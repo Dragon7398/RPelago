@@ -1,0 +1,465 @@
+import { useGameState } from '../contexts/GameStateContext';
+import { useAuth } from '../contexts/AuthContext';
+import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord } from '../lib/constants';
+import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
+import type { TileAdventurer, AdvClass, AdvSlot } from '../types';
+
+function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
+  if (!entry.slots) return [];
+  // Firebase may return a dense array or an object with numeric keys
+  return Array.isArray(entry.slots)
+    ? entry.slots
+    : Object.values(entry.slots as Record<string, AdvSlot>);
+}
+
+function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }: {
+  entry: TileAdventurer; tile: { name: string }; coord: string;
+  isOwner: boolean; showPrompt?: boolean;
+}) {
+  const slots = slotsFromEntry(entry);
+  if (slots.length > 0) {
+    return (
+      <div className="lb-adv-slots">
+        {slots.map((s, i) => (
+          <div key={i} className="lb-slot-row">
+            <span className="lb-slot-name">{s.name}</span>
+            <span className="lb-slot-sep">—</span>
+            <span className="lb-slot-game">{s.game}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (!showPrompt) return null;
+  return (
+    <div className="lb-slot-prompt">
+      No game currently set for this challenge.{isOwner && (
+        <>{' '}Please create a YAML for this challenge.
+        In the RPelago thread, please send it with the following message:{' '}
+        <span className="lb-slot-prompt-msg">
+          Game YAML for {tile.name || coord} at RPelago-{coord}.
+        </span></>
+      )}
+    </div>
+  );
+}
+
+interface Props {
+  coord: string | null;
+  onClose: () => void;
+  onLoginRequest: () => void;
+}
+
+function TriStateChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className={`lb-meta-chip ${value}`}>
+      {label}: {value.toUpperCase()}
+    </span>
+  );
+}
+
+export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) {
+  const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem } = useGameState();
+  const { user } = useAuth();
+
+  const open = !!coord;
+
+  if (!coord || !gameState) {
+    return <div className={`lightbox-overlay ${open ? 'open' : ''}`} onClick={onClose} />;
+  }
+
+  const tile    = gameState.tiles[coord];
+  const [r, c]  = rcFromCoord(coord);
+  const typeKey = getTypeKey(r, c);
+  const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
+  const state   = tile?.state ?? 'hidden';
+
+  if (state === 'hidden' || !tile) {
+    return <div className={`lightbox-overlay ${open ? 'open' : ''}`} onClick={onClose} />;
+  }
+
+  const isTown    = typeKey === 'town' || typeKey === 'town_center';
+  const player    = user ? gameState.players[user.id] : null;
+  const orbState  = gameState.orbState ?? {};
+  const orbConfig = gameState.orbConfig;
+
+  const advEntries = Object.values(tile.adventurers ?? {});
+
+  const handleSendAdventurer = async (advId: string) => {
+    if (!user || !player) return;
+    const adv = player.adventurers[advId];
+    if (!adv) return;
+    const entry: TileAdventurer = {
+      advId,
+      name:      `${adv.firstName} ${adv.lastName}`,
+      cls:       adv.cls as AdvClass,
+      owner:     user.id,
+      ownerName: user.displayName,
+    };
+    await sendAdventurer(coord, entry);
+  };
+
+  const handleRecall = async (advId: string) => {
+    if (!user) return;
+    await recallAdventurer(coord, advId, user.id);
+  };
+
+  const handlePurchaseOrb = async () => {
+    await purchaseOrb(coord);
+    onClose();
+  };
+
+  // ── Town lightbox ─────────────────────────────────────────────────────────
+  if (isTown) {
+    const shop          = tile.shopId ? (gameState.shops?.[tile.shopId] ?? null) : null;
+    const shopOrbId     = shop?.orbId ?? null;
+    const shopOrb       = shopOrbId ? ALL_ORBS.find(o => o.id === shopOrbId) : null;
+    const orbAcq        = shopOrbId ? orbState[shopOrbId] : null;
+    const alreadyOwned  = !!orbAcq;
+    const canAffordOrb  = !!player && player.gold >= ORB_SHOP_COST;
+    const shopItemIds   = shop?.itemIds ?? [];
+    const shopItemDefs  = shopItemIds
+      .map((id: string) => SHOP_ITEMS.find(i => i.id === id))
+      .filter(Boolean) as typeof SHOP_ITEMS[number][];
+    const hasShopContent = shopOrb || shopItemDefs.length > 0;
+
+    return (
+      <div className={`lightbox-overlay ${open ? 'open' : ''}`}
+           onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="lightbox">
+          <button className="lightbox-close" onClick={onClose}>✕</button>
+          <div className="lb-coord">Grid Position: {coord}</div>
+          <div className="lb-icon">{info.icon}</div>
+          <div className={`lb-title town`}>{tile.name || info.label}</div>
+          <div className="lb-divider" />
+          <div className="lb-shop-banner">🛒 {shop?.name ? `${shop.name.toUpperCase()} SHOP` : 'TOWN SHOP'}</div>
+          {!player ? (
+            <div className="lb-login-prompt">
+              Log in to browse the shop.{' '}
+              <a onClick={() => { onClose(); onLoginRequest(); }}>Enter RPelago →</a>
+            </div>
+          ) : !hasShopContent ? (
+            <div className="lb-shop-note">The shop will be available soon. Check back after your next adventure.</div>
+          ) : (
+            <>
+              {shopOrb && (
+                <div className="lb-shop-orb-item">
+                  <div className="lb-shop-orb-icon">{shopOrb.icon}</div>
+                  <div className="lb-shop-orb-info">
+                    <div className="lb-shop-orb-name">{shopOrb.label} Orb</div>
+                    <div className="lb-shop-orb-desc">A rare sigil orb — weakens the Dragon's power.</div>
+                    {alreadyOwned && orbAcq?.buyerName && (
+                      <div className="lb-shop-orb-buyer">Claimed by {orbAcq.buyerName}</div>
+                    )}
+                  </div>
+                  {alreadyOwned ? (
+                    <button className="lb-shop-orb-btn owned" disabled>✓ CLAIMED</button>
+                  ) : (
+                    <button
+                      className={`lb-shop-orb-btn${!canAffordOrb ? ' cant-afford' : ''}`}
+                      onClick={canAffordOrb ? handlePurchaseOrb : undefined}
+                      disabled={!canAffordOrb}
+                    >
+                      {canAffordOrb ? `⚗ OBTAIN · 🪙 ${ORB_SHOP_COST.toLocaleString()}` : `NOT ENOUGH GOLD · 🪙 ${ORB_SHOP_COST.toLocaleString()}`}
+                    </button>
+                  )}
+                </div>
+              )}
+              {shopItemDefs.map(item => {
+                const qty       = player.inventory?.[item.id] ?? 0;
+                const canAfford = player.gold >= item.cost;
+                return (
+                  <div key={item.id} className="lb-shop-item">
+                    <div className="lb-shop-item-info">
+                      <div className="lb-shop-item-name">{item.name}</div>
+                      <div className="lb-shop-item-desc">{item.description}</div>
+                      {qty > 0 && <div className="lb-shop-item-owned">Owned: {qty}</div>}
+                    </div>
+                    <div className="lb-shop-item-right">
+                      <div className="lb-shop-item-cost">🪙 {item.cost}</div>
+                      <button
+                        className={`lb-shop-item-btn${!canAfford ? ' cant-afford' : ''}`}
+                        onClick={canAfford ? () => { purchaseItem(item.id, coord); } : undefined}
+                        disabled={!canAfford}
+                      >
+                        {canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {tile.details && <div className="lb-details">{tile.details}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Boss lock check ───────────────────────────────────────────────────────
+  const orbCount = Object.keys(orbState).length;
+  const minOrbs  = orbConfig?.bossMinOrbs ?? 5;
+  const bossLocked = typeKey === 'boss' && orbCount < minOrbs && state !== 'complete';
+
+  // Live boss stats
+  let displayRelease = tile.release;
+  let displayCollect = tile.collect;
+  let displayHint    = tile.hint;
+  if (typeKey === 'boss') {
+    const live = getBossLiveStats(tile, orbState);
+    displayRelease = live.release;
+    displayCollect = live.collect;
+    displayHint    = live.hint;
+  }
+
+  // Orb reward info
+  const eliteOrbId = typeKey === 'elite' ? orbIdForElite(r, c, orbConfig) : null;
+  const edgeOrbId  = orbIdForEdgeTile(r, c, orbConfig);
+  const eliteOrb   = eliteOrbId ? ALL_ORBS.find(o => o.id === eliteOrbId) : null;
+  const edgeOrb    = edgeOrbId  ? ALL_ORBS.find(o => o.id === edgeOrbId)  : null;
+
+  const myAdvsSent  = player ? advEntries.filter(e => e.owner === user!.id) : [];
+  const freeAdvs    = player ? Object.values(player.adventurers).filter(a => !a.busy) : [];
+  const alreadySent = myAdvsSent.length > 0;
+
+  const stateBadgeText: Record<string, string> = {
+    available: 'AVAILABLE', inprogress: 'IN PROGRESS', complete: 'COMPLETE',
+  };
+
+  return (
+    <div className={`lightbox-overlay ${open ? 'open' : ''}`}
+         onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="lightbox">
+        <button className="lightbox-close" onClick={onClose}>✕</button>
+
+        {state !== 'complete' && (
+          <div className={`lb-state-badge ${state === 'inprogress' ? 'inprogress' : state}`}>
+            {stateBadgeText[state]}
+          </div>
+        )}
+        <div className="lb-coord">Grid Position: {coord}</div>
+        <div className="lb-icon">{info.icon}</div>
+        <div className={`lb-title ${typeKey}`}>{tile.name || info.label}</div>
+        {tile.name && (
+          <div style={{ fontFamily: "'Cinzel', serif", fontSize: '0.6rem', letterSpacing: '0.12em', color: 'var(--gold-dim)', marginTop: '0.1rem' }}>
+            {info.label}
+          </div>
+        )}
+        <div className="lb-divider" />
+
+        {/* Boss lock */}
+        {typeKey === 'boss' && (
+          <div className="lb-boss-lock">
+            <div className="lb-boss-lock-title">🔒 THE DRAGON STIRS</div>
+            {bossLocked ? (
+              <div style={{ fontFamily: "'Crimson Pro', serif", fontStyle: 'italic', fontSize: '0.82rem', color: 'oklch(55% 0.14 25)', marginBottom: '0.4rem' }}>
+                Gather <strong>{minOrbs - orbCount}</strong> more orb{minOrbs - orbCount !== 1 ? 's' : ''} to challenge the Dragon.
+              </div>
+            ) : (
+              <div style={{ fontFamily: "'Crimson Pro', serif", fontStyle: 'italic', fontSize: '0.82rem', color: 'oklch(62% 0.14 145)', marginBottom: '0.4rem' }}>
+                The seals are broken — the Dragon may be challenged!
+              </div>
+            )}
+            {/* Active orb effects */}
+            {(['wood', 'soul', 'light', 'dark'] as const).some(id => !!orbState[id]) && (
+              <>
+                <div style={{ fontFamily: "'Cinzel', serif", fontSize: '0.55rem', letterSpacing: '0.1em', color: 'var(--gold-dim)', margin: '0.3rem 0 0.2rem' }}>ORB EFFECTS ACTIVE</div>
+                <div className="lb-boss-neg-effects">
+                  {!!orbState['wood']  && <div className="lb-boss-neg-effect"><span style={{ color: 'var(--gold)' }}>🌿 Wood Orb: Release → On</span></div>}
+                  {!!orbState['soul']  && <div className="lb-boss-neg-effect"><span style={{ color: 'var(--gold)' }}>✨ Soul Orb: Collect → On</span></div>}
+                  {!!orbState['light'] && <div className="lb-boss-neg-effect"><span style={{ color: 'var(--gold)' }}>☀️ Light Orb: Hint −10%</span></div>}
+                  {!!orbState['dark']  && <div className="lb-boss-neg-effect"><span style={{ color: 'var(--gold)' }}>🌑 Dark Orb: Hint −10%</span></div>}
+                </div>
+              </>
+            )}
+            {/* Active curses */}
+            {ALL_ORBS.filter(o => !orbState[o.id]).length > 0 && (
+              <>
+                <div className="lb-boss-lock-title" style={{ fontSize: '0.6rem', marginTop: '0.4rem', marginBottom: '0.3rem' }}>ACTIVE CURSES</div>
+                <div className="lb-boss-neg-effects">
+                  {ALL_ORBS.filter(o => !orbState[o.id]).map(orb => (
+                    <div key={orb.id} className="lb-boss-neg-effect">
+                      <span>{orb.icon}</span>
+                      <span>{orbConfig?.bossNegEffects?.[orb.id] ?? `The ${orb.label} curse is active.`}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {bossLocked && <>{/* stop rendering rest of content when boss is locked */}</>}
+        {!bossLocked && (
+          <>
+            {/* Meta chips */}
+            <div className="lb-meta-row">
+              <TriStateChip label="RELEASE" value={displayRelease} />
+              <TriStateChip label="COLLECT" value={displayCollect} />
+              <span className="lb-meta-chip hint">HINT: {displayHint}%</span>
+            </div>
+
+            {/* Rewards */}
+            {(tile.gold > 0 || tile.xp > 0) && (
+              <div className="lb-rewards">
+                {tile.gold > 0 && <span className="lb-reward-chip gold">🪙 {tile.gold} Gold</span>}
+                {tile.xp   > 0 && <span className="lb-reward-chip xp">✨ {tile.xp} XP</span>}
+              </div>
+            )}
+
+            {/* Elite orb drop */}
+            {eliteOrb && (
+              <div className="lb-orb-reward" style={{ borderColor: eliteOrb.color }}>
+                <span style={{ fontSize: '1.4rem' }}>{eliteOrb.icon}</span>
+                <span>
+                  {!!orbState[eliteOrb.id]
+                    ? `${eliteOrb.label} Orb already gathered`
+                    : <>Drops: <strong>{eliteOrb.label} Orb</strong> upon defeat</>}
+                </span>
+              </div>
+            )}
+
+            {/* Edge orb hint */}
+            {edgeOrb && !!orbState[edgeOrb.id] && (
+              <div className="lb-orb-reward" style={{ borderColor: edgeOrb.color }}>
+                <span style={{ fontSize: '1.2rem' }}>{edgeOrb.icon}</span>
+                <span>{edgeOrb.label} Orb gathered from here</span>
+              </div>
+            )}
+
+            {tile.details && <div className="lb-details">{tile.details}</div>}
+            <div className="lb-divider" />
+
+            {/* ── Available ── */}
+            {state === 'available' && (
+              <>
+                {advEntries.length > 0 && (
+                  <>
+                    <div className="lb-progress-label" style={{ marginBottom: '0.4rem' }}>ADVENTURERS ASSIGNED</div>
+                    <div className="lb-adv-list">
+                      {advEntries.map(entry => (
+                        <div key={entry.advId} className="lb-adv-entry">
+                          <div className="lb-adv-row">
+                            <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                            <span className="lb-adv-name">{entry.name}</span>
+                            <span className="lb-adv-class">{entry.cls}</span>
+                            <span className="lb-adv-owner">{entry.ownerName}</span>
+                            {user && entry.owner === user.id && (
+                              <button className="lb-recall-btn" onClick={() => handleRecall(entry.advId)}>
+                                RECALL
+                              </button>
+                            )}
+                          </div>
+                          <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="lb-divider" />
+                  </>
+                )}
+                {!user ? (
+                  <div className="lb-login-prompt">
+                    Log in to send an Adventurer to this challenge.{' '}
+                    <a onClick={() => { onClose(); onLoginRequest(); }}>Enter RPelago →</a>
+                  </div>
+                ) : alreadySent ? (
+                  <div className="lb-no-adv">Your adventurer is already assigned here. Recall them above if you change your mind.</div>
+                ) : (
+                  <div className="lb-send-section">
+                    <div className="lb-send-label">SEND AN ADVENTURER ({tile.required} required)</div>
+                    {freeAdvs.length === 0 ? (
+                      <div className="lb-no-adv">All your adventurers are currently on missions.</div>
+                    ) : (
+                      <div className="lb-adv-picker">
+                        {freeAdvs.map(adv => (
+                          <button key={adv.id} className="lb-adv-pick-btn" onClick={() => handleSendAdventurer(adv.id)}>
+                            <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
+                            <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
+                            <span className="btn-adv-class">{adv.cls}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── In-Progress ── */}
+            {state === 'inprogress' && (
+              <>
+                {tile.link && (
+                  <div className="lb-archipelago-link">
+                    <a href={tile.link} target="_blank" rel="noopener noreferrer">
+                      🗺 Open Archipelago Game →
+                    </a>
+                  </div>
+                )}
+                <div className="lb-progress-wrap">
+                  <div className="lb-progress-label">ADVENTURERS: {advEntries.length} / {tile.required}</div>
+                  <div className="lb-progress-bar-bg">
+                    <div
+                      className={`lb-progress-bar-fill${advEntries.length >= tile.required ? ' full' : ''}`}
+                      style={{ width: `${tile.required > 0 ? Math.round((advEntries.length / tile.required) * 100) : 100}%` }}
+                    />
+                  </div>
+                </div>
+                {advEntries.length > 0 && (
+                  <div className="lb-adv-list">
+                    {advEntries.map(entry => (
+                      <div key={entry.advId} className="lb-adv-entry">
+                        <div className="lb-adv-row">
+                          <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                          <span className="lb-adv-name">{entry.name}</span>
+                          <span className="lb-adv-class">{entry.cls}</span>
+                          <span className="lb-adv-owner">{entry.ownerName}</span>
+                        </div>
+                        <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {user && !alreadySent && freeAdvs.length > 0 && advEntries.length < tile.required && (
+                  <div className="lb-send-section">
+                    <div className="lb-send-label">JOIN THE CHALLENGE</div>
+                    <div className="lb-adv-picker">
+                      {freeAdvs.map(adv => (
+                        <button key={adv.id} className="lb-adv-pick-btn" onClick={() => handleSendAdventurer(adv.id)}>
+                          <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
+                          <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
+                          <span className="btn-adv-class">{adv.cls}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── Complete ── */}
+            {state === 'complete' && (
+              <>
+                <div className="lb-complete-banner">✦ CHALLENGE CLEARED ✦</div>
+                {advEntries.length > 0 && (
+                  <div className="lb-adv-list">
+                    {advEntries.map(entry => (
+                      <div key={entry.advId} className="lb-adv-entry">
+                        <div className="lb-adv-row">
+                          <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                          <span className="lb-adv-name">{entry.name}</span>
+                          <span className="lb-adv-class">{entry.cls}</span>
+                          <span className="lb-adv-owner">{entry.ownerName}</span>
+                        </div>
+                        <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={false} showPrompt={false} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

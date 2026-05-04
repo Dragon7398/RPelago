@@ -1,0 +1,132 @@
+import { useState, useEffect } from 'react';
+import { AuthProvider } from './contexts/AuthContext';
+import { GameStateProvider } from './contexts/GameStateContext';
+import { useAuth } from './contexts/AuthContext';
+import { useGameState } from './contexts/GameStateContext';
+import { firebaseReady } from './firebase/config';
+import Header from './components/Header';
+import PlayerHUD from './components/PlayerHUD';
+import OrbBar from './components/OrbBar';
+import MapGrid from './components/MapGrid';
+import TileLightbox from './components/TileLightbox';
+import ProfileLightbox from './components/ProfileLightbox';
+import LoginModal from './components/LoginModal';
+import AdminPanel from './components/AdminPanel';
+
+function SettingsPanel() {
+  const [open, setOpen] = useState(false);
+  const [size, setSize] = useState(() => {
+    const saved = localStorage.getItem('realm_tile_size');
+    return saved ? parseInt(saved, 10) : 94;
+  });
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--tile-size', `${size}px`);
+    localStorage.setItem('realm_tile_size', String(size));
+  }, [size]);
+
+  return (
+    <>
+      <div className={`settings-popout ${open ? 'open' : ''}`}>
+        <div className="settings-title">⚙ SETTINGS</div>
+        <div className="settings-row">
+          <span className="settings-label">TILE SIZE</span>
+          <input
+            type="range" min={64} max={140} step={4}
+            value={size}
+            onChange={e => setSize(parseInt(e.target.value, 10))}
+            className="settings-slider"
+          />
+          <span className="settings-value">{size}px</span>
+        </div>
+      </div>
+      <button className="settings-toggle" onClick={() => setOpen(o => !o)}>
+        ⚙ SETTINGS
+      </button>
+    </>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div className="loading-screen">
+      <div className="loading-emblem">⚔</div>
+      <div className="loading-title">RPELAGO</div>
+      <div className="loading-subtitle">Charting the Archipelago…</div>
+    </div>
+  );
+}
+
+function AppContent() {
+  const [activeTile,  setActiveTile]  = useState<string | null>(null);
+  const [loginOpen,   setLoginOpen]   = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [adminOpen,   setAdminOpen]   = useState(false);
+
+  const { user }              = useAuth();
+  const { gameState, loading } = useGameState();
+  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+
+  if (loading) return <LoadingScreen />;
+
+  return (
+    <div className="page-content">
+      <Header />
+      <PlayerHUD
+        onLoginClick={() => setLoginOpen(true)}
+        onProfileClick={() => setProfileOpen(true)}
+        onTileClick={coord => setActiveTile(coord)}
+      />
+      <OrbBar />
+      <div className="rule"><span>⚔</span></div>
+      <MapGrid onTileClick={coord => setActiveTile(coord)} />
+      <div className="state-legend">
+        <div className="state-legend-item"><div className="state-swatch sw-hidden" /><span>Hidden</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-available" /><span>Available</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-inprogress" /><span>In Progress</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-complete" /><span>Complete</span></div>
+      </div>
+
+      <SettingsPanel />
+
+      {isAdmin && (
+        <button className="admin-toggle" onClick={() => setAdminOpen(true)}>⚙ ADMIN</button>
+      )}
+
+      <TileLightbox
+        coord={activeTile}
+        onClose={() => setActiveTile(null)}
+        onLoginRequest={() => setLoginOpen(true)}
+      />
+      <ProfileLightbox open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
+    </div>
+  );
+}
+
+function FirebaseBanner() {
+  if (firebaseReady) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+      background: 'oklch(18% 0.08 25 / 0.95)', borderBottom: '1px solid oklch(50% 0.18 25)',
+      padding: '0.6rem 1.2rem', textAlign: 'center',
+      fontFamily: "'Cinzel', serif", fontSize: '0.68rem', letterSpacing: '0.1em',
+      color: 'oklch(72% 0.16 25)',
+    }}>
+      ⚠ Firebase not configured — copy <code style={{ fontFamily: 'monospace', background: 'oklch(10% 0.03 75)', padding: '0.1rem 0.3rem', borderRadius: '2px' }}>.env.example</code> to <code style={{ fontFamily: 'monospace', background: 'oklch(10% 0.03 75)', padding: '0.1rem 0.3rem', borderRadius: '2px' }}>.env</code> and fill in your Firebase project values.
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <GameStateProvider>
+        <FirebaseBanner />
+        <AppContent />
+      </GameStateProvider>
+    </AuthProvider>
+  );
+}
