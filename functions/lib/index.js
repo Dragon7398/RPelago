@@ -63,9 +63,18 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
 });
 // ── Shop item costs (mirrors src/lib/constants.ts SHOP_ITEMS) ─────────────────
 const ITEM_COSTS = {
-    map: 100,
+    map: 200,
+    scroll_of_magnetism: 1000,
+    scroll_of_generosity: 1000,
+    coat_of_many_colors: 750,
+    wand_of_piercing: 300,
+    throwing_dagger: 400,
+    ring_of_resistance: 500,
+    warhammer: 600,
 };
-const ORB_SHOP_COST = 1000;
+// Items that cannot be purchased more than once
+const NON_CONSUMABLE_ITEMS = new Set(['coat_of_many_colors', 'wand_of_piercing', 'throwing_dagger', 'ring_of_resistance', 'warhammer']);
+const ORB_SHOP_COST = 1500;
 // ── purchaseShopItem ──────────────────────────────────────────────────────────
 exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
@@ -96,6 +105,8 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     const cost = ITEM_COSTS[itemId];
     if (cost == null)
         throw new https_1.HttpsError('not-found', 'Unknown item.');
+    if (NON_CONSUMABLE_ITEMS.has(itemId) && (player.inventory?.[itemId] ?? 0) > 0)
+        throw new https_1.HttpsError('failed-precondition', 'Item already owned.');
     if (player.gold < cost)
         throw new https_1.HttpsError('failed-precondition', 'Not enough gold.');
     await db.ref().update({

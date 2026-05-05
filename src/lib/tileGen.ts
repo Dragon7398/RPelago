@@ -229,13 +229,13 @@ const BATTLE_RC = [
 const PUZZLE_RC = [
   { weight: 10, value: { release: 'on'      as TriState, collect: 'on'      as TriState } },
   { weight: 25, value: { release: 'on'      as TriState, collect: 'off'     as TriState } },
-  { weight: 25, value: { release: 'special' as TriState, collect: 'off'     as TriState } },
-  { weight: 25, value: { release: 'special' as TriState, collect: 'special' as TriState } },
+  { weight: 30, value: { release: 'special' as TriState, collect: 'off'     as TriState } },
+  { weight: 20, value: { release: 'special' as TriState, collect: 'special' as TriState } },
   { weight: 15, value: { release: 'off'     as TriState, collect: 'off'     as TriState } },
 ];
 const ELITE_RC = [
-  { weight: 20, value: { release: 'on'      as TriState, collect: 'on'  as TriState } },
-  { weight: 25, value: { release: 'on'      as TriState, collect: 'off' as TriState } },
+  { weight: 15, value: { release: 'on'      as TriState, collect: 'on'  as TriState } },
+  { weight: 30, value: { release: 'on'      as TriState, collect: 'off' as TriState } },
   { weight: 25, value: { release: 'special' as TriState, collect: 'off' as TriState } },
   { weight: 30, value: { release: 'off'     as TriState, collect: 'off' as TriState } },
 ];
@@ -243,8 +243,8 @@ const ELITE_RC = [
 function calcDifficultyBonus(release: TriState, collect: TriState): number {
   let bonus = 100;
   for (const v of [release, collect]) {
-    if (v === 'special') bonus += 10;
-    else if (v === 'off') bonus += 20;
+    if (v === 'special') bonus += 15;
+    else if (v === 'off') bonus += 25;
   }
   return bonus;
 }
@@ -253,10 +253,10 @@ function calcXP(
   typeKey: string, required: number, hint: number,
   release: TriState, collect: TriState, bonusXP: number,
 ): number {
-  const BASE: Record<string, number> = { battle: 25, puzzle: 30, elite: 35, boss: 40 };
+  const BASE: Record<string, number> = { battle: 30, puzzle: 40, elite: 50, boss: 60 };
   const base = BASE[typeKey] ?? 25;
   const diff = calcDifficultyBonus(release, collect);
-  const raw = base + bonusXP + 5 * required - 2 * (20 - hint);
+  const raw = base + bonusXP + 5 * required + hint;
   return Math.max(1, Math.round(raw * diff / 100));
 }
 
@@ -282,7 +282,7 @@ function generateTileStats(seed: number, r: number, c: number, typeKey: TileType
   }
 
   const rcOptions   = typeKey === 'battle' ? BATTLE_RC : typeKey === 'puzzle' ? PUZZLE_RC : ELITE_RC;
-  const [hintMin, hintMax] = typeKey === 'elite' ? [8, 20] : [6, 15];
+  const [hintMin, hintMax] = typeKey === 'elite' ? [10, 20] : [6, 15];
   const requiredMin = typeKey === 'elite' ? 6 : 4;
   const requiredMax = typeKey === 'elite' ? 12 : 8;
 

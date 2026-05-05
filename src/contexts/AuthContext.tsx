@@ -8,7 +8,7 @@ import {
 } from 'firebase/auth';
 import type { AuthUser, Adventurer, Player } from '../types';
 import { auth as firebaseAuth, firebaseReady } from '../firebase/config';
-import { playerExists, upsertPlayer } from '../firebase/db';
+import { playerExists, upsertPlayer, isPlayerDisabled } from '../firebase/db';
 import { ADV_CLASSES } from '../lib/constants';
 import { randomAdvName } from '../lib/tileGen';
 
@@ -86,11 +86,12 @@ async function ensurePlayerRecord(fbUser: User, displayName: string): Promise<vo
 // ── Context ───────────────────────────────────────────────────────────────────
 
 interface AuthContextValue {
-  user:    AuthUser | null;
-  loading: boolean;
-  authError: string | null;
-  signIn:  () => void;
-  signOut: () => Promise<void>;
+  user:       AuthUser | null;
+  loading:    boolean;
+  authError:  string | null;
+  signIn:     () => void;
+  signOut:    () => Promise<void>;
+  clearError: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -141,6 +142,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const displayName = fbUser.displayName ?? 'Unknown';
         try {
           await ensurePlayerRecord(fbUser, displayName);
+          const disabled = await isPlayerDisabled(fbUser.uid);
+          if (disabled) {
+            await fbSignOut(firebaseAuth!);
+            setAuthError('Your account is currently restricted. Please ask the admin for assistance.');
+            setLoading(false);
+            return;
+          }
         } catch (err) {
           console.error('Failed to create player record:', err);
         }
@@ -167,8 +175,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const clearError = useCallback(() => setAuthError(null), []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, authError, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, authError, signIn, signOut, clearError }}>
       {children}
     </AuthContext.Provider>
   );

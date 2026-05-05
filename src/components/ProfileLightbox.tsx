@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { calcLevel, xpForLevel, xpForNextLevel } from '../lib/gameLogic';
-import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS } from '../lib/constants';
+import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS } from '../lib/constants';
 import type { AdvClass } from '../types';
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
 
 export default function ProfileLightbox({ open, onClose }: Props) {
   const { user } = useAuth();
-  const { gameState, renameAdventurer } = useGameState();
+  const { gameState, renameAdventurer, setNameColor } = useGameState();
 
   const player = user && gameState ? gameState.players[user.id] : null;
   const adventurers = player ? Object.values(player.adventurers) : [];
@@ -60,7 +60,12 @@ export default function ProfileLightbox({ open, onClose }: Props) {
           </div>
         ) : (
           <>
-            <div className="profile-player-name">{user!.displayName.toUpperCase()}</div>
+            <div
+              className="profile-player-name"
+              style={{ color: NAME_COLORS.find(c => c.id === (player.nameColor ?? 'default'))?.value }}
+            >
+              {user!.displayName.toUpperCase()}
+            </div>
             <div className="profile-level-line">LEVEL {level} ADVENTURER</div>
 
             <div className="profile-stats-grid">
@@ -92,6 +97,23 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                 </div>
               )}
             </div>
+
+            {(player.inventory?.['coat_of_many_colors'] ?? 0) > 0 && (
+              <div className="profile-adv-section">
+                <div className="profile-adv-title">NAME COLOR</div>
+                <div className="profile-color-swatches">
+                  {NAME_COLORS.map(nc => (
+                    <button
+                      key={nc.id}
+                      className={`profile-color-swatch${(player.nameColor ?? 'default') === nc.id ? ' selected' : ''}`}
+                      style={{ backgroundColor: nc.value }}
+                      title={nc.label}
+                      onClick={() => setNameColor(user!.id, nc.id === 'default' ? null : nc.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Inventory */}
             {(() => {

@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
-import { playerReset } from '../firebase/db';
-import { TILE_TYPES, ALL_ORBS, COLS, ROWS, COL_CHARS, SHOP_ITEMS, coordFromRC, rcFromCoord } from '../lib/constants';
-import { getTypeKey, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
-import type { TileState, TriState, OrbConfig, AdvSlot } from '../types';
-
-const SHOP_ORDER = ['centralia', 'frostshear', 'flamefell', 'pinereach'] as const;
+import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, SLOT_STATUSES, TILE_TRAITS } from '../lib/constants';
+import type { TraitDef } from '../lib/constants';
+import { getTypeKey } from '../lib/tileGen';
+import type { TileState, TriState, AdvSlot, SlotStatus } from '../types';
 
 interface Props {
   open: boolean;
@@ -23,15 +21,14 @@ export default function AdminPanel({ open, onClose }: Props) {
   const {
     gameState,
     adminSetTileState, adminUpdateTile, adminCompleteTile,
-    adminGrantOrb, adminUpdateOrbConfig, adminResetOrbs,
-    adminMapReset, adminConsumeItem, adminUpdateShop, adminSetAdventurerSlots,
+    adminSetAdventurerSlots, adminSetPublicSlots,
   } = useGameState();
 
   const [selectedCoord, setSelectedCoord] = useState<string | null>(null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
-  const [curseEdits, setCurseEdits] = useState<Record<string, string>>({});
   // slotDrafts: advId → pending new-slot input values
-  const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string }>>({});
+  const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus }>>({});
+  const [publicDraft, setPublicDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus }>({ name: '', game: '', details: '', status: 'Unstarted' });
 
   function readSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlot[] {
     if (!raw) return [];
@@ -63,12 +60,22 @@ export default function AdminPanel({ open, onClose }: Props) {
     await adminUpdateTile(selectedCoord, { [field]: value });
   };
 
-  const handleOrbConfigUpdate = async (updates: Partial<OrbConfig>) => {
-    await adminUpdateOrbConfig(updates);
+  const handleTraitToggle = async (def: TraitDef, enabled: boolean) => {
+    if (!selectedCoord || !tile) return;
+    const next = { ...(tile.traits ?? {}) };
+    if (enabled) {
+      next[def.id] = { value: def.hasValue ? def.defaultValue : 0 };
+    } else {
+      delete next[def.id];
+    }
+    await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
   };
 
-  const orbConfig = gameState.orbConfig;
-  const players = Object.values(gameState.players ?? {});
+  const handleTraitValue = async (traitId: string, value: number) => {
+    if (!selectedCoord || !tile) return;
+    const next = { ...(tile.traits ?? {}), [traitId]: { value } };
+    await adminUpdateTile(selectedCoord, { traits: next });
+  };
 
   return (
     <>
@@ -77,6 +84,13 @@ export default function AdminPanel({ open, onClose }: Props) {
         <button className="admin-close" onClick={onClose}>✕</button>
         <h2>⚔ ADMIN — MAP CONTROL</h2>
         <div className="admin-subtitle">Click a tile to select it, then adjust its state and settings.</div>
+
+        <button
+          className="admin-dashboard-link"
+          onClick={() => window.open('/#admin', '_blank')}
+        >
+          ⧉ Admin Dashboard
+        </button>
 
         {/* Mini map */}
         <div className="admin-col-labels">
@@ -229,11 +243,58 @@ export default function AdminPanel({ open, onClose }: Props) {
                 />
               </div>
 
+              {/* Rules */}
+              <div className="admin-detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.3rem' }}>
+                <div className="admin-detail-label">RULES</div>
+                <textarea
+                  className="admin-textarea"
+                  value={localEdits.rules !== undefined ? String(localEdits.rules) : (tile.rules ?? '')}
+                  onChange={e => setLocalEdits(p => ({ ...p, rules: e.target.value }))}
+                />
+              </div>
+
               {Object.keys(localEdits).length > 0 && (
                 <button className="admin-btn secondary" style={{ marginTop: '0.5rem' }} onClick={handleFieldSave}>
                   Save Changes
                 </button>
               )}
+
+              {/* Traits */}
+              <div className="admin-detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.3rem', marginTop: '0.6rem' }}>
+                <div className="admin-detail-label">TRAITS</div>
+                <div className="admin-traits-list">
+                  {TILE_TRAITS.map(def => {
+                    const active    = tile.traits?.[def.id];
+                    const isEnabled = active !== undefined;
+                    const currentVal = active?.value ?? def.defaultValue;
+                    const desc = def.description.replace('{value}', String(currentVal));
+                    return (
+                      <div key={def.id} className="admin-trait-row">
+                        <div className="admin-trait-top">
+                          <input
+                            type="checkbox"
+                            className="admin-trait-check"
+                            checked={isEnabled}
+                            onChange={e => handleTraitToggle(def, e.target.checked)}
+                          />
+                          <span className="admin-trait-name">{def.name}</span>
+                          {def.hasValue && isEnabled && (
+                            <input
+                              type="number"
+                              className="admin-trait-value-input"
+                              key={`${selectedCoord}-${def.id}-val`}
+                              defaultValue={currentVal}
+                              min={0}
+                              onBlur={e => handleTraitValue(def.id, parseInt(e.target.value) || def.defaultValue)}
+                            />
+                          )}
+                        </div>
+                        <div className="admin-trait-desc">{desc}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               {/* Adventurer slot editor */}
               {Object.values(tile.adventurers ?? {}).length > 0 && (
@@ -241,7 +302,7 @@ export default function AdminPanel({ open, onClose }: Props) {
                   <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>SLOTS</div>
                   {Object.values(tile.adventurers ?? {}).map(entry => {
                     const slots  = readSlots(entry.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
-                    const draft  = slotDrafts[entry.advId] ?? { name: '', game: '' };
+                    const draft  = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus };
                     const save   = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord!, entry.advId, next);
                     return (
                       <div key={entry.advId} className="admin-slot-adv">
@@ -254,6 +315,14 @@ export default function AdminPanel({ open, onClose }: Props) {
                             <span className="admin-slot-val">{s.name}</span>
                             <span className="admin-slot-sep">—</span>
                             <span className="admin-slot-val">{s.game}</span>
+                            {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
+                            <select
+                              className="admin-slot-status-select"
+                              value={s.status ?? 'Unstarted'}
+                              onChange={e => save(slots.map((slot, j) => j === i ? { ...slot, status: e.target.value as SlotStatus } : slot))}
+                            >
+                              {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+                            </select>
                             <button
                               className="admin-slot-del"
                               onClick={() => save(slots.filter((_, j) => j !== i))}
@@ -274,12 +343,27 @@ export default function AdminPanel({ open, onClose }: Props) {
                             value={draft.game}
                             onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, game: e.target.value } }))}
                           />
+                          <input
+                            className="admin-text-input"
+                            placeholder="Details (optional)"
+                            value={draft.details}
+                            onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, details: e.target.value } }))}
+                          />
+                          <select
+                            className="admin-slot-status-select"
+                            value={draft.status}
+                            onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, status: e.target.value as SlotStatus } }))}
+                          >
+                            {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+                          </select>
                           <button
                             className="admin-slot-add-btn"
                             disabled={!draft.name.trim() || !draft.game.trim()}
                             onClick={() => {
-                              save([...slots, { name: draft.name.trim(), game: draft.game.trim() }]);
-                              setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '' } }));
+                              const newSlot: AdvSlot = { name: draft.name.trim(), game: draft.game.trim(), status: draft.status };
+                              if (draft.details.trim()) newSlot.details = draft.details.trim();
+                              save([...slots, newSlot]);
+                              setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '', details: '', status: 'Unstarted' } }));
                             }}
                           >+ Add</button>
                         </div>
@@ -288,201 +372,81 @@ export default function AdminPanel({ open, onClose }: Props) {
                   })}
                 </>
               )}
+
+              {/* Public slots */}
+              {(() => {
+                const pubSlots = readSlots(tile.publicSlots as any);
+                const savePub  = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord!, next);
+                return (
+                  <>
+                    <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>PUBLIC SLOTS</div>
+                    <div className="admin-slot-adv">
+                      {pubSlots.map((s, i) => (
+                        <div key={i} className="admin-slot-row">
+                          <span className="admin-slot-val">{s.name}</span>
+                          <span className="admin-slot-sep">—</span>
+                          <span className="admin-slot-val">{s.game}</span>
+                          {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
+                          <select
+                            className="admin-slot-status-select"
+                            value={s.status ?? 'Unstarted'}
+                            onChange={e => savePub(pubSlots.map((slot, j) => j === i ? { ...slot, status: e.target.value as SlotStatus } : slot))}
+                          >
+                            {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+                          </select>
+                          <button
+                            className="admin-slot-del"
+                            onClick={() => savePub(pubSlots.filter((_, j) => j !== i))}
+                            title="Remove slot"
+                          >✕</button>
+                        </div>
+                      ))}
+                      <div className="admin-slot-add-row">
+                        <input
+                          className="admin-text-input"
+                          placeholder="Slot name"
+                          value={publicDraft.name}
+                          onChange={e => setPublicDraft(p => ({ ...p, name: e.target.value }))}
+                        />
+                        <input
+                          className="admin-text-input"
+                          placeholder="Game"
+                          value={publicDraft.game}
+                          onChange={e => setPublicDraft(p => ({ ...p, game: e.target.value }))}
+                        />
+                        <input
+                          className="admin-text-input"
+                          placeholder="Details (optional)"
+                          value={publicDraft.details}
+                          onChange={e => setPublicDraft(p => ({ ...p, details: e.target.value }))}
+                        />
+                        <select
+                          className="admin-slot-status-select"
+                          value={publicDraft.status}
+                          onChange={e => setPublicDraft(p => ({ ...p, status: e.target.value as SlotStatus }))}
+                        >
+                          {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                        <button
+                          className="admin-slot-add-btn"
+                          disabled={!publicDraft.name.trim() || !publicDraft.game.trim()}
+                          onClick={() => {
+                            const newSlot: AdvSlot = { name: publicDraft.name.trim(), game: publicDraft.game.trim(), status: publicDraft.status };
+                            if (publicDraft.details.trim()) newSlot.details = publicDraft.details.trim();
+                            savePub([...pubSlots, newSlot]);
+                            setPublicDraft({ name: '', game: '', details: '', status: 'Unstarted' });
+                          }}
+                        >+ Add</button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </>
           )}
         </div>
 
-        {/* Orb config */}
-        <div className="admin-orb-section">
-          <div className="admin-orb-title">⚗ ORB CONFIGURATION</div>
-
-          {/* Orb location map */}
-          <div className="admin-orb-label" style={{ marginBottom: '0.4rem' }}>Orb locations</div>
-          {(() => {
-            const assignments: Record<string, string[]> = {};
-            ALL_ORBS.forEach(o => { assignments[o.id] = []; });
-
-            for (const coord of Object.keys(gameState.tiles)) {
-              const [r, c] = rcFromCoord(coord);
-              const typeKey = getTypeKey(r, c);
-              if (typeKey === 'elite') {
-                const id = orbIdForElite(r, c, orbConfig);
-                if (id) assignments[id]?.push(`★ Elite · ${coord}`);
-              } else if (typeKey === 'battle' || typeKey === 'puzzle') {
-                const id = orbIdForEdgeTile(r, c, orbConfig);
-                if (id) assignments[id]?.push(`${typeKey === 'battle' ? '⚔ Battle' : '🧩 Puzzle'} · ${coord}`);
-              }
-            }
-            for (const shop of Object.values(gameState.shops ?? {})) {
-              if (shop.orbId) assignments[shop.orbId]?.push(`🛒 ${shop.name}`);
-            }
-
-            return ALL_ORBS.map(orb => {
-              const locs       = assignments[orb.id] ?? [];
-              const isDupe     = locs.length > 1;
-              const isUnset    = locs.length === 0;
-              return (
-                <div key={orb.id} className={`admin-orb-loc${isDupe ? ' dupe' : isUnset ? ' unset' : ''}`}>
-                  <span className="admin-orb-loc-icon">{orb.icon}</span>
-                  <span className="admin-orb-loc-name">{orb.label}</span>
-                  <span className="admin-orb-loc-where">
-                    {isUnset ? '— unassigned' : locs.join('  ·  ')}
-                  </span>
-                  {isDupe && <span className="admin-orb-loc-warn" title="Assigned to multiple slots">⚠</span>}
-                </div>
-              );
-            });
-          })()}
-
-          <div className="admin-orb-row" style={{ marginTop: '0.8rem' }}>
-            <div className="admin-orb-label">Boss min orbs</div>
-            <input
-              type="number" className="admin-count-input" min={0} max={9}
-              value={orbConfig?.bossMinOrbs ?? 5}
-              onChange={e => handleOrbConfigUpdate({ bossMinOrbs: parseInt(e.target.value) || 0 })}
-            />
-          </div>
-
-          <div className="admin-orb-row" style={{ flexWrap: 'wrap', gap: '0.4rem' }}>
-            <div className="admin-orb-label" style={{ width: '100%' }}>Grant orb (admin override)</div>
-            {ALL_ORBS.map(orb => (
-              <button
-                key={orb.id}
-                className={`admin-grant-orb-btn${gameState.orbState?.[orb.id] ? ' granted' : ''}`}
-                onClick={() => !gameState.orbState?.[orb.id] && adminGrantOrb(orb.id)}
-              >
-                {orb.icon} {orb.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="admin-orb-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>
-            Boss curse text (shown when orb is missing)
-          </div>
-          {ALL_ORBS.map(orb => {
-            const saved   = orbConfig?.bossNegEffects?.[orb.id] ?? '';
-            const current = curseEdits[orb.id] ?? saved;
-            const dirty   = current !== saved;
-            return (
-              <div key={orb.id} className="admin-curse-row">
-                <span className="admin-curse-orb">{orb.icon} {orb.label}</span>
-                <input
-                  className="admin-text-input"
-                  value={current}
-                  onChange={e => setCurseEdits(p => ({ ...p, [orb.id]: e.target.value }))}
-                  placeholder={`Curse for missing ${orb.label} Orb…`}
-                />
-                {dirty && (
-                  <button
-                    className="admin-curse-save"
-                    onClick={() => {
-                      handleOrbConfigUpdate({ bossNegEffects: { ...(orbConfig?.bossNegEffects ?? {}), [orb.id]: current } });
-                      setCurseEdits(p => { const n = { ...p }; delete n[orb.id]; return n; });
-                    }}
-                  >
-                    ✓
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Shop management */}
-        <div className="admin-orb-section">
-          <div className="admin-orb-title">🛒 SHOPS</div>
-          {SHOP_ORDER.map(shopId => {
-            const shop = gameState.shops?.[shopId];
-            if (!shop) return null;
-            return (
-              <div key={shopId} className="admin-shop-row">
-                <div className="admin-shop-name">{shop.name}</div>
-                <div className="admin-orb-row" style={{ marginTop: '0.3rem' }}>
-                  <div className="admin-orb-label">Orb for sale</div>
-                  <select
-                    className="admin-select"
-                    value={shop.orbId ?? ''}
-                    onChange={e => adminUpdateShop(shopId, { orbId: e.target.value || null })}
-                  >
-                    <option value="">— None —</option>
-                    {ALL_ORBS.map(orb => (
-                      <option key={orb.id} value={orb.id}>{orb.icon} {orb.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {shop.itemIds?.length > 0 && (
-                  <div className="admin-shop-items">
-                    Items: {shop.itemIds.map(id => SHOP_ITEMS.find(i => i.id === id)?.name ?? id).join(', ')}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Player management */}
-        <div className="admin-orb-section">
-          <div className="admin-orb-title">👥 PLAYERS</div>
-          {players.length === 0 ? (
-            <div className="admin-detail-empty">No players have joined yet.</div>
-          ) : players.map(player => {
-            const ownedItems = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
-            return (
-              <div key={player.id} className="admin-player-card">
-                <div className="admin-player-header">
-                  <div className="admin-player-name">{player.displayName}</div>
-                  <div className="admin-player-stats">
-                    ✨ {player.xp.toLocaleString()} XP · 🪙 {player.gold.toLocaleString()} G · {Object.keys(player.adventurers ?? {}).length} adv
-                    {(player.xpHistory?.length ?? 0) > 0 && (
-                      <span className="admin-player-history"> · prev: {player.xpHistory!.map(x => x.toLocaleString()).join(', ')} XP</span>
-                    )}
-                  </div>
-                </div>
-                {ownedItems.length > 0 && (
-                  <div className="admin-player-inv">
-                    {ownedItems.map(item => (
-                      <div key={item.id} className="admin-inv-item">
-                        <span className="admin-inv-item-name">{item.name}</span>
-                        <span className="admin-inv-item-qty">×{player.inventory![item.id]}</span>
-                        <button
-                          className="admin-inv-use-btn"
-                          onClick={() => adminConsumeItem(player.id, item.id)}
-                        >
-                          Mark Used
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  className="admin-player-reset-btn"
-                  onClick={() => {
-                    if (confirm(`Reset ${player.displayName}'s stats? This archives their XP and cannot be undone.`))
-                      playerReset(player.id);
-                  }}
-                >
-                  Player Reset
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Danger zone */}
         <div className="admin-actions" style={{ marginTop: '1rem' }}>
-          <button
-            className="admin-btn danger"
-            onClick={() => { if (confirm('Reset the map? Player XP, gold, and adventurers are preserved. This cannot be undone.')) adminMapReset(); }}
-          >
-            Map Reset
-          </button>
-          <button
-            className="admin-btn"
-            style={{ borderColor: 'oklch(40% 0.14 290)', color: 'oklch(65% 0.16 290)', background: 'oklch(14% 0.07 290 / 0.4)' }}
-            onClick={() => { if (confirm('Reset all orbs?')) adminResetOrbs(); }}
-          >
-            Reset Orbs
-          </button>
           <button className="admin-btn secondary" onClick={onClose}>Close</button>
         </div>
       </div>

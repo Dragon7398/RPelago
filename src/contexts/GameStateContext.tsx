@@ -7,7 +7,8 @@ import {
   setTileState, updateTileAdmin, assignAdventurer, removeAdventurer,
   completeTile, updateAdventurer,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
-  consumePlayerItem, mapReset, updateShop, setAdventurerSlots,
+  consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
+  setPlayerDisabled, setPlayerNameColor,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
 import { getAdjCoords } from '../lib/constants';
@@ -39,6 +40,10 @@ interface GameStateContextValue {
   adminSetAdmin: (playerId: string) => Promise<void>;
   adminUpdateShop: (shopId: string, updates: Partial<Shop>) => Promise<void>;
   adminSetAdventurerSlots: (coord: string, advId: string, slots: AdvSlot[]) => Promise<void>;
+  adminSetPublicSlots: (coord: string, slots: AdvSlot[]) => Promise<void>;
+  setNameColor: (playerId: string, colorId: string | null) => Promise<void>;
+  adminDisablePlayer: (playerId: string) => Promise<void>;
+  adminEnablePlayer: (playerId: string) => Promise<void>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -196,13 +201,29 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await setAdventurerSlots(coord, advId, slots);
   }, []);
 
+  const adminSetPublicSlots = useCallback(async (coord: string, slots: AdvSlot[]) => {
+    await setPublicSlots(coord, slots);
+  }, []);
+
+  const setNameColor = useCallback(async (playerId: string, colorId: string | null) => {
+    await setPlayerNameColor(playerId, colorId);
+  }, []);
+
+  const adminDisablePlayer = useCallback(async (playerId: string) => {
+    await setPlayerDisabled(playerId, true);
+  }, []);
+
+  const adminEnablePlayer = useCallback(async (playerId: string) => {
+    await setPlayerDisabled(playerId, false);
+  }, []);
+
   return (
     <GameStateContext.Provider value={{
       gameState, loading,
       sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
-      adminSetAdventurerSlots,
+      adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
     }}>
       {children}
     </GameStateContext.Provider>

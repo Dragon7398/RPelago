@@ -1,8 +1,66 @@
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord } from '../lib/constants';
+import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord, TILE_TRAITS, NAME_COLORS, ITEM_TRAIT_REFS } from '../lib/constants';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
 import type { TileAdventurer, AdvClass, AdvSlot } from '../types';
+
+function resolveNameColor(colorId: string | undefined): string | undefined {
+  if (!colorId || colorId === 'default') return undefined;
+  return NAME_COLORS.find(c => c.id === colorId)?.value;
+}
+
+type TraitEffect =
+  | { kind: 'negated';  item: string }
+  | { kind: 'modified'; item: string; newValue: number }
+  | { kind: 'none' };
+
+function traitEffect(traitId: string, value: number, inventory: Record<string, number>): TraitEffect {
+  const has = (id: string) => (inventory[id] ?? 0) > 0;
+  switch (traitId) {
+    case 'magicresist': case 'physresist':
+      if (has('wand_of_piercing'))    return { kind: 'negated',  item: 'Wand of Piercing' };
+      break;
+    case 'aerial':
+      if (has('throwing_dagger'))     return { kind: 'negated',  item: 'Throwing Dagger' };
+      break;
+    case 'agile':
+      if (has('throwing_dagger'))     return { kind: 'modified', item: 'Throwing Dagger', newValue: Math.round(value * 1.25) };
+      break;
+    case 'cursed': case 'stunning':
+      if (has('ring_of_resistance'))  return { kind: 'negated',  item: 'Ring of Resistance' };
+      break;
+    case 'horde':
+      if (has('warhammer'))           return { kind: 'modified', item: 'Warhammer', newValue: Math.max(1, value - 1) };
+      break;
+    case 'sturdy':
+      if (has('warhammer'))           return { kind: 'modified', item: 'Warhammer', newValue: Math.round(value * 0.5) };
+      break;
+  }
+  return { kind: 'none' };
+}
+
+function renderTraitDesc(description: string, traitIds: readonly string[]): React.ReactNode {
+  if (traitIds.length === 0) return description;
+  const refs = TILE_TRAITS.filter(t => traitIds.includes(t.id));
+  if (refs.length === 0) return description;
+  const pattern = new RegExp(
+    `(${refs.map(t => t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'g',
+  );
+  const parts = description.split(pattern);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const trait = refs.find(t => t.name === part);
+        if (trait) {
+          const tip = trait.description.replace('{value}', String(trait.defaultValue));
+          return <span key={i} className="trait-ref" data-tooltip={tip}>{part}</span>;
+        }
+        return part;
+      })}
+    </>
+  );
+}
 
 function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
   if (!entry.slots) return [];
@@ -25,6 +83,8 @@ function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }: {
             <span className="lb-slot-name">{s.name}</span>
             <span className="lb-slot-sep">—</span>
             <span className="lb-slot-game">{s.game}</span>
+            {s.details && <span className="lb-slot-details">{s.details}</span>}
+            {s.status && <span className={`lb-slot-status ss-${s.status.replace('%', 'pct').replace('-', '')}`}>{s.status}</span>}
           </div>
         ))}
       </div>
@@ -166,23 +226,24 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                 </div>
               )}
               {shopItemDefs.map(item => {
-                const qty       = player.inventory?.[item.id] ?? 0;
-                const canAfford = player.gold >= item.cost;
+                const qty          = player.inventory?.[item.id] ?? 0;
+                const alreadyOwned = !item.consumable && qty > 0;
+                const canAfford    = !alreadyOwned && player.gold >= item.cost;
                 return (
                   <div key={item.id} className="lb-shop-item">
                     <div className="lb-shop-item-info">
                       <div className="lb-shop-item-name">{item.name}</div>
-                      <div className="lb-shop-item-desc">{item.description}</div>
-                      {qty > 0 && <div className="lb-shop-item-owned">Owned: {qty}</div>}
+                      <div className="lb-shop-item-desc">{renderTraitDesc(item.description, ITEM_TRAIT_REFS[item.id] ?? [])}</div>
+                      {item.consumable && qty > 0 && <div className="lb-shop-item-owned">Owned: {qty}</div>}
                     </div>
                     <div className="lb-shop-item-right">
                       <div className="lb-shop-item-cost">🪙 {item.cost}</div>
                       <button
-                        className={`lb-shop-item-btn${!canAfford ? ' cant-afford' : ''}`}
+                        className={`lb-shop-item-btn${alreadyOwned ? ' owned' : !canAfford ? ' cant-afford' : ''}`}
                         onClick={canAfford ? () => { purchaseItem(item.id, coord); } : undefined}
-                        disabled={!canAfford}
+                        disabled={!canAfford || alreadyOwned}
                       >
-                        {canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}
+                        {alreadyOwned ? '✓ OWNED' : canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}
                       </button>
                     </div>
                   </div>
@@ -328,22 +389,100 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
             )}
 
             {tile.details && <div className="lb-details">{tile.details}</div>}
+            {tile.traits && Object.keys(tile.traits).length > 0 && (
+              <div className="lb-traits">
+                <div className="lb-traits-header">TRAITS</div>
+                {TILE_TRAITS
+                  .filter(def => tile.traits![def.id] !== undefined)
+                  .map(def => {
+                    const value  = tile.traits![def.id].value;
+                    const inv    = player?.inventory ?? {};
+                    const effect = traitEffect(def.id, value, inv);
+                    const negated  = effect.kind === 'negated';
+                    const modified = effect.kind === 'modified';
+                    const parts  = def.description.split('{value}');
+                    return (
+                      <div key={def.id} className={`lb-trait${negated ? ' lb-trait-negated' : ''}`}>
+                        <div className="lb-trait-top-row">
+                          <span className={`lb-trait-name${negated ? ' lb-trait-struck' : ''}`}>{def.name}</span>
+                          {(negated || modified) && (
+                            <span className="lb-trait-item-badge">
+                              {negated ? '✦ IMMUNE' : '✦ MODIFIED'} · {effect.item}
+                            </span>
+                          )}
+                        </div>
+                        <span className={`lb-trait-desc${negated ? ' lb-trait-struck' : ''}`}>
+                          {modified && parts.length === 2 ? (
+                            <>
+                              {parts[0]}
+                              <span className="lb-trait-val-struck">{value}</span>
+                              {' '}
+                              <span className="lb-trait-val-new">{(effect as { kind: 'modified'; newValue: number; item: string }).newValue}</span>
+                              {parts[1]}
+                            </>
+                          ) : (
+                            def.description.replace('{value}', String(value))
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+            {tile.rules && (
+              <div className="lb-rules">
+                <div className="lb-rules-label">RULES</div>
+                {tile.rules}
+              </div>
+            )}
+            {(() => {
+              const pubSlots = tile.publicSlots
+                ? (Array.isArray(tile.publicSlots)
+                    ? tile.publicSlots
+                    : Object.values(tile.publicSlots as Record<string, AdvSlot>))
+                : [];
+              if (pubSlots.length === 0) return null;
+              return (
+                <div className="lb-public-slots">
+                  <div className="lb-public-slots-header">PUBLIC SLOTS</div>
+                  {pubSlots.map((s, i) => (
+                    <div key={i} className="lb-slot-row">
+                      <span className="lb-slot-name">{s.name}</span>
+                      <span className="lb-slot-sep">—</span>
+                      <span className="lb-slot-game">{s.game}</span>
+                      {s.details && <span className="lb-slot-details">{s.details}</span>}
+                      {s.status && <span className={`lb-slot-status ss-${s.status.replace('%', 'pct').replace('-', '')}`}>{s.status}</span>}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             <div className="lb-divider" />
 
             {/* ── Available ── */}
             {state === 'available' && (
               <>
+                <div className="lb-progress-wrap">
+                  <div className="lb-progress-label">ADVENTURERS: {advEntries.length} / {tile.required}</div>
+                  <div className="lb-progress-bar-bg">
+                    <div
+                      className={`lb-progress-bar-fill${advEntries.length >= tile.required ? ' full' : ''}`}
+                      style={{ width: `${tile.required > 0 ? Math.round((advEntries.length / tile.required) * 100) : 100}%` }}
+                    />
+                  </div>
+                </div>
                 {advEntries.length > 0 && (
                   <>
-                    <div className="lb-progress-label" style={{ marginBottom: '0.4rem' }}>ADVENTURERS ASSIGNED</div>
                     <div className="lb-adv-list">
                       {advEntries.map(entry => (
                         <div key={entry.advId} className="lb-adv-entry">
                           <div className="lb-adv-row">
-                            <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
-                            <span className="lb-adv-name">{entry.name}</span>
-                            <span className="lb-adv-class">{entry.cls}</span>
-                            <span className="lb-adv-owner">{entry.ownerName}</span>
+                            <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                            <span className="lb-adv-secondary">
+                              <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                              <span className="lb-adv-name">{entry.name}</span>
+                              <span className="lb-adv-class">{entry.cls}</span>
+                            </span>
                             {user && entry.owner === user.id && (
                               <button className="lb-recall-btn" onClick={() => handleRecall(entry.advId)}>
                                 RECALL
@@ -395,24 +534,17 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                     </a>
                   </div>
                 )}
-                <div className="lb-progress-wrap">
-                  <div className="lb-progress-label">ADVENTURERS: {advEntries.length} / {tile.required}</div>
-                  <div className="lb-progress-bar-bg">
-                    <div
-                      className={`lb-progress-bar-fill${advEntries.length >= tile.required ? ' full' : ''}`}
-                      style={{ width: `${tile.required > 0 ? Math.round((advEntries.length / tile.required) * 100) : 100}%` }}
-                    />
-                  </div>
-                </div>
                 {advEntries.length > 0 && (
                   <div className="lb-adv-list">
                     {advEntries.map(entry => (
                       <div key={entry.advId} className="lb-adv-entry">
                         <div className="lb-adv-row">
-                          <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
-                          <span className="lb-adv-name">{entry.name}</span>
-                          <span className="lb-adv-class">{entry.cls}</span>
                           <span className="lb-adv-owner">{entry.ownerName}</span>
+                          <span className="lb-adv-secondary">
+                            <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                            <span className="lb-adv-name">{entry.name}</span>
+                            <span className="lb-adv-class">{entry.cls}</span>
+                          </span>
                         </div>
                         <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
                       </div>
@@ -445,10 +577,12 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                     {advEntries.map(entry => (
                       <div key={entry.advId} className="lb-adv-entry">
                         <div className="lb-adv-row">
-                          <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
-                          <span className="lb-adv-name">{entry.name}</span>
-                          <span className="lb-adv-class">{entry.cls}</span>
                           <span className="lb-adv-owner">{entry.ownerName}</span>
+                          <span className="lb-adv-secondary">
+                            <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                            <span className="lb-adv-name">{entry.name}</span>
+                            <span className="lb-adv-class">{entry.cls}</span>
+                          </span>
                         </div>
                         <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={false} showPrompt={false} />
                       </div>

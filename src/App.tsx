@@ -12,6 +12,7 @@ import TileLightbox from './components/TileLightbox';
 import ProfileLightbox from './components/ProfileLightbox';
 import LoginModal from './components/LoginModal';
 import AdminPanel from './components/AdminPanel';
+import AdminDashboard from './components/AdminDashboard';
 
 function SettingsPanel() {
   const [open, setOpen] = useState(false);
@@ -66,6 +67,8 @@ function AppContent() {
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+
+  if (window.location.hash === '#admin') return <AdminDashboard />;
 
   if (loading) return <LoadingScreen />;
 

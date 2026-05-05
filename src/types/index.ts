@@ -1,4 +1,5 @@
 export type TileState = 'hidden' | 'available' | 'inprogress' | 'complete';
+export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
 export type TileTypeKey = 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
@@ -12,8 +13,10 @@ export interface ShopItem {
 }
 
 export interface AdvSlot {
-  name: string;   // player-chosen slot name, e.g. "BrisbeLTTP"
-  game: string;   // game title, e.g. "Link To The Past"
+  name: string;       // player-chosen slot name, e.g. "BrisbeLTTP"
+  game: string;       // game title, e.g. "Link To The Past"
+  details?: string;   // optional extra info for complex challenges
+  status?: SlotStatus;
 }
 
 export interface TileAdventurer {
@@ -34,6 +37,9 @@ export interface Tile {
   collect: TriState;
   hint: number;
   details: string;
+  rules?: string;
+  traits?: Record<string, { value: number }>;
+  publicSlots?: AdvSlot[];
   link: string;
   gold: number;
   xp: number;
@@ -63,6 +69,8 @@ export interface Player {
   adventurers: Record<string, Adventurer>;  // keyed by adventurer id
   inventory: Record<string, number>;         // itemId → quantity owned
   xpHistory?: number[];                      // archived XP totals from previous campaigns
+  nameColor?: string;                        // color ID from NAME_COLORS palette
+  disabled?: boolean;
 }
 
 export interface OrbConfig {

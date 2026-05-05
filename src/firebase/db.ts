@@ -185,6 +185,40 @@ export async function setAdventurerSlots(coord: string, advId: string, slots: Ad
   }
 }
 
+// ── Admin: public slots ───────────────────────────────────────────────────────
+export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
+  const path = `game/tiles/${coord}/publicSlots`;
+  if (slots.length === 0) {
+    await remove(ref(db!, path));
+  } else {
+    await set(ref(db!, path), slots);
+  }
+}
+
+// ── Player name color ─────────────────────────────────────────────────────────
+export async function setPlayerNameColor(playerId: string, colorId: string | null): Promise<void> {
+  if (!colorId || colorId === 'default') {
+    await remove(ref(db!, `game/players/${playerId}/nameColor`));
+  } else {
+    await set(ref(db!, `game/players/${playerId}/nameColor`), colorId);
+  }
+}
+
+// ── Player disable / enable ───────────────────────────────────────────────────
+export async function setPlayerDisabled(playerId: string, disabled: boolean): Promise<void> {
+  if (disabled) {
+    await set(ref(db!, `game/players/${playerId}/disabled`), true);
+  } else {
+    await remove(ref(db!, `game/players/${playerId}/disabled`));
+  }
+}
+
+export async function isPlayerDisabled(playerId: string): Promise<boolean> {
+  assertDb();
+  const snap = await get(ref(db!, `game/players/${playerId}/disabled`));
+  return snap.val() === true;
+}
+
 // ── Admin: set admin ID ───────────────────────────────────────────────────────
 export async function setAdminId(playerId: string): Promise<void> {
   await update(ref(db!, 'game/meta'), { adminId: playerId });

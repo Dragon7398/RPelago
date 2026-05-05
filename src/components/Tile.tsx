@@ -59,10 +59,12 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const animDelay = `${(rowIndex * 7 + colIndex) * 18}ms`;
 
   let progressText = '';
-  if (state === 'available' || state === 'inprogress') {
+  if (state === 'available') {
     if (typeKey !== 'town' && typeKey !== 'town_center') {
       progressText = `${filled}/${required} ⚔`;
     }
+  } else if (state === "inprogress") {
+    progressText = "In Progress"
   }
 
   const icon = hidden
