@@ -37,8 +37,9 @@ export default function MapPage() {
   }, [selectedCoord]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!gameState) return null;
+  const gs = gameState; // narrowed alias so closures don't see GameState | null
 
-  const tile = selectedCoord ? gameState.tiles[selectedCoord] : null;
+  const tile = selectedCoord ? gs.tiles[selectedCoord] : null;
 
   const handleStateBtn = async (state: TileState) => {
     if (!selectedCoord || !tile) return;
@@ -80,7 +81,7 @@ export default function MapPage() {
 
   // ── Checklist helpers ───────────────────────────────────────────────────────
   function tileComplete(coord: string): boolean {
-    const t = gameState.tiles[coord];
+    const t = gs.tiles[coord];
     if (!t) return false;
     const [r, c] = rcFromCoord(coord);
     const typeKey = getTypeKey(r, c);
@@ -91,7 +92,7 @@ export default function MapPage() {
         return !!t.rules?.trim();
       case 'town':
       case 'town_center': {
-        const shop = t.shopId ? gameState.shops?.[t.shopId] : null;
+        const shop = t.shopId ? gs.shops?.[t.shopId] : null;
         return !!(shop && (shop.itemIds.length > 0 || shop.orbId));
       }
       case 'elite':
