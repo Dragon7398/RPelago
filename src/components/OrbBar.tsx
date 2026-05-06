@@ -32,6 +32,16 @@ export default function OrbBar() {
   const count     = Object.keys(orbState).length;
   const minOrbs   = orbConfig?.bossMinOrbs ?? 5;
 
+  const [collapsed, setCollapsed] = useState(() =>
+    localStorage.getItem('realm_orb_collapsed') === 'true'
+  );
+  const toggleCollapsed = () => {
+    setCollapsed(c => {
+      localStorage.setItem('realm_orb_collapsed', String(!c));
+      return !c;
+    });
+  };
+
   // Flash animation: fire only for orbs newly collected during this session
   const initializedRef  = useRef(false);
   const prevOrbStateRef = useRef<Record<string, OrbAcquisition>>({});
@@ -56,43 +66,53 @@ export default function OrbBar() {
   }, [orbState, loading]);
 
   return (
-    <div className="orb-bar">
-      <div className="orb-bar-title">SIGIL ORBS</div>
-      <div className="orb-bar-orbs">
-        {ALL_ORBS.map(orb => {
-          const acq      = orbState[orb.id];
-          const collected = !!acq;
-          const flashing  = flashingOrbs.has(orb.id);
-          const bgColor = collected
-            ? orb.color.replace('oklch(', 'oklch(').replace(')', ' / 0.18)')
-            : 'transparent';
-          return (
-            <div
-              key={orb.id}
-              className="orb-pip"
-              title={collected ? acquisitionTitle(acq) : `${orb.label} Orb — not yet gathered`}
-            >
-              <div
-                className={`orb-gem ${collected ? 'collected' : 'missing'}${flashing ? ' just-collected' : ''}`}
-                style={{ borderColor: orb.color, color: orb.color, background: bgColor }}
-              >
-                {orb.icon}
-              </div>
-              <div className="orb-label">{orb.label.toUpperCase()}</div>
-              {collected && (
-                <div className="orb-source">{acquisitionLabel(acq)}</div>
-              )}
-            </div>
-          );
-        })}
+    <div className={`orb-bar${collapsed ? ' orb-bar-collapsed' : ''}`}>
+      <div className="orb-bar-title" onClick={toggleCollapsed}>
+        <span>SIGIL ORBS</span>
+        <span className="orb-bar-title-right">
+          {collapsed && <span className="orb-bar-count">{count} / 9</span>}
+          <span className="orb-bar-chevron">{collapsed ? '▸' : '▾'}</span>
+        </span>
       </div>
-      <div className="orb-count-badge">
-        <strong>{count}</strong> / 9 orbs &nbsp;·&nbsp;{' '}
-        {count >= minOrbs
-          ? <span style={{ color: 'oklch(60% 0.16 145)' }}>Boss unlocked</span>
-          : <span style={{ color: 'oklch(55% 0.14 25)' }}>{minOrbs - count} more to unlock boss</span>
-        }
-      </div>
+      {!collapsed && (
+        <>
+          <div className="orb-bar-orbs">
+            {ALL_ORBS.map(orb => {
+              const acq      = orbState[orb.id];
+              const collected = !!acq;
+              const flashing  = flashingOrbs.has(orb.id);
+              const bgColor = collected
+                ? orb.color.replace('oklch(', 'oklch(').replace(')', ' / 0.18)')
+                : 'transparent';
+              return (
+                <div
+                  key={orb.id}
+                  className="orb-pip"
+                  title={collected ? acquisitionTitle(acq) : `${orb.label} Orb — not yet gathered`}
+                >
+                  <div
+                    className={`orb-gem ${collected ? 'collected' : 'missing'}${flashing ? ' just-collected' : ''}`}
+                    style={{ borderColor: orb.color, color: orb.color, background: bgColor }}
+                  >
+                    {orb.icon}
+                  </div>
+                  <div className="orb-label">{orb.label.toUpperCase()}</div>
+                  {collected && (
+                    <div className="orb-source">{acquisitionLabel(acq)}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="orb-count-badge">
+            <strong>{count}</strong> / 9 orbs &nbsp;·&nbsp;{' '}
+            {count >= minOrbs
+              ? <span style={{ color: 'oklch(60% 0.16 145)' }}>Boss unlocked</span>
+              : <span style={{ color: 'oklch(55% 0.14 25)' }}>{minOrbs - count} more to unlock boss</span>
+            }
+          </div>
+        </>
+      )}
     </div>
   );
 }

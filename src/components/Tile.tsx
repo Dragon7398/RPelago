@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
+import { useAuth } from '../contexts/AuthContext';
 import { TILE_TYPES } from '../lib/constants';
 import { getTypeKey } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
@@ -14,6 +15,7 @@ interface Props {
 
 export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const { gameState, loading } = useGameState();
+  const { user } = useAuth();
   const tile = gameState?.tiles[coord];
 
   const [r, c] = rcFromCoord(coord);
@@ -24,6 +26,7 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
 
   const filled   = tile ? Object.keys(tile.adventurers ?? {}).length : 0;
   const required = tile?.required ?? 0;
+  const isMine   = !!user && Object.values(tile?.adventurers ?? {}).some(e => e.owner === user.id);
 
   // Fog lift: animate hidden→available only after initial load
   const initializedRef = useRef(false);
@@ -54,6 +57,7 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
     `state-${state}`,
     isCenter ? 'tile-center' : '',
     fogLifting ? 'fog-lifting' : '',
+    isMine ? 'tile-mine' : '',
   ].filter(Boolean).join(' ');
 
   const animDelay = `${(rowIndex * 7 + colIndex) * 18}ms`;

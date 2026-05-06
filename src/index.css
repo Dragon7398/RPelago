@@ -15,8 +15,9 @@
   --green:      oklch(58% 0.16 145);
   --dragon:     oklch(58% 0.20 40);
   --amber:      oklch(72% 0.16 60);
-  --tile-size:  clamp(76px, 9.5vw, 112px);
-  --gap:        clamp(4px, 0.5vw, 7px);
+  --tile-user-size: 94px;
+  --tile-size:  clamp(36px, 10vw, var(--tile-user-size));
+  --gap:        clamp(2px, 0.5vw, 7px);
 }
 
 body {
@@ -50,14 +51,14 @@ body::after {
 .page-content {
   position: relative; z-index: 1;
   display: flex; flex-direction: column;
-  align-items: center; gap: 1.6rem; width: 100%;
+  align-items: center; gap: 1.4rem; width: 100%;
 }
 
 /* ── Header ── */
 header { text-align: center; }
 header h1 {
   font-family: 'Cinzel', serif; font-weight: 800;
-  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
   color: var(--gold); letter-spacing: 0.12em;
   text-shadow: 0 0 30px oklch(72% 0.14 75 / 0.5), 0 2px 4px #000;
   line-height: 1;
@@ -289,6 +290,22 @@ header p {
 }
 .tile { animation: tileReveal 0.35s ease both; }
 
+/* ── Settings: show tile labels ── */
+.no-tile-labels .tile-label { display: none; }
+
+/* ── Settings: highlight my adventurers ── */
+.highlight-my-advs .tile-mine {
+  box-shadow: 0 0 0 2px oklch(72% 0.18 75), 0 0 14px oklch(72% 0.18 75 / 0.45);
+  border-color: oklch(72% 0.18 75);
+}
+
+/* ── Settings: reduce animations ── */
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
 /* ── State Legend ── */
 .state-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; justify-content: center; }
 .state-legend-item { display: flex; align-items: center; gap: 0.4rem; font-family: 'Cinzel', serif; font-size: 0.62rem; color: var(--gold-dim); letter-spacing: 0.07em; }
@@ -340,6 +357,8 @@ header p {
   font-family: 'Cinzel', serif; font-size: 0.5rem;
   color: oklch(50% 0.08 75); min-width: 3em; text-align: right;
 }
+.settings-check-row { margin-top: 0.5rem; cursor: pointer; }
+.settings-check { accent-color: var(--gold); width: 13px; height: 13px; flex-shrink: 0; cursor: pointer; }
 
 /* ══ LIGHTBOX ══ */
 .lightbox-overlay {
@@ -904,7 +923,12 @@ header p {
 
 /* ══ ORB BAR ══ */
 .orb-bar { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: oklch(13% 0.04 75 / 0.85); border: 1px solid var(--border-glow); border-radius: 3px; }
-.orb-bar-title { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.18em; color: var(--gold-dim); text-align: center; }
+.orb-bar-collapsed { padding: 0.35rem 1.2rem; }
+.orb-bar-title { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.18em; color: var(--gold-dim); text-align: center; cursor: pointer; display: flex; align-items: center; gap: 0.7rem; user-select: none; width: 100%; justify-content: center; }
+.orb-bar-title:hover { color: var(--gold); }
+.orb-bar-title-right { display: flex; align-items: center; gap: 0.45rem; }
+.orb-bar-count { color: var(--gold); font-size: 0.56rem; letter-spacing: 0.1em; }
+.orb-bar-chevron { font-size: 1rem; opacity: 0.7; }
 .orb-bar-orbs { display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap; justify-content: center; }
 .orb-pip { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: default; }
 .orb-gem {
@@ -1400,3 +1424,27 @@ header p {
   color: oklch(65% 0.12 145); transition: all 0.15s;
 }
 .dash-curse-save:hover { background: oklch(22% 0.08 145 / 0.5); color: oklch(72% 0.14 145); }
+
+/* ══ MOBILE / SMALL SCREEN ══════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  body { padding: 0.8rem 0.3rem; }
+
+  .map-frame { padding: 4px; }
+  .map-frame::before, .map-frame::after { display: none; }
+
+  .player-hud { flex-wrap: wrap; justify-content: center; gap: 0.6rem; padding: 0.45rem 0.8rem; }
+  .hud-divider { display: none; }
+  .hud-adventurers { flex-wrap: wrap; justify-content: center; }
+
+  .lightbox { padding: 1.4rem 1rem; }
+
+  .orb-bar { padding: 0.5rem 0.7rem; }
+
+  .settings-popout { min-width: 185px; left: 0.5rem; bottom: 3.5rem; }
+  .settings-toggle { left: 0.5rem; bottom: 0.8rem; }
+
+  .lb-adv-row { flex-wrap: wrap; }
+  .lb-adv-secondary { flex-wrap: wrap; }
+
+  .page-content { gap: 1rem; }
+}

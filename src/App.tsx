@@ -14,17 +14,44 @@ import LoginModal from './components/LoginModal';
 import AdminPanel from './components/AdminPanel';
 import AdminDashboard from './components/AdminDashboard';
 
+function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
+  const [val, setVal] = useState(() => {
+    const s = localStorage.getItem(key);
+    return s === null ? def : s === 'true';
+  });
+  const set = (v: boolean) => {
+    setVal(v);
+    localStorage.setItem(key, String(v));
+  };
+  return [val, set];
+}
+
 function SettingsPanel() {
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState(() => {
     const saved = localStorage.getItem('realm_tile_size');
     return saved ? parseInt(saved, 10) : 94;
   });
+  const [showLabels,    setShowLabels]    = useBoolSetting('realm_show_labels',     true);
+  const [highlightAdvs, setHighlightAdvs] = useBoolSetting('realm_highlight_advs',  false);
+  const [reduceMotion,  setReduceMotion]  = useBoolSetting('realm_reduce_motion',   false);
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--tile-size', `${size}px`);
+    document.documentElement.style.setProperty('--tile-user-size', `${size}px`);
     localStorage.setItem('realm_tile_size', String(size));
   }, [size]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('no-tile-labels',    !showLabels);
+  }, [showLabels]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('highlight-my-advs', highlightAdvs);
+  }, [highlightAdvs]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-motion',     reduceMotion);
+  }, [reduceMotion]);
 
   return (
     <>
@@ -33,13 +60,25 @@ function SettingsPanel() {
         <div className="settings-row">
           <span className="settings-label">TILE SIZE</span>
           <input
-            type="range" min={64} max={140} step={4}
+            type="range" min={64} max={120} step={4}
             value={size}
             onChange={e => setSize(parseInt(e.target.value, 10))}
             className="settings-slider"
           />
           <span className="settings-value">{size}px</span>
         </div>
+        <label className="settings-row settings-check-row">
+          <input type="checkbox" className="settings-check" checked={showLabels} onChange={e => setShowLabels(e.target.checked)} />
+          <span className="settings-label">SHOW TILE LABELS</span>
+        </label>
+        <label className="settings-row settings-check-row">
+          <input type="checkbox" className="settings-check" checked={highlightAdvs} onChange={e => setHighlightAdvs(e.target.checked)} />
+          <span className="settings-label">HIGHLIGHT MY ADVENTURERS</span>
+        </label>
+        <label className="settings-row settings-check-row">
+          <input type="checkbox" className="settings-check" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />
+          <span className="settings-label">REDUCE ANIMATIONS</span>
+        </label>
       </div>
       <button className="settings-toggle" onClick={() => setOpen(o => !o)}>
         ⚙ SETTINGS
