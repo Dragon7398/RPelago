@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { GameStateProvider } from './contexts/GameStateContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { useAuth } from './contexts/AuthContext';
 import { useGameState } from './contexts/GameStateContext';
 import { firebaseReady } from './firebase/config';
@@ -13,6 +14,7 @@ import ProfileLightbox from './components/ProfileLightbox';
 import LoginModal from './components/LoginModal';
 import AdminPanel from './components/AdminPanel';
 import AdminDashboard from './components/AdminDashboard';
+import ActivityFeed from './components/ActivityFeed';
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
   const [val, setVal] = useState(() => {
@@ -120,6 +122,7 @@ function AppContent() {
         onTileClick={coord => setActiveTile(coord)}
       />
       <OrbBar />
+      <ActivityFeed />
       <div className="rule"><span>⚔</span></div>
       <MapGrid onTileClick={coord => setActiveTile(coord)} />
       <div className="state-legend">
@@ -166,8 +169,10 @@ export default function App() {
   return (
     <AuthProvider>
       <GameStateProvider>
-        <FirebaseBanner />
-        <AppContent />
+        <ToastProvider>
+          <FirebaseBanner />
+          <AppContent />
+        </ToastProvider>
       </GameStateProvider>
     </AuthProvider>
   );

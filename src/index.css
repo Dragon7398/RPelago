@@ -949,6 +949,30 @@ header p {
 .orb-count-badge { font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em; color: var(--gold-dim); text-align: center; }
 .orb-count-badge strong { color: var(--gold); }
 
+/* ══ ACTIVITY FEED ══ */
+.activity-feed {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.6rem 1.2rem; width: 100%; max-width: 640px;
+  background: oklch(13% 0.04 75 / 0.85); border: 1px solid var(--border-glow); border-radius: 3px;
+}
+.activity-feed-collapsed { padding: 0.35rem 1.2rem; }
+.activity-feed-title {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.18em;
+  color: var(--gold-dim); cursor: pointer; display: flex; align-items: center;
+  justify-content: space-between; user-select: none; width: 100%;
+}
+.activity-feed-title:hover { color: var(--gold); }
+.activity-feed-title-right { display: flex; align-items: center; }
+.activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.activity-feed-empty { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(40% 0.06 75); text-align: center; padding: 0.3rem 0; }
+.activity-entry {
+  display: flex; align-items: baseline; gap: 0.5rem;
+  font-family: 'Crimson Pro', serif; font-size: 0.76rem; line-height: 1.4;
+}
+.activity-icon { font-size: 0.8rem; flex-shrink: 0; }
+.activity-message { color: oklch(72% 0.05 75); flex: 1; }
+.activity-time { font-family: 'Cinzel', serif; font-size: 0.46rem; letter-spacing: 0.08em; color: oklch(40% 0.05 75); flex-shrink: 0; white-space: nowrap; }
+
 /* ══ PROFILE LIGHTBOX ══ */
 .profile-overlay {
   position: fixed; inset: 0;
@@ -1424,6 +1448,30 @@ header p {
   color: oklch(65% 0.12 145); transition: all 0.15s;
 }
 .dash-curse-save:hover { background: oklch(22% 0.08 145 / 0.5); color: oklch(72% 0.14 145); }
+
+/* ══ TOASTS ══════════════════════════════════════════════════════════════════ */
+.toast-container {
+  position: fixed; bottom: 5rem; right: 1.2rem; z-index: 500;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  pointer-events: none;
+}
+.toast {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  padding: 0.55rem 0.9rem; border-radius: 3px; border: 1px solid;
+  display: flex; align-items: center; gap: 0.55rem;
+  background: oklch(14% 0.05 75 / 0.97);
+  box-shadow: 0 4px 20px #000a, 0 0 12px oklch(72% 0.14 75 / 0.08);
+  animation: toastIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  max-width: 280px;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.toast-success { border-color: oklch(42% 0.12 145); color: oklch(72% 0.14 145); }
+.toast-error   { border-color: oklch(42% 0.14 25);  color: oklch(68% 0.16 25);  }
+.toast-info    { border-color: var(--border-glow);  color: var(--gold-dim);     }
+.toast-icon    { flex-shrink: 0; font-size: 0.55rem; }
 
 /* ══ MOBILE / SMALL SCREEN ══════════════════════════════════════════════════ */
 @media (max-width: 480px) {

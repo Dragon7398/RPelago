@@ -123,3 +123,19 @@ export interface AuthUser {
   displayName: string;
   isAdmin: boolean;
 }
+
+export type ActivityType =
+  | 'tile_complete'
+  | 'tile_inprogress'
+  | 'tile_available'
+  | 'orb_collected'
+  | 'item_purchased'
+  | 'orb_purchased';
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: number;
+  type: ActivityType;
+  message: string;
+  icon: string;
+}

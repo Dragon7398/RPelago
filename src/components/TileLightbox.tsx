@@ -1,5 +1,6 @@
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord, TILE_TRAITS, NAME_COLORS, ITEM_TRAIT_REFS } from '../lib/constants';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
 import type { TileAdventurer, AdvClass, AdvSlot } from '../types';
@@ -121,6 +122,7 @@ function TriStateChip({ label, value }: { label: string; value: string }) {
 export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) {
   const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem } = useGameState();
   const { user } = useAuth();
+  const { addToast } = useToast();
 
   const open = !!coord;
 
@@ -156,17 +158,32 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       owner:     user.id,
       ownerName: user.displayName,
     };
-    await sendAdventurer(coord, entry);
+    try {
+      await sendAdventurer(coord, entry);
+      addToast(`${adv.firstName} ${adv.lastName} dispatched to ${tile.name || coord}.`, 'success');
+    } catch {
+      addToast('Failed to send adventurer. Please try again.', 'error');
+    }
   };
 
   const handleRecall = async (advId: string) => {
     if (!user) return;
-    await recallAdventurer(coord, advId, user.id);
+    try {
+      await recallAdventurer(coord, advId, user.id);
+      addToast('Adventurer recalled.', 'info');
+    } catch {
+      addToast('Failed to recall adventurer. Please try again.', 'error');
+    }
   };
 
   const handlePurchaseOrb = async () => {
-    await purchaseOrb(coord);
-    onClose();
+    try {
+      await purchaseOrb(coord);
+      addToast('Orb claimed!', 'success');
+      onClose();
+    } catch {
+      addToast('Purchase failed. Please try again.', 'error');
+    }
   };
 
   // ── Town lightbox ─────────────────────────────────────────────────────────
@@ -240,7 +257,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                       <div className="lb-shop-item-cost">🪙 {item.cost}</div>
                       <button
                         className={`lb-shop-item-btn${alreadyOwned ? ' owned' : !canAfford ? ' cant-afford' : ''}`}
-                        onClick={canAfford ? () => { purchaseItem(item.id, coord); } : undefined}
+                        onClick={canAfford ? () => { purchaseItem(item.id, coord).then(() => addToast(`${item.name} purchased.`, 'success')).catch(() => addToast('Purchase failed. Please try again.', 'error')); } : undefined}
                         disabled={!canAfford || alreadyOwned}
                       >
                         {alreadyOwned ? '✓ OWNED' : canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}

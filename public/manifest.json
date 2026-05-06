@@ -1,0 +1,12 @@
+{
+  "name": "RPelago",
+  "short_name": "RPelago",
+  "description": "Archipelago metagame overlay",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141009",
+  "theme_color": "#141009",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

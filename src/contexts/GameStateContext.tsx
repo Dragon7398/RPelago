@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot } from '../types';
+import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry } from '../types';
 import { firebaseReady, functions } from '../firebase/config';
 import {
   subscribeToGame, initializeGameIfNeeded,
@@ -8,7 +8,7 @@ import {
   completeTile, updateAdventurer,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
-  setPlayerDisabled, setPlayerNameColor,
+  setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
 import { getAdjCoords } from '../lib/constants';
@@ -18,6 +18,7 @@ import { rcFromCoord } from '../lib/constants';
 interface GameStateContextValue {
   gameState: GameState | null;
   loading: boolean;
+  activityLog: ActivityEntry[];
 
   // Player actions
   sendAdventurer: (coord: string, entry: TileAdventurer) => Promise<void>;
@@ -49,8 +50,9 @@ interface GameStateContextValue {
 const GameStateContext = createContext<GameStateContextValue | null>(null);
 
 export function GameStateProvider({ children }: { children: ReactNode }) {
-  const [gameState, setGameState] = useState<GameState | null>(null);
-  const [loading, setLoading]     = useState(true);
+  const [gameState, setGameState]   = useState<GameState | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
 
   useEffect(() => {
     if (!firebaseReady) {
@@ -58,20 +60,22 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    let unsubscribe: () => void;
+    let unsubscribeGame: () => void;
+    let unsubscribeLog: () => void;
 
     initializeGameIfNeeded().then(() => {
-      unsubscribe = subscribeToGame(state => {
+      unsubscribeGame = subscribeToGame(state => {
         if (state?.meta?.seed != null) initializeGrid(state.meta.seed);
         setGameState(state);
         setLoading(false);
       });
+      unsubscribeLog = subscribeToActivityLog(setActivityLog);
     }).catch(err => {
       console.error('Firebase init failed:', err);
       setLoading(false);
     });
 
-    return () => { unsubscribe?.(); };
+    return () => { unsubscribeGame?.(); unsubscribeLog?.(); };
   }, []);
 
   // ── Player actions ──────────────────────────────────────────────────────────
@@ -103,7 +107,12 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   // ── Admin tile actions ──────────────────────────────────────────────────────
   const adminSetTileState = useCallback(async (coord: string, state: TileState) => {
     await setTileState(coord, state);
-  }, []);
+    if (state === 'inprogress') {
+      const tile = gameState?.tiles[coord];
+      const name = tile?.name || coord;
+      await logActivity('tile_inprogress', `${name} is now In Progress.`, '⚔️');
+    }
+  }, [gameState]);
 
   const adminUpdateTile = useCallback(async (coord: string, updates: Partial<Tile>) => {
     await updateTileAdmin(coord, updates);
@@ -164,6 +173,18 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     }
 
     await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions);
+
+    const ownerIds = [...new Set(Object.values(tile.adventurers ?? {}).map(a => a.owner))];
+    const participantNames = ownerIds.map(id => gameState.players[id]?.displayName).filter(Boolean).join(', ');
+    const credit = participantNames || 'the party';
+    await logActivity('tile_complete', `${tileName} cleared by ${credit}.`, '✅');
+
+    for (const { coord: rc, newState } of revealCoords) {
+      if (newState === 'available') {
+        const name = gameState.tiles[rc]?.name || rc;
+        await logActivity('tile_available', `${name} is now available.`, '🗺️');
+      }
+    }
   }, [gameState]);
 
   const adminGrantOrb = useCallback(async (orbId: string) => {
@@ -219,7 +240,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   return (
     <GameStateContext.Provider value={{
-      gameState, loading,
+      gameState, loading, activityLog,
       sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,

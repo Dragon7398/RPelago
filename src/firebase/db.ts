@@ -1,6 +1,6 @@
-import { ref, set, update, get, onValue, remove } from 'firebase/database';
+import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { db, firebaseReady } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 
@@ -118,6 +118,12 @@ export async function completeTile(
   }
 
   await update(ref(db!), updates);
+
+  for (const orbId of Object.keys(orbAcquisitions)) {
+    const orb = (await import('../lib/constants')).ALL_ORBS.find(o => o.id === orbId);
+    const tileNameSnap = (await get(ref(db!, `game/tiles/${coord}/name`))).val() as string | null;
+    await logActivity('orb_collected', `${orb?.label ?? orbId} Orb gathered from ${tileNameSnap || coord}.`, orb?.icon ?? '🔮');
+  }
 }
 
 // ── Player queries ────────────────────────────────────────────────────────────
@@ -219,6 +225,27 @@ export async function isPlayerDisabled(playerId: string): Promise<boolean> {
   return snap.val() === true;
 }
 
+// ── Activity log ──────────────────────────────────────────────────────────────
+export async function logActivity(type: ActivityType, message: string, icon: string): Promise<void> {
+  if (!db || !firebaseReady) return;
+  await push(ref(db, 'game/activityLog'), { timestamp: Date.now(), type, message, icon });
+}
+
+export function subscribeToActivityLog(
+  callback: (entries: ActivityEntry[]) => void,
+): () => void {
+  assertDb();
+  return onValue(ref(db!, 'game/activityLog'), snap => {
+    if (!snap.exists()) { callback([]); return; }
+    const raw = snap.val() as Record<string, Omit<ActivityEntry, 'id'>>;
+    const entries = Object.entries(raw)
+      .map(([id, e]) => ({ ...e, id }))
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 25);
+    callback(entries);
+  });
+}
+
 // ── Admin: set admin ID ───────────────────────────────────────────────────────
 export async function setAdminId(playerId: string): Promise<void> {
   await update(ref(db!, 'game/meta'), { adminId: playerId });
@@ -241,8 +268,9 @@ export async function mapReset(): Promise<void> {
   // Fresh tile layout with new shop assignments for this seed
   updates['game/tiles'] = buildDefaultTileData(seed);
 
-  // Clear orb state
+  // Clear orb state and activity log
   updates['game/orbState'] = null;
+  updates['game/activityLog'] = null;
 
   // Preserve orb config and shops (admin may have customized both); update meta
   updates['game/orbConfig'] = orbConfig;

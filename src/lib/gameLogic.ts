@@ -52,7 +52,7 @@ export function awardTileRewards(
   tile: Tile,
   players: Record<string, Player>,
 ): Record<string, Player> {
-  const adventurers = Object.values(tile.adventurers);
+  const adventurers = Object.values(tile.adventurers ?? {});
   if (adventurers.length === 0) return players;
 
   const ownerIds = [...new Set(adventurers.map(a => a.owner))];
