@@ -1438,6 +1438,8 @@ header p {
 
   .lightbox { padding: 1.4rem 1rem; }
 
+  .tile .tile-icon { font-size: clamp(1.05rem, 5vw, 1.4rem); }
+
   .orb-bar { padding: 0.5rem 0.7rem; }
 
   .settings-popout { min-width: 185px; left: 0.5rem; bottom: 3.5rem; }
