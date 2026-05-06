@@ -12,7 +12,6 @@ import MapGrid from './components/MapGrid';
 import TileLightbox from './components/TileLightbox';
 import ProfileLightbox from './components/ProfileLightbox';
 import LoginModal from './components/LoginModal';
-import AdminPanel from './components/AdminPanel';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 
@@ -103,7 +102,6 @@ function AppContent() {
   const [activeTile,  setActiveTile]  = useState<string | null>(null);
   const [loginOpen,   setLoginOpen]   = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [adminOpen,   setAdminOpen]   = useState(false);
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
@@ -135,7 +133,7 @@ function AppContent() {
       <SettingsPanel />
 
       {isAdmin && (
-        <button className="admin-toggle" onClick={() => setAdminOpen(true)}>⚙ ADMIN</button>
+        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">⚙ ADMIN</a>
       )}
 
       <TileLightbox
@@ -145,7 +143,6 @@ function AppContent() {
       />
       <ProfileLightbox open={profileOpen} onClose={() => setProfileOpen(false)} />
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
-      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
     </div>
   );
 }

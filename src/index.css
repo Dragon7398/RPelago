@@ -668,6 +668,9 @@ header p {
 .admin-close { position: absolute; top: 1rem; right: 1.2rem; background: none; border: none; color: var(--gold-dim); font-size: 1.1rem; cursor: pointer; transition: color 0.15s; }
 .admin-close:hover { color: var(--gold); }
 
+.map-page-layout { display: grid; grid-template-columns: auto 1fr; gap: 1.5rem; align-items: start; }
+@media (max-width: 800px) { .map-page-layout { grid-template-columns: 1fr; } }
+
 .admin-col-labels { display: flex; gap: 4px; margin-left: calc(22px + 4px); margin-bottom: 2px; }
 .admin-col-lbl { width: 50px; text-align: center; font-family: 'Cinzel', serif; font-size: 0.55rem; color: var(--gold-dim); }
 .admin-grid { display: flex; flex-direction: column; gap: 3px; margin-bottom: 1.2rem; }

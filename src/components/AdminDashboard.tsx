@@ -5,14 +5,16 @@ import ChallengesPage from './admin/ChallengesPage';
 import PlayersPage from './admin/PlayersPage';
 import ShopsPage from './admin/ShopsPage';
 import OrbsPage from './admin/OrbsPage';
+import MapPage from './admin/MapPage';
 
-type DashPage = 'challenges' | 'players' | 'shops' | 'orbs';
+type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map';
 
 const PAGES: { id: DashPage; label: string }[] = [
   { id: 'challenges', label: '⚔ Challenges' },
   { id: 'players',    label: '👥 Players'    },
   { id: 'shops',      label: '🛒 Shops'      },
   { id: 'orbs',       label: '⚗ Orbs'       },
+  { id: 'map',        label: '🗺 Map'        },
 ];
 
 export default function AdminDashboard() {
@@ -96,6 +98,7 @@ export default function AdminDashboard() {
         {page === 'players'    && <PlayersPage />}
         {page === 'shops'      && <ShopsPage />}
         {page === 'orbs'       && <OrbsPage />}
+        {page === 'map'        && <MapPage />}
       </main>
     </div>
   );
