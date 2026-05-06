@@ -2,6 +2,7 @@ import type { Tile, TileTypeKey, TriState, OrbConfig } from '../types';
 import {
   COLS, ROWS, ADV_CLASSES, ADV_NAMES_FIRST, ADV_NAMES_LAST,
   ALL_ORBS, coordFromRC, getAdjRC, isEdgeTile, TOWN_SHOP_ITEMS, NON_CENTER_SHOP_IDS,
+  BOSS_ELEMENTAL_TRAIT_VALUES,
 } from './constants';
 
 // ── Seeded shuffle (LCG) ──────────────────────────────────────────────────────
@@ -277,8 +278,10 @@ function generateTileStats(seed: number, r: number, c: number, typeKey: TileType
     const diffBonus = calcDifficultyBonus(release, collect);
     const xp   = calcXP('boss', required, hint, release, collect, bonusXP);
     const gold = calcGold(seed, r, c, xp);
+    const traits: Record<string, { value: number }> = {};
+    for (const [id, value] of Object.entries(BOSS_ELEMENTAL_TRAIT_VALUES)) traits[id] = { value };
     return { required, release, collect, hint, bonusXP, diffBonus, xp, gold,
-             baseRelease: release, baseCollect: collect, baseHint: hint };
+             baseRelease: release, baseCollect: collect, baseHint: hint, traits };
   }
 
   const rcOptions   = typeKey === 'battle' ? BATTLE_RC : typeKey === 'puzzle' ? PUZZLE_RC : ELITE_RC;

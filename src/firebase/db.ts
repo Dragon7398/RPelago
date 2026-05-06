@@ -78,6 +78,17 @@ export async function setTileState(coord: string, state: TileState): Promise<voi
   await update(ref(db!, `game/tiles/${coord}`), { state });
 }
 
+export async function setTileInProgress(
+  coord: string,
+  stunnedAdvId: string | null,
+  tauntedAdvId: string | null,
+): Promise<void> {
+  const updates: Record<string, unknown> = { [`game/tiles/${coord}/state`]: 'inprogress' };
+  updates[`game/tiles/${coord}/stunnedAdvId`] = stunnedAdvId;
+  updates[`game/tiles/${coord}/tauntedAdvId`] = tauntedAdvId;
+  await update(ref(db!), updates);
+}
+
 export async function updateTileAdmin(coord: string, updates: Partial<Tile>): Promise<void> {
   await update(ref(db!, `game/tiles/${coord}`), { ...updates, adminOverride: true });
 }

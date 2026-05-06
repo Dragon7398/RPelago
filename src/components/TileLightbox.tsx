@@ -63,6 +63,27 @@ function renderTraitDesc(description: string, traitIds: readonly string[]): Reac
   );
 }
 
+function AdvStatusIcons({ advId, tile, inventory }: {
+  advId: string;
+  tile: { stunnedAdvId?: string; tauntedAdvId?: string };
+  inventory: Record<string, number>;
+}) {
+  const isStunned = tile.stunnedAdvId === advId;
+  const isTaunted = tile.tauntedAdvId === advId;
+  if (!isStunned && !isTaunted) return null;
+  const resisted = isStunned && (inventory['ring_of_resistance'] ?? 0) > 0;
+  return (
+    <span className="lb-adv-status-icons">
+      {isStunned && (
+        resisted
+          ? <span className="lb-adv-status-icon" title="Resisted Stun!">🛡️</span>
+          : <span className="lb-adv-status-icon" title="Stunned!">💫</span>
+      )}
+      {isTaunted && <span className="lb-adv-status-icon" title="Taunted!">😤</span>}
+    </span>
+  );
+}
+
 function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
   if (!entry.slots) return [];
   // Firebase may return a dense array or an object with numeric keys
@@ -495,6 +516,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                         <div key={entry.advId} className="lb-adv-entry">
                           <div className="lb-adv-row">
                             <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                            <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
                             <span className="lb-adv-secondary">
                               <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
                               <span className="lb-adv-name">{entry.name}</span>
@@ -556,7 +578,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                     {advEntries.map(entry => (
                       <div key={entry.advId} className="lb-adv-entry">
                         <div className="lb-adv-row">
-                          <span className="lb-adv-owner">{entry.ownerName}</span>
+                          <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                          <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
                           <span className="lb-adv-secondary">
                             <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
                             <span className="lb-adv-name">{entry.name}</span>
@@ -594,7 +617,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                     {advEntries.map(entry => (
                       <div key={entry.advId} className="lb-adv-entry">
                         <div className="lb-adv-row">
-                          <span className="lb-adv-owner">{entry.ownerName}</span>
+                          <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                          <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
                           <span className="lb-adv-secondary">
                             <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
                             <span className="lb-adv-name">{entry.name}</span>

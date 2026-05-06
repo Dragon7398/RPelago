@@ -40,6 +40,8 @@ export interface Tile {
   rules?: string;
   traits?: Record<string, { value: number }>;
   publicSlots?: AdvSlot[];
+  stunnedAdvId?: string;
+  tauntedAdvId?: string;
   link: string;
   gold: number;
   xp: number;

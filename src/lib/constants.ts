@@ -121,6 +121,26 @@ export const MAX_LEVEL = LEVEL_THRESHOLDS.length;
 
 export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
 
+// ── Boss orb-reactive traits ───────────────────────────────────────────────────
+// Elemental orb → trait IDs applied to the boss while that orb is ungathered
+export const ELEMENTAL_ORB_TRAITS: Readonly<Record<string, readonly string[]>> = {
+  fire:  ['cursed', 'stunning'],
+  air:   ['aerial', 'agile'],
+  water: ['camouflage', 'taunt'],
+  earth: ['enduring', 'sturdy'],
+};
+
+// These traits can still be removed even while the boss is In Progress
+export const BOSS_SOFT_TRAITS: readonly string[] = ['camouflage', 'enduring'];
+
+// Initial trait values written to the boss on map generation (all 4 orbs ungathered)
+export const BOSS_ELEMENTAL_TRAIT_VALUES: Readonly<Record<string, number>> = {
+  cursed: 0, stunning: 0,
+  aerial: 0, agile:    250,
+  camouflage: 0, taunt: 0,
+  enduring: 95, sturdy: 150,
+};
+
 // ── Shop items ────────────────────────────────────────────────────────────────
 export const SHOP_ITEMS: readonly ShopItem[] = [
   {

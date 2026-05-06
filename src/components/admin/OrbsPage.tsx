@@ -5,6 +5,10 @@ import { getTypeKey, orbIdForElite, orbIdForEdgeTile } from '../../lib/tileGen';
 import type { OrbConfig } from '../../types';
 
 const ORB_EFFECTS: Record<string, string> = {
+  fire:  'Boss has Cursed & Stunning while ungathered; both traits lock in when boss reaches In Progress',
+  air:   'Boss has Aerial & Agile while ungathered; both traits lock in when boss reaches In Progress',
+  water: 'Boss has Camouflage & Taunt while ungathered; Taunt locks in at In Progress, Camouflage stays removable',
+  earth: 'Boss has Enduring & Sturdy while ungathered; Sturdy locks in at In Progress, Enduring stays removable',
   wood:  'Enables Boss Release (required to release completed slots)',
   soul:  'Enables Boss Collect (required to collect completed slots)',
   light: 'Reduces Boss Hint cost by 10',
