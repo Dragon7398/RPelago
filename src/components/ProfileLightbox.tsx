@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
+import { useToast } from '../contexts/ToastContext';
 import { calcLevel, xpForLevel, xpForNextLevel } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS } from '../lib/constants';
 import type { AdvClass } from '../types';
@@ -13,6 +14,7 @@ interface Props {
 export default function ProfileLightbox({ open, onClose }: Props) {
   const { user } = useAuth();
   const { gameState, renameAdventurer, setNameColor } = useGameState();
+  const { addToast } = useToast();
 
   const player = user && gameState ? gameState.players[user.id] : null;
   const adventurers = player ? Object.values(player.adventurers) : [];
@@ -39,12 +41,16 @@ export default function ProfileLightbox({ open, onClose }: Props) {
 
   const handleRenameSave = async (advId: string, firstName: string, lastName: string) => {
     if (!user) return;
-    await renameAdventurer(user.id, advId, firstName, lastName);
-    setRenames(prev => {
-      const next = { ...prev };
-      delete next[advId];
-      return next;
-    });
+    try {
+      await renameAdventurer(user.id, advId, firstName, lastName);
+      setRenames(prev => {
+        const next = { ...prev };
+        delete next[advId];
+        return next;
+      });
+    } catch {
+      addToast('Failed to rename adventurer. Please try again.', 'error');
+    }
   };
 
   if (!open) return null;
@@ -108,7 +114,13 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                       className={`profile-color-swatch${(player.nameColor ?? 'default') === nc.id ? ' selected' : ''}`}
                       style={{ backgroundColor: nc.value }}
                       title={nc.label}
-                      onClick={() => setNameColor(user!.id, nc.id === 'default' ? null : nc.id)}
+                      onClick={async () => {
+                        try {
+                          await setNameColor(user!.id, nc.id === 'default' ? null : nc.id);
+                        } catch {
+                          addToast('Failed to update name color. Please try again.', 'error');
+                        }
+                      }}
                     />
                   ))}
                 </div>

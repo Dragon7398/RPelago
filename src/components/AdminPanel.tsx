@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, SLOT_STATUSES, TILE_TRAITS } from '../lib/constants';
 import type { TraitDef } from '../lib/constants';
 import { getTypeKey } from '../lib/tileGen';
@@ -18,11 +20,15 @@ const STATE_BUTTONS: { state: TileState; label: string; cls: string }[] = [
 ];
 
 export default function AdminPanel({ open, onClose }: Props) {
+  const { user } = useAuth();
+  const { addToast } = useToast();
   const {
     gameState,
     adminSetTileState, adminUpdateTile, adminCompleteTile,
     adminSetAdventurerSlots, adminSetPublicSlots,
   } = useGameState();
+
+  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
 
   const [selectedCoord, setSelectedCoord] = useState<string | null>(null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
@@ -36,28 +42,41 @@ export default function AdminPanel({ open, onClose }: Props) {
   }
 
   if (!gameState) return null;
+  if (!isAdmin) return null;
 
   const tile = selectedCoord ? gameState.tiles[selectedCoord] : null;
 
   const handleStateBtn = async (state: TileState) => {
     if (!selectedCoord || !tile) return;
-    if (state === 'complete') {
-      if (tile.state === 'complete') return;
-      await adminCompleteTile(selectedCoord);
-    } else {
-      await adminSetTileState(selectedCoord, state);
+    try {
+      if (state === 'complete') {
+        if (tile.state === 'complete') return;
+        await adminCompleteTile(selectedCoord);
+      } else {
+        await adminSetTileState(selectedCoord, state);
+      }
+    } catch {
+      addToast('Failed to update tile state. Please try again.', 'error');
     }
   };
 
   const handleFieldSave = async () => {
     if (!selectedCoord || Object.keys(localEdits).length === 0) return;
-    await adminUpdateTile(selectedCoord, localEdits as any);
-    setLocalEdits({});
+    try {
+      await adminUpdateTile(selectedCoord, localEdits as any);
+      setLocalEdits({});
+    } catch {
+      addToast('Failed to save tile changes. Please try again.', 'error');
+    }
   };
 
   const handleTriState = async (field: 'release' | 'collect', value: TriState) => {
     if (!selectedCoord) return;
-    await adminUpdateTile(selectedCoord, { [field]: value });
+    try {
+      await adminUpdateTile(selectedCoord, { [field]: value });
+    } catch {
+      addToast('Failed to update tile. Please try again.', 'error');
+    }
   };
 
   const handleTraitToggle = async (def: TraitDef, enabled: boolean) => {
@@ -68,13 +87,21 @@ export default function AdminPanel({ open, onClose }: Props) {
     } else {
       delete next[def.id];
     }
-    await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+    try {
+      await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+    } catch {
+      addToast('Failed to update trait. Please try again.', 'error');
+    }
   };
 
   const handleTraitValue = async (traitId: string, value: number) => {
     if (!selectedCoord || !tile) return;
     const next = { ...(tile.traits ?? {}), [traitId]: { value } };
-    await adminUpdateTile(selectedCoord, { traits: next });
+    try {
+      await adminUpdateTile(selectedCoord, { traits: next });
+    } catch {
+      addToast('Failed to update trait value. Please try again.', 'error');
+    }
   };
 
   return (

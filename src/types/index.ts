@@ -123,7 +123,6 @@ export interface GameState {
 export interface AuthUser {
   id: string;
   displayName: string;
-  isAdmin: boolean;
 }
 
 export type ActivityType =

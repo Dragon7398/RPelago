@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { httpsCallable } from 'firebase/functions';
+import { onAuthStateChanged } from 'firebase/auth';
 import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry } from '../types';
-import { firebaseReady, functions } from '../firebase/config';
+import { firebaseReady, functions, auth as firebaseAuth } from '../firebase/config';
 import {
   subscribeToGame, initializeGameIfNeeded,
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
@@ -55,28 +56,34 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const processedOrbsRef = useRef<Set<string> | null>(null);
 
+  // Subscribe to game state immediately — reads are open to all users.
   useEffect(() => {
     if (!firebaseReady) {
       setLoading(false);
       return;
     }
-
-    let unsubscribeGame: () => void;
-    let unsubscribeLog: () => void;
-
-    initializeGameIfNeeded().then(() => {
-      unsubscribeGame = subscribeToGame(state => {
-        if (state?.meta?.seed != null) initializeGrid(state.meta.seed);
-        setGameState(state);
-        setLoading(false);
-      });
-      unsubscribeLog = subscribeToActivityLog(setActivityLog);
-    }).catch(err => {
-      console.error('Firebase init failed:', err);
+    const unsubscribeGame = subscribeToGame(state => {
+      if (state?.meta?.seed != null) initializeGrid(state.meta.seed);
+      setGameState(state);
       setLoading(false);
     });
+    const unsubscribeLog = subscribeToActivityLog(setActivityLog);
+    return () => { unsubscribeGame(); unsubscribeLog(); };
+  }, []);
 
-    return () => { unsubscribeGame?.(); unsubscribeLog?.(); };
+  // Initialize the game only after a user is authenticated. The initializing
+  // user's UID becomes adminId, preventing unauthenticated initialization.
+  useEffect(() => {
+    if (!firebaseReady || !firebaseAuth) return;
+    const unsubscribeAuth = onAuthStateChanged(firebaseAuth, async fbUser => {
+      if (!fbUser) return;
+      try {
+        await initializeGameIfNeeded(fbUser.uid);
+      } catch (err) {
+        console.error('Game init failed:', err);
+      }
+    });
+    return () => unsubscribeAuth();
   }, []);
 
   // ── Orb → boss trait effect ─────────────────────────────────────────────────
@@ -143,9 +150,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const renameAdventurer = useCallback(async (
     playerId: string, advId: string, firstName: string, lastName: string,
   ) => {
-    const busyTile = gameState?.players[playerId]?.adventurers[advId]?.busyTile;
-    await updateAdventurer(playerId, advId, { firstName, lastName }, busyTile);
-  }, [gameState]);
+    await updateAdventurer(playerId, advId, { firstName, lastName });
+  }, []);
 
   const purchaseItem = useCallback(async (itemId: string, coord: string) => {
     if (!functions) throw new Error('Firebase not configured.');

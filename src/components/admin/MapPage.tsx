@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
+import { useToast } from '../../contexts/ToastContext';
 import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, SLOT_STATUSES, TILE_TRAITS, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import type { TraitDef } from '../../lib/constants';
 import { getTypeKey } from '../../lib/tileGen';
@@ -24,6 +25,7 @@ export default function MapPage() {
     adminSetAdventurerSlots, adminSetPublicSlots,
   } = useGameState();
 
+  const { addToast } = useToast();
   const [selectedCoord, setSelectedCoord] = useState<string | null>(null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
   const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus }>>({});
@@ -43,23 +45,35 @@ export default function MapPage() {
 
   const handleStateBtn = async (state: TileState) => {
     if (!selectedCoord || !tile) return;
-    if (state === 'complete') {
-      if (tile.state === 'complete') return;
-      await adminCompleteTile(selectedCoord);
-    } else {
-      await adminSetTileState(selectedCoord, state);
+    try {
+      if (state === 'complete') {
+        if (tile.state === 'complete') return;
+        await adminCompleteTile(selectedCoord);
+      } else {
+        await adminSetTileState(selectedCoord, state);
+      }
+    } catch {
+      addToast('Failed to update tile state. Please try again.', 'error');
     }
   };
 
   const handleFieldSave = async () => {
     if (!selectedCoord || Object.keys(localEdits).length === 0) return;
-    await adminUpdateTile(selectedCoord, localEdits as any);
-    setLocalEdits({});
+    try {
+      await adminUpdateTile(selectedCoord, localEdits as any);
+      setLocalEdits({});
+    } catch {
+      addToast('Failed to save tile changes. Please try again.', 'error');
+    }
   };
 
   const handleTriState = async (field: 'release' | 'collect', value: TriState) => {
     if (!selectedCoord) return;
-    await adminUpdateTile(selectedCoord, { [field]: value });
+    try {
+      await adminUpdateTile(selectedCoord, { [field]: value });
+    } catch {
+      addToast('Failed to update tile. Please try again.', 'error');
+    }
   };
 
   const handleTraitToggle = async (def: TraitDef, enabled: boolean) => {
@@ -70,13 +84,21 @@ export default function MapPage() {
     } else {
       delete next[def.id];
     }
-    await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+    try {
+      await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+    } catch {
+      addToast('Failed to update trait. Please try again.', 'error');
+    }
   };
 
   const handleTraitValue = async (traitId: string, value: number) => {
     if (!selectedCoord || !tile) return;
     const next = { ...(tile.traits ?? {}), [traitId]: { value } };
-    await adminUpdateTile(selectedCoord, { traits: next });
+    try {
+      await adminUpdateTile(selectedCoord, { traits: next });
+    } catch {
+      addToast('Failed to update trait value. Please try again.', 'error');
+    }
   };
 
   // ── Checklist helpers ───────────────────────────────────────────────────────

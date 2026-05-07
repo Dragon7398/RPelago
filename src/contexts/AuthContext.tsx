@@ -152,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           console.error('Failed to create player record:', err);
         }
-        setUser({ id: fbUser.uid, displayName, isAdmin: false });
+        setUser({ id: fbUser.uid, displayName });
       } else {
         setUser(null);
       }

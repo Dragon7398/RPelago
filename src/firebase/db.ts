@@ -24,27 +24,28 @@ function defaultOrbConfig(): OrbConfig {
   };
 }
 
-function defaultGameState(): Omit<GameState, 'players'> & { players: Record<string, never> } {
-  const seed      = Math.floor(Math.random() * 0x7FFFFFFF);
-  const orbConfig = defaultOrbConfig();
-  initializeGrid(seed);
-  return {
-    tiles:     buildDefaultTileData(seed),
-    players:   {},
-    orbState:  {},
-    orbConfig,
-    shops:     { ...DEFAULT_SHOPS },
-    meta:      { adminId: '', initialized: true, seed },
-  };
-}
-
 // ── Initialize ────────────────────────────────────────────────────────────────
-export async function initializeGameIfNeeded(): Promise<void> {
+export async function initializeGameIfNeeded(uid?: string): Promise<void> {
   assertDb();
   const d = db!;
   const snap = await get(ref(d, 'game/meta'));
   if (!snap.exists() || !snap.val()?.initialized) {
-    await set(ref(d, 'game'), defaultGameState());
+    const seed      = Math.floor(Math.random() * 0x7FFFFFFF);
+    const orbConfig = defaultOrbConfig();
+    initializeGrid(seed);
+
+    // Phase 1: write meta so the calling user becomes admin and the game is marked initialized.
+    // game/meta allows any auth'd write when !initialized (DB rule).
+    await set(ref(d, 'game/meta'), { adminId: uid ?? '', initialized: true, seed });
+
+    // Phase 2: write the rest of the game data. The user is now admin (adminId === uid).
+    await update(ref(d), {
+      'game/tiles':     buildDefaultTileData(seed),
+      'game/players':   {},
+      'game/orbState':  {},
+      'game/orbConfig': orbConfig,
+      'game/shops':     { ...DEFAULT_SHOPS },
+    });
     return;
   }
 
@@ -58,7 +59,12 @@ export async function initializeGameIfNeeded(): Promise<void> {
         migrationUpdates[`game/tiles/${coord}/shopId`] = shopId;
       }
     }
-    await update(ref(d), migrationUpdates);
+    // Migration requires admin access; silently skip if the current user isn't admin.
+    try {
+      await update(ref(d), migrationUpdates);
+    } catch {
+      // Non-admin users can't run the migration; admin will complete it on next load.
+    }
   }
 }
 
@@ -153,16 +159,26 @@ export async function updateAdventurer(
   playerId: string,
   advId: string,
   updates: { firstName: string; lastName: string },
-  busyTile?: string | null,
 ): Promise<void> {
+  assertDb();
+  const fullName = `${updates.firstName} ${updates.lastName}`;
   const dbUpdates: Record<string, unknown> = {
     [`game/players/${playerId}/adventurers/${advId}/firstName`]: updates.firstName,
     [`game/players/${playerId}/adventurers/${advId}/lastName`]:  updates.lastName,
   };
-  if (busyTile) {
-    dbUpdates[`game/tiles/${busyTile}/adventurers/${advId}/name`] =
-      `${updates.firstName} ${updates.lastName}`;
+
+  // Scan all tiles so the name is updated wherever this adventurer appears,
+  // not just the current busyTile (which can be stale after reassignment).
+  const tilesSnap = await get(ref(db!, 'game/tiles'));
+  if (tilesSnap.exists()) {
+    const tiles = tilesSnap.val() as Record<string, { adventurers?: Record<string, unknown> }>;
+    for (const coord of Object.keys(tiles)) {
+      if (tiles[coord].adventurers?.[advId] !== undefined) {
+        dbUpdates[`game/tiles/${coord}/adventurers/${advId}/name`] = fullName;
+      }
+    }
   }
+
   await update(ref(db!), dbUpdates);
 }
 

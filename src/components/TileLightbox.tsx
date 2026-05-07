@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -144,6 +145,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
   const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem } = useGameState();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const [purchasing, setPurchasing] = useState(false);
 
   const open = !!coord;
 
@@ -198,12 +200,16 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
   };
 
   const handlePurchaseOrb = async () => {
+    if (purchasing) return;
+    setPurchasing(true);
     try {
       await purchaseOrb(coord);
       addToast('Orb claimed!', 'success');
       onClose();
     } catch {
       addToast('Purchase failed. Please try again.', 'error');
+    } finally {
+      setPurchasing(false);
     }
   };
 
@@ -255,10 +261,10 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                   ) : (
                     <button
                       className={`lb-shop-orb-btn${!canAffordOrb ? ' cant-afford' : ''}`}
-                      onClick={canAffordOrb ? handlePurchaseOrb : undefined}
-                      disabled={!canAffordOrb}
+                      onClick={canAffordOrb && !purchasing ? handlePurchaseOrb : undefined}
+                      disabled={!canAffordOrb || purchasing}
                     >
-                      {canAffordOrb ? `⚗ OBTAIN · 🪙 ${ORB_SHOP_COST.toLocaleString()}` : `NOT ENOUGH GOLD · 🪙 ${ORB_SHOP_COST.toLocaleString()}`}
+                      {purchasing ? '…' : canAffordOrb ? `⚗ OBTAIN · 🪙 ${ORB_SHOP_COST.toLocaleString()}` : `NOT ENOUGH GOLD · 🪙 ${ORB_SHOP_COST.toLocaleString()}`}
                     </button>
                   )}
                 </div>
@@ -278,8 +284,18 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                       <div className="lb-shop-item-cost">🪙 {item.cost}</div>
                       <button
                         className={`lb-shop-item-btn${alreadyOwned ? ' owned' : !canAfford ? ' cant-afford' : ''}`}
-                        onClick={canAfford ? () => { purchaseItem(item.id, coord).then(() => addToast(`${item.name} purchased.`, 'success')).catch(() => addToast('Purchase failed. Please try again.', 'error')); } : undefined}
-                        disabled={!canAfford || alreadyOwned}
+                        onClick={canAfford && !purchasing ? async () => {
+                          setPurchasing(true);
+                          try {
+                            await purchaseItem(item.id, coord);
+                            addToast(`${item.name} purchased.`, 'success');
+                          } catch {
+                            addToast('Purchase failed. Please try again.', 'error');
+                          } finally {
+                            setPurchasing(false);
+                          }
+                        } : undefined}
+                        disabled={!canAfford || alreadyOwned || purchasing}
                       >
                         {alreadyOwned ? '✓ OWNED' : canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}
                       </button>

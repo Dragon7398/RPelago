@@ -298,6 +298,9 @@ header p {
   box-shadow: 0 0 0 2px oklch(72% 0.18 75), 0 0 14px oklch(72% 0.18 75 / 0.45);
   border-color: oklch(72% 0.18 75);
 }
+.highlight-my-advs .tile-mine.state-available {
+  animation: none;
+}
 
 /* ── Settings: reduce animations ── */
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
