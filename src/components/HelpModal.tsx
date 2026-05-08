@@ -120,11 +120,11 @@ function SectionMap() {
         </div>
         <div className="help-tile-row">
           <span className="help-tile-icon">💀</span>
-          <div><strong>Elite</strong> — A powerful enemy. Higher difficulty with more slots needed. Often drops Orbs on completion.</div>
+          <div><strong>Elite</strong> — A powerful enemy. Higher difficulty with more slots needed. Always awards an Orb on first completion.</div>
         </div>
         <div className="help-tile-row">
           <span className="help-tile-icon">🐉</span>
-          <div><strong>Boss</strong> — The final challenge. Locked until all 9 Orbs are gathered.</div>
+          <div><strong>Boss</strong> — The final challenge. Locked until at least 5 Orbs have been gathered.</div>
         </div>
       </div>
       <h4>Tile States</h4>
@@ -156,9 +156,10 @@ function SectionAdventurers() {
     <div className="help-section">
       <h3>Adventurers</h3>
       <p>
-        When you join RPelago you receive a party of <strong>up to 8 Adventurers</strong>,
-        each with a randomly assigned name and class. They are your means of tackling
-        challenges across the island.
+        When you join RPelago you start with <strong>1 Adventurer</strong>, randomly named
+        and classed. You earn more as you level up — a second at level 2, a third at level 4,
+        and a fourth at level 6 (the maximum). They are your means of tackling challenges
+        across the island.
       </p>
       <div className="help-callout">
         <span className="help-callout-icon">⚔</span>
@@ -197,10 +198,38 @@ function SectionChallenges() {
       <ol className="help-list">
         <li>Click an <strong>Available</strong> tile and assign one of your idle Adventurers to an open slot.</li>
         <li>Submit your <strong>YAML</strong> to the game thread on Discord.</li>
-        <li>Other players fill the remaining slots, moving the tile to <strong>In Progress</strong>.</li>
+        <li>Other players fill the remaining slots. Once all slots are full, an Admin will move the tile to <strong>In Progress</strong>.</li>
         <li>Each player plays their assigned Archipelago world (to goal or completion).</li>
         <li>An admin verifies and marks the tile <strong>Complete</strong>. Rewards are distributed.</li>
       </ol>
+      <h4>YAML Rules</h4>
+      <p>
+        New to Archipelago? Start with the{' '}
+        <a href="https://archipelago.gg/tutorial/Archipelago/setup_en" target="_blank" rel="noopener noreferrer">official YAML setup guide</a>.
+      </p>
+      <ul className="help-list">
+        <li>
+          Submit <strong>1 YAML per slot</strong>. Your YAML may include up to <strong>5 games</strong>;
+          duplicates are allowed. If submitting multiple games, combine them into one file using{' '}
+          <code>---</code> between entries — do not submit separate files.
+        </li>
+        <li>
+          <strong>Game eligibility:</strong> Unsupported games are allowed if they appear on{' '}
+          <a href="https://docs.google.com/spreadsheets/d/1UR8D95P90cS7tpmAlKvT1giSJeNet2eOMhapK8xjNXE" target="_blank" rel="noopener noreferrer">Drago's list</a>{' '}
+          (Async or Sync) <em>and</em> do not require a ROM to generate. Manuals are not allowed.
+          When in doubt, ask before submitting.
+        </li>
+        <li>
+          <strong>Check limits:</strong> At least <strong>50 checks</strong> and no more than{' '}
+          <strong>1,500 checks</strong> total, unless otherwise approved.
+        </li>
+        <li>
+          <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are
+          limited to <strong>0</strong> starting inventory items, <strong>2</strong> priority
+          locations, <strong>2</strong> excluded locations, and <strong>1</strong> starting hint
+          or hint location.
+        </li>
+      </ul>
       <h4>Rewards</h4>
       <div className="help-tile-list">
         <div className="help-tile-row">
@@ -226,7 +255,7 @@ function SectionChallenges() {
 
 function SectionTraits() {
   const featuredTraits = TILE_TRAITS.filter(t =>
-    ['horde', 'agile', 'sturdy', 'stunning', 'cursed', 'taunt', 'aerial', 'camouflage', 'enduring'].includes(t.id)
+    ['horde', 'agile', 'sturdy', 'stunning', 'cursed', 'aerial'].includes(t.id)
   );
   return (
     <div className="help-section">
@@ -250,7 +279,7 @@ function SectionTraits() {
       <h4>Passive Items</h4>
       <p>Buy these at Town shops to permanently ignore certain traits:</p>
       <div className="help-items">
-        {SHOP_ITEMS.filter(i => !i.consumable).map(item => (
+        {SHOP_ITEMS.filter(i => i.description.startsWith('Passive:')).map(item => (
           <div key={item.id} className="help-item-row">
             <span className="help-item-name">{item.name}</span>
             <span className="help-item-desc">{item.description.replace('Passive: ', '')}</span>
@@ -266,8 +295,8 @@ function SectionOrbs() {
     <div className="help-section">
       <h3>Orbs</h3>
       <p>
-        There are <strong>9 elemental Orbs</strong> hidden across the archipelago.
-        Collecting them all unlocks the Boss tile and strips away its most punishing traits.
+        There are <strong>9 Orbs</strong> hidden across the archipelago.
+        Gathering at least 5 unlocks the Boss tile — collect more to strip away its most punishing traits.
       </p>
       <h4>The 9 Orbs</h4>
       <div className="help-orb-grid">
@@ -280,7 +309,7 @@ function SectionOrbs() {
       </div>
       <h4>Where to Find Them</h4>
       <ul className="help-list">
-        <li><strong>Elite tiles 💀</strong> — Elite encounters often reward an Orb.</li>
+        <li><strong>Elite tiles 💀</strong> — Every Elite encounter awards an Orb on first completion.</li>
         <li><strong>Town shops 🏰</strong> — Some shops sell a specific Orb for 1,500 Gold.</li>
         <li>Keep your eyes open — Orbs can turn up in unexpected places.</li>
       </ul>
@@ -297,9 +326,9 @@ function SectionBoss() {
     <div className="help-section">
       <h3>The Boss</h3>
       <p>
-        Hidden at the center of the archipelago lurks the <strong>final Boss 🐉</strong>.
-        It starts locked — gathering at least 5 Orbs awakens it. Each additional Orb you
-        collect strips away more of its traits, making it easier to defeat.
+        Somewhere on the island lurks the <strong>final Boss 🐉</strong>.
+        It starts locked — gathering at least 5 Orbs awakens it. The four elemental Orbs
+        are especially potent: each one strips two of its traits, making it easier to defeat.
       </p>
       <h4>Orb Traits</h4>
       <p>

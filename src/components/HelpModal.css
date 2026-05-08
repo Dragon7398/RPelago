@@ -127,6 +127,21 @@
 }
 .help-section strong { color: var(--gold); }
 .help-section em { color: var(--amber); font-style: italic; }
+.help-section a {
+  color: var(--amber);
+  text-decoration: underline;
+  text-decoration-color: oklch(65% 0.18 50 / 0.4);
+  text-underline-offset: 2px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.help-section a:visited { color: var(--gold-dim); text-decoration-color: oklch(60% 0.10 75 / 0.4); }
+.help-section a:hover   { color: var(--gold);     text-decoration-color: var(--gold); }
+.help-section code {
+  font-family: 'Courier New', monospace; font-size: 0.85em;
+  background: oklch(12% 0.03 75 / 0.8);
+  border: 1px solid var(--border); border-radius: 2px;
+  padding: 0.05em 0.35em; color: var(--amber);
+}
 
 /* ── Lists ── */
 .help-list {
