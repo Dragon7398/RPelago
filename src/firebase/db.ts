@@ -99,6 +99,29 @@ export async function updateTileAdmin(coord: string, updates: Partial<Tile>): Pr
   await update(ref(db!, `game/tiles/${coord}`), { ...updates, adminOverride: true });
 }
 
+export async function resetTileStats(coord: string, stats: Partial<Tile>): Promise<void> {
+  assertDb();
+  await update(ref(db!, `game/tiles/${coord}`), { ...stats, adminOverride: false });
+}
+
+export async function setTilesAvailability(
+  stateUpdates: Record<string, TileState>,
+  inProgressCoord?: string,
+  stunnedAdvId?: string | null,
+  tauntedAdvId?: string | null,
+): Promise<void> {
+  assertDb();
+  const updates: Record<string, unknown> = {};
+  for (const [c, s] of Object.entries(stateUpdates)) {
+    updates[`game/tiles/${c}/state`] = s;
+  }
+  if (inProgressCoord != null) {
+    updates[`game/tiles/${inProgressCoord}/stunnedAdvId`] = stunnedAdvId ?? null;
+    updates[`game/tiles/${inProgressCoord}/tauntedAdvId`] = tauntedAdvId ?? null;
+  }
+  await update(ref(db!), updates);
+}
+
 export async function assignAdventurer(coord: string, entry: TileAdventurer): Promise<void> {
   await set(ref(db!, `game/tiles/${coord}/adventurers/${entry.advId}`), entry);
   await update(ref(db!, `game/players/${entry.owner}/adventurers/${entry.advId}`), {
@@ -137,7 +160,7 @@ export async function completeTile(
   await update(ref(db!), updates);
 
   for (const orbId of Object.keys(orbAcquisitions)) {
-    const orb = (await import('../lib/constants')).ALL_ORBS.find(o => o.id === orbId);
+    const orb = ALL_ORBS.find(o => o.id === orbId);
     const tileNameSnap = (await get(ref(db!, `game/tiles/${coord}/name`))).val() as string | null;
     await logActivity('orb_collected', `${orb?.label ?? orbId} Orb gathered from ${tileNameSnap || coord}.`, orb?.icon ?? '🔮');
   }

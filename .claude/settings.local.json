@@ -9,7 +9,8 @@
       "Bash(Sort-Object)",
       "Bash(Find-Item -Path \"c:\\\\Users\\\\admin\\\\source\\\\RPelago\" -Name \"*.rules.json\" -o -Name \"*rules*\")",
       "Bash(npx vite *)",
-      "PowerShell(Head -30)"
+      "PowerShell(Head -30)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\admin\\\\source\\\\RPelago\\\\src\" -Recurse | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\admin\\\\source\\\\RPelago\\\\\", \"\"\\) })"
     ]
   }
 }

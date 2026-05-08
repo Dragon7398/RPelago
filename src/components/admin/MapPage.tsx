@@ -21,7 +21,7 @@ function readSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlo
 export default function MapPage() {
   const {
     gameState,
-    adminSetTileState, adminUpdateTile, adminCompleteTile,
+    adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats,
     adminSetAdventurerSlots, adminSetPublicSlots,
   } = useGameState();
 
@@ -98,6 +98,17 @@ export default function MapPage() {
       await adminUpdateTile(selectedCoord, { traits: next });
     } catch {
       addToast('Failed to update trait value. Please try again.', 'error');
+    }
+  };
+
+  const handleRegenStats = async () => {
+    if (!selectedCoord) return;
+    try {
+      await adminRegenTileStats(selectedCoord);
+      setLocalEdits({});
+      addToast('Tile stats regenerated from seed.', 'info');
+    } catch {
+      addToast('Failed to regenerate stats. Please try again.', 'error');
     }
   };
 
@@ -333,6 +344,24 @@ export default function MapPage() {
                         placeholder="https://…"
                       />
                     </div>
+
+                    {typeKey !== 'boss' && (
+                      <div className="admin-detail-row" style={{ justifyContent: 'flex-end', gap: '0.5rem', alignItems: 'center' }}>
+                        {tile.adminOverride && (
+                          <span style={{ fontFamily: "'Cinzel', serif", fontSize: '0.5rem', color: 'oklch(65% 0.14 25)', letterSpacing: '0.08em' }}>
+                            ⚠ STATS OVERRIDDEN
+                          </span>
+                        )}
+                        <button
+                          className="admin-btn secondary"
+                          style={{ fontSize: '0.52rem', padding: '0.18rem 0.6rem' }}
+                          onClick={handleRegenStats}
+                          title="Reset stats to seeded defaults, clearing any manual overrides"
+                        >
+                          ↺ Regen Stats
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
 

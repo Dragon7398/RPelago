@@ -7,9 +7,10 @@ interface Props {
   onLoginClick: () => void;
   onProfileClick: () => void;
   onTileClick: (coord: string) => void;
+  onHelpClick: () => void;
 }
 
-export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick }: Props) {
+export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick }: Props) {
   const { user, signOut } = useAuth();
   const { gameState }     = useGameState();
 
@@ -21,6 +22,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick }:
     return (
       <div className="player-hud">
         <button className="hud-login-btn" onClick={onLoginClick}>⚔ ENTER RPelago</button>
+        <button className="hud-help-btn" onClick={onHelpClick} title="How to play">?</button>
       </div>
     );
   }
@@ -48,6 +50,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick }:
         </div>
       </div>
       <div className="hud-divider" />
+      <button className="hud-help-btn" onClick={onHelpClick} title="How to play">?</button>
       <button className="hud-logout-btn" onClick={signOut}>LEAVE</button>
     </div>
   );

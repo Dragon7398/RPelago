@@ -266,7 +266,7 @@ function calcGold(seed: number, r: number, c: number, xp: number): number {
   return Math.round(xp * pct / 100);
 }
 
-function generateTileStats(seed: number, r: number, c: number, typeKey: TileTypeKey): Partial<Tile> {
+export function generateTileStats(seed: number, r: number, c: number, typeKey: TileTypeKey): Partial<Tile> {
   if (typeKey === 'town' || typeKey === 'town_center') return {};
 
   if (typeKey === 'boss') {

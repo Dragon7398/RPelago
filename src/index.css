@@ -116,6 +116,17 @@ header p {
   color: var(--gold); border-color: var(--gold);
   box-shadow: 0 0 10px oklch(72% 0.14 75 / 0.2);
 }
+.hud-help-btn {
+  font-family: 'Cinzel', serif; font-size: 0.7rem; font-weight: 700;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%; cursor: pointer;
+  border: 1px solid var(--border-glow); background: transparent;
+  color: var(--gold-dim); transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.hud-help-btn:hover {
+  color: var(--gold); border-color: var(--gold);
+  box-shadow: 0 0 10px oklch(72% 0.14 75 / 0.2);
+}
 
 /* ── Rule ── */
 .rule { display: flex; align-items: center; gap: 1rem; width: 100%; max-width: 700px; }

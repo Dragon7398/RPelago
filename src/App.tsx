@@ -12,6 +12,7 @@ import MapGrid from './components/MapGrid';
 import TileLightbox from './components/TileLightbox';
 import ProfileLightbox from './components/ProfileLightbox';
 import LoginModal from './components/LoginModal';
+import HelpModal from './components/HelpModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 
@@ -102,6 +103,7 @@ function AppContent() {
   const [activeTile,  setActiveTile]  = useState<string | null>(null);
   const [loginOpen,   setLoginOpen]   = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [helpOpen,    setHelpOpen]    = useState(false);
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
@@ -118,6 +120,7 @@ function AppContent() {
         onLoginClick={() => setLoginOpen(true)}
         onProfileClick={() => setProfileOpen(true)}
         onTileClick={coord => setActiveTile(coord)}
+        onHelpClick={() => setHelpOpen(true)}
       />
       <OrbBar />
       <ActivityFeed />
@@ -143,6 +146,7 @@ function AppContent() {
       />
       <ProfileLightbox open={profileOpen} onClose={() => setProfileOpen(false)} />
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

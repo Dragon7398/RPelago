@@ -6,14 +6,14 @@ import { firebaseReady, functions, auth as firebaseAuth } from '../firebase/conf
 import {
   subscribeToGame, initializeGameIfNeeded,
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
-  completeTile, updateAdventurer,
+  completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
 import { getAdjCoords, ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
-import { getTypeKey, orbIdForEdgeTile, orbIdForElite, initializeGrid } from '../lib/tileGen';
+import { getTypeKey, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
 
 interface GameStateContextValue {
@@ -32,6 +32,7 @@ interface GameStateContextValue {
   adminSetTileState: (coord: string, state: TileState) => Promise<void>;
   adminUpdateTile: (coord: string, updates: Partial<Tile>) => Promise<void>;
   adminCompleteTile: (coord: string) => Promise<void>;
+  adminRegenTileStats: (coord: string) => Promise<void>;
   adminGrantOrb: (orbId: string) => Promise<void>;
 
   // Admin config
@@ -49,6 +50,33 @@ interface GameStateContextValue {
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
+
+function computeRecalcUpdates(
+  tiles: Record<string, Tile>,
+  coord: string,
+  newState: TileState,
+): Record<string, TileState> {
+  const map: Record<string, TileState> = {};
+  for (const [c, t] of Object.entries(tiles)) map[c] = t.state;
+  map[coord] = newState;
+
+  for (const c of Object.keys(map)) {
+    if (map[c] === 'available') map[c] = 'hidden';
+  }
+
+  for (const [c, state] of Object.entries(map)) {
+    if (state !== 'complete') continue;
+    for (const adjCoord of getAdjCoords(c)) {
+      if (map[adjCoord] === 'hidden') map[adjCoord] = 'available';
+    }
+  }
+
+  const updates: Record<string, TileState> = {};
+  for (const [c, s] of Object.entries(map)) {
+    if (tiles[c]?.state !== s) updates[c] = s;
+  }
+  return updates;
+}
 
 export function GameStateProvider({ children }: { children: ReactNode }) {
   const [gameState, setGameState]   = useState<GameState | null>(null);
@@ -161,12 +189,22 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   // ── Admin tile actions ──────────────────────────────────────────────────────
   const adminSetTileState = useCallback(async (coord: string, state: TileState) => {
     const tile = gameState?.tiles[coord];
+    const wasComplete = tile?.state === 'complete';
+
     if (state === 'inprogress' && tile) {
       const advIds = Object.keys(tile.adventurers ?? {});
       const pick = () => advIds.length > 0 ? advIds[Math.floor(Math.random() * advIds.length)] : null;
       const stunnedAdvId = tile.traits?.['stunning'] !== undefined ? pick() : null;
       const tauntedAdvId = tile.traits?.['taunt']    !== undefined ? pick() : null;
-      await setTileInProgress(coord, stunnedAdvId, tauntedAdvId);
+      if (wasComplete && gameState) {
+        const recalc = computeRecalcUpdates(gameState.tiles, coord, 'inprogress');
+        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId);
+      } else {
+        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId);
+      }
+    } else if (wasComplete && state !== 'complete' && gameState) {
+      const recalc = computeRecalcUpdates(gameState.tiles, coord, state);
+      await setTilesAvailability(recalc);
     } else {
       await setTileState(coord, state);
     }
@@ -179,6 +217,14 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const adminUpdateTile = useCallback(async (coord: string, updates: Partial<Tile>) => {
     await updateTileAdmin(coord, updates);
   }, []);
+
+  const adminRegenTileStats = useCallback(async (coord: string) => {
+    if (!gameState) return;
+    const [r, c] = rcFromCoord(coord);
+    const typeKey = getTypeKey(r, c);
+    const stats = generateTileStats(gameState.meta.seed, r, c, typeKey);
+    await resetTileStats(coord, stats);
+  }, [gameState]);
 
   const adminCompleteTile = useCallback(async (coord: string) => {
     if (!gameState) return;
@@ -304,7 +350,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
       sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer,
-      adminSetTileState, adminUpdateTile, adminCompleteTile, adminGrantOrb,
+      adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
     }}>
