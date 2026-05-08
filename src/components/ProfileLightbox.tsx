@@ -2,18 +2,24 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
-import { calcLevel, xpForLevel, xpForNextLevel } from '../lib/gameLogic';
-import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS } from '../lib/constants';
-import type { AdvClass } from '../types';
+import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
+import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
+import type { AdvClass, PlayerFeats } from '../types';
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
+const SLOT_LABELS: Record<string, string> = {
+  level3: 'Level 3',
+  level5: 'Level 5',
+  level7: 'Level 7',
+};
+
 export default function ProfileLightbox({ open, onClose }: Props) {
   const { user } = useAuth();
-  const { gameState, renameAdventurer, setNameColor } = useGameState();
+  const { gameState, renameAdventurer, setNameColor, selectFeat } = useGameState();
   const { addToast } = useToast();
 
   const player = user && gameState ? gameState.players[user.id] : null;
@@ -24,6 +30,13 @@ export default function ProfileLightbox({ open, onClose }: Props) {
   const xpNext = xpForNextLevel(level);
   const maxed  = level >= MAX_LEVEL;
   const xpPct  = xpNext ? Math.round(((xpCurr - xpThis) / (xpNext - xpThis)) * 100) : 100;
+
+  const feats    = player?.feats ?? {} as PlayerFeats;
+  const featIds  = getPlayerFeatIds(feats);
+  const pending  = player ? pendingFeatSlot(level, feats) : null;
+
+  const [pendingSelection, setPendingSelection] = useState<string | null>(null);
+  const [featSaving, setFeatSaving] = useState(false);
 
   // Per-adventurer rename state
   const [renames, setRenames] = useState<Record<string, { first: string; last: string }>>({});
@@ -50,6 +63,20 @@ export default function ProfileLightbox({ open, onClose }: Props) {
       });
     } catch {
       addToast('Failed to rename adventurer. Please try again.', 'error');
+    }
+  };
+
+  const handleSelectFeat = async () => {
+    if (!user || !pending || !pendingSelection) return;
+    setFeatSaving(true);
+    try {
+      await selectFeat(user.id, pending, pendingSelection);
+      setPendingSelection(null);
+      addToast(`Feat selected: ${FEATS.find(f => f.id === pendingSelection)?.name ?? pendingSelection}.`, 'success');
+    } catch {
+      addToast('Failed to select feat. Please try again.', 'error');
+    } finally {
+      setFeatSaving(false);
     }
   };
 
@@ -103,6 +130,68 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                 </div>
               )}
             </div>
+
+            {/* ── Feats ── */}
+            {(featIds.length > 0 || pending) && (
+              <div className="profile-adv-section">
+                <div className="profile-adv-title">FEATS</div>
+
+                {/* Earned feats display */}
+                {(feats.level3 || feats.level5 || feats.level7) && (
+                  <div className="profile-feats-list">
+                    {(['level3', 'level5', 'level7'] as const).map(slot => {
+                      const featId = feats[slot];
+                      if (!featId) return null;
+                      const def = FEATS.find(f => f.id === featId);
+                      if (!def) return null;
+                      return (
+                        <div key={slot} className="profile-feat-row">
+                          <span className="profile-feat-icon">{def.icon}</span>
+                          <div className="profile-feat-info">
+                            <div className="profile-feat-name">{def.name}</div>
+                            <div className="profile-feat-desc">{def.description}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Pending feat selection */}
+                {pending && (
+                  <div className="profile-feat-select">
+                    <div className="profile-feat-select-title">
+                      ✦ {SLOT_LABELS[pending]} FEAT AVAILABLE — Choose one:
+                    </div>
+                    <div className="profile-feat-options">
+                      {getAvailableFeatsForSlot(pending, feats).map(featId => {
+                        const def = FEATS.find(f => f.id === featId);
+                        if (!def) return null;
+                        const selected = pendingSelection === featId;
+                        return (
+                          <button
+                            key={featId}
+                            className={`profile-feat-option${selected ? ' selected' : ''}`}
+                            onClick={() => setPendingSelection(selected ? null : featId)}
+                          >
+                            <span className="profile-feat-option-icon">{def.icon}</span>
+                            <span className="profile-feat-option-name">{def.name}</span>
+                            <span className="profile-feat-option-desc">{def.description}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      className="profile-feat-confirm"
+                      disabled={!pendingSelection || featSaving}
+                      onClick={handleSelectFeat}
+                    >
+                      {featSaving ? '…' : 'CONFIRM FEAT'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {(player.inventory?.['coat_of_many_colors'] ?? 0) > 0 && (
               <div className="profile-adv-section">

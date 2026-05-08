@@ -224,6 +224,77 @@ export const TOWN_SHOP_ITEMS: Readonly<Record<number, readonly string[]>> = {
   3: [],
 };
 
+export interface FeatDef {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  availableAt: 3 | 5 | 7;
+  yamlEffect?: {
+    startingHints?: number;
+    hintedLocations?: number;
+    excludedLocations?: number;
+    priorityLocations?: number;
+    startingItems?: number;
+  };
+}
+
+export const FEATS: readonly FeatDef[] = [
+  {
+    id: 'knowledgeable',
+    name: 'Knowledgeable',
+    icon: '📚',
+    availableAt: 3,
+    description: 'You are allowed to add 1 additional Starting Hint and 2 additional Hinted Locations to each YAML you submit. (This changes your maximum to 2 Hints and 2 Hint Locations, or 1 Hint and 3 Hint Locations.)',
+    yamlEffect: { startingHints: 1, hintedLocations: 2 },
+  },
+  {
+    id: 'picky',
+    name: 'Picky',
+    icon: '🚫',
+    availableAt: 3,
+    description: 'You are allowed to add 4 additional Excluded Locations to each YAML you submit. (This changes your maximum to 6 Excluded Locations.)',
+    yamlEffect: { excludedLocations: 4 },
+  },
+  {
+    id: 'helpful',
+    name: 'Helpful',
+    icon: '📌',
+    availableAt: 3,
+    description: 'You are allowed to add 2 additional Priority Locations to each YAML you submit. (This changes your maximum to 4 Priority Locations.)',
+    yamlEffect: { priorityLocations: 2 },
+  },
+  {
+    id: 'mentor',
+    name: 'Mentor',
+    icon: '🎓',
+    availableAt: 5,
+    description: 'Players on challenges you play in receive 5% bonus XP. You receive 1% bonus XP for each other player on your challenge. This stacks with other Mentors.',
+  },
+  {
+    id: 'treasurer',
+    name: 'Treasurer',
+    icon: '💰',
+    availableAt: 5,
+    description: 'Players on challenges you play in receive 10% bonus Gold. You receive 3% bonus Gold for each other player on your challenge. This stacks with other Treasurers.',
+  },
+  {
+    id: 'seeker',
+    name: 'Seeker',
+    icon: '🔍',
+    availableAt: 7,
+    description: 'Challenges you play on have 1% reduced Hint cost. This stacks with other Seekers, to a minimum of 1% Hint Cost.',
+  },
+  {
+    id: 'prepared',
+    name: 'Prepared',
+    icon: '🎒',
+    availableAt: 7,
+    description: 'You are allowed to add 1 starting inventory item to each YAML you submit. (This changes your maximum to 1 starting inventory item.)',
+    yamlEffect: { startingItems: 1 },
+  },
+];
+
 export function coordFromRC(r: number, c: number): string {
   return `${COL_CHARS[c]}${r + 1}`;
 }

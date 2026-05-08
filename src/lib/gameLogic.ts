@@ -1,5 +1,5 @@
-import type { Player, Tile, AdvClass, Adventurer } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL } from './constants';
+import type { Player, Tile, AdvClass, Adventurer, PlayerFeats } from '../types';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS } from './constants';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
 export function calcLevel(xp: number): number {
@@ -47,6 +47,135 @@ export function checkAndGrantAdventurers(player: Player, prevLevel: number, newL
   return updated;
 }
 
+// ── Feat helpers ───────────────────────────────────────────────────────────────
+
+export function getPlayerFeatIds(feats?: PlayerFeats): string[] {
+  if (!feats) return [];
+  return [feats.level3, feats.level5, feats.level7].filter(Boolean) as string[];
+}
+
+// Returns feat IDs still available to pick for the given level slot
+export function getAvailableFeatsForSlot(
+  slot: 'level3' | 'level5' | 'level7',
+  currentFeats: PlayerFeats,
+): string[] {
+  const taken = new Set([currentFeats.level3, currentFeats.level5, currentFeats.level7].filter(Boolean));
+  const byLevel = (lv: 3 | 5 | 7) => FEATS.filter(f => f.availableAt === lv).map(f => f.id);
+
+  let candidates: string[];
+  if (slot === 'level3') {
+    candidates = byLevel(3);
+  } else if (slot === 'level5') {
+    candidates = [...byLevel(5), ...byLevel(3)];
+  } else {
+    candidates = [...byLevel(7), ...byLevel(5), ...byLevel(3)];
+  }
+
+  return candidates.filter(id => !taken.has(id));
+}
+
+// Returns the feat slot that is available for selection at the player's current level
+export function pendingFeatSlot(
+  level: number,
+  feats: PlayerFeats,
+): 'level3' | 'level5' | 'level7' | null {
+  if (level >= 7 && !feats.level7) return 'level7';
+  if (level >= 5 && !feats.level5) return 'level5';
+  if (level >= 3 && !feats.level3) return 'level3';
+  return null;
+}
+
+function hasFeat(playerId: string, featId: string, players: Record<string, Player>): boolean {
+  const f = players[playerId]?.feats;
+  if (!f) return false;
+  return f.level3 === featId || f.level5 === featId || f.level7 === featId;
+}
+
+// XP/Gold multipliers from Mentor/Treasurer feats for a specific player on a tile.
+// Mentor: OTHER Mentors give everyone (incl. self) +5% each; self as Mentor gets +1% per other player.
+// Treasurer: OTHER Treasurers give everyone +10% each; self as Treasurer gets +3% per other player.
+export function calcFeatBonuses(
+  ownerId: string,
+  ownerIds: string[],
+  players: Record<string, Player>,
+): { xpMultiplier: number; goldMultiplier: number } {
+  const otherOwners = ownerIds.filter(id => id !== ownerId);
+  const isMentor    = hasFeat(ownerId, 'mentor',    players);
+  const isTreasurer = hasFeat(ownerId, 'treasurer', players);
+
+  const otherMentorCount    = otherOwners.filter(id => hasFeat(id, 'mentor',    players)).length;
+  const otherTreasurerCount = otherOwners.filter(id => hasFeat(id, 'treasurer', players)).length;
+
+  const xpBonus   = otherMentorCount    * 0.05 + (isMentor    ? otherOwners.length * 0.01 : 0);
+  const goldBonus = otherTreasurerCount * 0.10 + (isTreasurer ? otherOwners.length * 0.03 : 0);
+
+  return { xpMultiplier: 1 + xpBonus, goldMultiplier: 1 + goldBonus };
+}
+
+export function buildXpBonusTooltip(
+  ownerId: string,
+  ownerIds: string[],
+  players: Record<string, Player>,
+): string | null {
+  const isMentor        = hasFeat(ownerId, 'mentor', players);
+  const otherOwners     = ownerIds.filter(id => id !== ownerId);
+  const otherMentors    = otherOwners.filter(id => hasFeat(id, 'mentor', players));
+
+  const totalPct = otherMentors.length * 5 + (isMentor ? otherOwners.length : 0);
+  if (totalPct === 0) return null;
+
+  const parts: string[] = [];
+  if (otherMentors.length > 0) {
+    const n = otherMentors.length;
+    parts.push(`${n} ${isMentor ? 'other ' : ''}Mentor${n !== 1 ? 's' : ''} on challenge`);
+  }
+  if (isMentor && otherOwners.length > 0) {
+    const n = otherOwners.length;
+    parts.push(`${n} other player${n !== 1 ? 's' : ''} on challenge`);
+  }
+
+  return `+${totalPct}% due to ${parts.join(' and ')}`;
+}
+
+export function buildGoldBonusTooltip(
+  ownerId: string,
+  ownerIds: string[],
+  players: Record<string, Player>,
+): string | null {
+  const isTreasurer     = hasFeat(ownerId, 'treasurer', players);
+  const otherOwners     = ownerIds.filter(id => id !== ownerId);
+  const otherTreasurers = otherOwners.filter(id => hasFeat(id, 'treasurer', players));
+
+  const totalPct = otherTreasurers.length * 10 + (isTreasurer ? otherOwners.length * 3 : 0);
+  if (totalPct === 0) return null;
+
+  const parts: string[] = [];
+  if (otherTreasurers.length > 0) {
+    const n = otherTreasurers.length;
+    parts.push(`${n} ${isTreasurer ? 'other ' : ''}Treasurer${n !== 1 ? 's' : ''} on challenge`);
+  }
+  if (isTreasurer && otherOwners.length > 0) {
+    const n = otherOwners.length;
+    parts.push(`${n} other player${n !== 1 ? 's' : ''} on challenge`);
+  }
+
+  return `+${totalPct}% due to ${parts.join(' and ')}`;
+}
+
+export function calcSeekerHintReduction(
+  ownerIds: string[],
+  players: Record<string, Player>,
+): number {
+  return ownerIds.filter(id => hasFeat(id, 'seeker', players)).length;
+}
+
+export function buildSeekerHintTooltip(seekerCount: number): string | null {
+  if (seekerCount === 0) return null;
+  return `-${seekerCount}% due to ${seekerCount} Seeker${seekerCount !== 1 ? 's' : ''} on challenge`;
+}
+
+// ── Reward distribution ────────────────────────────────────────────────────────
+
 // Pure function — returns updated players map
 export function awardTileRewards(
   tile: Tile,
@@ -73,10 +202,11 @@ export function awardTileRewards(
         : adv;
     }
 
+    const { xpMultiplier, goldMultiplier } = calcFeatBonuses(ownerId, ownerIds, updated);
     const prevLevel = calcLevel(p.xp);
-    const newXp     = p.xp + (tile.xp ?? 0);
-    const newGold   = p.gold + (tile.gold ?? 0);
-    const newLevel  = calcLevel(newXp);
+    const newXp    = p.xp   + Math.round((tile.xp   ?? 0) * xpMultiplier);
+    const newGold  = p.gold + Math.round((tile.gold ?? 0) * goldMultiplier);
+    const newLevel = calcLevel(newXp);
     let updatedPlayer = { ...p, xp: newXp, gold: newGold, adventurers: clearedAdvs };
     updatedPlayer = checkAndGrantAdventurers(updatedPlayer, prevLevel, newLevel);
     updated[ownerId] = updatedPlayer;

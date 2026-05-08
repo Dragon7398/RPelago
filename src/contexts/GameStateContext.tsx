@@ -10,6 +10,7 @@ import {
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
+  selectFeat as dbSelectFeat,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
 import { getAdjCoords, ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
@@ -27,6 +28,7 @@ interface GameStateContextValue {
   purchaseOrb: (coord: string) => Promise<void>;
   purchaseItem: (itemId: string, coord: string) => Promise<void>;
   renameAdventurer: (playerId: string, advId: string, firstName: string, lastName: string) => Promise<void>;
+  selectFeat: (playerId: string, slot: 'level3' | 'level5' | 'level7', featId: string) => Promise<void>;
 
   // Admin tile actions
   adminSetTileState: (coord: string, state: TileState) => Promise<void>;
@@ -184,6 +186,14 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const purchaseItem = useCallback(async (itemId: string, coord: string) => {
     if (!functions) throw new Error('Firebase not configured.');
     await httpsCallable(functions, 'purchaseShopItem')({ itemId, coord });
+  }, []);
+
+  const selectFeat = useCallback(async (
+    playerId: string,
+    slot: 'level3' | 'level5' | 'level7',
+    featId: string,
+  ) => {
+    await dbSelectFeat(playerId, slot, featId);
   }, []);
 
   // ── Admin tile actions ──────────────────────────────────────────────────────
@@ -349,7 +359,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
-      sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer,
+      sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer, selectFeat,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,

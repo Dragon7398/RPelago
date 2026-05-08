@@ -251,6 +251,16 @@ export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<v
   }
 }
 
+// ── Player feats ──────────────────────────────────────────────────────────────
+export async function selectFeat(
+  playerId: string,
+  slot: 'level3' | 'level5' | 'level7',
+  featId: string,
+): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/players/${playerId}/feats/${slot}`), featId);
+}
+
 // ── Player name color ─────────────────────────────────────────────────────────
 export async function setPlayerNameColor(playerId: string, colorId: string | null): Promise<void> {
   if (!colorId || colorId === 'default') {
@@ -363,5 +373,6 @@ export async function playerReset(playerId: string): Promise<void> {
     inventory:   {},
     adventurers: keptAdvs,
     xpHistory,
+    feats:       {},
   });
 }

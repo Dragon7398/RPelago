@@ -1,6 +1,7 @@
 import { useGameState } from '../../contexts/GameStateContext';
-import { TILE_TYPES, rcFromCoord } from '../../lib/constants';
+import { TILE_TYPES, rcFromCoord, FEATS } from '../../lib/constants';
 import { getTypeKey } from '../../lib/tileGen';
+import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer, AdvSlot } from '../../types';
 
 function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
@@ -10,11 +11,29 @@ function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
     : Object.values(entry.slots as Record<string, AdvSlot>);
 }
 
-function AdvSlotList({ entry }: { entry: TileAdventurer }) {
-  const slots = slotsFromEntry(entry);
+function AdvSlotList({ entry, players }: {
+  entry: TileAdventurer;
+  players: Record<string, import('../../types').Player>;
+}) {
+  const slots   = slotsFromEntry(entry);
+  const featIds = getPlayerFeatIds(players[entry.owner]?.feats);
   return (
     <div className="dash-adv-entry">
-      <span className="dash-player-tag">{entry.ownerName}</span>
+      <span className="dash-player-tag">
+        {entry.ownerName}
+        {featIds.length > 0 && (
+          <span className="dash-feat-icons">
+            {featIds.map(id => {
+              const def = FEATS.find(f => f.id === id);
+              return def ? (
+                <span key={id} className="dash-feat-icon" title={def.name + ': ' + def.description}>
+                  {def.icon}
+                </span>
+              ) : null;
+            })}
+          </span>
+        )}
+      </span>
       {slots.length > 0 ? (
         <div className="dash-adv-slots">
           {slots.map((s, i) => (
@@ -78,7 +97,7 @@ export default function ChallengesPage() {
                 </div>
                 {advs.length > 0 && (
                   <div className="dash-tile-advs">
-                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} />)}
+                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} players={gameState.players} />)}
                   </div>
                 )}
               </div>
@@ -119,7 +138,7 @@ export default function ChallengesPage() {
                 </div>
                 {advs.length > 0 && (
                   <div className="dash-tile-advs">
-                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} />)}
+                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} players={gameState.players} />)}
                   </div>
                 )}
               </div>

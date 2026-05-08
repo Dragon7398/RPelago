@@ -1108,6 +1108,40 @@ header p {
 .profile-inv-desc { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: oklch(55% 0.06 75); margin-top: 0.15rem; line-height: 1.35; }
 .profile-inv-qty { font-family: 'Cinzel', serif; font-size: 0.85rem; font-weight: 600; color: var(--parchment); letter-spacing: 0.04em; flex-shrink: 0; }
 
+/* ── Feat value display (struck + new) ───────────────────────────────────────── */
+.lb-val-struck { text-decoration: line-through; opacity: 0.45; }
+.lb-val-new    { color: oklch(72% 0.18 145); font-weight: 600; }
+
+/* ── Feat icons on adventurer rows ───────────────────────────────────────────── */
+.lb-adv-feat-icons { display: inline-flex; gap: 0.15rem; margin: 0 0.2rem; align-items: center; }
+.lb-adv-feat-icon  { font-size: 0.82rem; line-height: 1; cursor: help; }
+
+/* ── Admin challenge page feat icons ─────────────────────────────────────────── */
+.dash-feat-icons { display: inline-flex; gap: 0.12rem; margin-left: 0.3rem; vertical-align: middle; }
+.dash-feat-icon  { font-size: 0.78rem; cursor: help; }
+
+/* ── Profile feats section ───────────────────────────────────────────────────── */
+.profile-feats-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.6rem; }
+.profile-feat-row { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.45rem 0.6rem; background: oklch(16% 0.06 145 / 0.25); border: 1px solid oklch(35% 0.10 145); border-radius: 3px; }
+.profile-feat-icon { font-size: 1.3rem; line-height: 1; flex-shrink: 0; margin-top: 0.1rem; }
+.profile-feat-info { flex: 1; min-width: 0; }
+.profile-feat-name { font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.1em; color: oklch(72% 0.14 145); display: block; margin-bottom: 0.2rem; }
+.profile-feat-desc { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: oklch(55% 0.06 75); line-height: 1.35; }
+
+/* Feat selection UI */
+.profile-feat-select { background: oklch(14% 0.07 75 / 0.5); border: 1px solid oklch(44% 0.14 75); border-radius: 4px; padding: 0.7rem 0.75rem; }
+.profile-feat-select-title { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.12em; color: var(--gold); margin-bottom: 0.6rem; }
+.profile-feat-options { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+.profile-feat-option { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.5rem 0.65rem; background: oklch(16% 0.05 75 / 0.4); border: 1px solid oklch(32% 0.06 75); border-radius: 3px; cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; width: 100%; }
+.profile-feat-option:hover { border-color: oklch(50% 0.12 75); background: oklch(20% 0.06 75 / 0.5); }
+.profile-feat-option.selected { border-color: oklch(56% 0.16 145); background: oklch(16% 0.08 145 / 0.4); }
+.profile-feat-option-icon { font-size: 1.2rem; line-height: 1; flex-shrink: 0; margin-top: 0.1rem; }
+.profile-feat-option-name { font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.1em; color: var(--gold); display: block; margin-bottom: 0.2rem; }
+.profile-feat-option-desc { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.7rem; color: oklch(55% 0.06 75); line-height: 1.35; display: block; }
+.profile-feat-confirm { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.12em; padding: 0.4rem 1rem; border-radius: 2px; cursor: pointer; background: oklch(18% 0.10 145 / 0.5); border: 1px solid oklch(48% 0.14 145); color: oklch(72% 0.14 145); transition: all 0.15s; width: 100%; }
+.profile-feat-confirm:hover:not(:disabled) { background: oklch(22% 0.12 145 / 0.6); border-color: oklch(60% 0.16 145); }
+.profile-feat-confirm:disabled { opacity: 0.35; cursor: not-allowed; }
+
 /* ── Town shop items ─────────────────────────────────────────────────────────── */
 .lb-shop-item { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.55rem 0.7rem; background: oklch(16% 0.05 75 / 0.4); border: 1px solid oklch(30% 0.06 75); border-radius: 3px; margin-bottom: 0.5rem; }
 .lb-shop-item-info { flex: 1; min-width: 0; }

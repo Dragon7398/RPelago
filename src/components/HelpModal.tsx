@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { ADV_ICONS, ALL_ORBS, TILE_TRAITS, SHOP_ITEMS } from '../lib/constants';
+import { ADV_ICONS, ALL_ORBS, TILE_TRAITS, SHOP_ITEMS, FEATS } from '../lib/constants';
+import { useGameState } from '../contexts/GameStateContext';
+import { useAuth } from '../contexts/AuthContext';
+import { getPlayerFeatIds } from '../lib/gameLogic';
 import './HelpModal.css';
 
 interface Props {
@@ -7,13 +10,15 @@ interface Props {
   onClose: () => void;
 }
 
-type Section = 'overview' | 'map' | 'adventurers' | 'challenges' | 'traits' | 'orbs' | 'boss' | 'shop';
+type Section = 'overview' | 'map' | 'adventurers' | 'challenges' | 'yaml' | 'feats' | 'traits' | 'orbs' | 'boss' | 'shop';
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'overview',    label: 'What is RPelago?', icon: '⚔' },
   { id: 'map',         label: 'The Map',           icon: '🗺️' },
   { id: 'adventurers', label: 'Adventurers',       icon: '🧙' },
   { id: 'challenges',  label: 'Challenges',        icon: '🏆' },
+  { id: 'yaml',        label: 'YAML Rules',        icon: '📜' },
+  { id: 'feats',       label: 'Feats',             icon: '🏅' },
   { id: 'traits',      label: 'Traits & Items',    icon: '🔮' },
   { id: 'orbs',        label: 'Orbs',              icon: '✨' },
   { id: 'boss',        label: 'The Boss',          icon: '🐉' },
@@ -52,6 +57,8 @@ export default function HelpModal({ open, onClose }: Props) {
             {section === 'map'         && <SectionMap />}
             {section === 'adventurers' && <SectionAdventurers />}
             {section === 'challenges'  && <SectionChallenges />}
+            {section === 'yaml'        && <SectionYaml />}
+            {section === 'feats'       && <SectionFeats />}
             {section === 'traits'      && <SectionTraits />}
             {section === 'orbs'        && <SectionOrbs />}
             {section === 'boss'        && <SectionBoss />}
@@ -202,7 +209,59 @@ function SectionChallenges() {
         <li>Each player plays their assigned Archipelago world (to goal or completion).</li>
         <li>An admin verifies and marks the tile <strong>Complete</strong>. Rewards are distributed.</li>
       </ol>
-      <h4>YAML Rules</h4>
+      <h4>Rewards</h4>
+      <div className="help-tile-list">
+        <div className="help-tile-row">
+          <span className="help-tile-icon">💰</span>
+          <div><strong>Gold</strong> — Spend at town shops on items or Orbs.</div>
+        </div>
+        <div className="help-tile-row">
+          <span className="help-tile-icon">⭐</span>
+          <div><strong>XP</strong> — Raises your level, shown in the HUD.</div>
+        </div>
+        <div className="help-tile-row">
+          <span className="help-tile-icon">✨</span>
+          <div><strong>Orbs</strong> — Rare drops from certain tiles and shops.</div>
+        </div>
+      </div>
+      <div className="help-callout">
+        <span className="help-callout-icon">🧩</span>
+        <span>Some tiles have <strong>public slots</strong> — extra Archipelago worlds open to anyone, not tied to a specific player.</span>
+      </div>
+    </div>
+  );
+}
+
+function YamlVal({ base, bonus }: { base: number; bonus: number }) {
+  if (bonus === 0) return <strong>{base}</strong>;
+  return (
+    <>
+      <span className="help-yaml-struck">{base}</span>{' '}
+      <strong className="help-yaml-new">{base + bonus}</strong>
+    </>
+  );
+}
+
+function SectionYaml() {
+  const { user }      = useAuth();
+  const { gameState } = useGameState();
+  const player        = user && gameState ? gameState.players[user.id] : null;
+  const featIds       = getPlayerFeatIds(player?.feats);
+
+  const hasKnow = featIds.includes('knowledgeable');
+  const hasPick = featIds.includes('picky');
+  const hasHelp = featIds.includes('helpful');
+  const hasPrep = featIds.includes('prepared');
+
+  return (
+    <div className="help-section">
+      <h3>YAML Rules</h3>
+      {player && featIds.some(id => ['knowledgeable','picky','helpful','prepared'].includes(id)) && (
+        <div className="help-callout">
+          <span className="help-callout-icon">🏅</span>
+          <span>Values marked in <span className="help-yaml-new">gold</span> reflect your personal feat bonuses.</span>
+        </div>
+      )}
       <p>
         New to Archipelago? Start with the{' '}
         <a href="https://archipelago.gg/tutorial/Archipelago/setup_en" target="_blank" rel="noopener noreferrer">official YAML setup guide</a>.
@@ -225,30 +284,66 @@ function SectionChallenges() {
         </li>
         <li>
           <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are
-          limited to <strong>0</strong> starting inventory items, <strong>2</strong> priority
-          locations, <strong>2</strong> excluded locations, and <strong>1</strong> starting hint
-          or hint location.
+          limited to <YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory{' '}
+          item{hasPrep ? 's' : ''}, <YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority
+          locations, <YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations, and{' '}
+          {hasKnow ? (
+            <><YamlVal base={1} bonus={1} /> starting hints or <YamlVal base={1} bonus={2} /> hint locations</>
+          ) : (
+            <><strong>1</strong> starting hint or hint location</>
+          )}.
         </li>
       </ul>
-      <h4>Rewards</h4>
-      <div className="help-tile-list">
-        <div className="help-tile-row">
-          <span className="help-tile-icon">💰</span>
-          <div><strong>Gold</strong> — Spend at town shops on items or Orbs.</div>
+    </div>
+  );
+}
+
+function SectionFeats() {
+  const { user }      = useAuth();
+  const { gameState } = useGameState();
+  const player        = user && gameState ? gameState.players[user.id] : null;
+  const featIds       = getPlayerFeatIds(player?.feats);
+
+  const level3Feats = FEATS.filter(f => f.availableAt === 3);
+  const level5Feats = FEATS.filter(f => f.availableAt === 5);
+  const level7Feats = FEATS.filter(f => f.availableAt === 7);
+
+  return (
+    <div className="help-section">
+      <h3>Feats</h3>
+      <p>
+        As you level up, you unlock <strong>Feats</strong> — permanent abilities that enhance
+        your capabilities. You choose one feat at levels 3, 5, and 7. Higher-level selections
+        also let you pick from lower tiers you haven't chosen yet.
+      </p>
+      <p>
+        Select your feat from your <strong>Profile</strong> once you reach the unlock level.
+      </p>
+
+      {[
+        { label: 'Level 3', feats: level3Feats },
+        { label: 'Level 5', feats: level5Feats, note: '(or any unchosen Level 3 feat)' },
+        { label: 'Level 7', feats: level7Feats, note: '(or any unchosen Level 3 or Level 5 feat)' },
+      ].map(({ label, feats, note }) => (
+        <div key={label}>
+          <h4>{label}{note && <span className="help-feat-note"> {note}</span>}</h4>
+          <div className="help-feats">
+            {feats.map(feat => {
+              const owned = featIds.includes(feat.id);
+              return (
+                <div key={feat.id} className={`help-feat-row${owned ? ' owned' : ''}`}>
+                  <span className="help-feat-icon">{feat.icon}</span>
+                  <div>
+                    <span className="help-feat-name">{feat.name}</span>
+                    {owned && <span className="help-feat-owned-badge">✦ YOURS</span>}
+                    <p className="help-feat-desc">{feat.description}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="help-tile-row">
-          <span className="help-tile-icon">⭐</span>
-          <div><strong>XP</strong> — Raises your level, shown in the HUD.</div>
-        </div>
-        <div className="help-tile-row">
-          <span className="help-tile-icon">✨</span>
-          <div><strong>Orbs</strong> — Rare drops from certain tiles and shops.</div>
-        </div>
-      </div>
-      <div className="help-callout">
-        <span className="help-callout-icon">🧩</span>
-        <span>Some tiles have <strong>public slots</strong> — extra Archipelago worlds open to anyone, not tied to a specific player.</span>
-      </div>
+      ))}
     </div>
   );
 }

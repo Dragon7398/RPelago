@@ -63,6 +63,12 @@ export interface Adventurer {
   busyTile: string | null;
 }
 
+export interface PlayerFeats {
+  level3?: string;
+  level5?: string;
+  level7?: string;
+}
+
 export interface Player {
   id: string;
   displayName: string;
@@ -73,6 +79,7 @@ export interface Player {
   xpHistory?: number[];                      // archived XP totals from previous campaigns
   nameColor?: string;                        // color ID from NAME_COLORS palette
   disabled?: boolean;
+  feats?: PlayerFeats;
 }
 
 export interface OrbConfig {

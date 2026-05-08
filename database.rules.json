@@ -31,6 +31,13 @@
             ".write": "auth != null && (auth.uid === $playerId || root.child('game/meta/adminId').val() === auth.uid)"
           },
 
+          "feats": {
+            "$slot": {
+              ".write": "auth != null && (auth.uid === $playerId || root.child('game/meta/adminId').val() === auth.uid)",
+              ".validate": "newData.isString() && newData.val().length > 0"
+            }
+          },
+
           "xp": {
             ".validate": "newData.isNumber() && newData.val() >= 0"
           },

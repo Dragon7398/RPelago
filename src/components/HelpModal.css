@@ -297,6 +297,39 @@
   min-width: 80px; flex-shrink: 0;
 }
 
+/* ── Feats section ── */
+.help-feats { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.8rem; }
+.help-feat-row {
+  display: flex; align-items: flex-start; gap: 0.65rem;
+  padding: 0.5rem 0.65rem;
+  background: oklch(15% 0.04 75 / 0.5); border: 1px solid oklch(30% 0.06 75);
+  border-radius: 3px;
+}
+.help-feat-row.owned {
+  background: oklch(14% 0.07 145 / 0.25); border-color: oklch(38% 0.12 145);
+}
+.help-feat-icon { font-size: 1.3rem; line-height: 1; flex-shrink: 0; margin-top: 0.15rem; }
+.help-feat-name {
+  font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.1em;
+  color: var(--gold); display: block; margin-bottom: 0.2rem;
+}
+.help-feat-owned-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  color: oklch(68% 0.16 145); margin-left: 0.5rem; vertical-align: middle;
+}
+.help-feat-desc {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.76rem;
+  color: oklch(58% 0.06 75); line-height: 1.4; margin: 0;
+}
+.help-feat-note {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.7rem;
+  color: oklch(50% 0.06 75); font-weight: normal; letter-spacing: 0;
+}
+
+/* ── YAML adjusted values ── */
+.help-yaml-struck { text-decoration: line-through; opacity: 0.4; }
+.help-yaml-new    { color: oklch(72% 0.18 145); }
+
 /* ── Responsive: mobile stacks nav on top ── */
 @media (max-width: 560px) {
   .help-body { flex-direction: column; }

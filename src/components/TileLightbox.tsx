@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord, TILE_TRAITS, NAME_COLORS, ITEM_TRAIT_REFS } from '../lib/constants';
+import { TILE_TYPES, ADV_ICONS, ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, rcFromCoord, TILE_TRAITS, NAME_COLORS, ITEM_TRAIT_REFS, FEATS } from '../lib/constants';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
+import { getPlayerFeatIds, calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, calcSeekerHintReduction, buildSeekerHintTooltip } from '../lib/gameLogic';
 import type { TileAdventurer, AdvClass, AdvSlot } from '../types';
 
 function resolveNameColor(colorId: string | undefined): string | undefined {
@@ -81,6 +82,27 @@ function AdvStatusIcons({ advId, tile, inventory }: {
           : <span className="lb-adv-status-icon" title="Stunned!">💫</span>
       )}
       {isTaunted && <span className="lb-adv-status-icon" title="Taunted!">😤</span>}
+    </span>
+  );
+}
+
+function AdvFeatIcons({ playerId, players }: {
+  playerId: string;
+  players: Record<string, import('../types').Player>;
+}) {
+  const featIds = getPlayerFeatIds(players[playerId]?.feats);
+  if (featIds.length === 0) return null;
+  return (
+    <span className="lb-adv-feat-icons">
+      {featIds.map(id => {
+        const def = FEATS.find(f => f.id === id);
+        if (!def) return null;
+        return (
+          <span key={id} className="lb-adv-feat-icon trait-ref" data-tooltip={def.name + ': ' + def.description}>
+            {def.icon}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -407,20 +429,65 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
         {bossLocked && <>{/* stop rendering rest of content when boss is locked */}</>}
         {!bossLocked && (
           <>
-            {/* Meta chips */}
-            <div className="lb-meta-row">
-              <TriStateChip label="RELEASE" value={displayRelease} />
-              <TriStateChip label="COLLECT" value={displayCollect} />
-              <span className="lb-meta-chip hint">HINT: {displayHint}%</span>
-            </div>
+            {/* Compute feat-adjusted values once */}
+            {(() => {
+              const tileOwnerIds = [...new Set(advEntries.map(e => e.owner))];
+              const userInTile   = !!user && tileOwnerIds.includes(user.id);
+              const seekerReduce = calcSeekerHintReduction(tileOwnerIds, gameState.players);
+              const adjustedHint = Math.max(1, displayHint - seekerReduce);
+              const seekerTip    = buildSeekerHintTooltip(seekerReduce);
+              const xpTip  = userInTile ? buildXpBonusTooltip(user!.id,  tileOwnerIds, gameState.players) : null;
+              const goldTip = userInTile ? buildGoldBonusTooltip(user!.id, tileOwnerIds, gameState.players) : null;
+              const { xpMultiplier, goldMultiplier } = userInTile
+                ? calcFeatBonuses(user!.id, tileOwnerIds, gameState.players)
+                : { xpMultiplier: 1, goldMultiplier: 1 };
+              const adjXp   = Math.round((tile.xp   ?? 0) * xpMultiplier);
+              const adjGold = Math.round((tile.gold ?? 0) * goldMultiplier);
 
-            {/* Rewards */}
-            {(tile.gold > 0 || tile.xp > 0) && (
-              <div className="lb-rewards">
-                {tile.gold > 0 && <span className="lb-reward-chip gold">🪙 {tile.gold} Gold</span>}
-                {tile.xp   > 0 && <span className="lb-reward-chip xp">✨ {tile.xp} XP</span>}
-              </div>
-            )}
+              return (
+                <>
+                  {/* Meta chips */}
+                  <div className="lb-meta-row">
+                    <TriStateChip label="RELEASE" value={displayRelease} />
+                    <TriStateChip label="COLLECT" value={displayCollect} />
+                    {seekerReduce > 0 ? (
+                      <span className="lb-meta-chip hint trait-ref" data-tooltip={seekerTip ?? undefined}>
+                        HINT: <span className="lb-val-struck">{displayHint}%</span>{' '}
+                        <span className="lb-val-new">{adjustedHint}%</span> *
+                      </span>
+                    ) : (
+                      <span className="lb-meta-chip hint">HINT: {displayHint}%</span>
+                    )}
+                  </div>
+
+                  {/* Rewards */}
+                  {(tile.gold > 0 || tile.xp > 0) && (
+                    <div className="lb-rewards">
+                      {tile.gold > 0 && (
+                        goldTip ? (
+                          <span className="lb-reward-chip gold trait-ref" data-tooltip={goldTip}>
+                            🪙 <span className="lb-val-struck">{tile.gold}</span>{' '}
+                            <span className="lb-val-new">{adjGold}</span> Gold *
+                          </span>
+                        ) : (
+                          <span className="lb-reward-chip gold">🪙 {tile.gold} Gold</span>
+                        )
+                      )}
+                      {tile.xp > 0 && (
+                        xpTip ? (
+                          <span className="lb-reward-chip xp trait-ref" data-tooltip={xpTip}>
+                            ✨ <span className="lb-val-struck">{tile.xp}</span>{' '}
+                            <span className="lb-val-new">{adjXp}</span> XP *
+                          </span>
+                        ) : (
+                          <span className="lb-reward-chip xp">✨ {tile.xp} XP</span>
+                        )
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Elite orb drop */}
             {eliteOrb && (
@@ -532,6 +599,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                         <div key={entry.advId} className="lb-adv-entry">
                           <div className="lb-adv-row">
                             <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                            <AdvFeatIcons playerId={entry.owner} players={gameState.players} />
                             <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
                             <span className="lb-adv-secondary">
                               <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
