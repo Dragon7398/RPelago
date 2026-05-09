@@ -164,10 +164,11 @@ function TriStateChip({ label, value }: { label: string; value: string }) {
 }
 
 export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) {
-  const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem } = useGameState();
+  const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, claimPublicSlot } = useGameState();
   const { user } = useAuth();
   const { addToast } = useToast();
   const [purchasing, setPurchasing] = useState(false);
+  const [claimingSlotKey, setClaimingSlotKey] = useState<string | null>(null);
 
   const open = !!coord;
 
@@ -208,6 +209,28 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       addToast(`${adv.firstName} ${adv.lastName} dispatched to ${tile.name || coord}.`, 'success');
     } catch {
       addToast('Failed to send adventurer. Please try again.', 'error');
+    }
+  };
+
+  const handleClaimSlot = async (slotKey: string, slots: AdvSlot[], advId: string) => {
+    if (!user || !player) return;
+    const adv = player.adventurers[advId];
+    if (!adv) return;
+    const hasContent = slots.length > 0 && (slots[0].name || slots[0].game);
+    const entry: TileAdventurer = {
+      advId,
+      name:      `${adv.firstName} ${adv.lastName}`,
+      cls:       adv.cls as AdvClass,
+      owner:     user.id,
+      ownerName: user.displayName,
+      ...(hasContent ? { slots } : {}),
+    };
+    try {
+      await claimPublicSlot(coord!, slotKey, entry);
+      setClaimingSlotKey(null);
+      addToast(`${adv.firstName} ${adv.lastName} claimed a slot at ${tile.name || coord}.`, 'success');
+    } catch {
+      addToast('Failed to claim slot. Please try again.', 'error');
     }
   };
 
@@ -578,6 +601,62 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                 </div>
               );
             })()}
+            {(() => {
+              const claimable = tile.claimableSlots ?? {};
+              const entries = Object.entries(claimable);
+              if (entries.length === 0) return null;
+              const canClaim = !!user && !alreadySent && freeAdvs.length > 0;
+              return (
+                <div className="lb-claimable-slots">
+                  <div className="lb-claimable-header">CLAIMABLE SLOTS</div>
+                  <div className="lb-claimable-note">A player has vacated this challenge. You can take over their game slot.</div>
+                  {entries.map(([slotKey, slots]) => {
+                    const slotArr: AdvSlot[] = Array.isArray(slots) ? slots : Object.values(slots as Record<string, AdvSlot>);
+                    const isClaiming = claimingSlotKey === slotKey;
+                    const hasContent = slotArr.some(s => s.name || s.game);
+                    return (
+                      <div key={slotKey} className="lb-claimable-slot">
+                        {hasContent && (
+                          <div className="lb-claimable-slot-games">
+                            {slotArr.map((s, i) => (
+                              <div key={i} className="lb-slot-row">
+                                {s.name && <span className="lb-slot-name">{s.name}</span>}
+                                {s.name && s.game && <span className="lb-slot-sep">—</span>}
+                                {s.game && <span className="lb-slot-game">{s.game}</span>}
+                                {s.details && <span className="lb-slot-details">{s.details}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {!user && (
+                          <div className="lb-claimable-login">Log in to claim this slot.</div>
+                        )}
+                        {canClaim && !isClaiming && (
+                          <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>
+                            CLAIM
+                          </button>
+                        )}
+                        {canClaim && isClaiming && (
+                          <div className="lb-claim-picker">
+                            <div className="lb-send-label">SEND AN ADVENTURER</div>
+                            <div className="lb-adv-picker">
+                              {freeAdvs.map(adv => (
+                                <button key={adv.id} className="lb-adv-pick-btn" onClick={() => handleClaimSlot(slotKey, slotArr, adv.id)}>
+                                  <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
+                                  <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
+                                  <span className="btn-adv-class">{adv.cls}</span>
+                                </button>
+                              ))}
+                            </div>
+                            <button className="lb-cancel-claim-btn" onClick={() => setClaimingSlotKey(null)}>Cancel</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             <div className="lb-divider" />
 
             {/* ── Available ── */}
@@ -673,20 +752,6 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                         <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
                       </div>
                     ))}
-                  </div>
-                )}
-                {user && !alreadySent && freeAdvs.length > 0 && advEntries.length < tile.required && (
-                  <div className="lb-send-section">
-                    <div className="lb-send-label">JOIN THE CHALLENGE</div>
-                    <div className="lb-adv-picker">
-                      {freeAdvs.map(adv => (
-                        <button key={adv.id} className="lb-adv-pick-btn" onClick={() => handleSendAdventurer(adv.id)}>
-                          <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
-                          <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
-                          <span className="btn-adv-class">{adv.cls}</span>
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 )}
               </>

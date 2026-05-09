@@ -1,13 +1,14 @@
+import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { SHOP_ITEMS, FEATS } from '../../lib/constants';
-import { calcLevel } from '../../lib/gameLogic';
+import { calcLevel, adventurerCountForLevel } from '../../lib/gameLogic';
 import { playerReset } from '../../firebase/db';
-import type { Player } from '../../types';
+import type { Player, Tile } from '../../types';
 
 const SLOT_MIN_LEVEL: Record<string, number> = { level3: 3, level5: 5, level7: 7 };
 const SLOT_ALLOWED:   Record<string, number[]> = { level3: [3], level5: [3, 5], level7: [3, 5, 7] };
 
-function getFeatWarnings(player: Player): string[] {
+function getFeatWarnings(player: Player, tiles: Record<string, Tile>): string[] {
   const feats = player.feats ?? {};
   const level = calcLevel(player.xp);
   const warnings: string[] = [];
@@ -25,11 +26,38 @@ function getFeatWarnings(player: Player): string[] {
       warnings.push(`${slot}: ${def.name} requires level ${SLOT_MIN_LEVEL[slot]}, player is level ${level}`);
     }
   }
+  const maxAdvs  = adventurerCountForLevel(level);
+  const advCount = Object.keys(player.adventurers ?? {}).length;
+  if (advCount > maxAdvs) {
+    warnings.push(`Has ${advCount} adventurers but level ${level} allows ${maxAdvs}`);
+  }
+
+  // Check for any adventurer appearing in more than one tile simultaneously
+  const advTileMap: Record<string, string[]> = {};
+  for (const [coord, tile] of Object.entries(tiles)) {
+    for (const [advId, ta] of Object.entries(tile.adventurers ?? {})) {
+      if (ta.owner === player.id) {
+        (advTileMap[advId] ??= []).push(coord);
+      }
+    }
+  }
+  for (const [advId, coords] of Object.entries(advTileMap)) {
+    if (coords.length > 1) {
+      const adv  = player.adventurers?.[advId];
+      const name = adv ? `${adv.firstName} ${adv.lastName}` : advId;
+      warnings.push(`${name} is double-assigned: ${coords.join(', ')}`);
+    }
+  }
+
   return warnings;
 }
 
 export default function PlayersPage() {
-  const { gameState, adminConsumeItem, adminDisablePlayer, adminEnablePlayer } = useGameState();
+  const { gameState, adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
+          adminAddWarning, adminDeleteWarning, adminClearWarnings } = useGameState();
+  const [addingFor, setAddingFor]   = useState<string | null>(null);
+  const [warningDraft, setWarningDraft] = useState('');
+
   if (!gameState) return null;
 
   const players   = Object.values(gameState.players ?? {});
@@ -41,19 +69,26 @@ export default function PlayersPage() {
       {players.length === 0 ? (
         <div className="dash-empty">No players have joined yet.</div>
       ) : players.map(player => {
-        const ownedItems = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
-        const busyAdvs   = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
-        const isAdmin    = player.id === adminId;
-        const level      = calcLevel(player.xp);
-        const warnings   = getFeatWarnings(player);
+        const ownedItems    = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
+        const busyAdvs      = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
+        const isAdmin       = player.id === adminId;
+        const level         = calcLevel(player.xp);
+        const featWarnings  = getFeatWarnings(player, gameState.tiles);
+        const playerWarnings = Object.entries(player.warnings ?? {})
+          .sort(([, a], [, b]) => b.timestamp - a.timestamp);
 
         return (
           <div key={player.id} className={`dash-player-card${player.disabled ? ' disabled' : ''}`}>
             <div className="dash-player-header">
               <div className="dash-player-name">
                 {player.displayName}
-                {warnings.length > 0 && (
-                  <span className="dash-feat-warning" title={warnings.join('\n')}>⚠</span>
+                {featWarnings.length > 0 && (
+                  <span className="dash-feat-warning" title={featWarnings.join('\n')}>⚠</span>
+                )}
+                {playerWarnings.length > 0 && (
+                  <span className="dash-player-warn-badge" title={`${playerWarnings.length} warning${playerWarnings.length !== 1 ? 's' : ''}`}>
+                    ⚑ {playerWarnings.length}
+                  </span>
                 )}
                 {player.disabled && (
                   <span className="dash-player-disabled-badge">RESTRICTED</span>
@@ -107,6 +142,74 @@ export default function PlayersPage() {
               </div>
             )}
 
+            {(playerWarnings.length > 0 || addingFor === player.id) && (
+              <div className="dash-player-warnings">
+                <div className="dash-player-section-label">
+                  Warnings
+                  {playerWarnings.length > 1 && (
+                    <button
+                      className="dash-warnings-clear"
+                      onClick={() => {
+                        if (confirm(`Clear all warnings for ${player.displayName}?`))
+                          adminClearWarnings(player.id);
+                      }}
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                {playerWarnings.map(([key, w]) => (
+                  <div key={key} className="dash-warning-row">
+                    <span className={`dash-warning-tag${w.auto ? ' auto' : ''}`}>
+                      {w.auto ? 'AUTO' : 'ADMIN'}
+                    </span>
+                    <span className="dash-warning-date">
+                      {new Date(w.timestamp).toLocaleDateString()}
+                    </span>
+                    <span className="dash-warning-msg">{w.message}</span>
+                    <button
+                      className="dash-warning-del"
+                      title="Delete warning"
+                      onClick={() => adminDeleteWarning(player.id, key)}
+                    >×</button>
+                  </div>
+                ))}
+                {addingFor === player.id && (
+                  <div className="dash-warning-add-row">
+                    <input
+                      className="dash-warning-input"
+                      value={warningDraft}
+                      onChange={e => setWarningDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && warningDraft.trim()) {
+                          adminAddWarning(player.id, warningDraft.trim());
+                          setAddingFor(null); setWarningDraft('');
+                        } else if (e.key === 'Escape') {
+                          setAddingFor(null); setWarningDraft('');
+                        }
+                      }}
+                      placeholder="Warning message..."
+                      autoFocus
+                    />
+                    <button
+                      className="dash-warning-submit"
+                      disabled={!warningDraft.trim()}
+                      onClick={() => {
+                        if (warningDraft.trim()) {
+                          adminAddWarning(player.id, warningDraft.trim());
+                          setAddingFor(null); setWarningDraft('');
+                        }
+                      }}
+                    >Add</button>
+                    <button
+                      className="dash-warning-cancel"
+                      onClick={() => { setAddingFor(null); setWarningDraft(''); }}
+                    >Cancel</button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="dash-player-actions">
               <button
                 className="dash-player-reset"
@@ -116,6 +219,12 @@ export default function PlayersPage() {
                 }}
               >
                 Player Reset
+              </button>
+              <button
+                className="dash-warning-add-btn"
+                onClick={() => { setAddingFor(player.id); setWarningDraft(''); }}
+              >
+                + Warning
               </button>
               {isAdmin ? (
                 <span className="dash-player-admin-badge">ADMIN</span>

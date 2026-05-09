@@ -24,9 +24,10 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const state: TileState = tile?.state ?? 'hidden';
   const isCenter = coord === 'D3';
 
-  const filled   = tile ? Object.keys(tile.adventurers ?? {}).length : 0;
-  const required = tile?.required ?? 0;
-  const isMine   = !!user && Object.values(tile?.adventurers ?? {}).some(e => e.owner === user.id);
+  const filled       = tile ? Object.keys(tile.adventurers ?? {}).length : 0;
+  const required     = tile?.required ?? 0;
+  const isMine       = !!user && Object.values(tile?.adventurers ?? {}).some(e => e.owner === user.id);
+  const hasClaimable = Object.keys(tile?.claimableSlots ?? {}).length > 0;
 
   // Fog lift: animate hidden→available only after initial load
   const initializedRef = useRef(false);
@@ -58,6 +59,7 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
     isCenter ? 'tile-center' : '',
     fogLifting ? 'fog-lifting' : '',
     isMine ? 'tile-mine' : '',
+    hasClaimable ? 'has-claimable' : '',
   ].filter(Boolean).join(' ');
 
   const animDelay = `${(rowIndex * 7 + colIndex) * 18}ms`;
@@ -67,8 +69,8 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
     if (typeKey !== 'town' && typeKey !== 'town_center') {
       progressText = `${filled}/${required} ⚔`;
     }
-  } else if (state === "inprogress") {
-    progressText = "In Progress"
+  } else if (state === 'inprogress') {
+    progressText = hasClaimable ? 'Slot Open' : 'In Progress';
   }
 
   const icon = hidden

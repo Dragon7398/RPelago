@@ -1,6 +1,6 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { db, firebaseReady } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 
@@ -239,6 +239,79 @@ export async function setAdventurerSlots(coord: string, advId: string, slots: Ad
   } else {
     await set(ref(db!, path), slots);
   }
+}
+
+// ── Admin: kick adventurer ────────────────────────────────────────────────────
+export async function adminKickAdventurer(
+  coord: string,
+  advId: string,
+  ownerId: string,
+  convertToClaimableSlot: boolean,
+  autoWarning?: string,
+): Promise<void> {
+  assertDb();
+
+  let slotsToAdd: AdvSlot[] = [];
+  if (convertToClaimableSlot) {
+    const taSnap = await get(ref(db!, `game/tiles/${coord}/adventurers/${advId}`));
+    const ta = taSnap.exists() ? (taSnap.val() as TileAdventurer) : null;
+    const rawSlots: AdvSlot[] = ta?.slots
+      ? (Array.isArray(ta.slots) ? ta.slots : Object.values(ta.slots as Record<string, AdvSlot>))
+      : [];
+    slotsToAdd = rawSlots.length > 0
+      ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details ? { details: s.details } : {}) }))
+      : [{ name: '', game: '' }];
+  }
+
+  const updates: Record<string, unknown> = {
+    [`game/tiles/${coord}/adventurers/${advId}`]:            null,
+    [`game/players/${ownerId}/adventurers/${advId}/busy`]:    false,
+    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
+  };
+
+  if (convertToClaimableSlot) {
+    const newSlotRef = push(ref(db!, `game/tiles/${coord}/claimableSlots`));
+    updates[`game/tiles/${coord}/claimableSlots/${newSlotRef.key}`] = slotsToAdd;
+  }
+
+  if (autoWarning) {
+    const warnRef = push(ref(db!, `game/players/${ownerId}/warnings`));
+    const warning: PlayerWarning = { timestamp: Date.now(), message: autoWarning, auto: true };
+    updates[`game/players/${ownerId}/warnings/${warnRef.key}`] = warning;
+  }
+
+  await update(ref(db!), updates);
+}
+
+// ── Admin: player warnings ────────────────────────────────────────────────────
+export async function addPlayerWarning(playerId: string, message: string): Promise<void> {
+  assertDb();
+  const warning: PlayerWarning = { timestamp: Date.now(), message };
+  await push(ref(db!, `game/players/${playerId}/warnings`), warning);
+}
+
+export async function deletePlayerWarning(playerId: string, warnKey: string): Promise<void> {
+  await remove(ref(db!, `game/players/${playerId}/warnings/${warnKey}`));
+}
+
+export async function clearPlayerWarnings(playerId: string): Promise<void> {
+  await remove(ref(db!, `game/players/${playerId}/warnings`));
+}
+
+// ── Player: claim a claimable slot ───────────────────────────────────────────
+export async function claimPublicSlot(
+  coord: string,
+  slotKey: string,
+  entry: TileAdventurer,
+): Promise<void> {
+  assertDb();
+  const updates: Record<string, unknown> = {
+    [`game/tiles/${coord}/claimableSlots/${slotKey}`]:                 null,
+    [`game/tiles/${coord}/adventurers/${entry.advId}`]:                entry,
+    [`game/players/${entry.owner}/adventurers/${entry.advId}/busy`]:    true,
+    [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
+  };
+  await update(ref(db!), updates);
 }
 
 // ── Admin: public slots ───────────────────────────────────────────────────────

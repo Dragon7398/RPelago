@@ -53,7 +53,7 @@ function AdvSlotList({ entry, players }: {
 }
 
 export default function ChallengesPage() {
-  const { gameState, adminMapReset } = useGameState();
+  const { gameState, adminMapReset, adminKickAdventurer } = useGameState();
   if (!gameState) return null;
 
   const allTiles = Object.entries(gameState.tiles);
@@ -97,7 +97,19 @@ export default function ChallengesPage() {
                 </div>
                 {advs.length > 0 && (
                   <div className="dash-tile-advs">
-                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} players={gameState.players} />)}
+                    {advs.map(adv => (
+                      <div key={adv.advId} className="dash-adv-kickable">
+                        <AdvSlotList entry={adv} players={gameState.players} />
+                        <button
+                          className="dash-kick-btn"
+                          title="Remove adventurer from this tile"
+                          onClick={() => {
+                            if (confirm(`Remove ${adv.ownerName} from ${tile.name || coord}? Their slot will be freed.`))
+                              adminKickAdventurer(coord, adv.advId, adv.owner, false);
+                          }}
+                        >Kick</button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -138,7 +150,19 @@ export default function ChallengesPage() {
                 </div>
                 {advs.length > 0 && (
                   <div className="dash-tile-advs">
-                    {advs.map(adv => <AdvSlotList key={adv.advId} entry={adv} players={gameState.players} />)}
+                    {advs.map(adv => (
+                      <div key={adv.advId} className="dash-adv-kickable">
+                        <AdvSlotList entry={adv} players={gameState.players} />
+                        <button
+                          className="dash-kick-btn dash-kick-btn--takeover"
+                          title="Kick adventurer and open their slot for a replacement"
+                          onClick={() => {
+                            if (confirm(`Kick ${adv.ownerName} from ${tile.name || coord}? Their slot will be converted to an open slot for someone else to take over.`))
+                              adminKickAdventurer(coord, adv.advId, adv.owner, true);
+                          }}
+                        >Kick</button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

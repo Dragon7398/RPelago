@@ -10,7 +10,9 @@ import {
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
-  selectFeat as dbSelectFeat,
+  selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
+  claimPublicSlot as dbClaimPublicSlot,
+  addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
 import { getAdjCoords, ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
@@ -49,6 +51,11 @@ interface GameStateContextValue {
   setNameColor: (playerId: string, colorId: string | null) => Promise<void>;
   adminDisablePlayer: (playerId: string) => Promise<void>;
   adminEnablePlayer: (playerId: string) => Promise<void>;
+  adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToPublicSlot: boolean) => Promise<void>;
+  claimPublicSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
+  adminAddWarning: (playerId: string, message: string) => Promise<void>;
+  adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
+  adminClearWarnings: (playerId: string) => Promise<void>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -356,6 +363,33 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await setPlayerDisabled(playerId, false);
   }, []);
 
+  const adminKickAdventurer = useCallback(async (
+    coord: string, advId: string, ownerId: string, convertToPublicSlot: boolean,
+  ) => {
+    const autoWarning = convertToPublicSlot && gameState
+      ? `Abandoned in-progress challenge: ${gameState.tiles[coord]?.name || coord}`
+      : undefined;
+    await dbKickAdventurer(coord, advId, ownerId, convertToPublicSlot, autoWarning);
+  }, [gameState]);
+
+  const claimPublicSlot = useCallback(async (
+    coord: string, slotKey: string, entry: TileAdventurer,
+  ) => {
+    await dbClaimPublicSlot(coord, slotKey, entry);
+  }, []);
+
+  const adminAddWarning = useCallback(async (playerId: string, message: string) => {
+    await addPlayerWarning(playerId, message);
+  }, []);
+
+  const adminDeleteWarning = useCallback(async (playerId: string, warnKey: string) => {
+    await deletePlayerWarning(playerId, warnKey);
+  }, []);
+
+  const adminClearWarnings = useCallback(async (playerId: string) => {
+    await clearPlayerWarnings(playerId);
+  }, []);
+
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
@@ -363,6 +397,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
+      adminKickAdventurer, claimPublicSlot,
+      adminAddWarning, adminDeleteWarning, adminClearWarnings,
     }}>
       {children}
     </GameStateContext.Provider>

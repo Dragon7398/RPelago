@@ -40,6 +40,7 @@ export interface Tile {
   rules?: string;
   traits?: Record<string, { value: number }>;
   publicSlots?: AdvSlot[];
+  claimableSlots?: Record<string, AdvSlot[]>;
   stunnedAdvId?: string;
   tauntedAdvId?: string;
   link: string;
@@ -69,6 +70,12 @@ export interface PlayerFeats {
   level7?: string;
 }
 
+export interface PlayerWarning {
+  timestamp: number;
+  message: string;
+  auto?: boolean;
+}
+
 export interface Player {
   id: string;
   displayName: string;
@@ -80,6 +87,7 @@ export interface Player {
   nameColor?: string;                        // color ID from NAME_COLORS palette
   disabled?: boolean;
   feats?: PlayerFeats;
+  warnings?: Record<string, PlayerWarning>;
 }
 
 export interface OrbConfig {
