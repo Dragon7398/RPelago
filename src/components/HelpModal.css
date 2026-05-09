@@ -328,28 +328,48 @@
 
 /* ── YAML adjusted values ── */
 .help-yaml-struck { text-decoration: line-through; opacity: 0.4; }
-.help-yaml-new    { color: oklch(72% 0.18 145); }
+.help-yaml-new,
+strong.help-yaml-new { color: oklch(72% 0.18 145); }
 
-/* ── Responsive: mobile stacks nav on top ── */
+/* ── Responsive: mobile horizontal tab strip ── */
 @media (max-width: 560px) {
+  .help-overlay { padding: 0.5rem; }
+  .help-modal   { max-height: 94vh; }
+
   .help-body { flex-direction: column; }
 
   .help-nav {
     flex-direction: row; flex-wrap: nowrap;
     width: 100%; overflow-x: auto; overflow-y: hidden;
     border-right: none; border-bottom: 1px solid var(--border);
-    padding: 0.35rem 0.4rem; gap: 0.25rem;
+    padding: 0.45rem 0.5rem; gap: 0.3rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* Fade right edge to hint more tabs exist */
+    mask-image: linear-gradient(to right, black calc(100% - 2rem), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 2rem), transparent 100%);
   }
+  .help-nav::-webkit-scrollbar { display: none; }
+
   .help-nav-btn {
     flex-direction: column; align-items: center; gap: 0.2rem;
-    padding: 0.4rem 0.6rem;
-    border-left: none; border-bottom: 2px solid transparent;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid oklch(30% 0.06 75 / 0.7);
+    border-radius: 3px;
     white-space: nowrap; flex-shrink: 0;
+    background: oklch(18% 0.05 75 / 0.5);
+  }
+  .help-nav-btn:hover {
+    background: oklch(22% 0.07 75 / 0.6);
+    border-color: oklch(42% 0.08 75 / 0.9);
   }
   .help-nav-btn.active {
-    border-bottom-color: var(--gold);
-    border-left-color: transparent;
+    background: oklch(22% 0.10 75 / 0.6);
+    border-color: var(--gold);
+    color: var(--gold);
   }
+
+  .help-nav-icon { font-size: 1rem; }
   .help-nav-label { font-size: 0.52rem; }
 
   .help-content { padding: 1rem; }
