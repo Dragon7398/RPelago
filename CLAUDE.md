@@ -53,6 +53,31 @@ Discord OAuth → `exchangeDiscordCode` Cloud Function → Firebase custom token
 
 Shops are keyed by `shopId` on town tiles. Purchases go through Cloud Functions (`purchaseShopOrb`, `purchaseShopItem`) that use the admin SDK to bypass DB write rules for inventory updates. The "Coat of Many Colors" item gates the name color picker.
 
+> **Dual-copy item costs**: `SHOP_ITEMS` in `src/lib/constants.ts` defines costs for the UI. `ITEM_COSTS` in `functions/src/index.ts` is a separate hardcoded copy used by the `purchaseShopItem` Cloud Function to enforce the price server-side. **Both must be updated together** whenever a price changes — the function comment says "mirrors src/lib/constants.ts SHOP_ITEMS".
+
+### Public and claimable slots
+
+Two distinct slot types exist on tiles:
+
+- **`publicSlots?: AdvSlot[]`** — Admin-set open slots. Anyone can play them; they are never consumed or removed.
+- **`claimableSlots?: Record<string, AdvSlot[]>`** — Created when an admin kicks a player from an **in-progress** tile. Any eligible player can claim one: the claim atomically deletes the slot entry and adds the player as a `TileAdventurer`. Keyed by Firebase push keys so individual entries are deletable.
+
+The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **delete** (claim) an existing entry but not create one. The `adventurers/$advId` validate rule uses a Firebase pre-write evaluation trick: during an atomic claim `update()`, the claimable slot still exists in `data`/`root` (pre-write state), so the rule `claimableSlots.exists()` passes even though the same update deletes it.
+
+### In-progress join restriction
+
+Once a tile is **in progress**, players cannot join it as a fresh adventurer — the Archipelago game is locked in at that point. The only entry path is claiming a claimable slot. This is enforced in two places:
+1. **UI**: The "JOIN THE CHALLENGE" picker is absent from the in-progress lightbox section.
+2. **DB rule**: The `adventurers/$advId` validate rule rejects non-admin writes to in-progress tiles unless `claimableSlots` exists on that tile.
+
+### Player warnings
+
+Players have a `warnings?: Record<string, PlayerWarning>` field (push-keyed for individual deletion). Warnings are:
+- **Auto-generated** when an admin kicks a player from an in-progress tile (written atomically in the same `update()` call as the kick).
+- **Manually added** by admin via the Players page in the Admin Dashboard.
+
+The Players page shows a count badge (`⚑ N`) and an inline list with AUTO/ADMIN tags, dates, per-warning delete, and a "Clear all" button.
+
 ### Environment
 
 All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrades gracefully if `.env` is missing (`firebaseReady` guard in `config.ts`).
@@ -71,5 +96,6 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | `src/contexts/GameStateContext.tsx` | Game subscription, all action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
 | `src/components/admin/` | Admin dashboard tabs (Map, Challenges, Players, Shops, Orbs) |
-| `functions/` | Cloud Functions (purchase handlers, Discord token exchange) |
+| `src/components/AdminDashboard.tsx` | Admin dashboard shell; sets `document.title` to `RPelago — Admin` on mount |
+| `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |
 | `database.rules.json` | Firebase security rules |

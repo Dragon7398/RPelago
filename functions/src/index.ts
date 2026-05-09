@@ -86,7 +86,7 @@ export const exchangeDiscordCode = onRequest(
 
 // ── Shop item costs (mirrors src/lib/constants.ts SHOP_ITEMS) ─────────────────
 const ITEM_COSTS: Record<string, number> = {
-  map:                    200,
+  map:                    250,
   scroll_of_magnetism:   1000,
   scroll_of_generosity:  1000,
   coat_of_many_colors:    750,

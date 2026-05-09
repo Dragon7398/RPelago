@@ -147,7 +147,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     id:          'map',
     name:        'Map',
     description: 'Consumable: Request a hint for 1 item and 1 location.',
-    cost:        200,
+    cost:        250,
     consumable:  true,
   },
   {

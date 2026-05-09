@@ -199,14 +199,14 @@ function SectionChallenges() {
       <p>
         Every non-town tile represents an <strong>Archipelago challenge</strong>: a
         multiplayer randomizer session your party must complete. Each slot in the challenge
-        corresponds to one Adventurer's Archipelago world.
+        corresponds to one Adventurer's games.
       </p>
       <h4>How It Works</h4>
       <ol className="help-list">
         <li>Click an <strong>Available</strong> tile and assign one of your idle Adventurers to an open slot.</li>
         <li>Submit your <strong>YAML</strong> to the game thread on Discord.</li>
         <li>Other players fill the remaining slots. Once all slots are full, an Admin will move the tile to <strong>In Progress</strong>.</li>
-        <li>Each player plays their assigned Archipelago world (to goal or completion).</li>
+        <li>Each player plays their assigned Archipelago games (either goaling all slots, or completing the tile's special challenge.)</li>
         <li>An admin verifies and marks the tile <strong>Complete</strong>. Rewards are distributed.</li>
       </ol>
       <h4>Rewards</h4>
@@ -285,17 +285,21 @@ function SectionYaml() {
         </li>
         <li>
           <strong>Check limits:</strong> At least <strong>50 checks</strong> and no more than{' '}
-          <strong>1,500 checks</strong> total, unless otherwise approved.
+          <strong>1,000 checks</strong> total, unless otherwise approved.
         </li>
         <li>
-          <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are
-          limited to <YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory{' '}
-          item{hasPrep ? 's' : ''}, <YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority
-          locations, <YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations, and{' '}
-          either <YamlVal base={0} bonus={hasKnow ? 1 : 0} /> starting hints and{' '}
-          <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''}, or{' '}
-          <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? 's' : ''} and{' '}
-          <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations.
+          <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are limited to:
+          <ul className="help-list help-list-sub">
+            <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''}</li>
+            <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations</li>
+            <li><YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations</li>
+            <li>
+              Either <YamlVal base={0} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? '' : 's'} and{' '}
+              <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''}, or{' '}
+              <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? 's' : ''} and{' '}
+              <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations
+            </li>
+          </ul>
         </li>
       </ul>
     </div>

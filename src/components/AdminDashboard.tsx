@@ -27,6 +27,12 @@ export default function AdminDashboard() {
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
 
   useEffect(() => {
+    const prev = document.title;
+    document.title = 'RPelago — Admin';
+    return () => { document.title = prev; };
+  }, []);
+
+  useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node))
         setMenuOpen(false);
