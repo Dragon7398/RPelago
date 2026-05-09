@@ -1,6 +1,8 @@
+import { useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
-import { calcLevel } from '../lib/gameLogic';
+import { useToast } from '../contexts/ToastContext';
+import { calcLevel, pendingFeatSlot } from '../lib/gameLogic';
 import { ADV_ICONS } from '../lib/constants';
 
 interface Props {
@@ -13,10 +15,32 @@ interface Props {
 export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick }: Props) {
   const { user, signOut } = useAuth();
   const { gameState }     = useGameState();
+  const { addToast }      = useToast();
 
   const player = user && gameState ? gameState.players[user.id] : null;
   const level  = player ? calcLevel(player.xp) : 1;
   const adventurers = player ? Object.values(player.adventurers) : [];
+  const pending = player ? pendingFeatSlot(level, player.feats ?? {}) : null;
+
+  const prevXpRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!player) { prevXpRef.current = null; return; }
+    const xp = player.xp;
+    if (prevXpRef.current === null) { prevXpRef.current = xp; return; }
+    if (xp <= prevXpRef.current) { prevXpRef.current = xp; return; }
+    const prevLevel = calcLevel(prevXpRef.current);
+    const newLevel  = calcLevel(xp);
+    prevXpRef.current = xp;
+    if (newLevel <= prevLevel) return;
+    for (const threshold of [3, 5, 7] as const) {
+      if (prevLevel < threshold && newLevel >= threshold) {
+        const slot = `level${threshold}` as 'level3' | 'level5' | 'level7';
+        if (!player.feats?.[slot]) {
+          addToast(`Level ${threshold} reached! Open your Profile to choose a Feat.`, 'success');
+        }
+      }
+    }
+  }, [player?.xp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!user) {
     return (
@@ -29,9 +53,10 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
 
   return (
     <div className="player-hud">
-      <span className="hud-name" onClick={onProfileClick} title="View your profile">
+      <span className="hud-name" onClick={onProfileClick} title={pending ? 'View your profile — feat available!' : 'View your profile'}>
         <span>⚔ {user.displayName.toUpperCase()}</span>
         <span className="hud-level-badge">LV {level}</span>
+        {pending && <span className="hud-feat-notify">!</span>}
       </span>
       <div className="hud-divider" />
       <div className="hud-adventurers">

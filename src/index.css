@@ -82,6 +82,18 @@ header p {
   padding: 0.15rem 0.4rem; border-radius: 2px; transition: background 0.15s;
 }
 .hud-name:hover { background: oklch(72% 0.14 75 / 0.1); }
+.hud-feat-notify {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 0.95rem; height: 0.95rem; border-radius: 50%;
+  background: var(--amber); color: var(--bg-card);
+  font-size: 0.55rem; font-weight: 900; font-family: 'Cinzel', serif;
+  margin-left: 0.25rem;
+  animation: feat-notify-pulse 1.5s ease-in-out infinite;
+}
+@keyframes feat-notify-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.75; transform: scale(1.2); }
+}
 .hud-level-badge {
   font-size: 0.55rem; letter-spacing: 0.1em;
   padding: 0.1rem 0.4rem; border-radius: 2px;
@@ -1380,6 +1392,9 @@ header p {
 .dash-player-name {
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.1em;
   color: var(--gold); display: flex; align-items: center; gap: 0.5rem;
+}
+.dash-feat-warning {
+  color: var(--amber); font-size: 0.85rem; cursor: help; line-height: 1;
 }
 .dash-player-disabled-badge {
   font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;

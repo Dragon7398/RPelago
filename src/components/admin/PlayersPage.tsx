@@ -1,6 +1,32 @@
 import { useGameState } from '../../contexts/GameStateContext';
-import { SHOP_ITEMS } from '../../lib/constants';
+import { SHOP_ITEMS, FEATS } from '../../lib/constants';
+import { calcLevel } from '../../lib/gameLogic';
 import { playerReset } from '../../firebase/db';
+import type { Player } from '../../types';
+
+const SLOT_MIN_LEVEL: Record<string, number> = { level3: 3, level5: 5, level7: 7 };
+const SLOT_ALLOWED:   Record<string, number[]> = { level3: [3], level5: [3, 5], level7: [3, 5, 7] };
+
+function getFeatWarnings(player: Player): string[] {
+  const feats = player.feats ?? {};
+  const level = calcLevel(player.xp);
+  const warnings: string[] = [];
+  for (const [slot, featId] of Object.entries(feats)) {
+    if (!featId) continue;
+    const def = FEATS.find(f => f.id === featId);
+    if (!def) {
+      warnings.push(`${slot}: unrecognised feat ID "${featId}"`);
+      continue;
+    }
+    if (!(SLOT_ALLOWED[slot] ?? []).includes(def.availableAt)) {
+      warnings.push(`${slot}: ${def.name} (tier ${def.availableAt}) is not valid for this slot`);
+    }
+    if (level < (SLOT_MIN_LEVEL[slot] ?? 99)) {
+      warnings.push(`${slot}: ${def.name} requires level ${SLOT_MIN_LEVEL[slot]}, player is level ${level}`);
+    }
+  }
+  return warnings;
+}
 
 export default function PlayersPage() {
   const { gameState, adminConsumeItem, adminDisablePlayer, adminEnablePlayer } = useGameState();
@@ -17,20 +43,24 @@ export default function PlayersPage() {
       ) : players.map(player => {
         const ownedItems = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
         const busyAdvs   = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
-
-        const isAdmin = player.id === adminId;
+        const isAdmin    = player.id === adminId;
+        const level      = calcLevel(player.xp);
+        const warnings   = getFeatWarnings(player);
 
         return (
           <div key={player.id} className={`dash-player-card${player.disabled ? ' disabled' : ''}`}>
             <div className="dash-player-header">
               <div className="dash-player-name">
                 {player.displayName}
+                {warnings.length > 0 && (
+                  <span className="dash-feat-warning" title={warnings.join('\n')}>⚠</span>
+                )}
                 {player.disabled && (
                   <span className="dash-player-disabled-badge">RESTRICTED</span>
                 )}
               </div>
               <div className="dash-player-stats">
-                ✨ {player.xp.toLocaleString()} XP · 🪙 {player.gold.toLocaleString()} G
+                LV {level} · ✨ {player.xp.toLocaleString()} XP · 🪙 {player.gold.toLocaleString()} G
                 · {Object.keys(player.adventurers ?? {}).length} adv
                 {(player.xpHistory?.length ?? 0) > 0 && (
                   <span className="dash-player-history">
