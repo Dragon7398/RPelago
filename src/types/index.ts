@@ -26,6 +26,7 @@ export interface TileAdventurer {
   owner: string;       // player ID
   ownerName: string;   // display name for rendering
   slots?: AdvSlot[];
+  room?: 1 | 2;
 }
 
 export interface Tile {
@@ -44,6 +45,7 @@ export interface Tile {
   stunnedAdvId?: string;
   tauntedAdvId?: string;
   link: string;
+  link2?: string;
   gold: number;
   xp: number;
   bonusXP: number;

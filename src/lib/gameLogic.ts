@@ -180,6 +180,7 @@ export function buildSeekerHintTooltip(seekerCount: number): string | null {
 export function awardTileRewards(
   tile: Tile,
   players: Record<string, Player>,
+  coord: string,
 ): Record<string, Player> {
   const adventurers = Object.values(tile.adventurers ?? {});
   if (adventurers.length === 0) return players;
@@ -191,13 +192,14 @@ export function awardTileRewards(
     const p = updated[ownerId];
     if (!p) continue;
 
-    // Free the adventurers that were assigned to this tile
+    // Free adventurers still assigned to this tile. Skip ones that were released
+    // early (slot completion) and may now be busy on a different tile.
     const myAdvIds = new Set(
       adventurers.filter(a => a.owner === ownerId).map(a => a.advId),
     );
     const clearedAdvs: Record<string, Adventurer> = {};
     for (const [advId, adv] of Object.entries(p.adventurers)) {
-      clearedAdvs[advId] = myAdvIds.has(advId)
+      clearedAdvs[advId] = myAdvIds.has(advId) && adv.busyTile === coord
         ? { ...adv, busy: false, busyTile: null }
         : adv;
     }

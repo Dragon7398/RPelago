@@ -336,7 +336,7 @@ export default function MapPage() {
                     </div>
 
                     <div className="admin-detail-row">
-                      <div className="admin-detail-label">ARCH. LINK</div>
+                      <div className="admin-detail-label">{tile.traits?.['bifurcated'] !== undefined ? 'ARCH. LINK 1' : 'ARCH. LINK'}</div>
                       <input
                         className="admin-text-input"
                         value={localEdits.link !== undefined ? String(localEdits.link) : (tile.link ?? '')}
@@ -344,6 +344,18 @@ export default function MapPage() {
                         placeholder="https://…"
                       />
                     </div>
+
+                    {tile.traits?.['bifurcated'] !== undefined && (
+                      <div className="admin-detail-row">
+                        <div className="admin-detail-label">ARCH. LINK 2</div>
+                        <input
+                          className="admin-text-input"
+                          value={localEdits.link2 !== undefined ? String(localEdits.link2) : (tile.link2 ?? '')}
+                          onChange={e => setLocalEdits(p => ({ ...p, link2: e.target.value }))}
+                          placeholder="https://…"
+                        />
+                      </div>
+                    )}
 
                     {typeKey !== 'boss' && (
                       <div className="admin-detail-row" style={{ justifyContent: 'flex-end', gap: '0.5rem', alignItems: 'center' }}>

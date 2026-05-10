@@ -88,10 +88,16 @@ export async function setTileInProgress(
   coord: string,
   stunnedAdvId: string | null,
   tauntedAdvId: string | null,
+  roomAssignments?: Record<string, 1 | 2>,
 ): Promise<void> {
   const updates: Record<string, unknown> = { [`game/tiles/${coord}/state`]: 'inprogress' };
   updates[`game/tiles/${coord}/stunnedAdvId`] = stunnedAdvId;
   updates[`game/tiles/${coord}/tauntedAdvId`] = tauntedAdvId;
+  if (roomAssignments) {
+    for (const [advId, room] of Object.entries(roomAssignments)) {
+      updates[`game/tiles/${coord}/adventurers/${advId}/room`] = room;
+    }
+  }
   await update(ref(db!), updates);
 }
 
@@ -109,6 +115,7 @@ export async function setTilesAvailability(
   inProgressCoord?: string,
   stunnedAdvId?: string | null,
   tauntedAdvId?: string | null,
+  roomAssignments?: Record<string, 1 | 2>,
 ): Promise<void> {
   assertDb();
   const updates: Record<string, unknown> = {};
@@ -118,6 +125,11 @@ export async function setTilesAvailability(
   if (inProgressCoord != null) {
     updates[`game/tiles/${inProgressCoord}/stunnedAdvId`] = stunnedAdvId ?? null;
     updates[`game/tiles/${inProgressCoord}/tauntedAdvId`] = tauntedAdvId ?? null;
+    if (roomAssignments) {
+      for (const [advId, room] of Object.entries(roomAssignments)) {
+        updates[`game/tiles/${inProgressCoord}/adventurers/${advId}/room`] = room;
+      }
+    }
   }
   await update(ref(db!), updates);
 }
@@ -232,12 +244,25 @@ export async function consumePlayerItem(playerId: string, itemId: string, newQty
 }
 
 // ── Admin: adventurer slots ───────────────────────────────────────────────────
-export async function setAdventurerSlots(coord: string, advId: string, slots: AdvSlot[]): Promise<void> {
-  const path = `game/tiles/${coord}/adventurers/${advId}/slots`;
-  if (slots.length === 0) {
-    await remove(ref(db!, path));
+export async function setAdventurerSlots(
+  coord: string,
+  advId: string,
+  slots: AdvSlot[],
+  freeAdventurer?: { ownerId: string },
+): Promise<void> {
+  const slotsPath = `game/tiles/${coord}/adventurers/${advId}/slots`;
+  if (freeAdventurer) {
+    const advBase = `game/players/${freeAdventurer.ownerId}/adventurers/${advId}`;
+    const updates: Record<string, unknown> = {
+      [slotsPath]: slots.length > 0 ? slots : null,
+      [`${advBase}/busy`]: false,
+      [`${advBase}/busyTile`]: null,
+    };
+    await update(ref(db!), updates);
+  } else if (slots.length === 0) {
+    await remove(ref(db!, slotsPath));
   } else {
-    await set(ref(db!, path), slots);
+    await set(ref(db!, slotsPath), slots);
   }
 }
 
@@ -299,7 +324,7 @@ export async function clearPlayerWarnings(playerId: string): Promise<void> {
 }
 
 // ── Player: claim a claimable slot ───────────────────────────────────────────
-export async function claimPublicSlot(
+export async function claimClaimableSlot(
   coord: string,
   slotKey: string,
   entry: TileAdventurer,

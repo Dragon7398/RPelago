@@ -57,6 +57,12 @@
               ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid",
               ".validate": "newData.isNumber() && newData.val() >= 0"
             }
+          },
+
+          "warnings": {
+            "$warnKey": {
+              ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid"
+            }
           }
         }
       },

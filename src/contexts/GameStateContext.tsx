@@ -11,7 +11,7 @@ import {
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
   selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
-  claimPublicSlot as dbClaimPublicSlot,
+  claimClaimableSlot as dbClaimClaimableSlot,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
@@ -51,8 +51,8 @@ interface GameStateContextValue {
   setNameColor: (playerId: string, colorId: string | null) => Promise<void>;
   adminDisablePlayer: (playerId: string) => Promise<void>;
   adminEnablePlayer: (playerId: string) => Promise<void>;
-  adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToPublicSlot: boolean) => Promise<void>;
-  claimPublicSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
+  adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToClaimableSlot: boolean) => Promise<void>;
+  claimClaimableSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
   adminAddWarning: (playerId: string, message: string) => Promise<void>;
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
   adminClearWarnings: (playerId: string) => Promise<void>;
@@ -213,11 +213,18 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       const pick = () => advIds.length > 0 ? advIds[Math.floor(Math.random() * advIds.length)] : null;
       const stunnedAdvId = tile.traits?.['stunning'] !== undefined ? pick() : null;
       const tauntedAdvId = tile.traits?.['taunt']    !== undefined ? pick() : null;
+      let roomAssignments: Record<string, 1 | 2> | undefined;
+      if (tile.traits?.['bifurcated'] !== undefined && advIds.length > 0) {
+        const shuffled = [...advIds].sort(() => Math.random() - 0.5);
+        const room1Count = Math.ceil(shuffled.length / 2);
+        roomAssignments = {};
+        shuffled.forEach((id, i) => { roomAssignments![id] = i < room1Count ? 1 : 2; });
+      }
       if (wasComplete && gameState) {
         const recalc = computeRecalcUpdates(gameState.tiles, coord, 'inprogress');
-        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId);
+        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId, roomAssignments);
       } else {
-        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId);
+        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId, roomAssignments);
       }
     } else if (wasComplete && state !== 'complete' && gameState) {
       const recalc = computeRecalcUpdates(gameState.tiles, coord, state);
@@ -248,7 +255,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     const tile = gameState.tiles[coord];
     if (!tile) return;
 
-    const updatedPlayers = awardTileRewards(tile, gameState.players);
+    const updatedPlayers = awardTileRewards(tile, gameState.players, coord);
     const [r, c]   = rcFromCoord(coord);
     const typeKey  = getTypeKey(r, c);
     const orbState = gameState.orbState ?? {};
@@ -344,8 +351,16 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adminSetAdventurerSlots = useCallback(async (coord: string, advId: string, slots: AdvSlot[]) => {
-    await setAdventurerSlots(coord, advId, slots);
-  }, []);
+    const tileAdv  = gameState?.tiles[coord]?.adventurers?.[advId];
+    const playerAdv = tileAdv ? gameState?.players[tileAdv.owner]?.adventurers[advId] : null;
+    const FREE_STATUSES = new Set(['100%', 'Goaled', 'Done']);
+    const allComplete  = slots.length > 0 && slots.every(s => s.status && FREE_STATUSES.has(s.status));
+    const stillHeld    = playerAdv?.busy === true && playerAdv?.busyTile === coord;
+    const freeAdventurer = allComplete && stillHeld && tileAdv
+      ? { ownerId: tileAdv.owner }
+      : undefined;
+    await setAdventurerSlots(coord, advId, slots, freeAdventurer);
+  }, [gameState]);
 
   const adminSetPublicSlots = useCallback(async (coord: string, slots: AdvSlot[]) => {
     await setPublicSlots(coord, slots);
@@ -364,18 +379,18 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adminKickAdventurer = useCallback(async (
-    coord: string, advId: string, ownerId: string, convertToPublicSlot: boolean,
+    coord: string, advId: string, ownerId: string, convertToClaimableSlot: boolean,
   ) => {
-    const autoWarning = convertToPublicSlot && gameState
+    const autoWarning = convertToClaimableSlot && gameState
       ? `Abandoned in-progress challenge: ${gameState.tiles[coord]?.name || coord}`
       : undefined;
-    await dbKickAdventurer(coord, advId, ownerId, convertToPublicSlot, autoWarning);
+    await dbKickAdventurer(coord, advId, ownerId, convertToClaimableSlot, autoWarning);
   }, [gameState]);
 
-  const claimPublicSlot = useCallback(async (
+  const claimClaimableSlot = useCallback(async (
     coord: string, slotKey: string, entry: TileAdventurer,
   ) => {
-    await dbClaimPublicSlot(coord, slotKey, entry);
+    await dbClaimClaimableSlot(coord, slotKey, entry);
   }, []);
 
   const adminAddWarning = useCallback(async (playerId: string, message: string) => {
@@ -397,7 +412,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
-      adminKickAdventurer, claimPublicSlot,
+      adminKickAdventurer, claimClaimableSlot,
       adminAddWarning, adminDeleteWarning, adminClearWarnings,
     }}>
       {children}

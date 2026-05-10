@@ -32,11 +32,19 @@ function getFeatWarnings(player: Player, tiles: Record<string, Tile>): string[] 
     warnings.push(`Has ${advCount} adventurers but level ${level} allows ${maxAdvs}`);
   }
 
-  // Check for any adventurer appearing in more than one tile simultaneously
+  // Check for any adventurer actively needed on more than one tile simultaneously.
+  // A tile appearance is "active" if the adventurer has no slots yet, or at least
+  // one slot is not yet at 100%/Goaled/Done. Appearances where all slots are
+  // complete are legacy credit records from early-release and are not a conflict.
+  const FREE_SLOT_STATUSES = new Set(['100%', 'Goaled', 'Done']);
+  const isActiveOnTile = (slots: typeof tiles[string]['adventurers'][string]['slots']) => {
+    if (!slots || slots.length === 0) return true;
+    return !slots.every(s => s.status && FREE_SLOT_STATUSES.has(s.status));
+  };
   const advTileMap: Record<string, string[]> = {};
   for (const [coord, tile] of Object.entries(tiles)) {
     for (const [advId, ta] of Object.entries(tile.adventurers ?? {})) {
-      if (ta.owner === player.id) {
+      if (ta.owner === player.id && isActiveOnTile(ta.slots)) {
         (advTileMap[advId] ??= []).push(coord);
       }
     }

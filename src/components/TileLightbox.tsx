@@ -164,7 +164,7 @@ function TriStateChip({ label, value }: { label: string; value: string }) {
 }
 
 export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) {
-  const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, claimPublicSlot } = useGameState();
+  const { gameState, sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, claimClaimableSlot } = useGameState();
   const { user } = useAuth();
   const { addToast } = useToast();
   const [purchasing, setPurchasing] = useState(false);
@@ -226,7 +226,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       ...(hasContent ? { slots } : {}),
     };
     try {
-      await claimPublicSlot(coord!, slotKey, entry);
+      await claimClaimableSlot(coord!, slotKey, entry);
       setClaimingSlotKey(null);
       addToast(`${adv.firstName} ${adv.lastName} claimed a slot at ${tile.name || coord}.`, 'success');
     } catch {
@@ -727,35 +727,78 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
             )}
 
             {/* ── In-Progress ── */}
-            {state === 'inprogress' && (
-              <>
-                {tile.link && (
-                  <div className="lb-archipelago-link">
-                    <a href={tile.link} target="_blank" rel="noopener noreferrer">
-                      🗺 Open Archipelago Game →
-                    </a>
-                  </div>
-                )}
-                {advEntries.length > 0 && (
-                  <div className="lb-adv-list">
-                    {advEntries.map(entry => (
-                      <div key={entry.advId} className="lb-adv-entry">
-                        <div className="lb-adv-row">
-                          <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
-                          <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
-                          <span className="lb-adv-secondary">
-                            <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
-                            <span className="lb-adv-name">{entry.name}</span>
-                            <span className="lb-adv-class">{entry.cls}</span>
-                          </span>
-                        </div>
-                        <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+            {state === 'inprogress' && (() => {
+              const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+              if (!isBifurcated) {
+                return (
+                  <>
+                    {tile.link && (
+                      <div className="lb-archipelago-link">
+                        <a href={tile.link} target="_blank" rel="noopener noreferrer">
+                          🗺 Open Archipelago Game →
+                        </a>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+                    )}
+                    {advEntries.length > 0 && (
+                      <div className="lb-adv-list">
+                        {advEntries.map(entry => (
+                          <div key={entry.advId} className="lb-adv-entry">
+                            <div className="lb-adv-row">
+                              <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                              <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
+                              <span className="lb-adv-secondary">
+                                <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                                <span className="lb-adv-name">{entry.name}</span>
+                                <span className="lb-adv-class">{entry.cls}</span>
+                              </span>
+                            </div>
+                            <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              }
+              const room1 = advEntries.filter(e => (e.room ?? 1) === 1);
+              const room2 = advEntries.filter(e => e.room === 2);
+              const renderRoom = (entries: typeof advEntries, label: string, link: string | undefined) => (
+                <div className="lb-bifurcated-room">
+                  <div className="lb-room-header">{label}</div>
+                  {link && (
+                    <div className="lb-archipelago-link">
+                      <a href={link} target="_blank" rel="noopener noreferrer">
+                        🗺 Open Archipelago Game →
+                      </a>
+                    </div>
+                  )}
+                  {entries.length > 0 && (
+                    <div className="lb-adv-list">
+                      {entries.map(entry => (
+                        <div key={entry.advId} className="lb-adv-entry">
+                          <div className="lb-adv-row">
+                            <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                            <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
+                            <span className="lb-adv-secondary">
+                              <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                              <span className="lb-adv-name">{entry.name}</span>
+                              <span className="lb-adv-class">{entry.cls}</span>
+                            </span>
+                          </div>
+                          <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+              return (
+                <>
+                  {renderRoom(room1, 'Room 1', tile.link || undefined)}
+                  {renderRoom(room2, 'Room 2', tile.link2 || undefined)}
+                </>
+              );
+            })()}
 
             {/* ── Complete ── */}
             {state === 'complete' && (

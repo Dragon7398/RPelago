@@ -185,8 +185,13 @@ function SectionAdventurers() {
       <h4>Managing Your Party</h4>
       <ul className="help-list">
         <li>Open your <strong>Profile</strong> (click your name in the HUD) to rename Adventurers and view your inventory.</li>
-        <li>An Adventurer can only be at <strong>one tile at a time</strong> — plan deployments wisely.</li>
-        <li>Adventurers are freed once an admin marks their tile Complete.</li>
+        <li>An Adventurer can only be <strong>actively working</strong> on one challenge at a time.</li>
+        <li>
+          Once every slot belonging to your Adventurer reaches <strong>100%, Goaled, or Done</strong>,
+          they are freed automatically — you can redeploy them to a new challenge right away.
+          You are still responsible for helping finish the challenge they are on (e.g. 
+          collecting any checks other players still need or goaling the slot) if the slot is not <strong>Done</strong>.
+        </li>
       </ul>
     </div>
   );
@@ -207,7 +212,12 @@ function SectionChallenges() {
         <li>Submit your <strong>YAML</strong> to the game thread on Discord.</li>
         <li>Other players fill the remaining slots. Once all slots are full, an Admin will move the tile to <strong>In Progress</strong>.</li>
         <li>Each player plays their assigned Archipelago games (either goaling all slots, or completing the tile's special challenge.)</li>
-        <li>An admin verifies and marks the tile <strong>Complete</strong>. Rewards are distributed.</li>
+        <li>
+          Once your slot reaches <strong>100%, Goaled, or Done</strong>, your Adventurer is freed and can
+          be sent to a new challenge immediately.  If not <strong>Done</strong>, you must still finish any remaining necessary 
+          tasks on the slot while working elsewhere.
+        </li>
+        <li>An admin verifies and marks the tile <strong>Complete</strong>. Rewards are distributed to all participants.</li>
       </ol>
       <h4>Rewards</h4>
       <div className="help-tile-list">
@@ -358,7 +368,7 @@ function SectionFeats() {
 
 function SectionTraits() {
   const featuredTraits = TILE_TRAITS.filter(t =>
-    ['horde', 'agile', 'sturdy', 'stunning', 'cursed', 'aerial'].includes(t.id)
+    ['bifurcated', 'horde', 'agile', 'sturdy', 'stunning', 'cursed', 'aerial'].includes(t.id)
   );
   return (
     <div className="help-section">

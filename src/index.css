@@ -630,6 +630,14 @@ header p {
 .lb-shop-orb-btn:hover { background: oklch(24% 0.10 290 / 0.6); box-shadow: 0 0 10px oklch(52% 0.18 290 / 0.3); }
 .lb-shop-orb-btn.owned { background: oklch(14% 0.04 75 / 0.4); border-color: var(--border-glow); color: var(--gold-dim); cursor: default; }
 
+/* Bifurcated rooms */
+.lb-bifurcated-room { margin-bottom: 0.8rem; }
+.lb-room-header {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: oklch(72% 0.14 75); border-bottom: 1px solid oklch(42% 0.10 75 / 0.5);
+  padding-bottom: 0.25rem; margin-bottom: 0.4rem;
+}
+
 /* Archipelago link */
 .lb-archipelago-link { margin: 0.4rem 0 0.8rem; }
 .lb-archipelago-link a {
