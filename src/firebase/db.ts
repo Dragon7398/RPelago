@@ -89,6 +89,7 @@ export async function setTileInProgress(
   stunnedAdvId: string | null,
   tauntedAdvId: string | null,
   roomAssignments?: Record<string, 1 | 2>,
+  extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
   const updates: Record<string, unknown> = { [`game/tiles/${coord}/state`]: 'inprogress' };
   updates[`game/tiles/${coord}/stunnedAdvId`] = stunnedAdvId;
@@ -98,6 +99,7 @@ export async function setTileInProgress(
       updates[`game/tiles/${coord}/adventurers/${advId}/room`] = room;
     }
   }
+  if (extraUpdates) Object.assign(updates, extraUpdates);
   await update(ref(db!), updates);
 }
 
@@ -116,6 +118,7 @@ export async function setTilesAvailability(
   stunnedAdvId?: string | null,
   tauntedAdvId?: string | null,
   roomAssignments?: Record<string, 1 | 2>,
+  extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
   assertDb();
   const updates: Record<string, unknown> = {};
@@ -131,6 +134,7 @@ export async function setTilesAvailability(
       }
     }
   }
+  if (extraUpdates) Object.assign(updates, extraUpdates);
   await update(ref(db!), updates);
 }
 
@@ -284,7 +288,7 @@ export async function adminKickAdventurer(
       ? (Array.isArray(ta.slots) ? ta.slots : Object.values(ta.slots as Record<string, AdvSlot>))
       : [];
     slotsToAdd = rawSlots.length > 0
-      ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details ? { details: s.details } : {}) }))
+      ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details ? { details: s.details } : {}), ...(s.room ? { room: s.room } : {}) }))
       : [{ name: '', game: '' }];
   }
 

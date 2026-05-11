@@ -29,7 +29,7 @@ export default function MapPage() {
   const [selectedCoord, setSelectedCoord] = useState<string | null>(null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
   const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus }>>({});
-  const [publicDraft, setPublicDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus }>({ name: '', game: '', details: '', status: 'Unstarted' });
+  const [publicDraft, setPublicDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; room: 1 | 2 | undefined }>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
   const [traitsCollapsed, setTraitsCollapsed] = useState(false);
 
   useEffect(() => {
@@ -516,8 +516,9 @@ export default function MapPage() {
 
                 {/* Public slots */}
                 {(() => {
-                  const pubSlots = readSlots(tile.publicSlots as any);
-                  const savePub  = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord!, next);
+                  const pubSlots    = readSlots(tile.publicSlots as any);
+                  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+                  const savePub     = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord!, next);
                   return (
                     <>
                       <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>PUBLIC SLOTS</div>
@@ -535,6 +536,22 @@ export default function MapPage() {
                             >
                               {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
                             </select>
+                            {isBifurcated && (
+                              <select
+                                className="admin-slot-status-select"
+                                value={s.room ?? ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  savePub(pubSlots.map((slot, j) => j === i
+                                    ? { ...slot, room: val === '1' ? 1 : val === '2' ? 2 : undefined }
+                                    : slot));
+                                }}
+                              >
+                                <option value="">— Room —</option>
+                                <option value="1">Room 1</option>
+                                <option value="2">Room 2</option>
+                              </select>
+                            )}
                             <button className="admin-slot-del" onClick={() => savePub(pubSlots.filter((_, j) => j !== i))} title="Remove slot">✕</button>
                           </div>
                         ))}
@@ -549,14 +566,29 @@ export default function MapPage() {
                             onChange={e => setPublicDraft(p => ({ ...p, status: e.target.value as SlotStatus }))}>
                             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
                           </select>
+                          {isBifurcated && (
+                            <select
+                              className="admin-slot-status-select"
+                              value={publicDraft.room ?? ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setPublicDraft(p => ({ ...p, room: val === '1' ? 1 : val === '2' ? 2 : undefined }));
+                              }}
+                            >
+                              <option value="">— Room —</option>
+                              <option value="1">Room 1</option>
+                              <option value="2">Room 2</option>
+                            </select>
+                          )}
                           <button
                             className="admin-slot-add-btn"
                             disabled={!publicDraft.name.trim() || !publicDraft.game.trim()}
                             onClick={() => {
                               const newSlot: AdvSlot = { name: publicDraft.name.trim(), game: publicDraft.game.trim(), status: publicDraft.status };
                               if (publicDraft.details.trim()) newSlot.details = publicDraft.details.trim();
+                              if (publicDraft.room)           newSlot.room    = publicDraft.room;
                               savePub([...pubSlots, newSlot]);
-                              setPublicDraft({ name: '', game: '', details: '', status: 'Unstarted' });
+                              setPublicDraft({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
                             }}
                           >+ Add</button>
                         </div>

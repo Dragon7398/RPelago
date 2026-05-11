@@ -17,6 +17,7 @@ export interface AdvSlot {
   game: string;       // game title, e.g. "Link To The Past"
   details?: string;   // optional extra info for complex challenges
   status?: SlotStatus;
+  room?: 1 | 2;       // bifurcated tiles: which room this slot belongs to
 }
 
 export interface TileAdventurer {

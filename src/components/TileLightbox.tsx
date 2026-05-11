@@ -217,6 +217,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
     const adv = player.adventurers[advId];
     if (!adv) return;
     const hasContent = slots.length > 0 && (slots[0].name || slots[0].game);
+    const slotRoom   = slots[0]?.room;
     const entry: TileAdventurer = {
       advId,
       name:      `${adv.firstName} ${adv.lastName}`,
@@ -224,6 +225,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       owner:     user.id,
       ownerName: user.displayName,
       ...(hasContent ? { slots } : {}),
+      ...(slotRoom ? { room: slotRoom } : {}),
     };
     try {
       await claimClaimableSlot(coord!, slotKey, entry);
@@ -580,6 +582,9 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
               </div>
             )}
             {(() => {
+              // For bifurcated in-progress tiles, pub/claimable slots render inside each room section below.
+              const isBifurcatedInProgress = tile.traits?.['bifurcated'] !== undefined && state === 'inprogress';
+              if (isBifurcatedInProgress) return null;
               const pubSlots = tile.publicSlots
                 ? (Array.isArray(tile.publicSlots)
                     ? tile.publicSlots
@@ -602,6 +607,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
               );
             })()}
             {(() => {
+              const isBifurcatedInProgress = tile.traits?.['bifurcated'] !== undefined && state === 'inprogress';
+              if (isBifurcatedInProgress) return null;
               const claimable = tile.claimableSlots ?? {};
               const entries = Object.entries(claimable);
               if (entries.length === 0) return null;
@@ -610,8 +617,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                 <div className="lb-claimable-slots">
                   <div className="lb-claimable-header">CLAIMABLE SLOTS</div>
                   <div className="lb-claimable-note">A player has vacated this challenge. You can take over their game slot.</div>
-                  {entries.map(([slotKey, slots]) => {
-                    const slotArr: AdvSlot[] = Array.isArray(slots) ? slots : Object.values(slots as Record<string, AdvSlot>);
+                  {entries.map(([slotKey, slotVal]) => {
+                    const slotArr: AdvSlot[] = Array.isArray(slotVal) ? slotVal : Object.values(slotVal as Record<string, AdvSlot>);
                     const isClaiming = claimingSlotKey === slotKey;
                     const hasContent = slotArr.some(s => s.name || s.game);
                     return (
@@ -628,13 +635,9 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                             ))}
                           </div>
                         )}
-                        {!user && (
-                          <div className="lb-claimable-login">Log in to claim this slot.</div>
-                        )}
+                        {!user && <div className="lb-claimable-login">Log in to claim this slot.</div>}
                         {canClaim && !isClaiming && (
-                          <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>
-                            CLAIM
-                          </button>
+                          <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>CLAIM</button>
                         )}
                         {canClaim && isClaiming && (
                           <div className="lb-claim-picker">
@@ -760,42 +763,123 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                   </>
                 );
               }
-              const room1 = advEntries.filter(e => (e.room ?? 1) === 1);
-              const room2 = advEntries.filter(e => e.room === 2);
-              const renderRoom = (entries: typeof advEntries, label: string, link: string | undefined) => (
-                <div className="lb-bifurcated-room">
-                  <div className="lb-room-header">{label}</div>
-                  {link && (
-                    <div className="lb-archipelago-link">
-                      <a href={link} target="_blank" rel="noopener noreferrer">
-                        🗺 Open Archipelago Game →
-                      </a>
-                    </div>
-                  )}
-                  {entries.length > 0 && (
-                    <div className="lb-adv-list">
-                      {entries.map(entry => (
-                        <div key={entry.advId} className="lb-adv-entry">
-                          <div className="lb-adv-row">
-                            <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
-                            <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
-                            <span className="lb-adv-secondary">
-                              <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
-                              <span className="lb-adv-name">{entry.name}</span>
-                              <span className="lb-adv-class">{entry.cls}</span>
-                            </span>
+
+              // ── Bifurcated in-progress ──
+              const allPubSlots: AdvSlot[] = tile.publicSlots
+                ? (Array.isArray(tile.publicSlots) ? tile.publicSlots : Object.values(tile.publicSlots as Record<string, AdvSlot>))
+                : [];
+              const claimableEntries = Object.entries(tile.claimableSlots ?? {}) as [string, AdvSlot[] | Record<string, AdvSlot>][];
+              const canClaim = !!user && !alreadySent && freeAdvs.length > 0;
+
+              const renderClaimableEntry = (slotKey: string, rawVal: AdvSlot[] | Record<string, AdvSlot>) => {
+                const slotArr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal);
+                const isClaiming = claimingSlotKey === slotKey;
+                const hasContent = slotArr.some(s => s.name || s.game);
+                return (
+                  <div key={slotKey} className="lb-claimable-slot">
+                    {hasContent && (
+                      <div className="lb-claimable-slot-games">
+                        {slotArr.map((s, i) => (
+                          <div key={i} className="lb-slot-row">
+                            {s.name && <span className="lb-slot-name">{s.name}</span>}
+                            {s.name && s.game && <span className="lb-slot-sep">—</span>}
+                            {s.game && <span className="lb-slot-game">{s.game}</span>}
+                            {s.details && <span className="lb-slot-details">{s.details}</span>}
                           </div>
-                          <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                        ))}
+                      </div>
+                    )}
+                    {!user && <div className="lb-claimable-login">Log in to claim this slot.</div>}
+                    {canClaim && !isClaiming && (
+                      <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>CLAIM</button>
+                    )}
+                    {canClaim && isClaiming && (
+                      <div className="lb-claim-picker">
+                        <div className="lb-send-label">SEND AN ADVENTURER</div>
+                        <div className="lb-adv-picker">
+                          {freeAdvs.map(adv => (
+                            <button key={adv.id} className="lb-adv-pick-btn" onClick={() => handleClaimSlot(slotKey, slotArr, adv.id)}>
+                              <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
+                              <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
+                              <span className="btn-adv-class">{adv.cls}</span>
+                            </button>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
+                        <button className="lb-cancel-claim-btn" onClick={() => setClaimingSlotKey(null)}>Cancel</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              const renderRoom = (
+                roomNum: 1 | 2,
+                label: string,
+                link: string | undefined,
+              ) => {
+                const roomAdvs    = advEntries.filter(e => (e.room ?? 1) === roomNum);
+                const roomPub     = allPubSlots.filter(s => (s.room ?? 1) === roomNum);
+                const roomClaim   = claimableEntries.filter(([, rawVal]) => {
+                  const arr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal);
+                  return (arr[0]?.room ?? 1) === roomNum;
+                });
+                return (
+                  <div className="lb-bifurcated-room">
+                    <div className="lb-room-header">{label}</div>
+                    {link && (
+                      <div className="lb-archipelago-link">
+                        <a href={link} target="_blank" rel="noopener noreferrer">
+                          🗺 Open Archipelago Game →
+                        </a>
+                      </div>
+                    )}
+                    {roomAdvs.length > 0 && (
+                      <div className="lb-adv-list">
+                        {roomAdvs.map(entry => (
+                          <div key={entry.advId} className="lb-adv-entry">
+                            <div className="lb-adv-row">
+                              <span className="lb-adv-owner" style={{ color: resolveNameColor(gameState.players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                              <AdvStatusIcons advId={entry.advId} tile={tile} inventory={gameState.players[entry.owner]?.inventory ?? {}} />
+                              <span className="lb-adv-secondary">
+                                <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
+                                <span className="lb-adv-name">{entry.name}</span>
+                                <span className="lb-adv-class">{entry.cls}</span>
+                              </span>
+                            </div>
+                            <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {roomPub.length > 0 && (
+                      <div className="lb-public-slots">
+                        <div className="lb-public-slots-header">PUBLIC SLOTS</div>
+                        {roomPub.map((s, i) => (
+                          <div key={i} className="lb-slot-row">
+                            <span className="lb-slot-name">{s.name}</span>
+                            <span className="lb-slot-sep">—</span>
+                            <span className="lb-slot-game">{s.game}</span>
+                            {s.details && <span className="lb-slot-details">{s.details}</span>}
+                            {s.status && <span className={`lb-slot-status ss-${s.status.replace('%', 'pct').replace('-', '')}`}>{s.status}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {roomClaim.length > 0 && (
+                      <div className="lb-claimable-slots">
+                        <div className="lb-claimable-header">CLAIMABLE SLOTS</div>
+                        <div className="lb-claimable-note">A player has vacated this challenge. You can take over their game slot.</div>
+                        {roomClaim.map(([slotKey, rawVal]) => renderClaimableEntry(slotKey, rawVal))}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
               return (
                 <>
-                  {renderRoom(room1, 'Room 1', tile.link || undefined)}
-                  {renderRoom(room2, 'Room 2', tile.link2 || undefined)}
+                  {renderRoom(1, 'Room 1', tile.link || undefined)}
+                  {renderRoom(2, 'Room 2', tile.link2 || undefined)}
                 </>
               );
             })()}

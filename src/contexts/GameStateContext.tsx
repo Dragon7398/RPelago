@@ -214,17 +214,30 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       const stunnedAdvId = tile.traits?.['stunning'] !== undefined ? pick() : null;
       const tauntedAdvId = tile.traits?.['taunt']    !== undefined ? pick() : null;
       let roomAssignments: Record<string, 1 | 2> | undefined;
+      let slotRoomUpdates: Record<string, unknown> | undefined;
       if (tile.traits?.['bifurcated'] !== undefined && advIds.length > 0) {
         const shuffled = [...advIds].sort(() => Math.random() - 0.5);
         const room1Count = Math.ceil(shuffled.length / 2);
         roomAssignments = {};
         shuffled.forEach((id, i) => { roomAssignments![id] = i < room1Count ? 1 : 2; });
+        // Stamp room onto any slots already assigned at bifurcation time
+        for (const [advId, room] of Object.entries(roomAssignments)) {
+          const rawSlots = tile.adventurers[advId]?.slots;
+          const existingSlots: AdvSlot[] = rawSlots
+            ? (Array.isArray(rawSlots) ? rawSlots : Object.values(rawSlots as Record<string, AdvSlot>))
+            : [];
+          if (existingSlots.length > 0) {
+            slotRoomUpdates ??= {};
+            slotRoomUpdates[`game/tiles/${coord}/adventurers/${advId}/slots`] =
+              existingSlots.map(s => ({ ...s, room }));
+          }
+        }
       }
       if (wasComplete && gameState) {
         const recalc = computeRecalcUpdates(gameState.tiles, coord, 'inprogress');
-        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId, roomAssignments);
+        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
       } else {
-        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId, roomAssignments);
+        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
       }
     } else if (wasComplete && state !== 'complete' && gameState) {
       const recalc = computeRecalcUpdates(gameState.tiles, coord, state);
@@ -353,13 +366,21 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const adminSetAdventurerSlots = useCallback(async (coord: string, advId: string, slots: AdvSlot[]) => {
     const tileAdv  = gameState?.tiles[coord]?.adventurers?.[advId];
     const playerAdv = tileAdv ? gameState?.players[tileAdv.owner]?.adventurers[advId] : null;
+
+    // On bifurcated tiles, stamp each slot with the adventurer's room so room
+    // propagates to claimable slots if this player is later kicked.
+    const isBifurcated = gameState?.tiles[coord]?.traits?.['bifurcated'] !== undefined;
+    const stampedSlots = isBifurcated && tileAdv?.room
+      ? slots.map(s => ({ ...s, room: tileAdv.room as 1 | 2 }))
+      : slots;
+
     const FREE_STATUSES = new Set(['100%', 'Goaled', 'Done']);
-    const allComplete  = slots.length > 0 && slots.every(s => s.status && FREE_STATUSES.has(s.status));
+    const allComplete  = stampedSlots.length > 0 && stampedSlots.every(s => s.status && FREE_STATUSES.has(s.status));
     const stillHeld    = playerAdv?.busy === true && playerAdv?.busyTile === coord;
     const freeAdventurer = allComplete && stillHeld && tileAdv
       ? { ownerId: tileAdv.owner }
       : undefined;
-    await setAdventurerSlots(coord, advId, slots, freeAdventurer);
+    await setAdventurerSlots(coord, advId, stampedSlots, freeAdventurer);
   }, [gameState]);
 
   const adminSetPublicSlots = useCallback(async (coord: string, slots: AdvSlot[]) => {
