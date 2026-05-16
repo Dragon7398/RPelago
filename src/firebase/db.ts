@@ -288,7 +288,7 @@ export async function adminKickAdventurer(
       ? (Array.isArray(ta.slots) ? ta.slots : Object.values(ta.slots as Record<string, AdvSlot>))
       : [];
     slotsToAdd = rawSlots.length > 0
-      ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details ? { details: s.details } : {}), ...(s.room ? { room: s.room } : {}) }))
+      ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details   ? { details:   s.details   } : {}), ...(s.room      ? { room:      s.room      } : {}), ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}), ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}) }))
       : [{ name: '', game: '' }];
   }
 
@@ -341,6 +341,16 @@ export async function claimClaimableSlot(
     [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
   };
   await update(ref(db!), updates);
+}
+
+// ── Admin: claimable slot bonus ───────────────────────────────────────────────
+export async function setClaimableSlotBonus(
+  coord: string,
+  slotKey: string,
+  slotArr: AdvSlot[],
+): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/claimableSlots/${slotKey}`), slotArr);
 }
 
 // ── Admin: public slots ───────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type { Player, Tile, AdvClass, Adventurer, PlayerFeats } from '../types';
+import type { Player, Tile, AdvClass, Adventurer, PlayerFeats, AdvSlot } from '../types';
 import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS } from './constants';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
@@ -204,10 +204,23 @@ export function awardTileRewards(
         : adv;
     }
 
+    // Sum flat slot bonuses across all this player's adventurers on the tile
+    let slotBonusXP = 0;
+    let slotBonusGold = 0;
+    for (const adv of adventurers.filter(a => a.owner === ownerId)) {
+      const advSlots: AdvSlot[] = adv.slots
+        ? (Array.isArray(adv.slots) ? adv.slots : Object.values(adv.slots as Record<string, AdvSlot>))
+        : [];
+      for (const slot of advSlots) {
+        slotBonusXP   += slot.bonusXP   ?? 0;
+        slotBonusGold += slot.bonusGold ?? 0;
+      }
+    }
+
     const { xpMultiplier, goldMultiplier } = calcFeatBonuses(ownerId, ownerIds, updated);
     const prevLevel = calcLevel(p.xp);
-    const newXp    = p.xp   + Math.round((tile.xp   ?? 0) * xpMultiplier);
-    const newGold  = p.gold + Math.round((tile.gold ?? 0) * goldMultiplier);
+    const newXp    = p.xp   + Math.round((tile.xp   ?? 0) * xpMultiplier) + slotBonusXP;
+    const newGold  = p.gold + Math.round((tile.gold ?? 0) * goldMultiplier) + slotBonusGold;
     const newLevel = calcLevel(newXp);
     let updatedPlayer = { ...p, xp: newXp, gold: newGold, adventurers: clearedAdvs };
     updatedPlayer = checkAndGrantAdventurers(updatedPlayer, prevLevel, newLevel);

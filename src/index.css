@@ -565,6 +565,22 @@ header p {
 }
 .lb-cancel-claim-btn:hover { color: oklch(58% 0.08 75); border-color: oklch(40% 0.08 75); }
 
+.lb-slot-bonus {
+  display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+}
+.lb-slot-bonus-xp {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.07em;
+  color: oklch(72% 0.14 145);
+  background: oklch(16% 0.06 145 / 0.4); border: 1px solid oklch(40% 0.10 145);
+  border-radius: 2px; padding: 0.1rem 0.38rem;
+}
+.lb-slot-bonus-gold {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.07em;
+  color: var(--gold);
+  background: oklch(16% 0.07 75 / 0.4); border: 1px solid oklch(44% 0.12 75);
+  border-radius: 2px; padding: 0.1rem 0.38rem;
+}
+
 .lb-traits {
   margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;
 }
@@ -765,6 +781,11 @@ header p {
 .map-checklist-unnamed { opacity: 0.4; font-style: italic; }
 .map-checklist-check { color: oklch(72% 0.18 145); font-size: 0.85rem; margin-left: auto; flex-shrink: 0; }
 .map-checklist-row.done .map-checklist-name { color: var(--text); }
+.trait-coverage-row { cursor: default; }
+.trait-coverage-row:hover { background: transparent; }
+.trait-coverage-name { font-size: 0.68rem; }
+.trait-coverage-counts { display: flex; gap: 0.5rem; margin-left: auto; flex-shrink: 0; }
+.trait-coverage-count { font-size: 0.65rem; color: var(--text-dim); white-space: nowrap; }
 
 /* ── Collapsible traits header ── */
 .admin-traits-header { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; margin-bottom: 0.3rem; }
@@ -982,6 +1003,24 @@ header p {
   background: oklch(24% 0.04 75); border: 1px solid oklch(42% 0.07 75);
   color: var(--parchment); border-radius: 2px; padding: 0.2rem 0.4rem; cursor: pointer;
 }
+.admin-bonus-input {
+  width: 3.6rem; padding: 0.18rem 0.3rem; font-size: 0.6rem;
+  background: oklch(20% 0.04 75); border: 1px solid oklch(38% 0.07 75);
+  color: var(--parchment); border-radius: 2px; flex-shrink: 0;
+}
+.admin-bonus-input:focus { border-color: var(--gold); outline: none; }
+.admin-bonus-label {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.06em;
+  color: var(--text-muted); flex-shrink: 0;
+}
+.admin-claimable-bonus-row {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.3rem 0; border-bottom: 1px solid oklch(26% 0.04 75 / 0.5);
+}
+.admin-claimable-bonus-row:last-child { border-bottom: none; }
+.admin-claimable-bonus-games { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.admin-claimable-bonus-game { font-size: 0.62rem; color: var(--text-muted); font-style: italic; }
+.admin-claimable-bonus-inputs { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 .admin-traits-list { display: flex; flex-direction: column; width: 100%; }
 .admin-trait-row   {
   display: flex; flex-direction: column; gap: 0.15rem;
@@ -1399,6 +1438,13 @@ header p {
 .dash-tile-icon   { font-size: 0.85rem; flex-shrink: 0; }
 .dash-tile-name   { font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.06em; color: var(--parchment); flex: 1; }
 .dash-tile-coord  { font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em; color: var(--text-muted); }
+.dash-tile-coord-link {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  color: var(--text-muted); background: none; border: none; padding: 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-color: oklch(40% 0.06 75);
+  transition: color 0.15s;
+}
+.dash-tile-coord-link:hover { color: var(--gold); text-decoration-color: var(--gold); }
 .dash-tile-slots  {
   font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.08em;
   color: oklch(55% 0.06 75); flex-shrink: 0;

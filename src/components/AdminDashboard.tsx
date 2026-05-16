@@ -20,8 +20,14 @@ const PAGES: { id: DashPage; label: string }[] = [
 export default function AdminDashboard() {
   const { user } = useAuth();
   const { gameState, loading } = useGameState();
-  const [page, setPage]       = useState<DashPage>('challenges');
+  const [page, setPage]         = useState<DashPage>('challenges');
+  const [mapInitCoord, setMapInitCoord] = useState<string | undefined>(undefined);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const navigateToMap = (coord: string) => {
+    setMapInitCoord(coord);
+    setPage('map');
+  };
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
@@ -70,7 +76,7 @@ export default function AdminDashboard() {
             <button
               key={p.id}
               className={`dash-tab${page === p.id ? ' active' : ''}`}
-              onClick={() => setPage(p.id)}
+              onClick={() => { setPage(p.id); setMapInitCoord(undefined); }}
             >
               {p.label}
             </button>
@@ -90,7 +96,7 @@ export default function AdminDashboard() {
                 <button
                   key={p.id}
                   className={`dash-menu-item${page === p.id ? ' active' : ''}`}
-                  onClick={() => { setPage(p.id); setMenuOpen(false); }}
+                  onClick={() => { setPage(p.id); setMapInitCoord(undefined); setMenuOpen(false); }}
                 >
                   {p.label}
                 </button>
@@ -100,11 +106,11 @@ export default function AdminDashboard() {
         </div>
       </header>
       <main className="dash-main">
-        {page === 'challenges' && <ChallengesPage />}
+        {page === 'challenges' && <ChallengesPage navigateToMap={navigateToMap} />}
         {page === 'players'    && <PlayersPage />}
         {page === 'shops'      && <ShopsPage />}
         {page === 'orbs'       && <OrbsPage />}
-        {page === 'map'        && <MapPage />}
+        {page === 'map'        && <MapPage initialCoord={mapInitCoord} />}
       </main>
     </div>
   );

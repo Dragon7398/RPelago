@@ -295,7 +295,9 @@ function SectionYaml() {
         </li>
         <li>
           <strong>Check limits:</strong> At least <strong>50 checks</strong> and no more than{' '}
-          <strong>1,000 checks</strong> total, unless otherwise approved.
+          <strong>1,500 checks</strong> total, unless otherwise approved.  As well, please use your best 
+          judgment on games to keep things fun; unless you're confident of your ability to keep things moving,
+          please don't submit, say, a Perfection Stardew Valley.
         </li>
         <li>
           <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are limited to:

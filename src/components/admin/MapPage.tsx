@@ -18,24 +18,31 @@ function readSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlo
   return Array.isArray(raw) ? raw : Object.values(raw);
 }
 
-export default function MapPage() {
+export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const {
     gameState,
     adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats,
-    adminSetAdventurerSlots, adminSetPublicSlots,
+    adminSetAdventurerSlots, adminSetPublicSlots, adminSetClaimableSlotBonus,
   } = useGameState();
 
   const { addToast } = useToast();
-  const [selectedCoord, setSelectedCoord] = useState<string | null>(null);
+  const [selectedCoord, setSelectedCoord] = useState<string | null>(initialCoord ?? null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
-  const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus }>>({});
+  const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>>({});
   const [publicDraft, setPublicDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; room: 1 | 2 | undefined }>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
+  const [claimableBonusDrafts, setClaimableBonusDrafts] = useState<Record<string, { bonusXP: number; bonusGold: number }>>({});
   const [traitsCollapsed, setTraitsCollapsed] = useState(false);
 
   useEffect(() => {
     if (!selectedCoord || !gameState) return;
     const t = gameState.tiles[selectedCoord];
     setTraitsCollapsed(t?.state === 'inprogress' || t?.state === 'complete');
+    const drafts: Record<string, { bonusXP: number; bonusGold: number }> = {};
+    for (const [key, rawVal] of Object.entries(t?.claimableSlots ?? {})) {
+      const arr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal as Record<string, AdvSlot>);
+      drafts[key] = { bonusXP: arr[0]?.bonusXP ?? 0, bonusGold: arr[0]?.bonusGold ?? 0 };
+    }
+    setClaimableBonusDrafts(drafts);
   }, [selectedCoord]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!gameState) return null;
@@ -129,7 +136,7 @@ export default function MapPage() {
         return !!(shop && (shop.itemIds.length > 0 || shop.orbId));
       }
       case 'elite':
-        return Object.keys(t.traits ?? {}).length > 0 && !!t.rules?.trim();
+        return Object.keys(t.traits ?? {}).length > 0 && (!!t.rules?.trim() || Object.keys(t.traits ?? {}).length > 2);
       case 'boss':
         return !!t.details?.trim() && !!t.rules?.trim();
       default:
@@ -144,6 +151,20 @@ export default function MapPage() {
       allCoords.push(coordFromRC(r, c));
     }
   }
+
+  // Trait coverage counts per tile type
+  const traitCoverage = TILE_TRAITS.map(def => {
+    let battle = 0, puzzle = 0, elite = 0;
+    for (const coord of allCoords) {
+      if (!gs.tiles[coord]?.traits?.[def.id]) continue;
+      const [r, c] = rcFromCoord(coord);
+      const typeKey = getTypeKey(r, c);
+      if (typeKey === 'battle') battle++;
+      else if (typeKey === 'puzzle') puzzle++;
+      else if (typeKey === 'elite') elite++;
+    }
+    return { def, battle, puzzle, elite };
+  });
 
   return (
     <div className="dash-page">
@@ -208,6 +229,21 @@ export default function MapPage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Trait coverage checklist */}
+          <div className="map-checklist">
+            <div className="map-checklist-title">TRAIT COVERAGE</div>
+            {traitCoverage.map(({ def, battle, puzzle, elite }) => (
+              <div key={def.id} className={`map-checklist-row trait-coverage-row${battle + puzzle + elite === 0 ? '' : ' done'}`}>
+                <span className="map-checklist-name trait-coverage-name">{def.name}</span>
+                <span className="trait-coverage-counts">
+                  <span className="trait-coverage-count">{TILE_TYPES.battle.icon} {battle}</span>
+                  <span className="trait-coverage-count">{TILE_TYPES.puzzle.icon} {puzzle}</span>
+                  <span className="trait-coverage-count">{TILE_TYPES.elite.icon} {elite}</span>
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -476,6 +512,28 @@ export default function MapPage() {
                               <span className="admin-slot-sep">—</span>
                               <span className="admin-slot-val">{s.game}</span>
                               {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
+                              <input
+                                type="number" min={0} className="admin-bonus-input" placeholder="+XP"
+                                key={`adv-xp-${entry.advId}-${i}-${s.bonusXP ?? 0}`}
+                                defaultValue={s.bonusXP ?? 0}
+                                onBlur={e => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  const updated = { ...s };
+                                  if (val > 0) updated.bonusXP = val; else delete updated.bonusXP;
+                                  save(slots.map((slot, j) => j === i ? updated : slot));
+                                }}
+                              />
+                              <input
+                                type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
+                                key={`adv-gold-${entry.advId}-${i}-${s.bonusGold ?? 0}`}
+                                defaultValue={s.bonusGold ?? 0}
+                                onBlur={e => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  const updated = { ...s };
+                                  if (val > 0) updated.bonusGold = val; else delete updated.bonusGold;
+                                  save(slots.map((slot, j) => j === i ? updated : slot));
+                                }}
+                              />
                               <select
                                 className="admin-slot-status-select"
                                 value={s.status ?? 'Unstarted'}
@@ -493,6 +551,12 @@ export default function MapPage() {
                               onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, game: e.target.value } }))} />
                             <input className="admin-text-input" placeholder="Details (optional)" value={draft.details}
                               onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, details: e.target.value } }))} />
+                            <input type="number" min={0} className="admin-bonus-input" placeholder="+XP"
+                              value={draft.bonusXP || ''}
+                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, bonusXP: parseInt(e.target.value) || 0 } }))} />
+                            <input type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
+                              value={draft.bonusGold || ''}
+                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, bonusGold: parseInt(e.target.value) || 0 } }))} />
                             <select className="admin-slot-status-select" value={draft.status}
                               onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, status: e.target.value as SlotStatus } }))}>
                               {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
@@ -502,9 +566,11 @@ export default function MapPage() {
                               disabled={!draft.name.trim() || !draft.game.trim()}
                               onClick={() => {
                                 const newSlot: AdvSlot = { name: draft.name.trim(), game: draft.game.trim(), status: draft.status };
-                                if (draft.details.trim()) newSlot.details = draft.details.trim();
+                                if (draft.details.trim())   newSlot.details   = draft.details.trim();
+                                if (draft.bonusXP > 0)      newSlot.bonusXP   = draft.bonusXP;
+                                if (draft.bonusGold > 0)    newSlot.bonusGold = draft.bonusGold;
                                 save([...slots, newSlot]);
-                                setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '', details: '', status: 'Unstarted' } }));
+                                setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0 } }));
                               }}
                             >+ Add</button>
                           </div>
@@ -592,6 +658,63 @@ export default function MapPage() {
                             }}
                           >+ Add</button>
                         </div>
+                      </div>
+                    </>
+                  );
+                })()}
+                {/* Claimable slot bonuses */}
+                {(() => {
+                  const claimable = tile.claimableSlots ?? {};
+                  const entries = Object.entries(claimable);
+                  if (entries.length === 0) return null;
+                  return (
+                    <>
+                      <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>CLAIMABLE SLOT BONUSES</div>
+                      <div className="admin-slot-adv">
+                        {entries.map(([slotKey, rawVal]) => {
+                          const slotArr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal as Record<string, AdvSlot>);
+                          const draft = claimableBonusDrafts[slotKey] ?? { bonusXP: slotArr[0]?.bonusXP ?? 0, bonusGold: slotArr[0]?.bonusGold ?? 0 };
+                          return (
+                            <div key={slotKey} className="admin-claimable-bonus-row">
+                              <div className="admin-claimable-bonus-games">
+                                {slotArr.map((s, i) => (
+                                  <span key={i} className="admin-claimable-bonus-game">
+                                    {s.name ? `${s.name} — ${s.game}` : s.game}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="admin-claimable-bonus-inputs">
+                                <span className="admin-bonus-label">+XP</span>
+                                <input
+                                  type="number" min={0} className="admin-bonus-input"
+                                  value={draft.bonusXP || ''}
+                                  placeholder="0"
+                                  onChange={e => setClaimableBonusDrafts(p => ({ ...p, [slotKey]: { ...draft, bonusXP: parseInt(e.target.value) || 0 } }))}
+                                />
+                                <span className="admin-bonus-label">+Gold</span>
+                                <input
+                                  type="number" min={0} className="admin-bonus-input"
+                                  value={draft.bonusGold || ''}
+                                  placeholder="0"
+                                  onChange={e => setClaimableBonusDrafts(p => ({ ...p, [slotKey]: { ...draft, bonusGold: parseInt(e.target.value) || 0 } }))}
+                                />
+                                <button
+                                  className="admin-slot-add-btn"
+                                  onClick={async () => {
+                                    const updated = slotArr.map((s, i) => {
+                                      if (i !== 0) return s;
+                                      const out = { ...s };
+                                      if (draft.bonusXP > 0)   out.bonusXP   = draft.bonusXP;   else delete out.bonusXP;
+                                      if (draft.bonusGold > 0) out.bonusGold = draft.bonusGold; else delete out.bonusGold;
+                                      return out;
+                                    });
+                                    await adminSetClaimableSlotBonus(selectedCoord!, slotKey, updated);
+                                  }}
+                                >Save</button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </>
                   );

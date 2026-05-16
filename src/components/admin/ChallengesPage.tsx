@@ -52,7 +52,7 @@ function AdvSlotList({ entry, players }: {
   );
 }
 
-export default function ChallengesPage() {
+export default function ChallengesPage({ navigateToMap }: { navigateToMap: (coord: string) => void }) {
   const { gameState, adminMapReset, adminKickAdventurer } = useGameState();
   if (!gameState) return null;
 
@@ -90,7 +90,7 @@ export default function ChallengesPage() {
                 <div className="dash-tile-header">
                   <span className="dash-tile-icon">{info.icon}</span>
                   <span className="dash-tile-name">{tile.name || coord}</span>
-                  <span className="dash-tile-coord">{coord}</span>
+                  <button className="dash-tile-coord-link" onClick={() => navigateToMap(coord)}>{coord}</button>
                   <span className={`dash-tile-slots${isFull ? ' full' : ''}`}>
                     {isFull ? '✓' : '○'} {advs.length}/{tile.required}
                   </span>
@@ -135,7 +135,7 @@ export default function ChallengesPage() {
                 <div className="dash-tile-header">
                   <span className="dash-tile-icon">{info.icon}</span>
                   <span className="dash-tile-name">{tile.name || coord}</span>
-                  <span className="dash-tile-coord">{coord}</span>
+                  <button className="dash-tile-coord-link" onClick={() => navigateToMap(coord)}>{coord}</button>
                   {tile.link && (
                     <a
                       className="dash-tile-link"

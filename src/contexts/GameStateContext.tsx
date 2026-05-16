@@ -12,6 +12,7 @@ import {
   setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
   selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
   claimClaimableSlot as dbClaimClaimableSlot,
+  setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
 } from '../firebase/db';
 import { awardTileRewards } from '../lib/gameLogic';
@@ -53,6 +54,7 @@ interface GameStateContextValue {
   adminEnablePlayer: (playerId: string) => Promise<void>;
   adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToClaimableSlot: boolean) => Promise<void>;
   claimClaimableSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
+  adminSetClaimableSlotBonus: (coord: string, slotKey: string, slotArr: AdvSlot[]) => Promise<void>;
   adminAddWarning: (playerId: string, message: string) => Promise<void>;
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
   adminClearWarnings: (playerId: string) => Promise<void>;
@@ -414,6 +416,12 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await dbClaimClaimableSlot(coord, slotKey, entry);
   }, []);
 
+  const adminSetClaimableSlotBonus = useCallback(async (
+    coord: string, slotKey: string, slotArr: AdvSlot[],
+  ) => {
+    await setClaimableSlotBonus(coord, slotKey, slotArr);
+  }, []);
+
   const adminAddWarning = useCallback(async (playerId: string, message: string) => {
     await addPlayerWarning(playerId, message);
   }, []);
@@ -433,7 +441,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
-      adminKickAdventurer, claimClaimableSlot,
+      adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
       adminAddWarning, adminDeleteWarning, adminClearWarnings,
     }}>
       {children}

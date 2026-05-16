@@ -115,12 +115,24 @@ function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
     : Object.values(entry.slots as Record<string, AdvSlot>);
 }
 
+function SlotBonusPills({ bonusXP, bonusGold }: { bonusXP?: number; bonusGold?: number }) {
+  if (!bonusXP && !bonusGold) return null;
+  return (
+    <div className="lb-slot-bonus">
+      {bonusXP  ? <span className="lb-slot-bonus-xp">+{bonusXP} XP</span>   : null}
+      {bonusGold ? <span className="lb-slot-bonus-gold">+{bonusGold} Gold</span> : null}
+    </div>
+  );
+}
+
 function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }: {
   entry: TileAdventurer; tile: { name: string }; coord: string;
   isOwner: boolean; showPrompt?: boolean;
 }) {
   const slots = slotsFromEntry(entry);
   if (slots.length > 0) {
+    const totalBonusXP   = slots.reduce((n, s) => n + (s.bonusXP   ?? 0), 0);
+    const totalBonusGold = slots.reduce((n, s) => n + (s.bonusGold ?? 0), 0);
     return (
       <div className="lb-adv-slots">
         {slots.map((s, i) => (
@@ -132,6 +144,7 @@ function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }: {
             {s.status && <span className={`lb-slot-status ss-${s.status.replace('%', 'pct').replace('-', '')}`}>{s.status}</span>}
           </div>
         ))}
+        <SlotBonusPills bonusXP={totalBonusXP || undefined} bonusGold={totalBonusGold || undefined} />
       </div>
     );
   }
@@ -621,6 +634,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                     const slotArr: AdvSlot[] = Array.isArray(slotVal) ? slotVal : Object.values(slotVal as Record<string, AdvSlot>);
                     const isClaiming = claimingSlotKey === slotKey;
                     const hasContent = slotArr.some(s => s.name || s.game);
+                    const entryBonusXP   = slotArr.reduce((n, s) => n + (s.bonusXP   ?? 0), 0);
+                    const entryBonusGold = slotArr.reduce((n, s) => n + (s.bonusGold ?? 0), 0);
                     return (
                       <div key={slotKey} className="lb-claimable-slot">
                         {hasContent && (
@@ -635,6 +650,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                             ))}
                           </div>
                         )}
+                        <SlotBonusPills bonusXP={entryBonusXP || undefined} bonusGold={entryBonusGold || undefined} />
                         {!user && <div className="lb-claimable-login">Log in to claim this slot.</div>}
                         {canClaim && !isClaiming && (
                           <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>CLAIM</button>
@@ -775,6 +791,8 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                 const slotArr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal);
                 const isClaiming = claimingSlotKey === slotKey;
                 const hasContent = slotArr.some(s => s.name || s.game);
+                const entryBonusXP   = slotArr.reduce((n, s) => n + (s.bonusXP   ?? 0), 0);
+                const entryBonusGold = slotArr.reduce((n, s) => n + (s.bonusGold ?? 0), 0);
                 return (
                   <div key={slotKey} className="lb-claimable-slot">
                     {hasContent && (
@@ -789,6 +807,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                         ))}
                       </div>
                     )}
+                    <SlotBonusPills bonusXP={entryBonusXP || undefined} bonusGold={entryBonusGold || undefined} />
                     {!user && <div className="lb-claimable-login">Log in to claim this slot.</div>}
                     {canClaim && !isClaiming && (
                       <button className="lb-claim-btn" onClick={() => setClaimingSlotKey(slotKey)}>CLAIM</button>

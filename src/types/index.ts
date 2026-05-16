@@ -18,6 +18,8 @@ export interface AdvSlot {
   details?: string;   // optional extra info for complex challenges
   status?: SlotStatus;
   room?: 1 | 2;       // bifurcated tiles: which room this slot belongs to
+  bonusXP?: number;   // extra XP awarded to the player who completes this slot
+  bonusGold?: number; // extra gold awarded to the player who completes this slot
 }
 
 export interface TileAdventurer {
