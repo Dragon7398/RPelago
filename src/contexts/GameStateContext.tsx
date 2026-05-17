@@ -247,7 +247,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions);
+    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions, tileName);
 
     const ownerIds = [...new Set(Object.values(tile.adventurers ?? {}).map(a => a.owner))];
     const participantNames = ownerIds.map(id => gameState.players[id]?.displayName).filter(Boolean).join(', ');

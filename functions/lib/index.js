@@ -61,7 +61,7 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-// ── Shop item costs (mirrors src/lib/constants.ts SHOP_ITEMS) ─────────────────
+// ── Shop item costs and names (mirrors src/lib/constants.ts SHOP_ITEMS) ───────
 const ITEM_COSTS = {
     map: 250,
     scroll_of_magnetism: 1000,
@@ -71,6 +71,16 @@ const ITEM_COSTS = {
     throwing_dagger: 400,
     ring_of_resistance: 500,
     warhammer: 600,
+};
+const ITEM_NAMES = {
+    map: 'Map',
+    scroll_of_magnetism: 'Scroll of Magnetism',
+    scroll_of_generosity: 'Scroll of Generosity',
+    coat_of_many_colors: 'Coat of Many Colors',
+    wand_of_piercing: 'Wand of Piercing',
+    throwing_dagger: 'Throwing Dagger',
+    ring_of_resistance: 'Ring of Resistance',
+    warhammer: 'Warhammer',
 };
 // Items that cannot be purchased more than once
 const NON_CONSUMABLE_ITEMS = new Set(['coat_of_many_colors', 'wand_of_piercing', 'throwing_dagger', 'ring_of_resistance', 'warhammer']);
@@ -113,6 +123,13 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
         [`game/players/${uid}/gold`]: player.gold - cost,
         [`game/players/${uid}/inventory/${itemId}`]: (player.inventory?.[itemId] ?? 0) + 1,
     });
+    const itemName = ITEM_NAMES[itemId] ?? itemId;
+    await db.ref('game/activityLog').push().set({
+        timestamp: Date.now(),
+        type: 'item_purchased',
+        message: `${player.displayName} purchased ${itemName} from ${shop.name ?? shopId}.`,
+        icon: '🛒',
+    });
     return { success: true };
 });
 // ── purchaseShopOrb ───────────────────────────────────────────────────────────
@@ -143,9 +160,6 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     const orbId = shop.orbId ?? null;
     if (!orbId)
         throw new https_1.HttpsError('failed-precondition', 'No orb sold at this shop.');
-    const orbSnap = await db.ref(`game/orbState/${orbId}`).get();
-    if (orbSnap.exists())
-        throw new https_1.HttpsError('already-exists', 'This orb has already been claimed.');
     if (player.gold < ORB_SHOP_COST)
         throw new https_1.HttpsError('failed-precondition', 'Not enough gold.');
     const acquisition = {
@@ -154,9 +168,21 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         tileName: shop.name ?? coord,
         buyerName: player.displayName,
     };
-    await db.ref().update({
-        [`game/players/${uid}/gold`]: player.gold - ORB_SHOP_COST,
-        [`game/orbState/${orbId}`]: acquisition,
+    // Atomically claim the orb so two concurrent purchases can't both succeed.
+    const { committed } = await db.ref(`game/orbState/${orbId}`).transaction(current => {
+        if (current !== null)
+            return; // abort — already claimed
+        return acquisition;
+    });
+    if (!committed)
+        throw new https_1.HttpsError('already-exists', 'This orb has already been claimed.');
+    await db.ref(`game/players/${uid}/gold`).set(player.gold - ORB_SHOP_COST);
+    const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
+    await db.ref('game/activityLog').push().set({
+        timestamp: Date.now(),
+        type: 'orb_purchased',
+        message: `${player.displayName} purchased the ${orbLabel} Orb from ${shop.name ?? coord}.`,
+        icon: '🔮',
     });
     return { success: true, orbId };
 });

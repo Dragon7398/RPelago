@@ -6,20 +6,8 @@ import type { Tile, AdvSlot, SlotStatus } from '../../../types';
 
 type PublicDraft = { name: string; game: string; details: string; status: SlotStatus; room: 1 | 2 | undefined };
 
-interface Props {
-  tile: Tile;
-  selectedCoord: string;
-}
-
-export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
-  const { adminSetPublicSlots } = useGameState();
-  const [draft, setDraft] = useState<PublicDraft>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
-
-  const pubSlots    = normalizeSlots(tile.publicSlots as AdvSlot[] | Record<string, AdvSlot> | undefined);
-  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
-  const save        = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord, next);
-
-  const RoomSelect = ({ value, onChange }: { value: 1 | 2 | undefined; onChange: (v: 1 | 2 | undefined) => void }) => (
+function RoomSelect({ value, onChange }: { value: 1 | 2 | undefined; onChange: (v: 1 | 2 | undefined) => void }) {
+  return (
     <select
       className="admin-slot-status-select"
       value={value ?? ''}
@@ -33,6 +21,20 @@ export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
       <option value="2">Room 2</option>
     </select>
   );
+}
+
+interface Props {
+  tile: Tile;
+  selectedCoord: string;
+}
+
+export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
+  const { adminSetPublicSlots } = useGameState();
+  const [draft, setDraft] = useState<PublicDraft>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
+
+  const pubSlots    = normalizeSlots(tile.publicSlots as AdvSlot[] | Record<string, AdvSlot> | undefined);
+  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+  const save        = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord, next);
 
   return (
     <>

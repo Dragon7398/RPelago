@@ -30,12 +30,12 @@ export function getBossPosition(seed: number): [number, number] {
 }
 
 // Region of tiles adjacent to the boss corner that must not contain hidden orbs.
-// Extends 3 rows and 2 columns inward from the corner (per design spec example).
+// Extends 2 rows and 3 columns inward from the corner (e.g. A1 boss → A1–C2).
 function isInBossCornerRegion(r: number, c: number, bossR: number, bossC: number): boolean {
-  const rMin = bossR === 0 ? 0 : ROWS - 3;
-  const rMax = bossR === 0 ? 2 : ROWS - 1;
-  const cMin = bossC === 0 ? 0 : COLS - 2;
-  const cMax = bossC === 0 ? 1 : COLS - 1;
+  const rMin = bossR === 0 ? 0 : ROWS - 2;
+  const rMax = bossR === 0 ? 1 : ROWS - 1;
+  const cMin = bossC === 0 ? 0 : COLS - 3;
+  const cMax = bossC === 0 ? 2 : COLS - 1;
   return r >= rMin && r <= rMax && c >= cMin && c <= cMax;
 }
 
@@ -206,7 +206,7 @@ function tileRng(seed: number, r: number, c: number, offset: number): number {
   s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
   s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
   s = s ^ (s >>> 16);
-  return (s >>> 0) / 0xffffffff;
+  return (s >>> 0) / 0x100000000;
 }
 
 function randInt(seed: number, r: number, c: number, offset: number, min: number, max: number): number {

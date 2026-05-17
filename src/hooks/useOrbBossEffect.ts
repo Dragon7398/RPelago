@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { GameState } from '../types';
-import { updateTileAdmin } from '../firebase/db';
+import { updateTileTraits } from '../firebase/db';
 import { ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
 import { typeKeyForCoord } from '../lib/tileGen';
 
@@ -49,7 +49,7 @@ export function useOrbBossEffect(gameState: GameState | null): void {
     }
 
     if (changed) {
-      updateTileAdmin(bossCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+      updateTileTraits(bossCoord, Object.keys(next).length > 0 ? next : null);
     }
   }, [gameState?.orbState]); // eslint-disable-line react-hooks/exhaustive-deps
 }

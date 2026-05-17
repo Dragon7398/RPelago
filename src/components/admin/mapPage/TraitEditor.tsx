@@ -3,7 +3,7 @@ import { TILE_TRAITS } from '../../../lib/constants';
 import type { TraitDef } from '../../../lib/constants';
 import { useGameState } from '../../../contexts/GameStateContext';
 import { useToast } from '../../../contexts/ToastContext';
-import type { Tile, TriState } from '../../../types';
+import type { Tile } from '../../../types';
 
 interface Props {
   tile: Tile;

@@ -140,18 +140,18 @@ export async function setTilesAvailability(
 }
 
 export async function assignAdventurer(coord: string, entry: TileAdventurer): Promise<void> {
-  await set(ref(db!, `game/tiles/${coord}/adventurers/${entry.advId}`), entry);
-  await update(ref(db!, `game/players/${entry.owner}/adventurers/${entry.advId}`), {
-    busy: true,
-    busyTile: coord,
+  await update(ref(db!), {
+    [`game/tiles/${coord}/adventurers/${entry.advId}`]:                entry,
+    [`game/players/${entry.owner}/adventurers/${entry.advId}/busy`]:    true,
+    [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
   });
 }
 
 export async function removeAdventurer(coord: string, advId: string, ownerId: string): Promise<void> {
-  await remove(ref(db!, `game/tiles/${coord}/adventurers/${advId}`));
-  await update(ref(db!, `game/players/${ownerId}/adventurers/${advId}`), {
-    busy: false,
-    busyTile: null,
+  await update(ref(db!), {
+    [`game/tiles/${coord}/adventurers/${advId}`]:                    null,
+    [`game/players/${ownerId}/adventurers/${advId}/busy`]:    false,
+    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
   });
 }
 
@@ -160,6 +160,7 @@ export async function completeTile(
   updatedPlayers: Record<string, Player>,
   revealCoords: { coord: string; newState: TileState }[],
   orbAcquisitions: Record<string, OrbAcquisition> = {},
+  tileName?: string,
 ): Promise<void> {
   const updates: Record<string, unknown> = {};
   updates[`game/tiles/${coord}/state`] = 'complete';
@@ -177,9 +178,9 @@ export async function completeTile(
   await update(ref(db!), updates);
 
   for (const orbId of Object.keys(orbAcquisitions)) {
-    const orb = ALL_ORBS.find(o => o.id === orbId);
-    const tileNameSnap = (await get(ref(db!, `game/tiles/${coord}/name`))).val() as string | null;
-    await logActivity('orb_collected', `${orb?.label ?? orbId} Orb gathered from ${tileNameSnap || coord}.`, orb?.icon ?? '🔮');
+    const orb  = ALL_ORBS.find(o => o.id === orbId);
+    const name = tileName || coord;
+    await logActivity('orb_collected', `${orb?.label ?? orbId} Orb gathered from ${name}.`, orb?.icon ?? '🔮');
   }
 }
 
@@ -340,6 +341,14 @@ export async function claimClaimableSlot(
     [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
   };
   await update(ref(db!), updates);
+}
+
+// ── Tile traits (orb effects — does not set adminOverride) ───────────────────
+export async function updateTileTraits(
+  coord: string,
+  traits: Record<string, { value: number }> | null,
+): Promise<void> {
+  await update(ref(db!), { [`game/tiles/${coord}/traits`]: traits });
 }
 
 // ── Admin: claimable slot bonus ───────────────────────────────────────────────

@@ -84,7 +84,7 @@ export const exchangeDiscordCode = onRequest(
   },
 );
 
-// ── Shop item costs (mirrors src/lib/constants.ts SHOP_ITEMS) ─────────────────
+// ── Shop item costs and names (mirrors src/lib/constants.ts SHOP_ITEMS) ───────
 const ITEM_COSTS: Record<string, number> = {
   map:                    250,
   scroll_of_magnetism:   1000,
@@ -94,6 +94,17 @@ const ITEM_COSTS: Record<string, number> = {
   throwing_dagger:        400,
   ring_of_resistance:     500,
   warhammer:              600,
+};
+
+const ITEM_NAMES: Record<string, string> = {
+  map:                   'Map',
+  scroll_of_magnetism:   'Scroll of Magnetism',
+  scroll_of_generosity:  'Scroll of Generosity',
+  coat_of_many_colors:   'Coat of Many Colors',
+  wand_of_piercing:      'Wand of Piercing',
+  throwing_dagger:       'Throwing Dagger',
+  ring_of_resistance:    'Ring of Resistance',
+  warhammer:             'Warhammer',
 };
 
 // Items that cannot be purchased more than once
@@ -125,8 +136,8 @@ export const purchaseShopItem = onCall(async (request) => {
   if (!shopSnap.exists())   throw new HttpsError('not-found', 'Shop not found.');
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
 
-  const shop   = shopSnap.val()   as { itemIds?: string[] };
-  const player = playerSnap.val() as { gold: number; inventory?: Record<string, number> };
+  const shop   = shopSnap.val()   as { itemIds?: string[]; name?: string };
+  const player = playerSnap.val() as { gold: number; displayName: string; inventory?: Record<string, number> };
 
   if (!(shop.itemIds ?? []).includes(itemId))
     throw new HttpsError('failed-precondition', 'Item not sold at this shop.');
@@ -140,6 +151,14 @@ export const purchaseShopItem = onCall(async (request) => {
   await db.ref().update({
     [`game/players/${uid}/gold`]:               player.gold - cost,
     [`game/players/${uid}/inventory/${itemId}`]: (player.inventory?.[itemId] ?? 0) + 1,
+  });
+
+  const itemName = ITEM_NAMES[itemId] ?? itemId;
+  await db.ref('game/activityLog').push().set({
+    timestamp: Date.now(),
+    type:      'item_purchased',
+    message:   `${player.displayName} purchased ${itemName} from ${shop.name ?? shopId}.`,
+    icon:      '🛒',
   });
 
   return { success: true };
@@ -175,9 +194,6 @@ export const purchaseShopOrb = onCall(async (request) => {
   const orbId = shop.orbId ?? null;
   if (!orbId) throw new HttpsError('failed-precondition', 'No orb sold at this shop.');
 
-  const orbSnap = await db.ref(`game/orbState/${orbId}`).get();
-  if (orbSnap.exists()) throw new HttpsError('already-exists', 'This orb has already been claimed.');
-
   if (player.gold < ORB_SHOP_COST)
     throw new HttpsError('failed-precondition', 'Not enough gold.');
 
@@ -188,9 +204,21 @@ export const purchaseShopOrb = onCall(async (request) => {
     buyerName: player.displayName,
   };
 
-  await db.ref().update({
-    [`game/players/${uid}/gold`]: player.gold - ORB_SHOP_COST,
-    [`game/orbState/${orbId}`]:   acquisition,
+  // Atomically claim the orb so two concurrent purchases can't both succeed.
+  const { committed } = await db.ref(`game/orbState/${orbId}`).transaction(current => {
+    if (current !== null) return; // abort — already claimed
+    return acquisition;
+  });
+  if (!committed) throw new HttpsError('already-exists', 'This orb has already been claimed.');
+
+  await db.ref(`game/players/${uid}/gold`).set(player.gold - ORB_SHOP_COST);
+
+  const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
+  await db.ref('game/activityLog').push().set({
+    timestamp: Date.now(),
+    type:      'orb_purchased',
+    message:   `${player.displayName} purchased the ${orbLabel} Orb from ${shop.name ?? coord}.`,
+    icon:      '🔮',
   });
 
   return { success: true, orbId };

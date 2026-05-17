@@ -1,4 +1,4 @@
-import { ALL_ORBS, TILE_TRAITS } from '../../lib/constants';
+import { TILE_TRAITS } from '../../lib/constants';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, calcSeekerHintReduction, buildSeekerHintTooltip } from '../../lib/gameLogic';
 import { traitEffect } from './lbHelpers';
 import type { Tile, Player, TileAdventurer, AuthUser, OrbAcquisition, OrbDef, TriState } from '../../types';
@@ -84,14 +84,14 @@ export default function TileDetails({
         <div className="lb-orb-reward" style={{ borderColor: eliteOrb.color }}>
           <span style={{ fontSize: '1.4rem' }}>{eliteOrb.icon}</span>
           <span>
-            {!!orbState[eliteOrb.id]
+            {orbState[eliteOrb.id]
               ? `${eliteOrb.label} Orb already gathered`
               : <>Drops: <strong>{eliteOrb.label} Orb</strong> upon defeat</>}
           </span>
         </div>
       )}
 
-      {edgeOrb && !!orbState[edgeOrb.id] && (
+      {edgeOrb && orbState[edgeOrb.id] && (
         <div className="lb-orb-reward" style={{ borderColor: edgeOrb.color }}>
           <span style={{ fontSize: '1.2rem' }}>{edgeOrb.icon}</span>
           <span>{edgeOrb.label} Orb gathered from here</span>
