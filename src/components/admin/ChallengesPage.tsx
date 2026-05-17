@@ -85,7 +85,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
               <AdvSlotList entry={adv} players={players} />
               <button
                 className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
-                title={variant === 'inprogress' ? 'Kick adventurer and open their slot for a replacement' : 'Remove adventurer from this tile'}
+                title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
                 onClick={() => onKick(adv.advId, adv.owner)}
               >Kick</button>
             </div>
@@ -160,7 +160,7 @@ export default function ChallengesPage({ navigateToMap }: { navigateToMap: (coor
         <button
           className="dash-danger-btn"
           onClick={() => {
-            if (confirm('Reset the map? Player XP, gold, and adventurers are preserved. This cannot be undone.'))
+            if (confirm('Reset the map? Player XP, gold, and Adventurers are preserved. This cannot be undone.'))
               adminMapReset();
           }}
         >

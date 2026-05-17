@@ -62,7 +62,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
         return next;
       });
     } catch {
-      addToast('Failed to rename adventurer. Please try again.', 'error');
+      addToast('Failed to rename Adventurer. Please try again.', 'error');
     }
   };
 

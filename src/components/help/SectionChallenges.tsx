@@ -11,7 +11,7 @@ export default function SectionChallenges() {
       <ol className="help-list">
         <li>Click an <strong>Available</strong> tile and assign one of your idle Adventurers to an open slot.</li>
         <li>Submit your <strong>YAML</strong> to the game thread on Discord.</li>
-        <li>Other players fill the remaining slots. Once all slots are full, an Admin will move the tile to <strong>In Progress</strong>.</li>
+        <li>Other players fill the remaining slots. Once all slots are full, an Admin will move the tile to <strong>In Progress</strong>. At this point the tile is locked — no new Adventurers can join.</li>
         <li>Each player plays their assigned Archipelago games (either goaling all slots, or completing the tile's special challenge.)</li>
         <li>
           Once your slot reaches <strong>100%, Goaled, or Done</strong>, your Adventurer is freed and can
@@ -38,6 +38,10 @@ export default function SectionChallenges() {
       <div className="help-callout">
         <span className="help-callout-icon">🧩</span>
         <span>Some tiles have <strong>public slots</strong> — extra Archipelago worlds open to anyone, not tied to a specific player.</span>
+      </div>
+      <div className="help-callout">
+        <span className="help-callout-icon">🔓</span>
+        <span>If a player is removed from an In Progress tile, the admin may convert their slot into a <strong>claimable slot</strong> — open for any idle Adventurer to step in and fill. Check the tile's lightbox if you hear a spot has opened up.</span>
       </div>
     </div>
   );

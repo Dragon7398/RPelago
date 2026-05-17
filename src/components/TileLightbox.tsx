@@ -61,7 +61,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       await sendAdventurer(coord, entry);
       addToast(`${adv.firstName} ${adv.lastName} dispatched to ${tile.name || coord}.`, 'success');
     } catch {
-      addToast('Failed to send adventurer. Please try again.', 'error');
+      addToast('Failed to send Adventurer. Please try again.', 'error');
     }
   };
 
@@ -92,7 +92,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       await recallAdventurer(coord, advId, user.id);
       addToast('Adventurer recalled.', 'info');
     } catch {
-      addToast('Failed to recall adventurer. Please try again.', 'error');
+      addToast('Failed to recall Adventurer. Please try again.', 'error');
     }
   };
 

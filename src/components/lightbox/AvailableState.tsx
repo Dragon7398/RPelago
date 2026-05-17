@@ -63,12 +63,12 @@ export default function AvailableState({
           <a onClick={() => { onClose(); onLoginRequest(); }}>Enter RPelago →</a>
         </div>
       ) : alreadySent ? (
-        <div className="lb-no-adv">Your adventurer is already assigned here. Recall them above if you change your mind.</div>
+        <div className="lb-no-adv">Your Adventurer is already assigned here. Recall them above if you change your mind.</div>
       ) : (
         <div className="lb-send-section">
           <div className="lb-send-label">SEND AN ADVENTURER ({tile.required} required)</div>
           {freeAdvs.length === 0 ? (
-            <div className="lb-no-adv">All your adventurers are currently on missions.</div>
+            <div className="lb-no-adv">All your Adventurers are currently on missions.</div>
           ) : (
             <div className="lb-adv-picker">
               {freeAdvs.map(adv => (
