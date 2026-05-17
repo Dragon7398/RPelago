@@ -179,7 +179,7 @@ header p {
   background: linear-gradient(135deg, oklch(100% 0 0 / 0.03) 0%, transparent 60%);
   pointer-events: none; z-index: 1;
 }
-.tile .tile-icon { font-size: clamp(1.2rem, 2.8vw, 2.2rem); line-height: 1; filter: drop-shadow(0 2px 4px #000a); transition: transform 0.15s ease; position: relative; z-index: 2; }
+.tile .tile-icon { font-size: calc(var(--tile-size) * 0.37); line-height: 1; filter: drop-shadow(0 2px 4px #000a); transition: transform 0.15s ease; position: relative; z-index: 2; }
 .tile .tile-label { font-family: 'Cinzel', serif; font-size: clamp(0.38rem, 0.65vw, 0.54rem); letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; line-height: 1; position: relative; z-index: 2; }
 .tile .tile-progress { font-family: 'Cinzel', serif; font-size: clamp(0.34rem, 0.55vw, 0.48rem); letter-spacing: 0.05em; position: relative; z-index: 2; margin-top: 1px; }
 
