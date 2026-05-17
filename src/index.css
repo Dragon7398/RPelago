@@ -313,12 +313,18 @@ header p {
 .no-tile-labels .tile-label { display: none; }
 
 /* ── Settings: highlight my adventurers ── */
-.highlight-my-advs .tile-mine {
-  box-shadow: 0 0 0 2px oklch(72% 0.18 75), 0 0 14px oklch(72% 0.18 75 / 0.45);
-  border-color: oklch(72% 0.18 75);
-}
 .highlight-my-advs .tile-mine.state-available {
   animation: none;
+  border-color: oklch(62% 0.20 145);
+  box-shadow: 0 0 0 2px oklch(62% 0.20 145), 0 0 14px oklch(62% 0.20 145 / 0.5);
+}
+.highlight-my-advs .tile-mine.state-inprogress {
+  border-color: oklch(68% 0.20 60);
+  box-shadow: 0 0 0 2px oklch(68% 0.20 60), 0 0 14px oklch(68% 0.20 60 / 0.5);
+}
+.highlight-my-advs .tile-mine.state-complete {
+  border-color: oklch(72% 0.20 75);
+  box-shadow: 0 0 0 2px oklch(72% 0.20 75), 0 0 14px oklch(72% 0.20 75 / 0.5);
 }
 
 /* ── Settings: reduce animations ── */
