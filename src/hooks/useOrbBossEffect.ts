@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { GameState } from '../types';
 import { updateTileAdmin } from '../firebase/db';
 import { ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
-import { getTypeKey } from '../lib/tileGen';
-import { rcFromCoord } from '../lib/constants';
+import { typeKeyForCoord } from '../lib/tileGen';
 
 // Watches orbState for newly acquired elemental orbs and removes the
 // corresponding boss traits. Soft traits are skipped if the boss is already
@@ -30,10 +29,7 @@ export function useOrbBossEffect(gameState: GameState | null): void {
     const elementalNew = newOrbIds.filter(id => id in ELEMENTAL_ORB_TRAITS);
     if (elementalNew.length === 0) return;
 
-    const bossCoord = Object.keys(gameState.tiles).find(coord => {
-      const [r, c] = rcFromCoord(coord);
-      return getTypeKey(r, c) === 'boss';
-    });
+    const bossCoord = Object.keys(gameState.tiles).find(coord => typeKeyForCoord(coord) === 'boss');
     if (!bossCoord) return;
 
     const bossTile = gameState.tiles[bossCoord];

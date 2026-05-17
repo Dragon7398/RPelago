@@ -16,9 +16,9 @@ import {
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
 } from '../firebase/db';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
-import { getAdjCoords } from '../lib/constants';
+import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { useOrbBossEffect } from '../hooks/useOrbBossEffect';
-import { getTypeKey, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
+import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
 
 interface GameStateContextValue {
@@ -233,8 +233,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     for (const adjCoord of getAdjCoords(coord)) {
       const adjTile = gameState.tiles[adjCoord];
       if (!adjTile || adjTile.state !== 'hidden') continue;
-      const [ar, ac] = rcFromCoord(adjCoord);
-      const adjType  = getTypeKey(ar, ac);
+      const adjType  = typeKeyForCoord(adjCoord);
       if (adjType === 'town') {
         revealCoords.push({ coord: adjCoord, newState: 'complete' });
         for (const nc of getAdjCoords(adjCoord)) {
@@ -305,7 +304,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       ? slots.map(s => ({ ...s, room: tileAdv.room as 1 | 2 }))
       : slots;
 
-    const FREE_STATUSES = new Set(['100%', 'Goaled', 'Done']);
+    const FREE_STATUSES = FREE_COMPLETED_STATUSES;
     const allComplete  = stampedSlots.length > 0 && stampedSlots.every(s => s.status && FREE_STATUSES.has(s.status));
     const stillHeld    = playerAdv?.busy === true && playerAdv?.busyTile === coord;
     const freeAdventurer = allComplete && stillHeld && tileAdv

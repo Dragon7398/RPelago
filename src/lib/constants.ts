@@ -49,6 +49,7 @@ export const ALL_ORBS: OrbDef[] = [
 ];
 
 export const SLOT_STATUSES = ['Unstarted', 'In-Progress', '100%', 'Goaled', 'Done'] as const;
+export const FREE_COMPLETED_STATUSES = new Set(['100%', 'Goaled', 'Done']);
 
 export const NAME_COLORS: readonly { id: string; label: string; value: string }[] = [
   { id: 'default',  label: 'Default',  value: 'oklch(92% 0.03 80)'  },

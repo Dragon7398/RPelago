@@ -1,7 +1,7 @@
 import type { Tile, TileTypeKey, TriState, OrbConfig } from '../types';
 import {
   COLS, ROWS, ADV_CLASSES, ADV_NAMES_FIRST, ADV_NAMES_LAST,
-  ALL_ORBS, coordFromRC, getAdjRC, isEdgeTile, TOWN_SHOP_ITEMS, NON_CENTER_SHOP_IDS,
+  ALL_ORBS, coordFromRC, rcFromCoord, getAdjRC, isEdgeTile, TOWN_SHOP_ITEMS, NON_CENTER_SHOP_IDS,
   BOSS_ELEMENTAL_TRAIT_VALUES,
 } from './constants';
 
@@ -161,6 +161,11 @@ export function initializeGrid(seed: number): void {
 }
 
 export function getTypeKey(r: number, c: number): TileTypeKey {
+  return _typeGrid[r][c];
+}
+
+export function typeKeyForCoord(coord: string): TileTypeKey {
+  const [r, c] = rcFromCoord(coord);
   return _typeGrid[r][c];
 }
 

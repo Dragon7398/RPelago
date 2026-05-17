@@ -1,5 +1,5 @@
-import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats, AdvSlot } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, getAdjCoords } from './constants';
+import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from '../types';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
 import { slotsFromEntry } from './slotHelpers';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
@@ -260,7 +260,7 @@ export function getFeatWarnings(player: Player, tiles: Record<string, Tile>): st
     warnings.push(`Has ${advCount} adventurers but level ${level} allows ${maxAdvs}`);
   }
 
-  const FREE_SLOT_STATUSES = new Set(['100%', 'Goaled', 'Done']);
+  const FREE_SLOT_STATUSES = FREE_COMPLETED_STATUSES;
   const isActiveOnTile = (slots: Tile['adventurers'][string]['slots']) => {
     if (!slots || slots.length === 0) return true;
     return !slots.every(s => s.status && FREE_SLOT_STATUSES.has(s.status));

@@ -1,5 +1,5 @@
-import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, TILE_TRAITS } from '../../../lib/constants';
-import { getTypeKey } from '../../../lib/tileGen';
+import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, TILE_TRAITS } from '../../../lib/constants';
+import { getTypeKey, typeKeyForCoord } from '../../../lib/tileGen';
 import type { GameState } from '../../../types';
 
 interface Props {
@@ -19,8 +19,7 @@ for (let c = 0; c < COLS; c++) {
 function tileComplete(coord: string, gs: GameState): boolean {
   const t = gs.tiles[coord];
   if (!t) return false;
-  const [r, c] = rcFromCoord(coord);
-  const typeKey = getTypeKey(r, c);
+  const typeKey = typeKeyForCoord(coord);
   switch (typeKey) {
     case 'battle':
       return Object.keys(t.traits ?? {}).length > 0;
@@ -45,8 +44,7 @@ export default function MapGridPanel({ gameState, selectedCoord, onSelectCoord }
     let battle = 0, puzzle = 0, elite = 0;
     for (const coord of allCoords) {
       if (!gameState.tiles[coord]?.traits?.[def.id]) continue;
-      const [r, c] = rcFromCoord(coord);
-      const typeKey = getTypeKey(r, c);
+      const typeKey = typeKeyForCoord(coord);
       if (typeKey === 'battle') battle++;
       else if (typeKey === 'puzzle') puzzle++;
       else if (typeKey === 'elite') elite++;
@@ -93,8 +91,7 @@ export default function MapGridPanel({ gameState, selectedCoord, onSelectCoord }
       <div className="map-checklist">
         <div className="map-checklist-title">TILE CHECKLIST</div>
         {allCoords.map(coord => {
-          const [r, c] = rcFromCoord(coord);
-          const typeKey = getTypeKey(r, c);
+          const typeKey = typeKeyForCoord(coord);
           const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
           const t       = gameState.tiles[coord];
           const done    = tileComplete(coord, gameState);

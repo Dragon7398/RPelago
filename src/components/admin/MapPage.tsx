@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
-import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS, rcFromCoord } from '../../lib/constants';
-import { getTypeKey } from '../../lib/tileGen';
+import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
+import { typeKeyForCoord } from '../../lib/tileGen';
 import type { TileState, TriState } from '../../types';
 import MapGridPanel        from './mapPage/MapGridPanel';
 import TraitEditor         from './mapPage/TraitEditor';
@@ -92,8 +92,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
           {!selectedCoord || !tile ? (
             <div className="admin-detail-empty">Select a tile to edit it.</div>
           ) : (() => {
-            const [selR, selC] = rcFromCoord(selectedCoord);
-            const typeKey  = getTypeKey(selR, selC);
+            const typeKey  = typeKeyForCoord(selectedCoord);
             const isTown   = typeKey === 'town' || typeKey === 'town_center';
             const shop     = isTown && tile.shopId ? (gs.shops?.[tile.shopId] ?? null) : null;
             const orbDef   = shop?.orbId ? ALL_ORBS.find(o => o.id === shop.orbId) : null;
