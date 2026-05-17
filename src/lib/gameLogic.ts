@@ -1,5 +1,6 @@
 import type { Player, Tile, AdvClass, Adventurer, PlayerFeats, AdvSlot } from '../types';
 import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS } from './constants';
+import { slotsFromEntry } from './slotHelpers';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
 export function calcLevel(xp: number): number {
@@ -208,9 +209,7 @@ export function awardTileRewards(
     let slotBonusXP = 0;
     let slotBonusGold = 0;
     for (const adv of adventurers.filter(a => a.owner === ownerId)) {
-      const advSlots: AdvSlot[] = adv.slots
-        ? (Array.isArray(adv.slots) ? adv.slots : Object.values(adv.slots as Record<string, AdvSlot>))
-        : [];
+      const advSlots = slotsFromEntry(adv);
       for (const slot of advSlots) {
         slotBonusXP   += slot.bonusXP   ?? 0;
         slotBonusGold += slot.bonusGold ?? 0;

@@ -2,14 +2,8 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, rcFromCoord, FEATS } from '../../lib/constants';
 import { getTypeKey } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
-import type { TileAdventurer, AdvSlot } from '../../types';
-
-function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
-  if (!entry.slots) return [];
-  return Array.isArray(entry.slots)
-    ? entry.slots
-    : Object.values(entry.slots as Record<string, AdvSlot>);
-}
+import type { TileAdventurer } from '../../types';
+import { slotsFromEntry } from '../../lib/slotHelpers';
 
 function AdvSlotList({ entry, players }: {
   entry: TileAdventurer;

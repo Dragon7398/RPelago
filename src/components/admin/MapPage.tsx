@@ -5,6 +5,7 @@ import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, SLOT_STATU
 import type { TraitDef } from '../../lib/constants';
 import { getTypeKey } from '../../lib/tileGen';
 import type { TileState, TriState, AdvSlot, SlotStatus } from '../../types';
+import { normalizeSlots } from '../../lib/slotHelpers';
 
 const STATE_BUTTONS: { state: TileState; label: string; cls: string }[] = [
   { state: 'hidden',     label: 'Hidden',      cls: 'btn-hidden'     },
@@ -13,10 +14,6 @@ const STATE_BUTTONS: { state: TileState; label: string; cls: string }[] = [
   { state: 'complete',   label: 'Complete',    cls: 'btn-complete'   },
 ];
 
-function readSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlot[] {
-  if (!raw) return [];
-  return Array.isArray(raw) ? raw : Object.values(raw);
-}
 
 export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const {
@@ -497,7 +494,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                   <>
                     <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>SLOTS</div>
                     {Object.values(tile.adventurers ?? {}).map(entry => {
-                      const slots = readSlots(entry.slots as any);
+                      const slots = normalizeSlots(entry.slots as any);
                       const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus };
                       const save  = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord!, entry.advId, next);
                       return (
@@ -582,7 +579,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
 
                 {/* Public slots */}
                 {(() => {
-                  const pubSlots    = readSlots(tile.publicSlots as any);
+                  const pubSlots    = normalizeSlots(tile.publicSlots as any);
                   const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
                   const savePub     = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord!, next);
                   return (

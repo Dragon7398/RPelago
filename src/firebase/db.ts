@@ -3,6 +3,7 @@ import { db, firebaseReady } from './config';
 import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
+import { normalizeSlots } from '../lib/slotHelpers';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -284,9 +285,7 @@ export async function adminKickAdventurer(
   if (convertToClaimableSlot) {
     const taSnap = await get(ref(db!, `game/tiles/${coord}/adventurers/${advId}`));
     const ta = taSnap.exists() ? (taSnap.val() as TileAdventurer) : null;
-    const rawSlots: AdvSlot[] = ta?.slots
-      ? (Array.isArray(ta.slots) ? ta.slots : Object.values(ta.slots as Record<string, AdvSlot>))
-      : [];
+    const rawSlots = normalizeSlots(ta?.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
     slotsToAdd = rawSlots.length > 0
       ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details   ? { details:   s.details   } : {}), ...(s.room      ? { room:      s.room      } : {}), ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}), ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}) }))
       : [{ name: '', game: '' }];
