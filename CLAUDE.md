@@ -37,13 +37,54 @@ Firebase RTDB (game/)
 ### Map grid
 
 - Fixed **5 rows × 7 columns** (ROWS=5, COLS=7 in `constants.ts`).
-- Coordinates are strings like `"2,3"` (row,col). Helpers: `coordFromRC(r,c)`, `rcFromCoord(coord)`.
-- Tile types: `town_center` (always D3 = row 2, col 3), 3 `town`s, 5 `elite`s, 9 `puzzle`s, 1 `boss` (corner, seed-determined), rest `battle`.
+- Coordinates are column-letter + row-number strings like `"D3"` (col D, row 3). Helpers: `coordFromRC(r,c)`, `rcFromCoord(coord)`.
+- Tile types: `town_center` (always D3), 3 `town`s, 5 `elite`s, 9 `puzzle`s, 1 `boss` (corner, seed-determined), rest `battle`.
 - Town tiles are auto-completed and reveal adjacent tiles when a neighbor completes.
 
 ### Orb system
 
-Nine elemental orbs (`ALL_ORBS` in `constants.ts`) are collected by completing specific tiles. `ELEMENTAL_ORB_TRAITS` maps each orb to boss traits it removes. When a new orb is collected, `GameStateContext`'s orb effect (`useEffect` on `gameState.orbState`) removes the corresponding traits from the boss tile, skipping soft traits if the boss is already `inprogress`.
+Nine elemental orbs (`ALL_ORBS` in `constants.ts`): fire, water, earth, air, light, dark, metal, wood, soul. Orbs are collected from: 5 elite tile drops, 3 shop purchases, 1 edge battle, 1 edge puzzle, and boss completion. Which orb goes where is configured in `orbConfig` (stored in Firebase).
+
+`ELEMENTAL_ORB_TRAITS` maps four of the orbs to boss traits they keep locked:
+- **fire** → cursed, stunning
+- **air** → aerial, agile
+- **water** → camouflage, taunt
+- **earth** → enduring, sturdy
+
+The boss starts with all eight of these traits applied. When a player acquires an orb, `useOrbBossEffect` (a hook called from `GameStateContext`) removes the corresponding traits from the boss tile, skipping `BOSS_SOFT_TRAITS` (camouflage, enduring) if the boss is already `inprogress`.
+
+`OrbAcquisition` records how each orb was obtained: `method` ('battle' | 'puzzle' | 'elite' | 'boss' | 'shop' | 'admin'), `tileCoord`, `tileName`, and `buyerName`.
+
+### Trait system
+
+16 traits defined in `TILE_TRAITS` (`constants.ts`). Traits with `hasValue: true` carry a numeric parameter (e.g. `agile: 250` means ≤250 checks):
+
+| Trait | Value | Effect |
+|-------|-------|--------|
+| aerial | — | Slot needs Fly or Ranged Weapon |
+| agile | checks | Slot may not exceed N checks |
+| bifurcated | — | Challenge splits into Room 1 / Room 2 |
+| camouflage | — | Hints off until one slot has goaled |
+| confounding | — | Adds a Simon Tatham puzzle as a public slot |
+| cursed | — | One or more YAML settings randomized after submit |
+| enduring | % | Must send N% of all checks, not just goal |
+| horde | count | Slot must have at least N games |
+| magicresist | — | Slot must not involve magic |
+| physresist | — | Slot must involve magic |
+| puzzling | — | Adds a Jigsaw as a public slot |
+| sturdy | checks | Slot must have at least N checks |
+| stunning | — | Random slot gets all locations excluded |
+| taunt | — | Random slot gets all locations prioritized |
+| thief | — | One or more slots steal items from others |
+| unbalanced | — | Progression balancing set to 0 |
+
+Items can negate specific traits; `ITEM_TRAIT_REFS` maps item IDs to the trait IDs they counter, used to underline trait names in shop descriptions.
+
+### Bifurcated tiles
+
+When a tile has the `bifurcated` trait, `adminSetTileState()` splits it into Room 1 and Room 2 when transitioning to `inprogress`. Each `AdvSlot` and `TileAdventurer` has an optional `room?: 1 | 2` field for assignment. `InProgressState.tsx` renders the two rooms separately. Admin can assign public slots and claimable slots to a specific room.
+
+The stunned/taunted adventurer IDs are tracked on the tile as `stunnedAdvId` and `tauntedAdvId`.
 
 ### Auth
 
@@ -51,9 +92,43 @@ Discord OAuth → `exchangeDiscordCode` Cloud Function → Firebase custom token
 
 ### Shops and items
 
-Shops are keyed by `shopId` on town tiles. Purchases go through Cloud Functions (`purchaseShopOrb`, `purchaseShopItem`) that use the admin SDK to bypass DB write rules for inventory updates. The "Coat of Many Colors" item gates the name color picker.
+Four named shops (Centralia, Frostshear, Flamefell, Pinereach) are assigned to town tiles via seeded shuffle. Each shop has one optional orb slot (`orbId: string | null`) and an `itemIds` array. Default shop configs are in `DEFAULT_SHOPS` (`constants.ts`); the live config is stored in `game/shops` in Firebase and is admin-editable.
 
-> **Dual-copy item costs**: `SHOP_ITEMS` in `src/lib/constants.ts` defines costs for the UI. `ITEM_COSTS` in `functions/src/index.ts` is a separate hardcoded copy used by the `purchaseShopItem` Cloud Function to enforce the price server-side. **Both must be updated together** whenever a price changes — the function comment says "mirrors src/lib/constants.ts SHOP_ITEMS".
+Purchases go through Cloud Functions (`purchaseShopOrb`, `purchaseShopItem`) that use the admin SDK to bypass DB write rules for inventory updates. Orb purchase costs `ORB_SHOP_COST` (1500 gold).
+
+Eight shop items are defined in `SHOP_ITEMS` (`constants.ts`):
+
+| Item | Cost | Type |
+|------|------|------|
+| Map | 250 | Consumable — request one hint |
+| Scroll of Magnetism | 1000 | Consumable — enables Collect On |
+| Scroll of Generosity | 1000 | Consumable — enables Release On |
+| Coat of Many Colors | 750 | Cosmetic — unlocks name color picker |
+| Wand of Piercing | 300 | Passive — ignore Magic/Physical Resist |
+| Throwing Dagger | 400 | Passive — ignore Aerial; +25% checks on Agile |
+| Ring of Resistance | 500 | Passive — immune to Cursed and Stunning |
+| Warhammer | 600 | Passive — –1 game on Horde; –50% checks on Sturdy |
+
+> **Dual-copy item costs**: `SHOP_ITEMS` in `src/lib/constants.ts` defines costs for the UI. `ITEM_COSTS` in `functions/src/index.ts` is a separate hardcoded copy used by the `purchaseShopItem` Cloud Function to enforce the price server-side. **Both must be updated together** whenever a price changes.
+
+### Feats system
+
+Players unlock one feat at each of levels 3, 5, and 7, stored in `player.feats` (`PlayerFeats` type). Feats are permanent and modify YAML submission limits and/or provide passive bonuses.
+
+**Level 3 feats** (pick one):
+- **Knowledgeable** (📚) — +1 Starting Hint, +2 Hinted Locations per YAML
+- **Picky** (🚫) — +4 Excluded Locations per YAML (max 6)
+- **Helpful** (📌) — +2 Priority Locations per YAML (max 4)
+
+**Level 5 feats** (pick one):
+- **Mentor** (🎓) — teammates gain 5% bonus XP; you gain 1% per extra player
+- **Treasurer** (💰) — teammates gain 10% bonus Gold; you gain 3% per extra player
+
+**Level 7 feats** (pick one):
+- **Seeker** (🔍) — challenges you join have 1% reduced hint cost (stacks, min 1%)
+- **Prepared** (🎒) — +1 starting inventory item per YAML
+
+Feats with `yamlEffect` affect the YAML limits displayed in the help modal (`SectionYaml.tsx`). Feat selection UI lives in `ProfileLightbox.tsx`.
 
 ### Public and claimable slots
 
@@ -63,6 +138,8 @@ Two distinct slot types exist on tiles:
 - **`claimableSlots?: Record<string, AdvSlot[]>`** — Created when an admin kicks a player from an **in-progress** tile. Any eligible player can claim one: the claim atomically deletes the slot entry and adds the player as a `TileAdventurer`. Keyed by Firebase push keys so individual entries are deletable.
 
 The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **delete** (claim) an existing entry but not create one. The `adventurers/$advId` validate rule uses a Firebase pre-write evaluation trick: during an atomic claim `update()`, the claimable slot still exists in `data`/`root` (pre-write state), so the rule `claimableSlots.exists()` passes even though the same update deletes it.
+
+`AdvSlot` supports `bonusXP` and `bonusGold` for extra rewards on specific slots, and `room?: 1 | 2` for bifurcated tiles.
 
 ### In-progress join restriction
 
@@ -76,7 +153,17 @@ Players have a `warnings?: Record<string, PlayerWarning>` field (push-keyed for 
 - **Auto-generated** when an admin kicks a player from an in-progress tile (written atomically in the same `update()` call as the kick).
 - **Manually added** by admin via the Players page in the Admin Dashboard.
 
-The Players page shows a count badge (`⚑ N`) and an inline list with AUTO/ADMIN tags, dates, per-warning delete, and a "Clear all" button.
+The Players page shows a count badge and an inline list with AUTO/ADMIN tags, dates, per-warning delete, and a "Clear all" button.
+
+### Activity log
+
+Real-time event feed stored in `game/activityLog` in Firebase, capped at 25 entries. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, and orb purchases. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
+
+### Player customization
+
+- **Name color**: 12 color options (`NAME_COLORS` in `constants.ts`). Requires owning the "Coat of Many Colors" item. Stored as `player.nameColor`.
+- **Adventurer renaming**: Players can rename adventurers (12-char limit per name part) via `ProfileLightbox`.
+- **XP history**: `player.xpHistory` archives XP totals from prior campaigns.
 
 ### Environment
 
@@ -87,15 +174,28 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | Path | Role |
 |------|------|
 | `src/types/index.ts` | All TypeScript types for game entities |
-| `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, level thresholds |
+| `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData` |
-| `src/lib/gameLogic.ts` | XP/level math, adventurer reward calculation |
+| `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation |
+| `src/lib/slotHelpers.ts` | Slot normalization utilities |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions` |
 | `src/firebase/db.ts` | All RTDB read/write functions |
 | `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert, `isAdmin` |
 | `src/contexts/GameStateContext.tsx` | Game subscription, all action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
-| `src/components/admin/` | Admin dashboard tabs (Map, Challenges, Players, Shops, Orbs) |
-| `src/components/AdminDashboard.tsx` | Admin dashboard shell; sets `document.title` to `RPelago — Admin` on mount |
+| `src/hooks/useOrbBossEffect.ts` | Boss trait removal on orb acquisition |
+| `src/components/MapGrid.tsx` | Renders the 5×7 tile grid |
+| `src/components/Tile.tsx` | Individual tile cell |
+| `src/components/TileLightbox.tsx` | Lightbox for non-town tiles |
+| `src/components/ProfileLightbox.tsx` | Player profile, adventurers, feat selection, name color |
+| `src/components/ActivityFeed.tsx` | Collapsible real-time event feed |
+| `src/components/OrbBar.tsx` | Orb collection display |
+| `src/components/HelpModal.tsx` | Help modal shell |
+| `src/components/help/` | Help section components (9 sections) |
+| `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers) |
+| `src/components/AdminDashboard.tsx` | Admin dashboard shell |
+| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage |
+| `src/components/admin/mapPage/` | Map page sub-editors: MapGridPanel, AdvSlotEditor, PublicSlotEditor, ClaimableBonusEditor, TraitEditor |
+| `src/components/admin/playersPage/` | PlayerCard sub-component |
 | `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |
 | `database.rules.json` | Firebase security rules |

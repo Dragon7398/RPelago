@@ -187,14 +187,10 @@
   width: 22px; height: 22px; border-radius: 3px; flex-shrink: 0;
   margin-top: 0.15rem; border: 1px solid;
 }
-.sw-hidden    { background: oklch(8% 0.02 75);  border-color: oklch(13% 0.02 75); }
-.sw-available {
-  background: oklch(15% 0.05 145);
-  border-color: oklch(45% 0.12 145);
-  box-shadow: 0 0 6px oklch(45% 0.12 145);
-}
-.sw-inprogress { background: oklch(16% 0.06 60);  border-color: oklch(50% 0.14 60); }
-.sw-complete   { background: oklch(16% 0.05 75);  border-color: oklch(50% 0.12 75); }
+.sw-hidden    { background: oklch(8% 0.02 75);   border-color: oklch(13% 0.02 75); }
+.sw-available { background: oklch(12% 0.04 145); border-color: oklch(45% 0.12 145); box-shadow: 0 0 6px oklch(45% 0.12 145 / 0.6); }
+.sw-inprogress{ background: oklch(12% 0.05 60);  border-color: oklch(50% 0.14 60); }
+.sw-complete  { background: oklch(12% 0.03 75);  border-color: oklch(50% 0.12 75); }
 
 /* ── Class Grid ── */
 .help-class-grid {

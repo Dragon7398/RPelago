@@ -198,13 +198,13 @@ header p {
 }
 
 /* ══ STATE: AVAILABLE ══ */
-.tile.state-available { cursor: pointer; }
+.tile.state-available { cursor: pointer; border-color: oklch(45% 0.12 145); color: oklch(55% 0.14 145); }
 .tile.state-available:hover { transform: translateY(-3px) scale(1.04); z-index: 2; }
 .tile.state-available:hover .tile-icon { transform: scale(1.1); }
 .tile.state-available .tile-progress { color: oklch(60% 0.08 75); }
 
 /* ══ STATE: IN-PROGRESS ══ */
-.tile.state-inprogress { cursor: pointer; }
+.tile.state-inprogress { cursor: pointer; border-color: oklch(50% 0.14 60); }
 .tile.state-inprogress:hover { transform: translateY(-3px) scale(1.04); z-index: 2; }
 .tile.state-inprogress:hover .tile-icon { transform: scale(1.1); }
 .tile.state-inprogress .tile-progress { color: var(--amber); }
@@ -221,7 +221,7 @@ header p {
 .tile.state-inprogress.has-claimable .tile-progress { color: oklch(66% 0.16 50); }
 
 /* ══ STATE: COMPLETE ══ */
-.tile.state-complete { cursor: pointer; }
+.tile.state-complete { cursor: pointer; border-color: oklch(50% 0.12 75); }
 .tile.state-complete:hover { transform: translateY(-3px) scale(1.04); z-index: 2; }
 .tile.state-complete:hover .tile-icon { transform: scale(1.1); }
 .tile.state-complete .tile-progress { color: oklch(70% 0.14 145); }
@@ -237,7 +237,6 @@ header p {
 .tile.state-inprogress.tile-battle,
 .tile.state-complete.tile-battle {
   background: linear-gradient(145deg, oklch(14% 0.06 25) 0%, oklch(18% 0.04 25) 100%);
-  border-color: oklch(40% 0.12 25) !important;
 }
 .tile.state-available.tile-battle:hover,
 .tile.state-inprogress.tile-battle:hover,
@@ -250,7 +249,6 @@ header p {
 .tile.state-inprogress.tile-puzzle,
 .tile.state-complete.tile-puzzle {
   background: linear-gradient(145deg, oklch(14% 0.06 195) 0%, oklch(18% 0.04 195) 100%);
-  border-color: oklch(40% 0.12 195) !important;
 }
 .tile.state-available.tile-puzzle:hover,
 .tile.state-inprogress.tile-puzzle:hover,
@@ -263,7 +261,6 @@ header p {
 .tile.state-inprogress.tile-town,
 .tile.state-complete.tile-town {
   background: linear-gradient(145deg, oklch(16% 0.07 145) 0%, oklch(20% 0.05 145) 100%);
-  border-color: oklch(40% 0.13 145) !important;
 }
 .tile.state-available.tile-town:hover,
 .tile.state-inprogress.tile-town:hover,
@@ -276,7 +273,6 @@ header p {
 .tile.state-inprogress.tile-elite,
 .tile.state-complete.tile-elite {
   background: linear-gradient(145deg, oklch(14% 0.06 310) 0%, oklch(18% 0.04 310) 100%);
-  border-color: oklch(40% 0.12 310) !important;
 }
 .tile.state-available.tile-elite:hover,
 .tile.state-inprogress.tile-elite:hover,
@@ -289,7 +285,6 @@ header p {
 .tile.state-inprogress.tile-boss,
 .tile.state-complete.tile-boss {
   background: linear-gradient(145deg, oklch(15% 0.08 40) 0%, oklch(20% 0.06 40) 100%);
-  border-color: oklch(40% 0.15 40) !important;
 }
 .tile.state-available.tile-boss:hover,
 .tile.state-inprogress.tile-boss:hover,
@@ -298,9 +293,7 @@ header p {
 .tile.state-inprogress.tile-boss .tile-label,
 .tile.state-complete.tile-boss .tile-label { color: oklch(75% 0.18 40); }
 
-.tile.tile-center.state-complete,
-.tile.tile-center.state-available,
-.tile.tile-center.state-inprogress { border-color: oklch(52% 0.14 75) !important; }
+.tile.tile-center.state-complete { border-color: oklch(52% 0.14 75) !important; }
 
 /* Animations */
 @keyframes fogLift {
@@ -340,9 +333,9 @@ header p {
 .state-legend-item { display: flex; align-items: center; gap: 0.4rem; font-family: 'Cinzel', serif; font-size: 0.62rem; color: var(--gold-dim); letter-spacing: 0.07em; }
 .state-swatch { width: 10px; height: 10px; border-radius: 50%; border: 1px solid; flex-shrink: 0; }
 .sw-hidden    { background: oklch(8% 0.02 75);  border-color: oklch(18% 0.03 75); }
-.sw-available { background: oklch(10% 0.03 75); border-color: oklch(35% 0.07 75); }
-.sw-inprogress{ background: oklch(72% 0.16 60 / 0.3); border-color: oklch(72% 0.16 60); }
-.sw-complete  { background: oklch(72% 0.14 75 / 0.2); border-color: var(--gold); }
+.sw-available { background: oklch(10% 0.04 145); border-color: oklch(45% 0.12 145); }
+.sw-inprogress{ background: oklch(10% 0.05 60);  border-color: oklch(50% 0.14 60); }
+.sw-complete  { background: oklch(10% 0.03 75);  border-color: oklch(50% 0.12 75); }
 
 /* ── Settings popout ── */
 .settings-toggle {
