@@ -1,5 +1,5 @@
-import type { Player, Tile, AdvClass, Adventurer, PlayerFeats, AdvSlot } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS } from './constants';
+import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats, AdvSlot } from '../types';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, getAdjCoords } from './constants';
 import { slotsFromEntry } from './slotHelpers';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
@@ -227,4 +227,90 @@ export function awardTileRewards(
   }
 
   return updated;
+}
+
+// ── Player validation ──────────────────────────────────────────────────────────
+
+const SLOT_MIN_LEVEL: Record<string, number>   = { level3: 3, level5: 5, level7: 7 };
+const SLOT_ALLOWED:   Record<string, number[]> = { level3: [3], level5: [3, 5], level7: [3, 5, 7] };
+
+export function getFeatWarnings(player: Player, tiles: Record<string, Tile>): string[] {
+  const feats = player.feats ?? {};
+  const level = calcLevel(player.xp);
+  const warnings: string[] = [];
+
+  for (const [slot, featId] of Object.entries(feats)) {
+    if (!featId) continue;
+    const def = FEATS.find(f => f.id === featId);
+    if (!def) {
+      warnings.push(`${slot}: unrecognised feat ID "${featId}"`);
+      continue;
+    }
+    if (!(SLOT_ALLOWED[slot] ?? []).includes(def.availableAt)) {
+      warnings.push(`${slot}: ${def.name} (tier ${def.availableAt}) is not valid for this slot`);
+    }
+    if (level < (SLOT_MIN_LEVEL[slot] ?? 99)) {
+      warnings.push(`${slot}: ${def.name} requires level ${SLOT_MIN_LEVEL[slot]}, player is level ${level}`);
+    }
+  }
+
+  const maxAdvs  = adventurerCountForLevel(level);
+  const advCount = Object.keys(player.adventurers ?? {}).length;
+  if (advCount > maxAdvs) {
+    warnings.push(`Has ${advCount} adventurers but level ${level} allows ${maxAdvs}`);
+  }
+
+  const FREE_SLOT_STATUSES = new Set(['100%', 'Goaled', 'Done']);
+  const isActiveOnTile = (slots: Tile['adventurers'][string]['slots']) => {
+    if (!slots || slots.length === 0) return true;
+    return !slots.every(s => s.status && FREE_SLOT_STATUSES.has(s.status));
+  };
+  const advTileMap: Record<string, string[]> = {};
+  for (const [coord, tile] of Object.entries(tiles)) {
+    for (const [advId, ta] of Object.entries(tile.adventurers ?? {})) {
+      if (ta.owner === player.id && isActiveOnTile(ta.slots)) {
+        (advTileMap[advId] ??= []).push(coord);
+      }
+    }
+  }
+  for (const [advId, coords] of Object.entries(advTileMap)) {
+    if (coords.length > 1) {
+      const adv  = player.adventurers?.[advId];
+      const name = adv ? `${adv.firstName} ${adv.lastName}` : advId;
+      warnings.push(`${name} is double-assigned: ${coords.join(', ')}`);
+    }
+  }
+
+  return warnings;
+}
+
+// ── Tile availability recalculation ───────────────────────────────────────────
+
+// Pure function — given a tile state change, returns only the coords whose
+// state differs from the current map (hidden→available derivation included).
+export function computeRecalcUpdates(
+  tiles: Record<string, Tile>,
+  coord: string,
+  newState: TileState,
+): Record<string, TileState> {
+  const map: Record<string, TileState> = {};
+  for (const [c, t] of Object.entries(tiles)) map[c] = t.state;
+  map[coord] = newState;
+
+  for (const c of Object.keys(map)) {
+    if (map[c] === 'available') map[c] = 'hidden';
+  }
+
+  for (const [c, state] of Object.entries(map)) {
+    if (state !== 'complete') continue;
+    for (const adjCoord of getAdjCoords(c)) {
+      if (map[adjCoord] === 'hidden') map[adjCoord] = 'available';
+    }
+  }
+
+  const updates: Record<string, TileState> = {};
+  for (const [c, s] of Object.entries(map)) {
+    if (tiles[c]?.state !== s) updates[c] = s;
+  }
+  return updates;
 }

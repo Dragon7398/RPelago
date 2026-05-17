@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry } from '../types';
@@ -15,8 +15,9 @@ import {
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
 } from '../firebase/db';
-import { awardTileRewards } from '../lib/gameLogic';
-import { getAdjCoords, ELEMENTAL_ORB_TRAITS, BOSS_SOFT_TRAITS } from '../lib/constants';
+import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
+import { getAdjCoords } from '../lib/constants';
+import { useOrbBossEffect } from '../hooks/useOrbBossEffect';
 import { getTypeKey, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
 
@@ -62,38 +63,11 @@ interface GameStateContextValue {
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
 
-function computeRecalcUpdates(
-  tiles: Record<string, Tile>,
-  coord: string,
-  newState: TileState,
-): Record<string, TileState> {
-  const map: Record<string, TileState> = {};
-  for (const [c, t] of Object.entries(tiles)) map[c] = t.state;
-  map[coord] = newState;
-
-  for (const c of Object.keys(map)) {
-    if (map[c] === 'available') map[c] = 'hidden';
-  }
-
-  for (const [c, state] of Object.entries(map)) {
-    if (state !== 'complete') continue;
-    for (const adjCoord of getAdjCoords(c)) {
-      if (map[adjCoord] === 'hidden') map[adjCoord] = 'available';
-    }
-  }
-
-  const updates: Record<string, TileState> = {};
-  for (const [c, s] of Object.entries(map)) {
-    if (tiles[c]?.state !== s) updates[c] = s;
-  }
-  return updates;
-}
 
 export function GameStateProvider({ children }: { children: ReactNode }) {
   const [gameState, setGameState]   = useState<GameState | null>(null);
   const [loading, setLoading]       = useState(true);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
-  const processedOrbsRef = useRef<Set<string> | null>(null);
 
   // Subscribe to game state immediately — reads are open to all users.
   useEffect(() => {
@@ -125,52 +99,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     return () => unsubscribeAuth();
   }, []);
 
-  // ── Orb → boss trait effect ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!gameState) return;
-    const currentOrbIds = Object.keys(gameState.orbState ?? {});
-
-    if (processedOrbsRef.current === null) {
-      processedOrbsRef.current = new Set(currentOrbIds);
-      return;
-    }
-
-    if (currentOrbIds.length === 0) {
-      processedOrbsRef.current = new Set();
-      return;
-    }
-
-    const newOrbIds = currentOrbIds.filter(id => !processedOrbsRef.current!.has(id));
-    newOrbIds.forEach(id => processedOrbsRef.current!.add(id));
-    const elementalNew = newOrbIds.filter(id => id in ELEMENTAL_ORB_TRAITS);
-    if (elementalNew.length === 0) return;
-
-    const bossCoord = Object.keys(gameState.tiles).find(coord => {
-      const [r, c] = rcFromCoord(coord);
-      return getTypeKey(r, c) === 'boss';
-    });
-    if (!bossCoord) return;
-
-    const bossTile = gameState.tiles[bossCoord];
-    if (!bossTile || bossTile.state === 'complete') return;
-
-    const softSet = new Set(BOSS_SOFT_TRAITS);
-    const isInProgress = bossTile.state === 'inprogress';
-    const next = { ...(bossTile.traits ?? {}) };
-    let changed = false;
-
-    for (const orbId of elementalNew) {
-      const traitIds = ELEMENTAL_ORB_TRAITS[orbId]!;
-      const toRemove = isInProgress ? traitIds.filter(t => softSet.has(t)) : [...traitIds];
-      for (const traitId of toRemove) {
-        if (traitId in next) { delete next[traitId]; changed = true; }
-      }
-    }
-
-    if (changed) {
-      updateTileAdmin(bossCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
-    }
-  }, [gameState?.orbState]); // eslint-disable-line react-hooks/exhaustive-deps
+  useOrbBossEffect(gameState);
 
   // ── Player actions ──────────────────────────────────────────────────────────
   const sendAdventurer = useCallback(async (coord: string, entry: TileAdventurer) => {
