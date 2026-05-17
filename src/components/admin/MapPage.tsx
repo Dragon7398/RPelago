@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
-import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, rcFromCoord, SLOT_STATUSES, TILE_TRAITS, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
-import type { TraitDef } from '../../lib/constants';
+import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS, rcFromCoord } from '../../lib/constants';
 import { getTypeKey } from '../../lib/tileGen';
-import type { TileState, TriState, AdvSlot, SlotStatus } from '../../types';
-import { normalizeSlots } from '../../lib/slotHelpers';
+import type { TileState, TriState } from '../../types';
+import MapGridPanel        from './mapPage/MapGridPanel';
+import TraitEditor         from './mapPage/TraitEditor';
+import AdvSlotEditor       from './mapPage/AdvSlotEditor';
+import PublicSlotEditor    from './mapPage/PublicSlotEditor';
+import ClaimableBonusEditor from './mapPage/ClaimableBonusEditor';
 
 const STATE_BUTTONS: { state: TileState; label: string; cls: string }[] = [
   { state: 'hidden',     label: 'Hidden',      cls: 'btn-hidden'     },
@@ -14,38 +17,21 @@ const STATE_BUTTONS: { state: TileState; label: string; cls: string }[] = [
   { state: 'complete',   label: 'Complete',    cls: 'btn-complete'   },
 ];
 
-
 export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const {
     gameState,
     adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats,
-    adminSetAdventurerSlots, adminSetPublicSlots, adminSetClaimableSlotBonus,
   } = useGameState();
-
   const { addToast } = useToast();
   const [selectedCoord, setSelectedCoord] = useState<string | null>(initialCoord ?? null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
-  const [slotDrafts, setSlotDrafts] = useState<Record<string, { name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>>({});
-  const [publicDraft, setPublicDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; room: 1 | 2 | undefined }>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
-  const [claimableBonusDrafts, setClaimableBonusDrafts] = useState<Record<string, { bonusXP: number; bonusGold: number }>>({});
-  const [traitsCollapsed, setTraitsCollapsed] = useState(false);
-
-  useEffect(() => {
-    if (!selectedCoord || !gameState) return;
-    const t = gameState.tiles[selectedCoord];
-    setTraitsCollapsed(t?.state === 'inprogress' || t?.state === 'complete');
-    const drafts: Record<string, { bonusXP: number; bonusGold: number }> = {};
-    for (const [key, rawVal] of Object.entries(t?.claimableSlots ?? {})) {
-      const arr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal as Record<string, AdvSlot>);
-      drafts[key] = { bonusXP: arr[0]?.bonusXP ?? 0, bonusGold: arr[0]?.bonusGold ?? 0 };
-    }
-    setClaimableBonusDrafts(drafts);
-  }, [selectedCoord]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!gameState) return null;
-  const gs = gameState; // narrowed alias so closures don't see GameState | null
+  const gs = gameState;
 
   const tile = selectedCoord ? gs.tiles[selectedCoord] : null;
+
+  const selectCoord = (coord: string) => { setSelectedCoord(coord); setLocalEdits({}); };
 
   const handleStateBtn = async (state: TileState) => {
     if (!selectedCoord || !tile) return;
@@ -80,31 +66,6 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
     }
   };
 
-  const handleTraitToggle = async (def: TraitDef, enabled: boolean) => {
-    if (!selectedCoord || !tile) return;
-    const next = { ...(tile.traits ?? {}) };
-    if (enabled) {
-      next[def.id] = { value: def.hasValue ? def.defaultValue : 0 };
-    } else {
-      delete next[def.id];
-    }
-    try {
-      await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
-    } catch {
-      addToast('Failed to update trait. Please try again.', 'error');
-    }
-  };
-
-  const handleTraitValue = async (traitId: string, value: number) => {
-    if (!selectedCoord || !tile) return;
-    const next = { ...(tile.traits ?? {}), [traitId]: { value } };
-    try {
-      await adminUpdateTile(selectedCoord, { traits: next });
-    } catch {
-      addToast('Failed to update trait value. Please try again.', 'error');
-    }
-  };
-
   const handleRegenStats = async () => {
     if (!selectedCoord) return;
     try {
@@ -116,144 +77,26 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
     }
   };
 
-  // ── Checklist helpers ───────────────────────────────────────────────────────
-  function tileComplete(coord: string): boolean {
-    const t = gs.tiles[coord];
-    if (!t) return false;
-    const [r, c] = rcFromCoord(coord);
-    const typeKey = getTypeKey(r, c);
-    switch (typeKey) {
-      case 'battle':
-        return Object.keys(t.traits ?? {}).length > 0;
-      case 'puzzle':
-        return !!t.rules?.trim();
-      case 'town':
-      case 'town_center': {
-        const shop = t.shopId ? gs.shops?.[t.shopId] : null;
-        return !!(shop && (shop.itemIds.length > 0 || shop.orbId));
-      }
-      case 'elite':
-        return Object.keys(t.traits ?? {}).length > 0 && (!!t.rules?.trim() || Object.keys(t.traits ?? {}).length > 2);
-      case 'boss':
-        return !!t.details?.trim() && !!t.rules?.trim();
-      default:
-        return false;
-    }
-  }
-
-  // List tiles in column-major order: A1–A5, B1–B5, …
-  const allCoords: string[] = [];
-  for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS; r++) {
-      allCoords.push(coordFromRC(r, c));
-    }
-  }
-
-  // Trait coverage counts per tile type
-  const traitCoverage = TILE_TRAITS.map(def => {
-    let battle = 0, puzzle = 0, elite = 0;
-    for (const coord of allCoords) {
-      if (!gs.tiles[coord]?.traits?.[def.id]) continue;
-      const [r, c] = rcFromCoord(coord);
-      const typeKey = getTypeKey(r, c);
-      if (typeKey === 'battle') battle++;
-      else if (typeKey === 'puzzle') puzzle++;
-      else if (typeKey === 'elite') elite++;
-    }
-    return { def, battle, puzzle, elite };
-  });
-
   return (
     <div className="dash-page">
       <h2 className="dash-page-title">Map Control</h2>
       <div className="map-page-layout">
 
-        {/* Mini-map */}
-        <div className="map-page-grid-wrap">
-          <div className="admin-col-labels">
-            {Array.from({ length: COLS }, (_, c) => (
-              <div key={c} className="admin-col-lbl">{COL_CHARS[c]}</div>
-            ))}
-          </div>
-          <div className="admin-grid">
-            {Array.from({ length: ROWS }, (_, r) => (
-              <div key={r} className="admin-grid-row">
-                <div className="admin-row-lbl">{r + 1}</div>
-                {Array.from({ length: COLS }, (_, c) => {
-                  const coord   = coordFromRC(r, c);
-                  const t       = gameState.tiles[coord];
-                  const typeKey = getTypeKey(r, c);
-                  const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
-                  const state   = t?.state ?? 'hidden';
-                  const isSelected = coord === selectedCoord;
-                  return (
-                    <div
-                      key={coord}
-                      className={`admin-tile s-${state}${isSelected ? ' selected' : ''}`}
-                      style={isSelected ? { outline: '2px solid var(--gold)' } : {}}
-                      onClick={() => { setSelectedCoord(coord); setLocalEdits({}); }}
-                      title={coord}
-                    >
-                      <span className="a-icon">{info.icon}</span>
-                      <span className="a-lbl">{coord}</span>
-                      <span className="state-dot" />
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+        <MapGridPanel
+          gameState={gs}
+          selectedCoord={selectedCoord}
+          onSelectCoord={selectCoord}
+        />
 
-          {/* Tile checklist */}
-          <div className="map-checklist">
-            <div className="map-checklist-title">TILE CHECKLIST</div>
-            {allCoords.map(coord => {
-              const [r, c] = rcFromCoord(coord);
-              const typeKey = getTypeKey(r, c);
-              const info = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
-              const t = gameState.tiles[coord];
-              const done = tileComplete(coord);
-              return (
-                <div
-                  key={coord}
-                  className={`map-checklist-row${done ? ' done' : ''}${coord === selectedCoord ? ' selected' : ''}`}
-                  onClick={() => { setSelectedCoord(coord); setLocalEdits({}); }}
-                >
-                  <span className="map-checklist-coord">{coord}</span>
-                  <span className="map-checklist-icon">{info.icon}</span>
-                  <span className="map-checklist-name">{t?.name || <em className="map-checklist-unnamed">unnamed</em>}</span>
-                  {done && <span className="map-checklist-check">✓</span>}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Trait coverage checklist */}
-          <div className="map-checklist">
-            <div className="map-checklist-title">TRAIT COVERAGE</div>
-            {traitCoverage.map(({ def, battle, puzzle, elite }) => (
-              <div key={def.id} className={`map-checklist-row trait-coverage-row${battle + puzzle + elite === 0 ? '' : ' done'}`}>
-                <span className="map-checklist-name trait-coverage-name">{def.name}</span>
-                <span className="trait-coverage-counts">
-                  <span className="trait-coverage-count">{TILE_TYPES.battle.icon} {battle}</span>
-                  <span className="trait-coverage-count">{TILE_TYPES.puzzle.icon} {puzzle}</span>
-                  <span className="trait-coverage-count">{TILE_TYPES.elite.icon} {elite}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Tile detail */}
         <div className="admin-detail map-page-detail">
           {!selectedCoord || !tile ? (
             <div className="admin-detail-empty">Select a tile to edit it.</div>
           ) : (() => {
             const [selR, selC] = rcFromCoord(selectedCoord);
-            const typeKey = getTypeKey(selR, selC);
-            const isTown = typeKey === 'town' || typeKey === 'town_center';
-            const shop = isTown && tile.shopId ? (gameState.shops?.[tile.shopId] ?? null) : null;
-            const orbDef = shop?.orbId ? ALL_ORBS.find(o => o.id === shop.orbId) : null;
+            const typeKey  = getTypeKey(selR, selC);
+            const isTown   = typeKey === 'town' || typeKey === 'town_center';
+            const shop     = isTown && tile.shopId ? (gs.shops?.[tile.shopId] ?? null) : null;
+            const orbDef   = shop?.orbId ? ALL_ORBS.find(o => o.id === shop.orbId) : null;
 
             return (
               <>
@@ -287,15 +130,12 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                 </div>
 
                 {isTown ? (
-                  /* ── Town: shop info ── */
                   <div className="admin-detail-row admin-town-shop-info">
                     <div className="admin-detail-label">SHOP</div>
                     {shop ? (
                       <div className="admin-town-shop">
                         <div className="admin-town-shop-name">🛒 {shop.name}</div>
-                        {orbDef && (
-                          <div className="admin-town-shop-orb">{orbDef.icon} {orbDef.label} Orb</div>
-                        )}
+                        {orbDef && <div className="admin-town-shop-orb">{orbDef.icon} {orbDef.label} Orb</div>}
                         {shop.itemIds.length > 0 ? (
                           <ul className="admin-town-shop-items">
                             {shop.itemIds.map(id => {
@@ -312,7 +152,6 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                     )}
                   </div>
                 ) : (
-                  /* ── Non-town: Archipelago fields ── */
                   <>
                     <div className="admin-detail-row">
                       <div className="admin-detail-label">REQUIRED</div>
@@ -434,288 +273,11 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                   </button>
                 )}
 
-                {!isTown && (
-                  <div style={{ marginTop: '0.6rem' }}>
-                    <div
-                      className="admin-traits-header"
-                      onClick={() => setTraitsCollapsed(c => !c)}
-                    >
-                      <span className="admin-detail-label" style={{ cursor: 'pointer' }}>TRAITS</span>
-                      <span className="admin-traits-chevron">{traitsCollapsed ? '▶' : '▼'}</span>
-                    </div>
-                    {traitsCollapsed ? (
-                      <div className="admin-traits-summary">
-                        {Object.keys(tile.traits ?? {}).length === 0
-                          ? <span className="admin-traits-summary-empty">None</span>
-                          : TILE_TRAITS
-                              .filter(def => tile.traits?.[def.id] !== undefined)
-                              .map(def => <span key={def.id} className="admin-traits-summary-tag">{def.name}</span>)
-                        }
-                      </div>
-                    ) : (
-                      <div className="admin-traits-list">
-                        {TILE_TRAITS.map(def => {
-                          const active     = tile.traits?.[def.id];
-                          const isEnabled  = active !== undefined;
-                          const currentVal = active?.value ?? def.defaultValue;
-                          const desc = def.description.replace('{value}', String(currentVal));
-                          return (
-                            <div key={def.id} className="admin-trait-row">
-                              <div className="admin-trait-top">
-                                <input
-                                  type="checkbox"
-                                  className="admin-trait-check"
-                                  checked={isEnabled}
-                                  onChange={e => handleTraitToggle(def, e.target.checked)}
-                                />
-                                <span className="admin-trait-name">{def.name}</span>
-                                {def.hasValue && isEnabled && (
-                                  <input
-                                    type="number"
-                                    className="admin-trait-value-input"
-                                    key={`${selectedCoord}-${def.id}-val`}
-                                    defaultValue={currentVal}
-                                    min={0}
-                                    onBlur={e => handleTraitValue(def.id, parseInt(e.target.value) || def.defaultValue)}
-                                  />
-                                )}
-                              </div>
-                              <div className="admin-trait-desc">{desc}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {!isTown && <TraitEditor key={selectedCoord} tile={tile} selectedCoord={selectedCoord} />}
 
-                {/* Adventurer slots */}
-                {Object.values(tile.adventurers ?? {}).length > 0 && (
-                  <>
-                    <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>SLOTS</div>
-                    {Object.values(tile.adventurers ?? {}).map(entry => {
-                      const slots = normalizeSlots(entry.slots as any);
-                      const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus };
-                      const save  = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord!, entry.advId, next);
-                      return (
-                        <div key={entry.advId} className="admin-slot-adv">
-                          <div className="admin-slot-adv-header">
-                            <span className="admin-slot-adv-name">{entry.name}</span>
-                            <span className="admin-slot-adv-owner">{entry.ownerName}</span>
-                          </div>
-                          {slots.map((s, i) => (
-                            <div key={i} className="admin-slot-row">
-                              <span className="admin-slot-val">{s.name}</span>
-                              <span className="admin-slot-sep">—</span>
-                              <span className="admin-slot-val">{s.game}</span>
-                              {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
-                              <input
-                                type="number" min={0} className="admin-bonus-input" placeholder="+XP"
-                                key={`adv-xp-${entry.advId}-${i}-${s.bonusXP ?? 0}`}
-                                defaultValue={s.bonusXP ?? 0}
-                                onBlur={e => {
-                                  const val = parseInt(e.target.value) || 0;
-                                  const updated = { ...s };
-                                  if (val > 0) updated.bonusXP = val; else delete updated.bonusXP;
-                                  save(slots.map((slot, j) => j === i ? updated : slot));
-                                }}
-                              />
-                              <input
-                                type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
-                                key={`adv-gold-${entry.advId}-${i}-${s.bonusGold ?? 0}`}
-                                defaultValue={s.bonusGold ?? 0}
-                                onBlur={e => {
-                                  const val = parseInt(e.target.value) || 0;
-                                  const updated = { ...s };
-                                  if (val > 0) updated.bonusGold = val; else delete updated.bonusGold;
-                                  save(slots.map((slot, j) => j === i ? updated : slot));
-                                }}
-                              />
-                              <select
-                                className="admin-slot-status-select"
-                                value={s.status ?? 'Unstarted'}
-                                onChange={e => save(slots.map((slot, j) => j === i ? { ...slot, status: e.target.value as SlotStatus } : slot))}
-                              >
-                                {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
-                              </select>
-                              <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>
-                            </div>
-                          ))}
-                          <div className="admin-slot-add-row">
-                            <input className="admin-text-input" placeholder="Slot name" value={draft.name}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, name: e.target.value } }))} />
-                            <input className="admin-text-input" placeholder="Game" value={draft.game}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, game: e.target.value } }))} />
-                            <input className="admin-text-input" placeholder="Details (optional)" value={draft.details}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, details: e.target.value } }))} />
-                            <input type="number" min={0} className="admin-bonus-input" placeholder="+XP"
-                              value={draft.bonusXP || ''}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, bonusXP: parseInt(e.target.value) || 0 } }))} />
-                            <input type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
-                              value={draft.bonusGold || ''}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, bonusGold: parseInt(e.target.value) || 0 } }))} />
-                            <select className="admin-slot-status-select" value={draft.status}
-                              onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, status: e.target.value as SlotStatus } }))}>
-                              {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
-                            </select>
-                            <button
-                              className="admin-slot-add-btn"
-                              disabled={!draft.name.trim() || !draft.game.trim()}
-                              onClick={() => {
-                                const newSlot: AdvSlot = { name: draft.name.trim(), game: draft.game.trim(), status: draft.status };
-                                if (draft.details.trim())   newSlot.details   = draft.details.trim();
-                                if (draft.bonusXP > 0)      newSlot.bonusXP   = draft.bonusXP;
-                                if (draft.bonusGold > 0)    newSlot.bonusGold = draft.bonusGold;
-                                save([...slots, newSlot]);
-                                setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0 } }));
-                              }}
-                            >+ Add</button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-
-                {/* Public slots */}
-                {(() => {
-                  const pubSlots    = normalizeSlots(tile.publicSlots as any);
-                  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
-                  const savePub     = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord!, next);
-                  return (
-                    <>
-                      <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>PUBLIC SLOTS</div>
-                      <div className="admin-slot-adv">
-                        {pubSlots.map((s, i) => (
-                          <div key={i} className="admin-slot-row">
-                            <span className="admin-slot-val">{s.name}</span>
-                            <span className="admin-slot-sep">—</span>
-                            <span className="admin-slot-val">{s.game}</span>
-                            {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
-                            <select
-                              className="admin-slot-status-select"
-                              value={s.status ?? 'Unstarted'}
-                              onChange={e => savePub(pubSlots.map((slot, j) => j === i ? { ...slot, status: e.target.value as SlotStatus } : slot))}
-                            >
-                              {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
-                            </select>
-                            {isBifurcated && (
-                              <select
-                                className="admin-slot-status-select"
-                                value={s.room ?? ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  savePub(pubSlots.map((slot, j) => j === i
-                                    ? { ...slot, room: val === '1' ? 1 : val === '2' ? 2 : undefined }
-                                    : slot));
-                                }}
-                              >
-                                <option value="">— Room —</option>
-                                <option value="1">Room 1</option>
-                                <option value="2">Room 2</option>
-                              </select>
-                            )}
-                            <button className="admin-slot-del" onClick={() => savePub(pubSlots.filter((_, j) => j !== i))} title="Remove slot">✕</button>
-                          </div>
-                        ))}
-                        <div className="admin-slot-add-row">
-                          <input className="admin-text-input" placeholder="Slot name" value={publicDraft.name}
-                            onChange={e => setPublicDraft(p => ({ ...p, name: e.target.value }))} />
-                          <input className="admin-text-input" placeholder="Game" value={publicDraft.game}
-                            onChange={e => setPublicDraft(p => ({ ...p, game: e.target.value }))} />
-                          <input className="admin-text-input" placeholder="Details (optional)" value={publicDraft.details}
-                            onChange={e => setPublicDraft(p => ({ ...p, details: e.target.value }))} />
-                          <select className="admin-slot-status-select" value={publicDraft.status}
-                            onChange={e => setPublicDraft(p => ({ ...p, status: e.target.value as SlotStatus }))}>
-                            {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
-                          </select>
-                          {isBifurcated && (
-                            <select
-                              className="admin-slot-status-select"
-                              value={publicDraft.room ?? ''}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setPublicDraft(p => ({ ...p, room: val === '1' ? 1 : val === '2' ? 2 : undefined }));
-                              }}
-                            >
-                              <option value="">— Room —</option>
-                              <option value="1">Room 1</option>
-                              <option value="2">Room 2</option>
-                            </select>
-                          )}
-                          <button
-                            className="admin-slot-add-btn"
-                            disabled={!publicDraft.name.trim() || !publicDraft.game.trim()}
-                            onClick={() => {
-                              const newSlot: AdvSlot = { name: publicDraft.name.trim(), game: publicDraft.game.trim(), status: publicDraft.status };
-                              if (publicDraft.details.trim()) newSlot.details = publicDraft.details.trim();
-                              if (publicDraft.room)           newSlot.room    = publicDraft.room;
-                              savePub([...pubSlots, newSlot]);
-                              setPublicDraft({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
-                            }}
-                          >+ Add</button>
-                        </div>
-                      </div>
-                    </>
-                  );
-                })()}
-                {/* Claimable slot bonuses */}
-                {(() => {
-                  const claimable = tile.claimableSlots ?? {};
-                  const entries = Object.entries(claimable);
-                  if (entries.length === 0) return null;
-                  return (
-                    <>
-                      <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>CLAIMABLE SLOT BONUSES</div>
-                      <div className="admin-slot-adv">
-                        {entries.map(([slotKey, rawVal]) => {
-                          const slotArr: AdvSlot[] = Array.isArray(rawVal) ? rawVal : Object.values(rawVal as Record<string, AdvSlot>);
-                          const draft = claimableBonusDrafts[slotKey] ?? { bonusXP: slotArr[0]?.bonusXP ?? 0, bonusGold: slotArr[0]?.bonusGold ?? 0 };
-                          return (
-                            <div key={slotKey} className="admin-claimable-bonus-row">
-                              <div className="admin-claimable-bonus-games">
-                                {slotArr.map((s, i) => (
-                                  <span key={i} className="admin-claimable-bonus-game">
-                                    {s.name ? `${s.name} — ${s.game}` : s.game}
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="admin-claimable-bonus-inputs">
-                                <span className="admin-bonus-label">+XP</span>
-                                <input
-                                  type="number" min={0} className="admin-bonus-input"
-                                  value={draft.bonusXP || ''}
-                                  placeholder="0"
-                                  onChange={e => setClaimableBonusDrafts(p => ({ ...p, [slotKey]: { ...draft, bonusXP: parseInt(e.target.value) || 0 } }))}
-                                />
-                                <span className="admin-bonus-label">+Gold</span>
-                                <input
-                                  type="number" min={0} className="admin-bonus-input"
-                                  value={draft.bonusGold || ''}
-                                  placeholder="0"
-                                  onChange={e => setClaimableBonusDrafts(p => ({ ...p, [slotKey]: { ...draft, bonusGold: parseInt(e.target.value) || 0 } }))}
-                                />
-                                <button
-                                  className="admin-slot-add-btn"
-                                  onClick={async () => {
-                                    const updated = slotArr.map((s, i) => {
-                                      if (i !== 0) return s;
-                                      const out = { ...s };
-                                      if (draft.bonusXP > 0)   out.bonusXP   = draft.bonusXP;   else delete out.bonusXP;
-                                      if (draft.bonusGold > 0) out.bonusGold = draft.bonusGold; else delete out.bonusGold;
-                                      return out;
-                                    });
-                                    await adminSetClaimableSlotBonus(selectedCoord!, slotKey, updated);
-                                  }}
-                                >Save</button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  );
-                })()}
+                <AdvSlotEditor       key={`adv-${selectedCoord}`}      tile={tile} selectedCoord={selectedCoord} />
+                <PublicSlotEditor    key={`pub-${selectedCoord}`}      tile={tile} selectedCoord={selectedCoord} />
+                <ClaimableBonusEditor key={`claim-${selectedCoord}`}   tile={tile} selectedCoord={selectedCoord} />
               </>
             );
           })()}
