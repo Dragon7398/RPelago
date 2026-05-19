@@ -1,7 +1,8 @@
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onValueWritten } from 'firebase-functions/v2/database';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getDatabase } from 'firebase-admin/database';
+import { getDatabase, ServerValue } from 'firebase-admin/database';
 import { defineSecret } from 'firebase-functions/params';
 
 initializeApp();
@@ -16,6 +17,7 @@ interface DiscordUser {
   id: string;
   username: string;
   global_name: string | null;
+  avatar: string | null;
 }
 
 export const exchangeDiscordCode = onRequest(
@@ -76,7 +78,28 @@ export const exchangeDiscordCode = onRequest(
 
       const customToken = await getAuth().createCustomToken(uid, { discordId: discordUser.id });
 
-      res.json({ customToken, displayName, uid });
+      // Write a minimal profile stub so the profile site can show an identity card
+      // and empty state even before the player completes any tiles.
+      const db         = getDatabase();
+      const profileRef = db.ref(`profiles/players/${uid}`);
+      const [joinedSnap, firstEventSnap] = await Promise.all([
+        profileRef.child('joinedAt').get(),
+        profileRef.child('firstEvent').get(),
+      ]);
+      const stub: Record<string, unknown> = {
+        id:            uid,
+        displayName,
+        discordHandle: discordUser.username,
+        avatarHash:    discordUser.avatar,
+      };
+      if (!joinedSnap.exists())    stub.joinedAt   = Date.now();
+      if (!firstEventSnap.exists()) stub.firstEvent = null;
+      await profileRef.update(stub);
+      if (discordUser.username) {
+        await db.ref(`profiles/handleIndex/${discordUser.username.replace(/\./g, '_')}`).set(uid);
+      }
+
+      res.json({ customToken, displayName, uid, discordHandle: discordUser.username, avatarHash: discordUser.avatar });
     } catch (err) {
       console.error('exchangeDiscordCode error:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -223,3 +246,114 @@ export const purchaseShopOrb = onCall(async (request) => {
 
   return { success: true, orbId };
 });
+
+// ── onTileComplete ────────────────────────────────────────────────────────────
+
+interface AdvEntry {
+  owner:    string;
+  ownerName: string;
+  slots?: Array<{ game?: string }>;
+}
+
+interface PlayerRecord {
+  displayName:   string;
+  discordHandle?: string;
+  avatarHash?:   string | null;
+  joinedAt?:     number;
+  xp?:           number;
+}
+
+function normalizeGameName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
+export const onTileComplete = onValueWritten(
+  'game/tiles/{coord}/state',
+  async (event) => {
+    const prevState = event.data.before.val() as string | null;
+    const newState  = event.data.after.val()  as string | null;
+
+    // Only act on the transition into 'complete'; ignore re-writes to an already-complete tile.
+    if (newState !== 'complete' || prevState === 'complete') return;
+
+    const coord = event.params.coord;
+    const db    = getDatabase();
+
+    // Read tile adventurers and all player records in parallel.
+    // tile.adventurers at completion is the canonical claim list: players freed early
+    // (slot completion) remain listed here; players who explicitly recalled do not.
+    const [advSnap, playersSnap] = await Promise.all([
+      db.ref(`game/tiles/${coord}/adventurers`).get(),
+      db.ref('game/players').get(),
+    ]);
+
+    if (!advSnap.exists()) return;
+
+    const adventurers = advSnap.val() as Record<string, AdvEntry>;
+    const players     = playersSnap.val() as Record<string, PlayerRecord> | null;
+
+    // Group adventurers by owner; collect each owner's normalized game names.
+    const byOwner = new Map<string, Set<string>>();
+    for (const adv of Object.values(adventurers)) {
+      if (!byOwner.has(adv.owner)) byOwner.set(adv.owner, new Set());
+      const games = byOwner.get(adv.owner)!;
+      for (const slot of adv.slots ?? []) {
+        if (slot.game?.trim()) games.add(normalizeGameName(slot.game));
+      }
+    }
+
+    // Batch-read each player's current firstEvent so we only set it when null —
+    // preserving a firstEvent from a different event that happened earlier.
+    const playerIds = [...byOwner.keys()];
+    const firstEventSnaps = await Promise.all(
+      playerIds.map(uid => db.ref(`profiles/players/${uid}/firstEvent`).get()),
+    );
+    const firstEventMap = new Map(
+      playerIds.map((uid, i) => [uid, firstEventSnaps[i].val() as string | null]),
+    );
+
+    const profileUpdates: Record<string, unknown> = {};
+
+    for (const [playerId, games] of byOwner) {
+      const player = players?.[playerId];
+      if (!player) continue;
+
+      const base = `profiles/players/${playerId}`;
+
+      // Identity — refreshed on every tile so handle/avatar stay current.
+      profileUpdates[`${base}/id`]            = playerId;
+      profileUpdates[`${base}/displayName`]   = player.displayName;
+      profileUpdates[`${base}/discordHandle`] = player.discordHandle ?? null;
+      profileUpdates[`${base}/avatarHash`]    = player.avatarHash    ?? null;
+      profileUpdates[`${base}/joinedAt`]      = player.joinedAt      ?? null;
+
+      // Only set firstEvent when it hasn't been claimed by an earlier event.
+      if (!firstEventMap.get(playerId)) {
+        profileUpdates[`${base}/firstEvent`] = 'rpelago_s1';
+      }
+
+      // XP — reflect current value at the moment of tile completion.
+      profileUpdates[`${base}/events/rpelago_s1/xp`] = player.xp ?? 0;
+
+      // Tiles — ServerValue.increment avoids read-modify-write race conditions.
+      profileUpdates[`${base}/events/rpelago_s1/tiles`] = ServerValue.increment(1);
+
+      // Games — keyed record (encodedName → true) so each game write is atomic;
+      // no pre-read needed and concurrent tile completions don't stomp each other.
+      for (const g of games) {
+        profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+      }
+
+      // Handle index — lets the profile site resolve /p/<handle> to a UID.
+      // Discord handles contain only letters, numbers, underscores, and periods;
+      // replace '.' (invalid Firebase key char) with '_'.
+      if (player.discordHandle) {
+        profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+      }
+    }
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await db.ref().update(profileUpdates);
+    }
+  },
+);

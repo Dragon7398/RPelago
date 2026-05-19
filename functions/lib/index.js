@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
+const database_1 = require("firebase-functions/v2/database");
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
-const database_1 = require("firebase-admin/database");
+const database_2 = require("firebase-admin/database");
 const params_1 = require("firebase-functions/params");
 (0, app_1.initializeApp)();
 const discordClientSecret = (0, params_1.defineSecret)('DISCORD_CLIENT_SECRET');
@@ -54,7 +55,29 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
             await (0, auth_1.getAuth)().createUser({ uid, displayName });
         }
         const customToken = await (0, auth_1.getAuth)().createCustomToken(uid, { discordId: discordUser.id });
-        res.json({ customToken, displayName, uid });
+        // Write a minimal profile stub so the profile site can show an identity card
+        // and empty state even before the player completes any tiles.
+        const db = (0, database_2.getDatabase)();
+        const profileRef = db.ref(`profiles/players/${uid}`);
+        const [joinedSnap, firstEventSnap] = await Promise.all([
+            profileRef.child('joinedAt').get(),
+            profileRef.child('firstEvent').get(),
+        ]);
+        const stub = {
+            id: uid,
+            displayName,
+            discordHandle: discordUser.username,
+            avatarHash: discordUser.avatar,
+        };
+        if (!joinedSnap.exists())
+            stub.joinedAt = Date.now();
+        if (!firstEventSnap.exists())
+            stub.firstEvent = null;
+        await profileRef.update(stub);
+        if (discordUser.username) {
+            await db.ref(`profiles/handleIndex/${discordUser.username.replace(/\./g, '_')}`).set(uid);
+        }
+        res.json({ customToken, displayName, uid, discordHandle: discordUser.username, avatarHash: discordUser.avatar });
     }
     catch (err) {
         console.error('exchangeDiscordCode error:', err);
@@ -93,7 +116,7 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     if (!itemId || !coord)
         throw new https_1.HttpsError('invalid-argument', 'Missing itemId or coord.');
     const uid = request.auth.uid;
-    const db = (0, database_1.getDatabase)();
+    const db = (0, database_2.getDatabase)();
     const tileSnap = await db.ref(`game/tiles/${coord}`).get();
     if (!tileSnap.exists())
         throw new https_1.HttpsError('not-found', 'Tile not found.');
@@ -140,7 +163,7 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     if (!coord)
         throw new https_1.HttpsError('invalid-argument', 'Missing coord.');
     const uid = request.auth.uid;
-    const db = (0, database_1.getDatabase)();
+    const db = (0, database_2.getDatabase)();
     const tileSnap = await db.ref(`game/tiles/${coord}`).get();
     if (!tileSnap.exists())
         throw new https_1.HttpsError('not-found', 'Tile not found.');
@@ -185,5 +208,79 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         icon: '🔮',
     });
     return { success: true, orbId };
+});
+function normalizeGameName(name) {
+    return name.trim().replace(/\s+/g, ' ');
+}
+exports.onTileComplete = (0, database_1.onValueWritten)('game/tiles/{coord}/state', async (event) => {
+    const prevState = event.data.before.val();
+    const newState = event.data.after.val();
+    // Only act on the transition into 'complete'; ignore re-writes to an already-complete tile.
+    if (newState !== 'complete' || prevState === 'complete')
+        return;
+    const coord = event.params.coord;
+    const db = (0, database_2.getDatabase)();
+    // Read tile adventurers and all player records in parallel.
+    // tile.adventurers at completion is the canonical claim list: players freed early
+    // (slot completion) remain listed here; players who explicitly recalled do not.
+    const [advSnap, playersSnap] = await Promise.all([
+        db.ref(`game/tiles/${coord}/adventurers`).get(),
+        db.ref('game/players').get(),
+    ]);
+    if (!advSnap.exists())
+        return;
+    const adventurers = advSnap.val();
+    const players = playersSnap.val();
+    // Group adventurers by owner; collect each owner's normalized game names.
+    const byOwner = new Map();
+    for (const adv of Object.values(adventurers)) {
+        if (!byOwner.has(adv.owner))
+            byOwner.set(adv.owner, new Set());
+        const games = byOwner.get(adv.owner);
+        for (const slot of adv.slots ?? []) {
+            if (slot.game?.trim())
+                games.add(normalizeGameName(slot.game));
+        }
+    }
+    // Batch-read each player's current firstEvent so we only set it when null —
+    // preserving a firstEvent from a different event that happened earlier.
+    const playerIds = [...byOwner.keys()];
+    const firstEventSnaps = await Promise.all(playerIds.map(uid => db.ref(`profiles/players/${uid}/firstEvent`).get()));
+    const firstEventMap = new Map(playerIds.map((uid, i) => [uid, firstEventSnaps[i].val()]));
+    const profileUpdates = {};
+    for (const [playerId, games] of byOwner) {
+        const player = players?.[playerId];
+        if (!player)
+            continue;
+        const base = `profiles/players/${playerId}`;
+        // Identity — refreshed on every tile so handle/avatar stay current.
+        profileUpdates[`${base}/id`] = playerId;
+        profileUpdates[`${base}/displayName`] = player.displayName;
+        profileUpdates[`${base}/discordHandle`] = player.discordHandle ?? null;
+        profileUpdates[`${base}/avatarHash`] = player.avatarHash ?? null;
+        profileUpdates[`${base}/joinedAt`] = player.joinedAt ?? null;
+        // Only set firstEvent when it hasn't been claimed by an earlier event.
+        if (!firstEventMap.get(playerId)) {
+            profileUpdates[`${base}/firstEvent`] = 'rpelago_s1';
+        }
+        // XP — reflect current value at the moment of tile completion.
+        profileUpdates[`${base}/events/rpelago_s1/xp`] = player.xp ?? 0;
+        // Tiles — ServerValue.increment avoids read-modify-write race conditions.
+        profileUpdates[`${base}/events/rpelago_s1/tiles`] = database_2.ServerValue.increment(1);
+        // Games — keyed record (encodedName → true) so each game write is atomic;
+        // no pre-read needed and concurrent tile completions don't stomp each other.
+        for (const g of games) {
+            profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+        }
+        // Handle index — lets the profile site resolve /p/<handle> to a UID.
+        // Discord handles contain only letters, numbers, underscores, and periods;
+        // replace '.' (invalid Firebase key char) with '_'.
+        if (player.discordHandle) {
+            profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+        }
+    }
+    if (Object.keys(profileUpdates).length > 0) {
+        await db.ref().update(profileUpdates);
+    }
 });
 //# sourceMappingURL=index.js.map

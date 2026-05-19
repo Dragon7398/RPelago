@@ -93,6 +93,9 @@ export interface Player {
   disabled?: boolean;
   feats?: PlayerFeats;
   warnings?: Record<string, PlayerWarning>;
+  discordHandle?: string;     // Discord username, e.g. 'azura.ttv'
+  avatarHash?: string | null; // Discord CDN avatar hash; null = no avatar set
+  joinedAt?: number;          // Unix ms; written once on first login, never overwritten
 }
 
 export interface OrbConfig {

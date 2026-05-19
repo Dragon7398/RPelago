@@ -8,7 +8,7 @@ import {
 } from 'firebase/auth';
 import type { AuthUser, Adventurer, Player } from '../types';
 import { auth as firebaseAuth, firebaseReady } from '../firebase/config';
-import { playerExists, upsertPlayer, isPlayerDisabled } from '../firebase/db';
+import { playerExists, upsertPlayer, upsertPlayerDiscordFields, isPlayerDisabled } from '../firebase/db';
 import { ADV_CLASSES } from '../lib/constants';
 import { randomAdvName } from '../lib/tileGen';
 
@@ -40,9 +40,11 @@ function buildDiscordAuthUrl(): string {
 }
 
 interface ExchangeResult {
-  customToken: string;
-  displayName: string;
-  uid: string;
+  customToken:   string;
+  displayName:   string;
+  uid:           string;
+  discordHandle: string;
+  avatarHash:    string | null;
 }
 
 async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
@@ -103,7 +105,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Prevents the null-user onAuthStateChanged tick from clearing loading
   // while we're still mid-exchange.
-  const exchangingRef = useRef(false);
+  const exchangingRef     = useRef(false);
+  const pendingDiscordRef = useRef<{ handle: string; avatarHash: string | null } | null>(null);
 
   useEffect(() => {
     if (!firebaseReady || !firebaseAuth) {
@@ -124,7 +127,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       exchangingRef.current = true;
 
       exchangeCodeForToken(code)
-        .then(({ customToken }) => signInWithCustomToken(firebaseAuth!, customToken))
+        .then(({ customToken, discordHandle, avatarHash }) => {
+          pendingDiscordRef.current = { handle: discordHandle, avatarHash };
+          return signInWithCustomToken(firebaseAuth!, customToken);
+        })
         .catch(err => {
           console.error('Discord auth exchange failed:', err);
           exchangingRef.current = false;
@@ -148,6 +154,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setAuthError('Your account is currently restricted. Please ask the admin for assistance.');
             setLoading(false);
             return;
+          }
+          // Persist Discord identity fields on every login so handle/avatar stay current.
+          // Only available when the user just exchanged an OAuth code; not on silent re-auth.
+          const pending = pendingDiscordRef.current;
+          if (pending) {
+            pendingDiscordRef.current = null;
+            await upsertPlayerDiscordFields(fbUser.uid, pending.handle, pending.avatarHash);
           }
         } catch (err) {
           console.error('Failed to create player record:', err);

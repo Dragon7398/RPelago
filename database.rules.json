@@ -1,5 +1,18 @@
 {
   "rules": {
+    "profiles": {
+      "players": {
+        "$uid": {
+          ".read":  true,
+          ".write": false
+        }
+      },
+      "handleIndex": {
+        ".read":  true,
+        ".write": false
+      }
+    },
+
     "game": {
       ".read": true,
       ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid",
