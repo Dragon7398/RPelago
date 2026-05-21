@@ -1154,7 +1154,10 @@ header p {
 .profile-overlay.open .profile-box { transform: scale(1) translateY(0); }
 .profile-close { position: absolute; top: 0.8rem; right: 1rem; background: none; border: none; color: var(--gold-dim); font-size: 1.2rem; cursor: pointer; padding: 0.2rem 0.4rem; border-radius: 2px; transition: color 0.15s; font-family: 'Crimson Pro', serif; line-height: 1; }
 .profile-close:hover { color: var(--gold); }
-.profile-player-name { font-family: 'Cinzel', serif; font-weight: 800; font-size: clamp(0.9rem, 4vw, 1.3rem); letter-spacing: 0.14em; color: var(--gold); text-shadow: 0 0 20px oklch(72% 0.14 75 / 0.4); margin-bottom: 0.2rem; overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
+.profile-name-row { display: flex; align-items: center; justify-content: center; gap: 0.45rem; margin-bottom: 0.2rem; }
+.profile-player-name { font-family: 'Cinzel', serif; font-weight: 800; font-size: clamp(0.9rem, 4vw, 1.3rem); letter-spacing: 0.14em; color: var(--gold); text-shadow: 0 0 20px oklch(72% 0.14 75 / 0.4); overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
+.profile-ext-link { display: inline-flex; align-items: center; justify-content: center; color: var(--gold-dim); text-decoration: none; padding: 0.2rem; border-radius: 3px; flex-shrink: 0; transition: color 0.2s, transform 0.4s ease; }
+.profile-ext-link:hover { color: var(--gold); transform: rotate(45deg); }
 .profile-level-line { font-family: 'Cinzel', serif; font-size: 0.7rem; letter-spacing: 0.18em; color: var(--gold-dim); margin-bottom: 1.2rem; }
 .profile-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin: 1rem 0; }
 .profile-stat { background: oklch(16% 0.05 75 / 0.5); border: 1px solid oklch(30% 0.06 75); border-radius: 3px; padding: 0.75rem 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
