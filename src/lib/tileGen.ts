@@ -1,7 +1,7 @@
 import type { Tile, TileTypeKey, TriState, OrbConfig } from '../types';
 import {
   COLS, ROWS, ADV_CLASSES, ADV_NAMES_FIRST, ADV_NAMES_LAST,
-  ALL_ORBS, coordFromRC, rcFromCoord, getAdjRC, isEdgeTile, TOWN_SHOP_ITEMS, NON_CENTER_SHOP_IDS,
+  ALL_ORBS, coordFromRC, rcFromCoord, getAdjRC, isEdgeTile, NON_CENTER_SHOP_IDS,
   BOSS_ELEMENTAL_TRAIT_VALUES,
 } from './constants';
 
@@ -191,13 +191,6 @@ export function orbIdForEdgeTile(r: number, c: number, orbConfig: OrbConfig): st
   if (edgePuzzlePos && edgePuzzlePos[0] === r && edgePuzzlePos[1] === c)
     return ALL_ORBS[orbConfig.puzzleOrb]?.id ?? null;
   return null;
-}
-
-// Returns item IDs sold at the given town tile
-export function shopItemIdsForTown(r: number, c: number): readonly string[] {
-  const idx = _orbPositions.shopTownPositions.findIndex(([tr, tc]) => tr === r && tc === c);
-  if (idx < 0) return [];
-  return TOWN_SHOP_ITEMS[idx] ?? [];
 }
 
 // ── Seeded per-tile RNG ───────────────────────────────────────────────────────

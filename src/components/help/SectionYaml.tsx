@@ -55,9 +55,14 @@ export default function SectionYaml() {
         </li>
         <li>
           <strong>Check limits:</strong> At least <strong>50 checks</strong> and no more than{' '}
-          <strong>1,500 checks</strong> total, unless otherwise approved.  As well, please use your best
-          judgment on games to keep things fun; unless you're confident of your ability to keep things moving,
-          please don't submit, say, a Perfection Stardew Valley.
+          <strong>1,500 checks</strong> total, unless otherwise approved.
+        </li>
+        <li>
+          <strong>Keep it fun!</strong>  Please use your best judgment on games to keep things fun for everyone.
+          Unless you're confident of your ability to keep things moving,
+          please don't submit, for example, a fully-maxed Stardew Valley.
+          Likewise, please don't submit trivially easy slots or goal excessively out-of-logic
+          [e.g. using BLJ to reach goal early in SM64].
         </li>
         <li>
           <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are limited to:
@@ -70,6 +75,9 @@ export default function SectionYaml() {
               <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''}, or{' '}
               <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? 's' : ''} and{' '}
               <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations
+              <ul className="help-list help-list-sub">
+                <li>Starting hints that affect too many items, such as hinting your primary macguffin [e.g. Yoshi Eggs in SMW] are not allowed.</li>
+              </ul>
             </li>
           </ul>
         </li>

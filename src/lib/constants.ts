@@ -117,7 +117,9 @@ export const ITEM_TRAIT_REFS: Readonly<Record<string, readonly string[]>> = {
   warhammer:          ['horde', 'sturdy'],
 };
 
-export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2000];
+// XP required for each level; this is calculated based on the average of around ~120 XP for completed tiles.
+// These will need to be changed for future seasons as the map grows and/or the XP distribution changes.
+export const LEVEL_THRESHOLDS = [0, 100, 300, 500, 800, 1150, 1500];
 export const MAX_LEVEL = LEVEL_THRESHOLDS.length;
 
 export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
@@ -216,15 +218,6 @@ export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {
 // Non-center shop IDs assigned to the three non-center towns via seeded shuffle
 export const NON_CENTER_SHOP_IDS = ['frostshear', 'flamefell', 'pinereach'] as const;
 
-// Maps shop town index (0 = center town, 1+ = other towns in row-major order) → item IDs sold there
-// Kept for legacy reference; shop inventory is now driven by game/shops in Firebase.
-export const TOWN_SHOP_ITEMS: Readonly<Record<number, readonly string[]>> = {
-  0: ['map'],
-  1: [],
-  2: [],
-  3: [],
-};
-
 export interface FeatDef {
   id: string;
   name: string;
@@ -270,21 +263,21 @@ export const FEATS: readonly FeatDef[] = [
     name: 'Mentor',
     icon: '🎓',
     availableAt: 5,
-    description: 'Players on challenges you play in receive 5% bonus XP. You receive 1% bonus XP for each other player on your challenge. This stacks with other Mentors.',
+    description: 'Other players on challenges you play in receive 5% bonus XP. You receive 1% bonus XP for each other player on your challenge. This stacks with other Mentors.',
   },
   {
     id: 'treasurer',
     name: 'Treasurer',
     icon: '💰',
     availableAt: 5,
-    description: 'Players on challenges you play in receive 10% bonus Gold. You receive 3% bonus Gold for each other player on your challenge. This stacks with other Treasurers.',
+    description: 'Other players on challenges you play in receive 10% bonus Gold. You receive 3% bonus Gold for each other player on your challenge. This stacks with other Treasurers.',
   },
   {
     id: 'seeker',
     name: 'Seeker',
     icon: '🔍',
     availableAt: 7,
-    description: 'Challenges you play on have 1% reduced Hint cost. This stacks with other Seekers, to a minimum of 1% Hint Cost.',
+    description: 'Challenges you play in have 1% reduced Hint cost. This stacks with other Seekers, to a minimum of 1% Hint Cost.',
   },
   {
     id: 'prepared',

@@ -1,4 +1,4 @@
-import { ALL_ORBS } from '../../lib/constants';
+import { ALL_ORBS, ORB_SHOP_COST } from '../../lib/constants';
 
 export default function SectionOrbs() {
   return (
@@ -20,7 +20,7 @@ export default function SectionOrbs() {
       <h4>Where to Find Them</h4>
       <ul className="help-list">
         <li><strong>Elite tiles 💀</strong> — Every Elite encounter awards an Orb on first completion.</li>
-        <li><strong>Town shops 🏰</strong> — Some shops sell a specific Orb for 1,500 Gold.</li>
+        <li><strong>Town shops 🏰</strong> — Some shops sell a specific Orb for {ORB_SHOP_COST.toLocaleString()} Gold.</li>
         <li>Keep your eyes open — Orbs can turn up in unexpected places.</li>
       </ul>
       <div className="help-callout">

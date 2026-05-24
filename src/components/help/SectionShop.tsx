@@ -1,4 +1,4 @@
-import { SHOP_ITEMS } from '../../lib/constants';
+import { SHOP_ITEMS, ORB_SHOP_COST } from '../../lib/constants';
 
 export default function SectionShop() {
   return (
@@ -27,7 +27,7 @@ export default function SectionShop() {
       </div>
       <div className="help-callout">
         <span className="help-callout-icon">🏰</span>
-        <span>Shops also sell specific <strong>Orbs</strong> for 1,500 Gold each. If the group is close to unlocking the Boss, saving gold for an Orb can be worth it.</span>
+        <span>Shops also sell specific <strong>Orbs</strong> for {ORB_SHOP_COST.toLocaleString()} Gold each. If the group is close to unlocking the Boss, saving gold for an Orb can be worth it.</span>
       </div>
     </div>
   );

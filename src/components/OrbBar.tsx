@@ -70,7 +70,7 @@ export default function OrbBar() {
       <div className="orb-bar-title" onClick={toggleCollapsed}>
         <span>SIGIL ORBS</span>
         <span className="orb-bar-title-right">
-          {collapsed && <span className="orb-bar-count">{count} / 9</span>}
+          {collapsed && <span className="orb-bar-count">{count} / {ALL_ORBS.length}</span>}
           <span className="orb-bar-chevron">{collapsed ? '▸' : '▾'}</span>
         </span>
       </div>
