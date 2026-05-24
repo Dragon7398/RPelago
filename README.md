@@ -1,73 +1,62 @@
-# React + TypeScript + Vite
+# RPelago
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A real-time collaborative metagame overlay for [Archipelago](https://archipelago.gg) randomizer sessions.
 
-Currently, two official plugins are available:
+Players log in via Discord, send adventurers to tiles on a 5×7 grid map, and cooperatively unlock new areas by completing challenges. An admin controls tile progression, configures encounters, and manages the shop economy.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **Grid map** — 5×7 board with tile progression: hidden → available → in progress → complete
+- **Adventurer system** — XP, gold, levels (1–7), and feats that modify YAML submission rules
+- **Orb system** — Nine elemental orbs collected across the map that strip traits from the final boss
+- **16 tile traits** — Modifiers like Aerial, Cursed, Bifurcated, and Stunning that change challenge rules
+- **Four shops** — Items and orb purchases using in-game gold, enforced server-side via Cloud Functions
+- **Real-time activity feed** — Live event log for tile completions, orb collection, and purchases
+- **Admin dashboard** — Full control over tiles, players, shops, orbs, and map configuration
+- **Themes** — Multiple visual themes including colorblind-friendly options
+- **Player profiles** — Adventurer customization, feat selection, name color, and XP history
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tech Stack
 
-## Expanding the ESLint configuration
+- React 19 + TypeScript + Vite
+- Firebase Realtime Database (all game state)
+- Firebase Authentication with Discord OAuth (via custom token exchange)
+- Firebase Cloud Functions (OAuth exchange, shop purchases)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Setup
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Prerequisites
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- Node.js 18+
+- A [Firebase](https://firebase.google.com) project with Realtime Database and Authentication enabled
+- A [Discord application](https://discord.com/developers/applications) for OAuth
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Running locally
+
+```bash
+npm install
+npm run dev        # Dev server at localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Edit `.env` with your own Firebase project config and Discord client ID before running.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Cloud Functions
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd functions
+npm install
+firebase deploy --only functions
 ```
+
+### Other commands
+
+```bash
+npm run build      # Type-check and build to dist/
+npm run lint       # ESLint
+npm run preview    # Preview production build
+npx tsc --noEmit   # Type-check only
+```
+
+## License
+
+[GNU Affero General Public License v3.0](LICENSE) — forks that are deployed as a network service must also be open source.
