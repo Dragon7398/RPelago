@@ -13,6 +13,7 @@ import TileLightbox from './components/TileLightbox';
 import ProfileLightbox from './components/ProfileLightbox';
 import LoginModal from './components/LoginModal';
 import HelpModal from './components/HelpModal';
+import PrivacyModal from './components/PrivacyModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 
@@ -152,10 +153,11 @@ function LoadingScreen() {
 }
 
 function AppContent() {
-  const [activeTile,  setActiveTile]  = useState<string | null>(null);
-  const [loginOpen,   setLoginOpen]   = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [helpOpen,    setHelpOpen]    = useState(false);
+  const [activeTile,   setActiveTile]   = useState<string | null>(null);
+  const [loginOpen,    setLoginOpen]    = useState(false);
+  const [profileOpen,  setProfileOpen]  = useState(false);
+  const [helpOpen,     setHelpOpen]     = useState(false);
+  const [privacyOpen,  setPrivacyOpen]  = useState(false);
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
@@ -185,6 +187,10 @@ function AppContent() {
         <div className="state-legend-item"><div className="state-swatch sw-complete" /><span>Complete</span></div>
       </div>
 
+      <footer className="page-footer">
+        <button className="page-footer-link" onClick={() => setPrivacyOpen(true)}>Privacy Policy</button>
+      </footer>
+
       <SettingsPanel />
 
       {isAdmin && (
@@ -197,8 +203,9 @@ function AppContent() {
         onLoginRequest={() => setLoginOpen(true)}
       />
       <ProfileLightbox open={profileOpen} onClose={() => setProfileOpen(false)} />
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onPrivacyClick={() => { setLoginOpen(false); setPrivacyOpen(true); }} />
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </div>
   );
 }

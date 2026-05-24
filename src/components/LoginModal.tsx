@@ -3,9 +3,10 @@ import { useAuth } from '../contexts/AuthContext';
 interface Props {
   open: boolean;
   onClose: () => void;
+  onPrivacyClick: () => void;
 }
 
-export default function LoginModal({ open, onClose }: Props) {
+export default function LoginModal({ open, onClose, onPrivacyClick }: Props) {
   const { signIn, authError, clearError } = useAuth();
 
   function handleClose() {
@@ -29,6 +30,15 @@ export default function LoginModal({ open, onClose }: Props) {
           <>
             <p style={{ fontFamily: "'Crimson Pro', serif", fontStyle: 'italic', color: 'var(--parchment)', marginBottom: '1.4rem' }}>
               Sign in with Discord to join the adventure.
+            </p>
+            <p style={{ fontFamily: "'Crimson Pro', serif", fontStyle: 'italic', fontSize: '0.8rem', color: 'var(--gold-dim)', marginBottom: '1rem', lineHeight: 1.5 }}>
+              By signing in you acknowledge our{' '}
+              <button
+                onClick={onPrivacyClick}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--amber)', fontFamily: 'inherit', fontSize: 'inherit', fontStyle: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+              >
+                Privacy Policy
+              </button>.
             </p>
             <button
               className="login-submit discord-btn"

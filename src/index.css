@@ -2035,3 +2035,22 @@ body.theme-obsidian {
   content: ''; inset: 0; border: none;
   background: radial-gradient(ellipse 70% 70% at 50% 50%, var(--hidden-bg-2) 0%, var(--hidden-bg-3) 100%);
 }
+
+/* ── Page Footer ── */
+.page-footer {
+  text-align: center;
+  padding: 1.5rem 1rem 2rem;
+  margin-top: 0.5rem;
+}
+.page-footer-link {
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  color: var(--gold-dim);
+  text-decoration: underline; text-decoration-color: oklch(from var(--gold-dim) l c h / 0.35);
+  text-underline-offset: 2px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.page-footer-link:hover {
+  color: var(--gold);
+  text-decoration-color: oklch(from var(--gold) l c h / 0.6);
+}
