@@ -66,7 +66,7 @@ export default function AvailableState({
         <div className="lb-no-adv">Your Adventurer is already assigned here. Recall them above if you change your mind.</div>
       ) : (
         <div className="lb-send-section">
-          <div className="lb-send-label">SEND AN ADVENTURER ({tile.required} required)</div>
+          <div className="lb-send-label">SEND AN ADVENTURER</div>
           {freeAdvs.length === 0 ? (
             <div className="lb-no-adv">All your Adventurers are currently on missions.</div>
           ) : (

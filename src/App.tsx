@@ -28,6 +28,27 @@ function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => vo
   return [val, set];
 }
 
+const THEMES = [
+  { id: 'gilded',    label: 'Gilded Hearth' },
+  { id: 'moonlit',   label: 'Moonlit Codex' },
+  { id: 'aether',    label: 'Aether Bloom' },
+  { id: 'parchment', label: 'Parchment Day' },
+  { id: 'obsidian',  label: 'Obsidian Contrast' },
+] as const;
+type ThemeId = typeof THEMES[number]['id'];
+
+function useStringSetting<T extends string>(key: string, def: T): [T, (v: T) => void] {
+  const [val, setVal] = useState<T>(() => {
+    const s = localStorage.getItem(key);
+    return (s ?? def) as T;
+  });
+  const set = (v: T) => {
+    setVal(v);
+    localStorage.setItem(key, v);
+  };
+  return [val, set];
+}
+
 function SettingsPanel() {
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState(() => {
@@ -37,6 +58,8 @@ function SettingsPanel() {
   const [showLabels,    setShowLabels]    = useBoolSetting('realm_show_labels',     true);
   const [highlightAdvs, setHighlightAdvs] = useBoolSetting('realm_highlight_advs',  false);
   const [reduceMotion,  setReduceMotion]  = useBoolSetting('realm_reduce_motion',   false);
+  const [theme,         setTheme]         = useStringSetting<ThemeId>('realm_theme', 'gilded');
+  const [statePatterns, setStatePatterns] = useBoolSetting('realm_state_patterns',  false);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--tile-user-size', `${size}px`);
@@ -55,10 +78,35 @@ function SettingsPanel() {
     document.documentElement.classList.toggle('reduce-motion',     reduceMotion);
   }, [reduceMotion]);
 
+  useEffect(() => {
+    const body = document.body;
+    THEMES.forEach(t => body.classList.remove(`theme-${t.id}`));
+    if (theme !== 'gilded') body.classList.add(`theme-${theme}`);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('state-patterns', statePatterns);
+  }, [statePatterns]);
+
   return (
     <>
       <div className={`settings-popout ${open ? 'open' : ''}`}>
         <div className="settings-title">⚙ SETTINGS</div>
+        <div className="settings-theme-block">
+          <span className="settings-label settings-section-label">THEME</span>
+          <div className="settings-theme-options">
+            {THEMES.map(t => (
+              <button
+                key={t.id}
+                className={`settings-theme-btn ${theme === t.id ? 'selected' : ''}`}
+                onClick={() => setTheme(t.id)}
+                aria-pressed={theme === t.id}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="settings-row">
           <span className="settings-label">TILE SIZE</span>
           <input
@@ -80,6 +128,10 @@ function SettingsPanel() {
         <label className="settings-row settings-check-row">
           <input type="checkbox" className="settings-check" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />
           <span className="settings-label">REDUCE ANIMATIONS</span>
+        </label>
+        <label className="settings-row settings-check-row">
+          <input type="checkbox" className="settings-check" checked={statePatterns} onChange={e => setStatePatterns(e.target.checked)} />
+          <span className="settings-label">STATE PATTERNS</span>
         </label>
       </div>
       <button className="settings-toggle" onClick={() => setOpen(o => !o)}>
