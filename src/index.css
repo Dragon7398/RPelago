@@ -1940,6 +1940,8 @@ body.theme-parchment {
 /* Kill the dark ambient glow and noise overlay on the light-mode theme */
 body.theme-parchment::before { background: none; }
 body.theme-parchment::after  { opacity: 0; }
+/* Title: drop the 30px glow and black drop-shadow — unreadable on cream */
+body.theme-parchment header h1 { text-shadow: 0 1px 2px oklch(from var(--gold) l c h / 0.25); }
 
 /* ── Obsidian Contrast (max accessibility) ─────────────────────────
    Near-black + saturated CUD-safe tile hues spread across the
