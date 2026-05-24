@@ -1821,11 +1821,22 @@ header p {
 
   .settings-popout { min-width: 185px; left: 0.5rem; bottom: 3.5rem; }
   .settings-toggle { left: 0.5rem; bottom: 0.8rem; }
+  .settings-row--tile-size { display: none; }
 
   .lb-adv-row { flex-wrap: wrap; }
   .lb-adv-secondary { flex-wrap: wrap; }
 
   .page-content { gap: 1rem; }
+
+  /* Prevent modal headers from being clipped by mobile browser chrome */
+  .lightbox-overlay,
+  .profile-overlay {
+    align-items: flex-start;
+    padding-top: max(env(safe-area-inset-top, 0px), 1rem);
+    overflow-y: auto;
+  }
+  .lightbox    { max-height: 88vh; max-height: 88dvh; }
+  .profile-box { max-height: 88vh; max-height: 88dvh; }
 }
 
 /* ══════════════════════════════════════════════════════════════════

@@ -108,7 +108,7 @@ function SettingsPanel() {
             ))}
           </div>
         </div>
-        <div className="settings-row">
+        <div className="settings-row settings-row--tile-size">
           <span className="settings-label">TILE SIZE</span>
           <input
             type="range" min={64} max={120} step={4}

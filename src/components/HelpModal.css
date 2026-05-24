@@ -330,8 +330,12 @@ strong.help-yaml-new { color: oklch(72% 0.18 145); }
 
 /* ── Responsive: mobile horizontal tab strip ── */
 @media (max-width: 560px) {
-  .help-overlay { padding: 0.5rem; }
-  .help-modal   { max-height: 94vh; }
+  .help-overlay {
+    padding: max(env(safe-area-inset-top, 0px), 0.5rem) 0.5rem 0.5rem;
+    align-items: flex-start;
+    overflow-y: auto;
+  }
+  .help-modal { max-height: 94vh; max-height: 94dvh; }
 
   .help-body { flex-direction: column; }
 
