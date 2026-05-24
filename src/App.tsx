@@ -157,7 +157,7 @@ function AppContent() {
   const [loginOpen,    setLoginOpen]    = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [helpOpen,     setHelpOpen]     = useState(false);
-  const [privacyOpen,  setPrivacyOpen]  = useState(false);
+  const [privacyOpen,  setPrivacyOpen]  = useState(() => window.location.hash === '#privacy');
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
