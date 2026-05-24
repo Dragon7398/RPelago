@@ -14,6 +14,20 @@
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <script>
+      (function () {
+        var t = localStorage.getItem('realm_theme');
+        if (t && t !== 'gilded') document.body.classList.add('theme-' + t);
+        if (localStorage.getItem('realm_state_patterns') === 'true')
+          document.documentElement.classList.add('state-patterns');
+        if (localStorage.getItem('realm_show_labels') === 'false')
+          document.documentElement.classList.add('no-tile-labels');
+        if (localStorage.getItem('realm_highlight_advs') === 'true')
+          document.documentElement.classList.add('highlight-my-advs');
+        if (localStorage.getItem('realm_reduce_motion') === 'true')
+          document.documentElement.classList.add('reduce-motion');
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
