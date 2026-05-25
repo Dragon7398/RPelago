@@ -281,6 +281,31 @@ export function getFeatWarnings(player: Player, tiles: Record<string, Tile>): st
     }
   }
 
+  // Adventurer busy-state desync: player record says busy on a tile but tile disagrees
+  for (const [advId, adv] of Object.entries(player.adventurers ?? {})) {
+    const name = `${adv.firstName} ${adv.lastName}`;
+    if (adv.busy && adv.busyTile) {
+      if (!tiles[adv.busyTile]?.adventurers?.[advId]) {
+        warnings.push(`${name} marked busy on ${adv.busyTile} but not found on that tile`);
+      }
+    }
+  }
+  // Tile-side desync: adventurer is active on a tile but player record doesn't show busy
+  for (const [advId, coords] of Object.entries(advTileMap)) {
+    const adv = player.adventurers?.[advId];
+    if (!adv) {
+      warnings.push(`Adventurer ${advId} is active on ${coords.join(', ')} but missing from player record`);
+    } else if (!adv.busy) {
+      const name = `${adv.firstName} ${adv.lastName}`;
+      warnings.push(`${name} is active on ${coords.join(', ')} but not marked busy in player record`);
+    }
+  }
+
+  // nameColor set without owning the Coat of Many Colors
+  if (player.nameColor && (player.inventory?.['coat_of_many_colors'] ?? 0) === 0) {
+    warnings.push('Has a custom name color but does not own Coat of Many Colors');
+  }
+
   return warnings;
 }
 

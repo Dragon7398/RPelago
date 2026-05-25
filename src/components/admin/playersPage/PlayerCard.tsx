@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGameState } from '../../../contexts/GameStateContext';
+import { useToast } from '../../../contexts/ToastContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings } from '../../../lib/gameLogic';
 import { playerReset } from '../../../firebase/db';
@@ -14,8 +15,10 @@ interface Props {
 export default function PlayerCard({ player, tiles, adminId }: Props) {
   const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
           adminAddWarning, adminDeleteWarning, adminClearWarnings } = useGameState();
+  const { addToast } = useToast();
   const [addingWarning, setAddingWarning] = useState(false);
   const [warningDraft, setWarningDraft]   = useState('');
+  const [resetting, setResetting]         = useState(false);
 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
@@ -152,12 +155,21 @@ export default function PlayerCard({ player, tiles, adminId }: Props) {
       <div className="dash-player-actions">
         <button
           className="dash-player-reset"
-          onClick={() => {
-            if (confirm(`Reset ${player.displayName}'s stats? This archives their XP and cannot be undone.`))
-              playerReset(player.id);
+          disabled={resetting}
+          onClick={async () => {
+            if (!confirm(`Reset ${player.displayName}'s stats? This archives their XP and cannot be undone.`)) return;
+            setResetting(true);
+            try {
+              await playerReset(player.id);
+              addToast(`${player.displayName} has been reset.`, 'success');
+            } catch {
+              addToast(`Failed to reset ${player.displayName}. Please try again.`, 'error');
+            } finally {
+              setResetting(false);
+            }
           }}
         >
-          Player Reset
+          {resetting ? 'Resetting…' : 'Player Reset'}
         </button>
         <button
           className="dash-warning-add-btn"
