@@ -17,7 +17,6 @@ import {
 } from '../firebase/db';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
 import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
-import { useOrbBossEffect } from '../hooks/useOrbBossEffect';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
 
@@ -98,8 +97,6 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     });
     return () => unsubscribeAuth();
   }, []);
-
-  useOrbBossEffect(gameState);
 
   // ── Player actions ──────────────────────────────────────────────────────────
   const sendAdventurer = useCallback(async (coord: string, entry: TileAdventurer) => {

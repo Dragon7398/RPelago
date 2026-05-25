@@ -1,5 +1,5 @@
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
-import { onValueWritten } from 'firebase-functions/v2/database';
+import { onValueWritten, onValueCreated } from 'firebase-functions/v2/database';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getDatabase, ServerValue } from 'firebase-admin/database';
@@ -29,6 +29,41 @@ const ADV_NAMES_LAST = [
 const ADV_CLASSES = [
   'Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Paladin', 'Bard', 'Druid',
 ];
+
+// ── Boss coord computation (mirrors src/lib/tileGen.ts) ───────────────────────
+const ROWS = 5, COLS = 7;
+const CORNER_POSITIONS: [number, number][] = [
+  [0,        0       ],
+  [0,        COLS - 1],
+  [ROWS - 1, 0       ],
+  [ROWS - 1, COLS - 1],
+];
+
+function seededShuffleFirst(arr: [number, number][], seed: number): [number, number] {
+  const a = [...arr];
+  let s = seed;
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    const j = Math.abs(s) % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a[0];
+}
+
+function bossCoordFromSeed(seed: number): string {
+  const [r, c] = seededShuffleFirst(CORNER_POSITIONS, seed ^ 0xDEADBEEF);
+  return `${String.fromCharCode(65 + c)}${r + 1}`;
+}
+
+// ── Elemental orb → boss traits (mirrors src/lib/constants.ts) ────────────────
+const ELEMENTAL_ORB_TRAITS: Record<string, string[]> = {
+  fire:  ['cursed', 'stunning'],
+  air:   ['aerial', 'agile'],
+  water: ['camouflage', 'taunt'],
+  earth: ['enduring', 'sturdy'],
+};
+// Traits removable even while boss is in-progress (game already locked)
+const BOSS_SOFT_TRAITS = new Set(['camouflage', 'enduring']);
 
 interface DiscordTokenResponse {
   access_token: string;
@@ -212,36 +247,42 @@ export const purchaseShopItem = onCall(async (request) => {
   const shopId = (tileSnap.val() as { shopId?: string }).shopId;
   if (!shopId) throw new HttpsError('failed-precondition', 'No shop at this tile.');
 
-  const [shopSnap, playerSnap] = await Promise.all([
-    db.ref(`game/shops/${shopId}`).get(),
-    db.ref(`game/players/${uid}`).get(),
-  ]);
+  const shopSnap = await db.ref(`game/shops/${shopId}`).get();
+  if (!shopSnap.exists()) throw new HttpsError('not-found', 'Shop not found.');
 
-  if (!shopSnap.exists())   throw new HttpsError('not-found', 'Shop not found.');
-  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
-
-  const shop   = shopSnap.val()   as { itemIds?: string[]; name?: string };
-  const player = playerSnap.val() as { gold: number; displayName: string; inventory?: Record<string, number> };
-
+  const shop = shopSnap.val() as { itemIds?: string[]; name?: string };
   if (!(shop.itemIds ?? []).includes(itemId))
     throw new HttpsError('failed-precondition', 'Item not sold at this shop.');
 
   const cost = ITEM_COSTS[itemId];
   if (cost == null) throw new HttpsError('not-found', 'Unknown item.');
-  if (NON_CONSUMABLE_ITEMS.has(itemId) && (player.inventory?.[itemId] ?? 0) > 0)
-    throw new HttpsError('failed-precondition', 'Item already owned.');
-  if (player.gold < cost) throw new HttpsError('failed-precondition', 'Not enough gold.');
 
-  await db.ref().update({
-    [`game/players/${uid}/gold`]:               player.gold - cost,
-    [`game/players/${uid}/inventory/${itemId}`]: (player.inventory?.[itemId] ?? 0) + 1,
-  });
+  type PlayerData = { displayName: string; gold: number; inventory?: Record<string, number> };
 
-  const itemName = ITEM_NAMES[itemId] ?? itemId;
+  let abortReason = 'Purchase failed. Please try again.';
+  const { committed, snapshot } = await db.ref(`game/players/${uid}`).transaction(
+    (current: PlayerData | null) => {
+      if (!current) { abortReason = 'Player not found.'; return undefined; }
+      if (current.gold < cost) { abortReason = 'Not enough gold.'; return undefined; }
+      if (NON_CONSUMABLE_ITEMS.has(itemId) && (current.inventory?.[itemId] ?? 0) > 0) {
+        abortReason = 'Item already owned.'; return undefined;
+      }
+      return {
+        ...current,
+        gold:      current.gold - cost,
+        inventory: { ...(current.inventory ?? {}), [itemId]: (current.inventory?.[itemId] ?? 0) + 1 },
+      };
+    },
+  );
+
+  if (!committed) throw new HttpsError('failed-precondition', abortReason);
+
+  const itemName    = ITEM_NAMES[itemId] ?? itemId;
+  const displayName = (snapshot.val() as PlayerData).displayName;
   await db.ref('game/activityLog').push().set({
     timestamp: Date.now(),
     type:      'item_purchased',
-    message:   `${player.displayName} purchased ${itemName} from ${shop.name ?? shopId}.`,
+    message:   `${displayName} purchased ${itemName} from ${shop.name ?? shopId}.`,
     icon:      '🛒',
   });
 
@@ -295,7 +336,19 @@ export const purchaseShopOrb = onCall(async (request) => {
   });
   if (!committed) throw new HttpsError('already-exists', 'This orb has already been claimed.');
 
-  await db.ref(`game/players/${uid}/gold`).set(player.gold - ORB_SHOP_COST);
+  // Deduct gold via transaction so stale snapshot value can't cause incorrect set().
+  let goldAbortReason = 'Gold deduction failed.';
+  const { committed: goldCommitted } = await db.ref(`game/players/${uid}/gold`).transaction(
+    (current: number | null) => {
+      if (typeof current !== 'number') { goldAbortReason = 'Player gold not found.'; return undefined; }
+      if (current < ORB_SHOP_COST)     { goldAbortReason = 'Not enough gold.';       return undefined; }
+      return current - ORB_SHOP_COST;
+    },
+  );
+  if (!goldCommitted) {
+    await db.ref(`game/orbState/${orbId}`).remove(); // rollback orb claim
+    throw new HttpsError('failed-precondition', goldAbortReason);
+  }
 
   const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
   await db.ref('game/activityLog').push().set({
@@ -416,5 +469,63 @@ export const onTileComplete = onValueWritten(
     if (Object.keys(profileUpdates).length > 0) {
       await db.ref().update(profileUpdates);
     }
+  },
+);
+
+// ── onOrbAcquired ─────────────────────────────────────────────────────────────
+// Removes boss traits when an elemental orb is first acquired, regardless of
+// which client or Cloud Function wrote the orb. Soft traits (camouflage,
+// enduring) are skipped if the boss is already in-progress (YAML locked).
+
+export const onOrbAcquired = onValueCreated(
+  'game/orbState/{orbId}',
+  async (event) => {
+    const orbId    = event.params.orbId;
+    const traitIds = ELEMENTAL_ORB_TRAITS[orbId];
+    if (!traitIds) return; // not an elemental orb
+
+    const db = getDatabase();
+
+    const metaSnap = await db.ref('game/meta').get();
+    if (!metaSnap.exists()) return;
+    const seed      = (metaSnap.val() as { seed: number }).seed;
+    const bossCoord = bossCoordFromSeed(seed);
+
+    const bossSnap = await db.ref(`game/tiles/${bossCoord}`).get();
+    if (!bossSnap.exists()) return;
+    const boss = bossSnap.val() as { state: string; traits?: Record<string, { value: number }> };
+    if (boss.state === 'complete') return;
+
+    const isInProgress = boss.state === 'inprogress';
+    const next: Record<string, { value: number }> = { ...(boss.traits ?? {}) };
+    let changed = false;
+
+    for (const traitId of traitIds) {
+      if (isInProgress && !BOSS_SOFT_TRAITS.has(traitId)) continue;
+      if (traitId in next) { delete next[traitId]; changed = true; }
+    }
+
+    if (!changed) return;
+    await db.ref(`game/tiles/${bossCoord}/traits`).set(
+      Object.keys(next).length > 0 ? next : null,
+    );
+  },
+);
+
+// ── pruneActivityLog ──────────────────────────────────────────────────────────
+// Fires on every new activity log entry and trims the log to 25 entries.
+
+export const pruneActivityLog = onValueCreated(
+  'game/activityLog/{entryId}',
+  async () => {
+    const db   = getDatabase();
+    const snap = await db.ref('game/activityLog').get();
+    if (!snap.exists()) return;
+    const keys = Object.keys(snap.val() as Record<string, unknown>).sort();
+    const MAX  = 25;
+    if (keys.length <= MAX) return;
+    const updates: Record<string, null> = {};
+    for (const k of keys.slice(0, keys.length - MAX)) updates[`game/activityLog/${k}`] = null;
+    await db.ref().update(updates);
   },
 );

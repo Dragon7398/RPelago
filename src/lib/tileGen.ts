@@ -177,12 +177,6 @@ export function orbIdForElite(r: number, c: number, orbConfig: OrbConfig): strin
   return orbIdx != null ? (ALL_ORBS[orbIdx]?.id ?? null) : null;
 }
 
-export function orbIdForTown(r: number, c: number, orbConfig: OrbConfig): string | null {
-  const idx = _orbPositions.shopTownPositions.findIndex(([tr, tc]) => tr === r && tc === c);
-  if (idx <= 0) return null;  // idx=0 is center (no orb), idx<0 not found
-  const orbIdx = orbConfig.shopOrbs[idx - 1];
-  return orbIdx != null ? (ALL_ORBS[orbIdx]?.id ?? null) : null;
-}
 
 export function orbIdForEdgeTile(r: number, c: number, orbConfig: OrbConfig): string | null {
   const { edgeBattlePos, edgePuzzlePos } = _orbPositions;
