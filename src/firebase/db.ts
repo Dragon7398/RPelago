@@ -192,26 +192,7 @@ export async function playerExists(playerId: string): Promise<boolean> {
 }
 
 // ── Player mutations ──────────────────────────────────────────────────────────
-export async function upsertPlayer(player: Player): Promise<void> {
-  await set(ref(db!, `game/players/${player.id}`), player);
-}
 
-export async function upsertPlayerDiscordFields(
-  uid: string,
-  discordHandle: string,
-  avatarHash: string | null,
-): Promise<void> {
-  assertDb();
-  const snap = await get(ref(db!, `game/players/${uid}/joinedAt`));
-  const updates: Record<string, unknown> = {
-    [`game/players/${uid}/discordHandle`]: discordHandle,
-    [`game/players/${uid}/avatarHash`]:    avatarHash,
-  };
-  if (!snap.exists()) {
-    updates[`game/players/${uid}/joinedAt`] = Date.now();
-  }
-  await update(ref(db!), updates);
-}
 
 export async function updateAdventurer(
   playerId: string,

@@ -9,6 +9,27 @@ initializeApp();
 
 const discordClientSecret = defineSecret('DISCORD_CLIENT_SECRET');
 
+// ── Adventurer name/class pools (mirrors src/lib/constants.ts) ────────────────
+const ADV_NAMES_FIRST = [
+  'Aldric', 'Serana', 'Torvin', 'Mira', 'Dax', 'Lyra', 'Borin', 'Sylva',
+  'Kael', 'Thessia', 'Oryn', 'Veda', 'Gareth', 'Nyx', 'Fenn', 'Isolde',
+  'Caspian', 'Thalia', 'Riven', 'Vesper', 'Emric', 'Wren', 'Draven', 'Elara',
+  'Caius', 'Branwen', 'Zephyr', 'Tarrin', 'Phaedra', 'Jorvin', 'Celeste', 'Rook',
+  'Elowen', 'Hadeon', 'Solia', 'Corvus', 'Mirela', 'Dusk', 'Zinnia', 'Tybalt',
+];
+const ADV_NAMES_LAST = [
+  'Stonefist', 'Ashveil', 'Ironwood', 'Dawnwhisper',
+  'Greymantle', 'Blackthorn', 'Swiftarrow', 'Moonforge',
+  'Emberveil', 'Shadowmend', 'Stormcaller', 'Nighthollow',
+  'Firesong', 'Silverthorn', 'Ravenwing', 'Cinderspire',
+  'Frosthollow', 'Starfall', 'Ashenbrow', 'Coppergate',
+  'Galesong', 'Embercroft', 'Runeblade', 'Oakheart',
+  'Brightholm', 'Coldwater', 'Wildstride',
+];
+const ADV_CLASSES = [
+  'Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Paladin', 'Bard', 'Druid',
+];
+
 interface DiscordTokenResponse {
   access_token: string;
 }
@@ -97,6 +118,46 @@ export const exchangeDiscordCode = onRequest(
       await profileRef.update(stub);
       if (discordUser.username) {
         await db.ref(`profiles/handleIndex/${discordUser.username.replace(/\./g, '_')}`).set(uid);
+      }
+
+      // Create or update game/players via admin SDK (bypasses security rules).
+      // Blocking on this before returning the token guarantees the record exists
+      // the moment the client signs in — no client-side writes needed for setup.
+      const gamePlayerRef = db.ref(`game/players/${uid}`);
+      const [gameAdvSnap, gameJoinedSnap] = await Promise.all([
+        gamePlayerRef.child('adventurers').get(),
+        gamePlayerRef.child('joinedAt').get(),
+      ]);
+
+      if (!gameAdvSnap.exists()) {
+        // New user — create the full player record server-side.
+        const advId    = `${uid}_adv_1`;
+        const firstName = ADV_NAMES_FIRST[Math.floor(Math.random() * ADV_NAMES_FIRST.length)];
+        const lastName  = ADV_NAMES_LAST[Math.floor(Math.random() * ADV_NAMES_LAST.length)];
+        const cls       = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
+        await gamePlayerRef.set({
+          id:          uid,
+          displayName,
+          xp:          0,
+          gold:        0,
+          adventurers: {
+            [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null },
+          },
+          inventory:     {},
+          joinedAt:      Date.now(),
+          discordHandle: discordUser.username,
+          avatarHash:    discordUser.avatar,
+        });
+      } else {
+        // Returning user — refresh Discord identity fields.
+        const gameUpdates: Record<string, unknown> = {
+          [`game/players/${uid}/discordHandle`]: discordUser.username,
+          [`game/players/${uid}/avatarHash`]:    discordUser.avatar,
+        };
+        if (!gameJoinedSnap.exists()) {
+          gameUpdates[`game/players/${uid}/joinedAt`] = Date.now();
+        }
+        await db.ref().update(gameUpdates);
       }
 
       res.json({ customToken, displayName, uid, discordHandle: discordUser.username, avatarHash: discordUser.avatar });

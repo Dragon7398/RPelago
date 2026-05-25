@@ -6,11 +6,9 @@ import {
   onAuthStateChanged, signInWithCustomToken,
   signOut as fbSignOut, type User,
 } from 'firebase/auth';
-import type { AuthUser, Adventurer, Player } from '../types';
+import type { AuthUser } from '../types';
 import { auth as firebaseAuth, firebaseReady } from '../firebase/config';
-import { playerExists, upsertPlayer, upsertPlayerDiscordFields, isPlayerDisabled } from '../firebase/db';
-import { ADV_CLASSES } from '../lib/constants';
-import { randomAdvName } from '../lib/tileGen';
+import { playerExists, isPlayerDisabled } from '../firebase/db';
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID as string;
 const REDIRECT_PATH     = '/auth/callback';
@@ -40,11 +38,7 @@ function buildDiscordAuthUrl(): string {
 }
 
 interface ExchangeResult {
-  customToken:   string;
-  displayName:   string;
-  uid:           string;
-  discordHandle: string;
-  avatarHash:    string | null;
+  customToken: string;
 }
 
 async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
@@ -65,24 +59,14 @@ async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
   return res.json() as Promise<ExchangeResult>;
 }
 
-async function ensurePlayerRecord(fbUser: User, displayName: string): Promise<void> {
+// Passive guard — the exchangeDiscordCode Cloud Function creates the record
+// server-side before returning the custom token. This just warns if something
+// went wrong with that step (e.g. a Cloud Function deployment issue).
+async function ensurePlayerRecord(fbUser: User): Promise<void> {
   const exists = await playerExists(fbUser.uid);
-  if (exists) return;
-
-  const advId          = `${fbUser.uid}_adv_1`;
-  const { firstName, lastName } = randomAdvName();
-  const cls            = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
-  const startingAdv: Adventurer = { id: advId, firstName, lastName, cls, busy: false, busyTile: null };
-
-  const player: Player = {
-    id:          fbUser.uid,
-    displayName,
-    xp:          0,
-    gold:        0,
-    adventurers: { [advId]: startingAdv },
-    inventory:   {},
-  };
-  await upsertPlayer(player);
+  if (!exists) {
+    console.warn(`[RPelago] Player record missing for ${fbUser.uid} — check exchangeDiscordCode logs.`);
+  }
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -105,8 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Prevents the null-user onAuthStateChanged tick from clearing loading
   // while we're still mid-exchange.
-  const exchangingRef     = useRef(false);
-  const pendingDiscordRef = useRef<{ handle: string; avatarHash: string | null } | null>(null);
+  const exchangingRef = useRef(false);
 
   useEffect(() => {
     if (!firebaseReady || !firebaseAuth) {
@@ -127,10 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       exchangingRef.current = true;
 
       exchangeCodeForToken(code)
-        .then(({ customToken, discordHandle, avatarHash }) => {
-          pendingDiscordRef.current = { handle: discordHandle, avatarHash };
-          return signInWithCustomToken(firebaseAuth!, customToken);
-        })
+        .then(({ customToken }) => signInWithCustomToken(firebaseAuth!, customToken))
         .catch(err => {
           console.error('Discord auth exchange failed:', err);
           exchangingRef.current = false;
@@ -147,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (fbUser) {
         const displayName = fbUser.displayName ?? 'Unknown';
         try {
-          await ensurePlayerRecord(fbUser, displayName);
+          await ensurePlayerRecord(fbUser);
           const disabled = await isPlayerDisabled(fbUser.uid);
           if (disabled) {
             await fbSignOut(firebaseAuth!);
@@ -155,15 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
             return;
           }
-          // Persist Discord identity fields on every login so handle/avatar stay current.
-          // Only available when the user just exchanged an OAuth code; not on silent re-auth.
-          const pending = pendingDiscordRef.current;
-          if (pending) {
-            pendingDiscordRef.current = null;
-            await upsertPlayerDiscordFields(fbUser.uid, pending.handle, pending.avatarHash);
-          }
         } catch (err) {
-          console.error('Failed to create player record:', err);
+          console.error('Auth setup failed:', err);
         }
         setUser({ id: fbUser.uid, displayName });
       } else {

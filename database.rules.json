@@ -36,8 +36,8 @@
 
       "players": {
         "$playerId": {
-          ".write": "auth != null && (root.child('game/meta/adminId').val() === auth.uid || (!data.exists() && auth.uid === $playerId))",
-          ".validate": "!data.exists() || root.child('game/meta/adminId').val() === auth.uid || (newData.child('xp').val() === data.child('xp').val() && newData.child('gold').val() === data.child('gold').val())",
+          ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid",
+          ".validate": "root.child('game/meta/adminId').val() === auth.uid || (newData.child('xp').val() === data.child('xp').val() && newData.child('gold').val() === data.child('gold').val())",
 
           "adventurers": {
             "$advId": {
