@@ -257,12 +257,13 @@ export const purchaseShopItem = onCall(async (request) => {
   const cost = ITEM_COSTS[itemId];
   if (cost == null) throw new HttpsError('not-found', 'Unknown item.');
 
-  type PlayerData = { displayName: string; gold: number; inventory?: Record<string, number> };
+  type PlayerData = { displayName: string; gold: number; inventory?: Record<string, number>; disabled?: boolean };
 
   let abortReason = 'Purchase failed. Please try again.';
   const { committed, snapshot } = await db.ref(`game/players/${uid}`).transaction(
     (current: PlayerData | null) => {
       if (!current) { abortReason = 'Player not found.'; return undefined; }
+      if (current.disabled) { abortReason = 'Account restricted.'; return undefined; }
       if (current.gold < cost) { abortReason = 'Not enough gold.'; return undefined; }
       if (NON_CONSUMABLE_ITEMS.has(itemId) && (current.inventory?.[itemId] ?? 0) > 0) {
         abortReason = 'Item already owned.'; return undefined;
@@ -314,7 +315,9 @@ export const purchaseShopOrb = onCall(async (request) => {
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
 
   const shop   = shopSnap.val()   as { orbId?: string | null; name?: string };
-  const player = playerSnap.val() as { gold: number; displayName: string };
+  const player = playerSnap.val() as { gold: number; displayName: string; disabled?: boolean };
+
+  if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
 
   const orbId = shop.orbId ?? null;
   if (!orbId) throw new HttpsError('failed-precondition', 'No orb sold at this shop.');
@@ -346,7 +349,11 @@ export const purchaseShopOrb = onCall(async (request) => {
     },
   );
   if (!goldCommitted) {
-    await db.ref(`game/orbState/${orbId}`).remove(); // rollback orb claim
+    try {
+      await db.ref(`game/orbState/${orbId}`).remove();
+    } catch (e) {
+      console.error(`[purchaseShopOrb] Rollback failed for orb ${orbId}, player ${uid}:`, e);
+    }
     throw new HttpsError('failed-precondition', goldAbortReason);
   }
 

@@ -228,6 +228,10 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
             abortReason = 'Player not found.';
             return undefined;
         }
+        if (current.disabled) {
+            abortReason = 'Account restricted.';
+            return undefined;
+        }
         if (current.gold < cost) {
             abortReason = 'Not enough gold.';
             return undefined;
@@ -279,6 +283,8 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const shop = shopSnap.val();
     const player = playerSnap.val();
+    if (player.disabled)
+        throw new https_1.HttpsError('permission-denied', 'Account restricted.');
     const orbId = shop.orbId ?? null;
     if (!orbId)
         throw new https_1.HttpsError('failed-precondition', 'No orb sold at this shop.');
@@ -312,7 +318,12 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         return current - ORB_SHOP_COST;
     });
     if (!goldCommitted) {
-        await db.ref(`game/orbState/${orbId}`).remove(); // rollback orb claim
+        try {
+            await db.ref(`game/orbState/${orbId}`).remove();
+        }
+        catch (e) {
+            console.error(`[purchaseShopOrb] Rollback failed for orb ${orbId}, player ${uid}:`, e);
+        }
         throw new https_1.HttpsError('failed-precondition', goldAbortReason);
     }
     const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);

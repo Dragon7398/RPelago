@@ -82,7 +82,7 @@ export function subscribeToGame(
 
 // ── Tile mutations ────────────────────────────────────────────────────────────
 export async function setTileState(coord: string, state: TileState): Promise<void> {
-  await update(ref(db!, `game/tiles/${coord}`), { state });
+  await update(ref(db!, `game/tiles/${coord}`), { state, stunnedAdvId: null, tauntedAdvId: null });
 }
 
 export async function setTileInProgress(
@@ -484,7 +484,38 @@ export async function playerReset(playerId: string): Promise<void> {
     keptAdvs[advId] = { ...adv, busy: false, busyTile: null };
   }
 
-  await set(ref(db!, `game/players/${playerId}`), {
+  const updates: Record<string, unknown> = {};
+
+  // Mirror kick behavior: remove tile entries, create claimable slots for in-progress tiles
+  for (const [advId, adv] of Object.entries(player.adventurers ?? {})) {
+    if (!adv.busy || !adv.busyTile) continue;
+    const coord = adv.busyTile;
+
+    const tileSnap = await get(ref(db!, `game/tiles/${coord}`));
+    if (!tileSnap.exists()) continue;
+    const tile = tileSnap.val() as Tile;
+
+    updates[`game/tiles/${coord}/adventurers/${advId}`] = null;
+
+    if (tile.state === 'inprogress') {
+      const rawSlots = normalizeSlots(
+        tile.adventurers?.[advId]?.slots as AdvSlot[] | Record<string, AdvSlot> | undefined,
+      );
+      const slotsToAdd: AdvSlot[] = rawSlots.length > 0
+        ? rawSlots.map(s => ({
+            name: s.name, game: s.game,
+            ...(s.details   ? { details:   s.details   } : {}),
+            ...(s.room      ? { room:      s.room      } : {}),
+            ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+            ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+          }))
+        : [{ name: '', game: '' }];
+      const newSlotRef = push(ref(db!, `game/tiles/${coord}/claimableSlots`));
+      updates[`game/tiles/${coord}/claimableSlots/${newSlotRef.key}`] = slotsToAdd;
+    }
+  }
+
+  updates[`game/players/${playerId}`] = {
     ...player,
     xp:          0,
     gold:        0,
@@ -492,5 +523,7 @@ export async function playerReset(playerId: string): Promise<void> {
     adventurers: keptAdvs,
     xpHistory,
     feats:       {},
-  });
+  };
+
+  await update(ref(db!), updates);
 }
