@@ -265,7 +265,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                 return (
                   <div key={adv.id} className="lb-adv-row" style={{ marginBottom: '0.5rem' }}>
                     <span className="lb-adv-icon">{ADV_ICONS[adv.cls as AdvClass] ?? '⚔️'}</span>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontFamily: "'Cinzel', serif", letterSpacing: '0.06em' }}>
                         {adv.cls}{adv.busy && adv.busyTile ? ` · ${adv.busyTile}` : ''}
                       </div>

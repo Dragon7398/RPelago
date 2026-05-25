@@ -29,10 +29,11 @@ Firebase RTDB (game/)
 
 ### Key invariants
 
-- **Admin identity**: `gameState.meta.adminId === currentUser.uid`. No token claims — just a plain field comparison in `AuthContext.isAdmin`.
-- **Tile state machine**: `hidden → available → inprogress → complete`. The `available` set is always derived from adjacency to `complete` tiles. Any time a `complete` tile is un-completed, `computeRecalcUpdates()` in `GameStateContext` must re-derive all `available` states and write them atomically via `setTilesAvailability()`.
+- **Admin identity**: `gameState.meta.adminId === currentUser.uid`. No token claims — derived inline in components by comparing `user.id` to `gameState.meta.adminId`. `AuthUser` has no `isAdmin` field.
+- **Tile state machine**: `hidden → available → inprogress → complete`. The `available` set is always derived from adjacency to `complete` tiles. Any time a `complete` tile is un-completed, `computeRecalcUpdates()` (in `gameLogic.ts`, imported into `GameStateContext`) re-derives all `available` states and writes them atomically via `setTilesAvailability()`.
 - **`adminOverride` flag**: When admin manually edits tile stats, `updateTileAdmin()` sets `adminOverride: true`. Regen Stats (`resetTileStats()`) clears it to `false` by re-applying seeded defaults.
 - **Seeded map generation**: `gameState.meta.seed` drives everything in `tileGen.ts`. `initializeGrid(seed)` populates a module-level grid array used by `getTypeKey(r, c)`. This must be called before any type lookups; it's called automatically in `subscribeToGame` when the state first loads.
+- **Stun/taunt clearing**: `setTileState()` always writes `stunnedAdvId: null` and `tauntedAdvId: null` alongside the state, so any admin-driven transition away from `inprogress` resets these fields. They are only re-set by `setTileInProgress()` / `setTilesAvailability()` when transitioning into `inprogress`.
 
 ### Map grid
 
@@ -43,7 +44,7 @@ Firebase RTDB (game/)
 
 ### Orb system
 
-Nine elemental orbs (`ALL_ORBS` in `constants.ts`): fire, water, earth, air, light, dark, metal, wood, soul. Orbs are collected from: 5 elite tile drops, 3 shop purchases, 1 edge battle, 1 edge puzzle, and boss completion. Which orb goes where is configured in `orbConfig` (stored in Firebase).
+Nine elemental orbs (`ALL_ORBS` in `constants.ts`): fire, water, earth, air, light, dark, metal, wood, soul. Orbs are collected from: 5 elite tile drops, 2 shop purchases, 1 edge battle, and 1 edge puzzle. Which orb goes where is configured in `orbConfig` (stored in Firebase).
 
 `ELEMENTAL_ORB_TRAITS` maps four of the orbs to boss traits they keep locked:
 - **fire** → cursed, stunning
@@ -51,7 +52,7 @@ Nine elemental orbs (`ALL_ORBS` in `constants.ts`): fire, water, earth, air, lig
 - **water** → camouflage, taunt
 - **earth** → enduring, sturdy
 
-The boss starts with all eight of these traits applied. When a player acquires an orb, `useOrbBossEffect` (a hook called from `GameStateContext`) removes the corresponding traits from the boss tile, skipping `BOSS_SOFT_TRAITS` (camouflage, enduring) if the boss is already `inprogress`.
+The boss starts with all eight of these traits applied. When an orb is written to `game/orbState/{orbId}`, the `onOrbAcquired` Cloud Function trigger removes the corresponding traits from the boss tile, skipping `BOSS_SOFT_TRAITS` (camouflage, enduring) if the boss is already `inprogress`.
 
 `OrbAcquisition` records how each orb was obtained: `method` ('battle' | 'puzzle' | 'elite' | 'boss' | 'shop' | 'admin'), `tileCoord`, `tileName`, and `buyerName`.
 
@@ -84,11 +85,24 @@ Items can negate specific traits; `ITEM_TRAIT_REFS` maps item IDs to the trait I
 
 When a tile has the `bifurcated` trait, `adminSetTileState()` splits it into Room 1 and Room 2 when transitioning to `inprogress`. Each `AdvSlot` and `TileAdventurer` has an optional `room?: 1 | 2` field for assignment. `InProgressState.tsx` renders the two rooms separately. Admin can assign public slots and claimable slots to a specific room.
 
-The stunned/taunted adventurer IDs are tracked on the tile as `stunnedAdvId` and `tauntedAdvId`.
+The stunned/taunted adventurer IDs are tracked on the tile as `stunnedAdvId` and `tauntedAdvId`. Both are cleared whenever the tile leaves `inprogress` (handled automatically by `setTileState`).
 
 ### Auth
 
 Discord OAuth → `exchangeDiscordCode` Cloud Function → Firebase custom token → `signInWithCustomToken`. After sign-in, `AuthContext` upserts the player record, then `GameStateContext` initializes the game (the first authenticated user becomes admin via the two-phase write in `initializeGameIfNeeded`).
+
+### Cloud Functions
+
+Six functions in `functions/src/index.ts`:
+
+| Function | Trigger | Purpose |
+|----------|---------|---------|
+| `exchangeDiscordCode` | HTTP request | Discord OAuth code exchange → Firebase custom token |
+| `purchaseShopItem` | Callable | Validates and deducts gold, adds item to inventory. Rejects disabled players. |
+| `purchaseShopOrb` | Callable | Atomically claims orb, deducts gold. Rejects disabled players. |
+| `onTileComplete` | DB write on `game/tiles/{coord}/state` | Fires when a tile reaches `complete`; updates `profiles/` with XP snapshot and game stats. |
+| `onOrbAcquired` | DB create on `game/orbState/{orbId}` | Removes boss traits unlocked by the acquired orb. |
+| `pruneActivityLog` | DB create on `game/activityLog/{entryId}` | Trims the activity log to the most recent 25 entries. |
 
 ### Shops and items
 
@@ -115,6 +129,8 @@ Eight shop items are defined in `SHOP_ITEMS` (`constants.ts`):
 
 Players unlock one feat at each of levels 3, 5, and 7, stored in `player.feats` (`PlayerFeats` type). Feats are permanent and modify YAML submission limits and/or provide passive bonuses.
 
+Level thresholds: `[0, 100, 300, 500, 800, 1150, 1500]` XP (index = level − 1). Level 3 requires 300 XP, level 5 requires 800 XP, level 7 requires 1500 XP.
+
 **Level 3 feats** (pick one):
 - **Knowledgeable** (📚) — +1 Starting Hint, +2 Hinted Locations per YAML
 - **Picky** (🚫) — +4 Excluded Locations per YAML (max 6)
@@ -128,14 +144,14 @@ Players unlock one feat at each of levels 3, 5, and 7, stored in `player.feats` 
 - **Seeker** (🔍) — challenges you join have 1% reduced hint cost (stacks, min 1%)
 - **Prepared** (🎒) — +1 starting inventory item per YAML
 
-Feats with `yamlEffect` affect the YAML limits displayed in the help modal (`SectionYaml.tsx`). Feat selection UI lives in `ProfileLightbox.tsx`.
+Feats with `yamlEffect` affect the YAML limits displayed in the help modal (`SectionYaml.tsx`). Feat selection UI lives in `ProfileLightbox.tsx`. The DB rule for `feats/$slot` only enforces that the slot was previously empty (preventing re-selection) — level eligibility is enforced in the UI only via `pendingFeatSlot()` in `gameLogic.ts`.
 
 ### Public and claimable slots
 
 Two distinct slot types exist on tiles:
 
 - **`publicSlots?: AdvSlot[]`** — Admin-set open slots. Anyone can play them; they are never consumed or removed.
-- **`claimableSlots?: Record<string, AdvSlot[]>`** — Created when an admin kicks a player from an **in-progress** tile. Any eligible player can claim one: the claim atomically deletes the slot entry and adds the player as a `TileAdventurer`. Keyed by Firebase push keys so individual entries are deletable.
+- **`claimableSlots?: Record<string, AdvSlot[]>`** — Created when an admin kicks a player from an **in-progress** tile, or when a **player reset** removes a player who is currently on an in-progress tile. Any eligible player can claim one: the claim atomically deletes the slot entry and adds the player as a `TileAdventurer`. Keyed by Firebase push keys so individual entries are deletable.
 
 The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **delete** (claim) an existing entry but not create one. The `adventurers/$advId` validate rule uses a Firebase pre-write evaluation trick: during an atomic claim `update()`, the claimable slot still exists in `data`/`root` (pre-write state), so the rule `claimableSlots.exists()` passes even though the same update deletes it.
 
@@ -155,9 +171,13 @@ Players have a `warnings?: Record<string, PlayerWarning>` field (push-keyed for 
 
 The Players page shows a count badge and an inline list with AUTO/ADMIN tags, dates, per-warning delete, and a "Clear all" button.
 
+### Player reset
+
+`playerReset()` in `db.ts` archives the player's XP, zeroes all stats, clears inventory and feats, and trims to one adventurer. It mirrors kick behavior for any tiles the player is currently on: tile adventurer entries are removed, and a claimable slot is created for any tile that is `inprogress`. All writes are atomic in a single multi-path `update()`.
+
 ### Activity log
 
-Real-time event feed stored in `game/activityLog` in Firebase, capped at 25 entries. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, and orb purchases. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
+Real-time event feed stored in `game/activityLog` in Firebase, automatically pruned to 25 entries by the `pruneActivityLog` Cloud Function trigger. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, and orb purchases. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
 
 ### Player customization
 
@@ -175,15 +195,18 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 |------|------|
 | `src/types/index.ts` | All TypeScript types for game entities |
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
-| `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData` |
-| `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation |
-| `src/lib/slotHelpers.ts` | Slot normalization utilities |
+| `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
+| `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards` |
+| `src/lib/slotHelpers.ts` | Slot normalization utilities (`normalizeSlots`, `slotsFromEntry`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions` |
 | `src/firebase/db.ts` | All RTDB read/write functions |
-| `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert, `isAdmin` |
+| `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert |
 | `src/contexts/GameStateContext.tsx` | Game subscription, all action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
-| `src/hooks/useOrbBossEffect.ts` | Boss trait removal on orb acquisition |
+| `src/components/Header.tsx` | Site header with nav/branding |
+| `src/components/PlayerHUD.tsx` | Player XP/gold/level status bar |
+| `src/components/LoginModal.tsx` | Discord login prompt |
+| `src/components/PrivacyModal.tsx` | Privacy policy / terms modal |
 | `src/components/MapGrid.tsx` | Renders the 5×7 tile grid |
 | `src/components/Tile.tsx` | Individual tile cell |
 | `src/components/TileLightbox.tsx` | Lightbox for non-town tiles |
@@ -191,7 +214,7 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | `src/components/ActivityFeed.tsx` | Collapsible real-time event feed |
 | `src/components/OrbBar.tsx` | Orb collection display |
 | `src/components/HelpModal.tsx` | Help modal shell |
-| `src/components/help/` | Help section components (9 sections) |
+| `src/components/help/` | Help section components (10 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml) |
 | `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers) |
 | `src/components/AdminDashboard.tsx` | Admin dashboard shell |
 | `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage |
