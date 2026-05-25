@@ -42,7 +42,7 @@ interface DiscordUser {
 }
 
 export const exchangeDiscordCode = onRequest(
-  { secrets: [discordClientSecret], cors: true },
+  { secrets: [discordClientSecret], cors: ['https://rpelago.brisbe.org', 'http://localhost:5173'] },
   async (req, res): Promise<void> => {
     if (req.method !== 'POST') {
       res.status(405).json({ error: 'Method not allowed' });
