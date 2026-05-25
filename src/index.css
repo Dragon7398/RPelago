@@ -1150,7 +1150,12 @@ header p {
   justify-content: space-between; user-select: none; width: 100%;
 }
 .activity-feed-title:hover { color: var(--gold); }
-.activity-feed-title-right { display: flex; align-items: center; }
+.activity-feed-title-right { display: flex; align-items: center; gap: 0.5rem; }
+.activity-feed-new-badge {
+  font-family: 'Cinzel', serif; font-size: 0.48rem; letter-spacing: 0.1em;
+  color: var(--bg-card); background: var(--gold-dim);
+  padding: 0.1em 0.5em; border-radius: 2px;
+}
 .activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; }
 .activity-feed-empty { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(40% 0.06 75); text-align: center; padding: 0.3rem 0; }
 .activity-entry {
