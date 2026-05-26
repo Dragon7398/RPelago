@@ -105,7 +105,9 @@ export default function OrbBar() {
             })}
           </div>
           <div className="orb-count-badge">
-            <strong>{count}</strong> / 9 orbs &nbsp;·&nbsp;{' '}
+            <strong>{count}</strong> / 9 orbs
+          </div>
+          <div className="orb-count-badge">
             {count >= minOrbs
               ? <span style={{ color: 'oklch(60% 0.16 145)' }}>Boss unlocked</span>
               : <span style={{ color: 'oklch(55% 0.14 25)' }}>{minOrbs - count} more to unlock boss</span>

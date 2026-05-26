@@ -32,9 +32,12 @@ function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => vo
 const THEMES = [
   { id: 'gilded',    label: 'Gilded Hearth' },
   { id: 'moonlit',   label: 'Moonlit Codex' },
+  { id: 'verdant',   label: 'Verdant Hollow' },
   { id: 'aether',    label: 'Aether Bloom' },
-  { id: 'parchment', label: 'Parchment Day' },
   { id: 'obsidian',  label: 'Obsidian Contrast' },
+  { id: 'parchment', label: 'Parchment Day' },
+  { id: 'sakura',    label: 'Sakura Scroll' },
+  { id: 'mint',      label: 'Mint Library' },
 ] as const;
 type ThemeId = typeof THEMES[number]['id'];
 
@@ -176,8 +179,10 @@ function AppContent() {
         onTileClick={coord => setActiveTile(coord)}
         onHelpClick={() => setHelpOpen(true)}
       />
-      <OrbBar />
-      <ActivityFeed />
+      <div className="orb-activity-row">
+        <OrbBar />
+        <ActivityFeed />
+      </div>
       <div className="rule"><span>⚔</span></div>
       <MapGrid onTileClick={coord => setActiveTile(coord)} />
       <div className="state-legend">
