@@ -33,7 +33,7 @@ export default function OrbBar() {
   const minOrbs   = orbConfig?.bossMinOrbs ?? 5;
 
   const [collapsed, setCollapsed] = useState(() =>
-    localStorage.getItem('realm_orb_collapsed') === 'true'
+    localStorage.getItem('realm_orb_collapsed') !== 'false'
   );
   const toggleCollapsed = () => {
     setCollapsed(c => {
