@@ -35,9 +35,11 @@ const THEMES = [
   { id: 'verdant',   label: 'Verdant Hollow' },
   { id: 'aether',    label: 'Aether Bloom' },
   { id: 'obsidian',  label: 'Obsidian Contrast' },
+  { id: 'tidepool',  label: 'Tidepool Atlas' },
   { id: 'parchment', label: 'Parchment Day' },
   { id: 'sakura',    label: 'Sakura Scroll' },
   { id: 'mint',      label: 'Mint Library' },
+  { id: 'lapis',     label: 'Dunes & Lapis' },
 ] as const;
 type ThemeId = typeof THEMES[number]['id'];
 

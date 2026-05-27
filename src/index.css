@@ -2099,6 +2099,50 @@ body.theme-mint::before { background: none; }
 body.theme-mint::after  { opacity: 0; }
 body.theme-mint header h1 { text-shadow: 0 1px 2px oklch(from var(--gold) l c h / 0.25); }
 
+/* ── Dunes & Lapis (light, Deutan/Protan-friendly) ────────────────
+   Warm sand base, lapis blue replaces gold as the chrome accent.
+   Blue-yellow axis encoding matches Tidepool Atlas. */
+body.theme-lapis {
+  --bg-deep:     oklch(94% 0.035 75);
+  --bg-mid:      oklch(90% 0.045 72);
+  --bg-card:     oklch(86% 0.055 70);
+  --border:      oklch(56% 0.10 240);
+  --border-glow: oklch(42% 0.16 245);
+  --gold:        oklch(38% 0.17 248);
+  --gold-dim:    oklch(32% 0.13 248);
+  --parchment:   oklch(22% 0.06 60);
+
+  --battle-fg:   oklch(40% 0.22 30);
+  --battle-bg-1: oklch(86% 0.08 30);
+  --battle-bg-2: oklch(90% 0.06 30);
+  --puzzle-fg:   oklch(36% 0.18 250);
+  --puzzle-bg-1: oklch(86% 0.06 250);
+  --puzzle-bg-2: oklch(90% 0.05 250);
+  --town-fg:     oklch(46% 0.13 200);
+  --town-bg-1:   oklch(86% 0.05 200);
+  --town-bg-2:   oklch(90% 0.04 200);
+  --elite-fg:    oklch(38% 0.20 315);
+  --elite-bg-1:  oklch(86% 0.06 315);
+  --elite-bg-2:  oklch(90% 0.05 315);
+  --boss-fg:     oklch(54% 0.18 85);
+  --boss-bg-1:   oklch(88% 0.09 85);
+  --boss-bg-2:   oklch(92% 0.07 85);
+
+  --state-avail-fg:     oklch(46% 0.13 200);
+  --state-avail-border: oklch(48% 0.13 200);
+  --state-prog-border:  oklch(50% 0.20 50);
+  --state-done-border:  oklch(38% 0.17 248);
+  --state-claim:        oklch(48% 0.22 35);
+
+  --hidden-bg-1:   oklch(74% 0.05 75);
+  --hidden-bg-2:   oklch(70% 0.05 75);
+  --hidden-bg-3:   oklch(66% 0.05 75);
+  --hidden-border: oklch(58% 0.07 75);
+}
+body.theme-lapis::before { background: none; }
+body.theme-lapis::after  { opacity: 0; }
+body.theme-lapis header h1 { text-shadow: 0 1px 2px oklch(from var(--gold) l c h / 0.25); }
+
 /* ── Obsidian Contrast (max accessibility) ─────────────────────────
    Near-black + saturated CUD-safe tile hues spread across the
    lightness axis. Pairs naturally with state-patterns. */
@@ -2132,6 +2176,47 @@ body.theme-obsidian {
   --state-avail-border: oklch(70% 0.16 150);
   --state-prog-border:  oklch(75% 0.18 70);
   --state-done-border:  oklch(80% 0.17 95);
+}
+
+/* ── Tidepool Atlas (dark, Deutan/Protan-friendly) ─────────────────
+   Blue-yellow axis encoding; tile hues climb a strict lightness
+   ladder 58→64→74→80→90 so they stay distinct in monochrome. */
+body.theme-tidepool {
+  --bg-deep:     oklch(13% 0.035 215);
+  --bg-mid:      oklch(17% 0.045 213);
+  --bg-card:     oklch(20% 0.055 212);
+  --border:      oklch(38% 0.07 208);
+  --border-glow: oklch(58% 0.10 200);
+  --gold:        oklch(85% 0.14 90);
+  --gold-dim:    oklch(65% 0.10 88);
+  --parchment:   oklch(95% 0.025 200);
+
+  --battle-fg:   oklch(58% 0.22 32);
+  --battle-bg-1: oklch(15% 0.08 32);
+  --battle-bg-2: oklch(19% 0.06 32);
+  --puzzle-fg:   oklch(74% 0.14 230);
+  --puzzle-bg-1: oklch(18% 0.06 230);
+  --puzzle-bg-2: oklch(22% 0.04 230);
+  --town-fg:     oklch(80% 0.13 195);
+  --town-bg-1:   oklch(20% 0.06 195);
+  --town-bg-2:   oklch(24% 0.04 195);
+  --elite-fg:    oklch(64% 0.20 320);
+  --elite-bg-1:  oklch(17% 0.07 320);
+  --elite-bg-2:  oklch(21% 0.05 320);
+  --boss-fg:     oklch(90% 0.18 95);
+  --boss-bg-1:   oklch(22% 0.07 95);
+  --boss-bg-2:   oklch(26% 0.05 95);
+
+  --state-avail-fg:     oklch(80% 0.13 195);
+  --state-avail-border: oklch(68% 0.12 195);
+  --state-prog-border:  oklch(72% 0.16 70);
+  --state-done-border:  oklch(80% 0.16 95);
+  --state-claim:        oklch(72% 0.20 40);
+
+  --hidden-bg-1:   oklch(10% 0.02 215);
+  --hidden-bg-2:   oklch(12% 0.02 215);
+  --hidden-bg-3:   oklch(7% 0.01 215);
+  --hidden-border: oklch(15% 0.03 215);
 }
 
 /* ══════════════════════════════════════════════════════════════════
