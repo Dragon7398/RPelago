@@ -465,9 +465,9 @@ header p {
   letter-spacing: 0.15em; padding: 0.2rem 0.7rem; border-radius: 2px; margin-bottom: 1rem;
   border: 1px solid;
 }
-.lb-state-badge.available  { color: oklch(65% 0.10 75); border-color: oklch(35% 0.07 75); background: oklch(12% 0.03 75 / 0.5); }
-.lb-state-badge.inprogress { color: var(--amber); border-color: oklch(55% 0.12 60); background: oklch(14% 0.05 60 / 0.4); }
-.lb-state-badge.complete   { color: var(--gold); border-color: oklch(50% 0.11 75); background: oklch(16% 0.05 75 / 0.4); }
+.lb-state-badge.available  { color: var(--state-avail-fg);                              border-color: var(--state-avail-border);                                    background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 145); }
+.lb-state-badge.inprogress { color: oklch(from var(--bg-card) calc(1 - l) 0.18 60);   border-color: var(--state-prog-border);                                     background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 60); }
+.lb-state-badge.complete   { color: var(--gold);                                        border-color: var(--state-done-border);                                     background: oklch(from var(--bg-card) calc(l - 0.04) c h); }
 
 .lb-coord { font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.2em; color: var(--gold-dim); margin-bottom: 0.8rem; }
 .lb-icon  { font-size: 3rem; line-height: 1; margin-bottom: 0.6rem; filter: drop-shadow(0 4px 8px #000a); }
@@ -1095,11 +1095,11 @@ header p {
   padding: 0.12rem 0.45rem; border-radius: 2px; border: 1px solid; white-space: nowrap;
 }
 .lb-slot-status { margin-left: auto; }
-.ss-Unstarted   { color: oklch(62% 0.05 75);  border-color: oklch(38% 0.04 75);  background: oklch(14% 0.02 75 / 0.4); }
-.ss-InProgress  { color: var(--amber);         border-color: oklch(50% 0.12 60);  background: oklch(14% 0.05 60 / 0.4); }
-.ss-100pct      { color: oklch(68% 0.14 220);  border-color: oklch(40% 0.10 220); background: oklch(13% 0.05 220 / 0.4); }
-.ss-Goaled      { color: oklch(68% 0.14 145);  border-color: oklch(38% 0.10 145); background: oklch(13% 0.05 145 / 0.4); }
-.ss-Done        { color: var(--gold);           border-color: oklch(50% 0.12 75);  background: oklch(16% 0.06 75 / 0.4); }
+.ss-Unstarted   { color: oklch(from var(--bg-card) calc(1 - l) 0.05 75);  border-color: oklch(45% 0.05 75);           background: oklch(from var(--bg-card) calc(l - 0.04) 0.02 75); }
+.ss-InProgress  { color: oklch(from var(--bg-card) calc(1 - l) 0.18 60);  border-color: var(--state-prog-border);      background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 60); }
+.ss-100pct      { color: oklch(from var(--bg-card) calc(1 - l) 0.16 220); border-color: oklch(45% 0.10 220);           background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 220); }
+.ss-Goaled      { color: var(--state-avail-fg);                            border-color: var(--state-avail-border);     background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 145); }
+.ss-Done        { color: var(--gold);                                      border-color: var(--state-done-border);      background: oklch(from var(--bg-card) calc(l - 0.04) c h); }
 
 /* ── Lightbox slot display ── */
 .lb-adv-entry { display: flex; flex-direction: column; }
