@@ -29,11 +29,19 @@ export const ADV_ICONS: Record<AdvClass, string> = {
 export const ADV_NAMES_FIRST = [
   'Aldric', 'Serana', 'Torvin', 'Mira', 'Dax', 'Lyra', 'Borin', 'Sylva',
   'Kael', 'Thessia', 'Oryn', 'Veda', 'Gareth', 'Nyx', 'Fenn', 'Isolde',
+  'Caspian', 'Thalia', 'Riven', 'Vesper', 'Emric', 'Wren', 'Draven', 'Elara',
+  'Caius', 'Branwen', 'Zephyr', 'Tarrin', 'Phaedra', 'Jorvin', 'Celeste', 'Rook',
+  'Elowen', 'Hadeon', 'Solia', 'Corvus', 'Mirela', 'Dusk', 'Zinnia', 'Tybalt',
 ];
 
 export const ADV_NAMES_LAST = [
   'Stonefist', 'Ashveil', 'Ironwood', 'Dawnwhisper',
   'Greymantle', 'Blackthorn', 'Swiftarrow', 'Moonforge',
+  'Emberveil', 'Shadowmend', 'Stormcaller', 'Nighthollow',
+  'Firesong', 'Silverthorn', 'Ravenwing', 'Cinderspire',
+  'Frosthollow', 'Starfall', 'Ashenbrow', 'Coppergate',
+  'Galesong', 'Embercroft', 'Runeblade', 'Oakheart',
+  'Brightholm', 'Duskmantle', 'Coldwater', 'Wildstride',
 ];
 
 export const ALL_ORBS: OrbDef[] = [
