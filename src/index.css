@@ -1016,6 +1016,13 @@ header p {
 }
 .admin-slot-sep   { color: var(--border); }
 .admin-slot-val   { flex: 1; }
+.admin-slot-edit-input {
+  flex: 1; min-width: 60px; padding: 0.2rem 0.35rem; font-size: 0.6rem;
+  background: oklch(16% 0.04 75); border: 1px solid var(--border);
+  color: var(--parchment); font-family: 'Crimson Pro', serif;
+  border-radius: 2px; outline: none; transition: border-color 0.15s;
+}
+.admin-slot-edit-input:focus { border-color: var(--gold); }
 .admin-slot-del {
   font-size: 0.55rem; padding: 0.1rem 0.3rem; cursor: pointer; border-radius: 2px;
   background: oklch(16% 0.08 25 / 0.5); border: 1px solid oklch(35% 0.10 25);
@@ -1087,6 +1094,7 @@ header p {
   font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
   padding: 0.12rem 0.45rem; border-radius: 2px; border: 1px solid; white-space: nowrap;
 }
+.lb-slot-status { margin-left: auto; }
 .ss-Unstarted   { color: oklch(62% 0.05 75);  border-color: oklch(38% 0.04 75);  background: oklch(14% 0.02 75 / 0.4); }
 .ss-InProgress  { color: var(--amber);         border-color: oklch(50% 0.12 60);  background: oklch(14% 0.05 60 / 0.4); }
 .ss-100pct      { color: oklch(68% 0.14 220);  border-color: oklch(40% 0.10 220); background: oklch(13% 0.05 220 / 0.4); }

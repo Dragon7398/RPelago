@@ -33,10 +33,41 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
             </div>
             {slots.map((s, i) => (
               <div key={i} className="admin-slot-row">
-                <span className="admin-slot-val">{s.name}</span>
-                <span className="admin-slot-sep">—</span>
-                <span className="admin-slot-val">{s.game}</span>
-                {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
+                <input
+                  className="admin-slot-edit-input"
+                  key={`name-${entry.advId}-${i}-${s.name}`}
+                  defaultValue={s.name}
+                  placeholder="Slot name"
+                  onBlur={e => {
+                    const val = e.target.value.trim();
+                    if (val && val !== s.name) save(slots.map((slot, j) => j === i ? { ...slot, name: val } : slot));
+                  }}
+                />
+                <input
+                  className="admin-slot-edit-input"
+                  key={`game-${entry.advId}-${i}-${s.game}`}
+                  defaultValue={s.game}
+                  placeholder="Game"
+                  onBlur={e => {
+                    const val = e.target.value.trim();
+                    if (val && val !== s.game) save(slots.map((slot, j) => j === i ? { ...slot, game: val } : slot));
+                  }}
+                />
+                <input
+                  className="admin-slot-edit-input"
+                  key={`details-${entry.advId}-${i}-${s.details ?? ''}`}
+                  defaultValue={s.details ?? ''}
+                  placeholder="Details"
+                  onBlur={e => {
+                    const val = e.target.value.trim();
+                    const cur = s.details ?? '';
+                    if (val !== cur) {
+                      const updated = { ...s };
+                      if (val) updated.details = val; else delete updated.details;
+                      save(slots.map((slot, j) => j === i ? updated : slot));
+                    }
+                  }}
+                />
                 <input
                   type="number" min={0} className="admin-bonus-input" placeholder="+XP"
                   key={`adv-xp-${entry.advId}-${i}-${s.bonusXP ?? 0}`}

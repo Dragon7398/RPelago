@@ -42,10 +42,41 @@ export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
       <div className="admin-slot-adv">
         {pubSlots.map((s, i) => (
           <div key={i} className="admin-slot-row">
-            <span className="admin-slot-val">{s.name}</span>
-            <span className="admin-slot-sep">—</span>
-            <span className="admin-slot-val">{s.game}</span>
-            {s.details && <span className="admin-slot-val admin-slot-details">{s.details}</span>}
+            <input
+              className="admin-slot-edit-input"
+              key={`pub-name-${i}-${s.name}`}
+              defaultValue={s.name}
+              placeholder="Slot name"
+              onBlur={e => {
+                const val = e.target.value.trim();
+                if (val && val !== s.name) save(pubSlots.map((slot, j) => j === i ? { ...slot, name: val } : slot));
+              }}
+            />
+            <input
+              className="admin-slot-edit-input"
+              key={`pub-game-${i}-${s.game}`}
+              defaultValue={s.game}
+              placeholder="Game"
+              onBlur={e => {
+                const val = e.target.value.trim();
+                if (val && val !== s.game) save(pubSlots.map((slot, j) => j === i ? { ...slot, game: val } : slot));
+              }}
+            />
+            <input
+              className="admin-slot-edit-input"
+              key={`pub-details-${i}-${s.details ?? ''}`}
+              defaultValue={s.details ?? ''}
+              placeholder="Details"
+              onBlur={e => {
+                const val = e.target.value.trim();
+                const cur = s.details ?? '';
+                if (val !== cur) {
+                  const updated = { ...s };
+                  if (val) updated.details = val; else delete updated.details;
+                  save(pubSlots.map((slot, j) => j === i ? updated : slot));
+                }
+              }}
+            />
             <select
               className="admin-slot-status-select"
               value={s.status ?? 'Unstarted'}

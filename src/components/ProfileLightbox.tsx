@@ -45,10 +45,10 @@ export default function ProfileLightbox({ open, onClose }: Props) {
     return renames[advId] ?? { first: defaultFirst, last: defaultLast };
   };
 
-  const handleRenameChange = (advId: string, field: 'first' | 'last', val: string) => {
+  const handleRenameChange = (advId: string, field: 'first' | 'last', val: string, defaultFirst: string, defaultLast: string) => {
     setRenames(prev => ({
       ...prev,
-      [advId]: { ...getRename(advId, '', ''), [field]: val.slice(0, 12) },
+      [advId]: { ...getRename(advId, defaultFirst, defaultLast), [field]: val.slice(0, 12) },
     }));
   };
 
@@ -275,14 +275,14 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                           value={first}
                           maxLength={12}
                           placeholder="First"
-                          onChange={e => handleRenameChange(adv.id, 'first', e.target.value)}
+                          onChange={e => handleRenameChange(adv.id, 'first', e.target.value, adv.firstName, adv.lastName)}
                         />
                         <input
                           className="profile-rename-input"
                           value={last}
                           maxLength={12}
                           placeholder="Last"
-                          onChange={e => handleRenameChange(adv.id, 'last', e.target.value)}
+                          onChange={e => handleRenameChange(adv.id, 'last', e.target.value, adv.firstName, adv.lastName)}
                         />
                         <button
                           className="profile-rename-btn"
