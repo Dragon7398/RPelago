@@ -1,6 +1,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { font-size: calc(16px * var(--font-scale, 1)); }
+
 :root {
+  --font-scale: 1;
   --bg-deep:    #141009;
   --bg-mid:     #1e1a0c;
   --bg-card:    #252010;
@@ -379,19 +382,19 @@ header p {
 
 /* ── Settings popout ── */
 .settings-toggle {
-  position: fixed; bottom: 1.5rem; left: 1.5rem; z-index: 90;
+  position: fixed; bottom: 24px; left: 24px; z-index: 90;
   background: var(--bg-card); border: 1px solid var(--border-glow);
-  color: var(--gold-dim); font-family: 'Cinzel', serif; font-size: 0.6rem;
-  letter-spacing: 0.1em; padding: 0.45rem 0.9rem; border-radius: 3px;
+  color: var(--gold-dim); font-family: 'Cinzel', serif; font-size: 10px;
+  letter-spacing: 0.1em; padding: 7px 14px; border-radius: 3px;
   cursor: pointer; transition: all 0.15s;
 }
 .settings-toggle:hover { color: var(--gold); border-color: var(--gold); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.2); }
 
 .settings-popout {
-  position: fixed; bottom: 4rem; left: 1.5rem; z-index: 91;
+  position: fixed; bottom: 64px; left: 24px; z-index: 91;
   background: linear-gradient(135deg, oklch(from var(--gold) l c h / 0.06) 0%, transparent 60%), var(--bg-card);
   border: 1px solid var(--border-glow); border-radius: 3px;
-  padding: 1rem 1.2rem; min-width: 220px;
+  padding: 16px 19px; min-width: 220px;
   box-shadow: 0 8px 32px #000a, 0 0 20px oklch(from var(--gold) l c h / 0.08);
   opacity: 0; pointer-events: none;
   transform: translateY(6px) scale(0.97);
@@ -400,14 +403,14 @@ header p {
 .settings-popout.open { opacity: 1; pointer-events: all; transform: translateY(0) scale(1); }
 
 .settings-title {
-  font-family: 'Cinzel', serif; font-size: 0.65rem; font-weight: 600;
-  color: var(--gold); letter-spacing: 0.14em; margin-bottom: 0.8rem;
+  font-family: 'Cinzel', serif; font-size: 10px; font-weight: 600;
+  color: var(--gold); letter-spacing: 0.14em; margin-bottom: 13px;
 }
 .settings-row {
-  display: flex; align-items: center; gap: 0.6rem;
+  display: flex; align-items: center; gap: 10px;
 }
 .settings-label {
-  font-family: 'Cinzel', serif; font-size: 0.52rem;
+  font-family: 'Cinzel', serif; font-size: 8px;
   letter-spacing: 0.1em; color: var(--gold-dim); white-space: nowrap;
 }
 .settings-slider {
@@ -416,10 +419,10 @@ header p {
 }
 .settings-slider:hover { opacity: 1; }
 .settings-value {
-  font-family: 'Cinzel', serif; font-size: 0.5rem;
-  color: oklch(50% 0.08 75); min-width: 3em; text-align: right;
+  font-family: 'Cinzel', serif; font-size: 8px;
+  color: oklch(50% 0.08 75); min-width: 30px; text-align: right;
 }
-.settings-check-row { margin-top: 0.5rem; cursor: pointer; }
+.settings-check-row { margin-top: 8px; cursor: pointer; }
 .settings-check { accent-color: var(--gold); width: 13px; height: 13px; flex-shrink: 0; cursor: pointer; }
 
 /* ══ LIGHTBOX ══ */
@@ -2127,18 +2130,18 @@ body.theme-obsidian {
    SETTINGS: THEME PICKER
    ══════════════════════════════════════════════════════════════════ */
 .settings-theme-block {
-  margin-bottom: 0.8rem; padding-bottom: 0.7rem;
+  margin-bottom: 13px; padding-bottom: 11px;
   border-bottom: 1px solid var(--border);
 }
 .settings-section-label {
-  display: block; margin-bottom: 0.4rem;
+  display: block; margin-bottom: 6px;
 }
 .settings-theme-options {
-  display: flex; flex-direction: column; gap: 0.25rem;
+  display: flex; flex-direction: column; gap: 4px;
 }
 .settings-theme-btn {
-  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.12em;
-  text-align: left; padding: 0.35rem 0.55rem;
+  font-family: 'Cinzel', serif; font-size: 9px; letter-spacing: 0.12em;
+  text-align: left; padding: 6px 9px;
   background: transparent; border: 1px solid var(--border);
   color: var(--gold-dim); border-radius: 2px; cursor: pointer;
   transition: all 0.15s;

@@ -59,6 +59,10 @@ function SettingsPanel() {
     const saved = localStorage.getItem('realm_tile_size');
     return saved ? parseInt(saved, 10) : 94;
   });
+  const [fontScale, setFontScale] = useState(() => {
+    const saved = localStorage.getItem('realm_font_scale');
+    return saved ? parseFloat(saved) : 1.0;
+  });
   const [showLabels,    setShowLabels]    = useBoolSetting('realm_show_labels',     true);
   const [highlightAdvs, setHighlightAdvs] = useBoolSetting('realm_highlight_advs',  false);
   const [reduceMotion,  setReduceMotion]  = useBoolSetting('realm_reduce_motion',   false);
@@ -69,6 +73,11 @@ function SettingsPanel() {
     document.documentElement.style.setProperty('--tile-user-size', `${size}px`);
     localStorage.setItem('realm_tile_size', String(size));
   }, [size]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--font-scale', String(fontScale));
+    localStorage.setItem('realm_font_scale', String(fontScale));
+  }, [fontScale]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('no-tile-labels',    !showLabels);
@@ -110,6 +119,16 @@ function SettingsPanel() {
               </button>
             ))}
           </div>
+        </div>
+        <div className="settings-row settings-row--tile-size">
+          <span className="settings-label">FONT SIZE</span>
+          <input
+            type="range" min={1.0} max={1.4} step={0.1}
+            value={fontScale}
+            onChange={e => setFontScale(parseFloat(e.target.value))}
+            className="settings-slider"
+          />
+          <span className="settings-value">{Math.round(fontScale * 100)}%</span>
         </div>
         <div className="settings-row settings-row--tile-size">
           <span className="settings-label">TILE SIZE</span>
