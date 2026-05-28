@@ -61,6 +61,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
         delete next[advId];
         return next;
       });
+      addToast('Adventurer renamed successfully.', 'success');
     } catch {
       addToast('Failed to rename Adventurer. Please try again.', 'error');
     }
