@@ -493,6 +493,7 @@ header p {
   background: oklch(from var(--bg-card) calc(l - 0.04) c h); border: 1px solid var(--border);
 }
 .lb-adv-owner { font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--parchment); letter-spacing: 0.06em; flex: 1; }
+.lb-adv-discord { font-family: 'Crimson Pro', serif; font-size: 0.6rem; color: var(--text-muted); letter-spacing: 0.02em; margin-left: 0.35rem; }
 .lb-adv-status-icons { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
 .lb-adv-status-icon { font-size: 0.95rem; cursor: default; line-height: 1; }
 .lb-adv-secondary { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }

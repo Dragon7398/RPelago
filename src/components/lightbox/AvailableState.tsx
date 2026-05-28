@@ -38,7 +38,12 @@ export default function AvailableState({
             {advEntries.map(entry => (
               <div key={entry.advId} className="lb-adv-entry">
                 <div className="lb-adv-row">
-                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>
+                    {entry.ownerName}
+                    {players[entry.owner]?.discordHandle && (
+                      <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
+                    )}
+                  </span>
                   <AdvFeatIcons playerId={entry.owner} players={players} />
                   <AdvStatusIcons advId={entry.advId} tile={tile} inventory={players[entry.owner]?.inventory ?? {}} />
                   <span className="lb-adv-secondary">

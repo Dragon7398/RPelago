@@ -38,7 +38,12 @@ export default function InProgressState({
             {advEntries.map(entry => (
               <div key={entry.advId} className="lb-adv-entry">
                 <div className="lb-adv-row">
-                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>
+                    {entry.ownerName}
+                    {players[entry.owner]?.discordHandle && (
+                      <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
+                    )}
+                  </span>
                   <AdvStatusIcons advId={entry.advId} tile={tile} inventory={players[entry.owner]?.inventory ?? {}} />
                   <span className="lb-adv-secondary">
                     <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
@@ -79,7 +84,12 @@ export default function InProgressState({
             {roomAdvs.map(entry => (
               <div key={entry.advId} className="lb-adv-entry">
                 <div className="lb-adv-row">
-                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>{entry.ownerName}</span>
+                  <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>
+                    {entry.ownerName}
+                    {players[entry.owner]?.discordHandle && (
+                      <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
+                    )}
+                  </span>
                   <AdvStatusIcons advId={entry.advId} tile={tile} inventory={players[entry.owner]?.inventory ?? {}} />
                   <span className="lb-adv-secondary">
                     <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
