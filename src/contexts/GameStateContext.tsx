@@ -14,6 +14,7 @@ import {
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
+  setAdventurerStatusNote as dbSetAdventurerStatusNote,
 } from '../firebase/db';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
 import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
@@ -58,6 +59,7 @@ interface GameStateContextValue {
   adminAddWarning: (playerId: string, message: string) => Promise<void>;
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
   adminClearWarnings: (playerId: string) => Promise<void>;
+  setAdventurerStatusNote: (coord: string, advId: string, text: string | null) => Promise<void>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -359,6 +361,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await clearPlayerWarnings(playerId);
   }, []);
 
+  const setAdventurerStatusNote = useCallback(async (coord: string, advId: string, text: string | null) => {
+    await dbSetAdventurerStatusNote(coord, advId, text);
+  }, []);
+
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
@@ -368,6 +374,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
       adminAddWarning, adminDeleteWarning, adminClearWarnings,
+      setAdventurerStatusNote,
     }}>
       {children}
     </GameStateContext.Provider>

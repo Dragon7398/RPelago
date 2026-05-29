@@ -23,7 +23,10 @@
           "adventurers": {
             "$advId": {
               ".write": "auth != null && (root.child('game/meta/adminId').val() === auth.uid || newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid)",
-              ".validate": "!newData.exists() || root.child('game/meta/adminId').val() === auth.uid || (newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && newData.child('ownerName').val() === root.child('game/players').child(auth.uid).child('displayName').val() && root.child('game/players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('game/tiles').child($coord).child('state').val() !== 'inprogress' || root.child('game/tiles').child($coord).child('claimableSlots').exists()))"
+              ".validate": "!newData.exists() || root.child('game/meta/adminId').val() === auth.uid || (newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && newData.child('ownerName').val() === root.child('game/players').child(auth.uid).child('displayName').val() && root.child('game/players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('game/tiles').child($coord).child('state').val() !== 'inprogress' || root.child('game/tiles').child($coord).child('claimableSlots').exists()))",
+              "statusNote": {
+                ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
+              }
             }
           },
           "claimableSlots": {

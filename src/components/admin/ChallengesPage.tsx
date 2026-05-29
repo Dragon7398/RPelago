@@ -42,6 +42,16 @@ function AdvSlotList({ entry, players }: {
       ) : (
         <div className="dash-adv-no-game">No game currently set</div>
       )}
+      {entry.statusNote && (
+        <div className="dash-adv-note">
+          <span className="dash-adv-note-text">{entry.statusNote.text}</span>
+          <span className="dash-adv-note-time">
+            {new Date(entry.statusNote.timestamp).toLocaleString(undefined, {
+              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+            })}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

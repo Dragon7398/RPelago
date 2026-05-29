@@ -1,6 +1,6 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { db, firebaseReady } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
@@ -308,6 +308,22 @@ export async function adminKickAdventurer(
   }
 
   await update(ref(db!), updates);
+}
+
+// ── Player: adventurer status note ───────────────────────────────────────────
+export async function setAdventurerStatusNote(
+  coord: string,
+  advId: string,
+  text: string | null,
+): Promise<void> {
+  assertDb();
+  const path = `game/tiles/${coord}/adventurers/${advId}/statusNote`;
+  if (!text) {
+    await remove(ref(db!, path));
+  } else {
+    const note: AdvStatusNote = { text, timestamp: Date.now() };
+    await set(ref(db!, path), note);
+  }
 }
 
 // ── Admin: player warnings ────────────────────────────────────────────────────

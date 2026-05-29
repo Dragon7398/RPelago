@@ -1121,6 +1121,53 @@ header p {
   border-radius: 2px; padding: 0.1rem 0.3rem; display: inline-block; margin-top: 0.2rem;
 }
 
+/* ── Adventurer status notes (in-progress lightbox) ── */
+.lb-adv-note {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.35rem;
+  margin: 0.2rem 0.5rem 0.1rem 2.2rem;
+  padding: 0.2rem 0.45rem;
+  border-left: 2px solid var(--border); border-radius: 0 2px 2px 0;
+  background: oklch(14% 0.04 75 / 0.5);
+  font-size: 0.68rem;
+}
+.lb-adv-note-text { font-style: italic; color: oklch(72% 0.04 75); flex: 1; min-width: 0; }
+.lb-adv-note-meta { display: flex; align-items: baseline; gap: 0.35rem; white-space: nowrap; flex-shrink: 0; }
+.lb-adv-note-time { font-size: 0.58rem; color: oklch(48% 0.05 75); }
+.lb-adv-note-edit, .lb-adv-note-add {
+  background: none; border: none; font-family: inherit; cursor: pointer;
+  font-size: 0.6rem; color: var(--gold-dim); padding: 0; opacity: 0.8;
+  transition: opacity 0.12s;
+}
+.lb-adv-note-edit:hover, .lb-adv-note-add:hover { opacity: 1; }
+.lb-adv-note-editor {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  margin: 0.2rem 0.5rem 0.1rem 2.2rem;
+}
+.lb-adv-note-input {
+  width: 100%; padding: 0.3rem 0.45rem; resize: vertical; min-height: 2.4rem;
+  background: oklch(16% 0.04 75); border: 1px solid var(--border-glow);
+  color: var(--parchment); font-family: 'Crimson Pro', serif; font-size: 0.72rem;
+  border-radius: 2px; outline: none; line-height: 1.45; transition: border-color 0.15s;
+}
+.lb-adv-note-input:focus { border-color: var(--gold); }
+.lb-adv-note-actions { display: flex; align-items: center; gap: 0.3rem; }
+.lb-adv-note-chars { font-size: 0.58rem; color: oklch(48% 0.05 75); margin-right: auto; }
+.lb-adv-note-cancel {
+  background: transparent; border: 1px solid var(--border); border-radius: 2px;
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.05em;
+  color: oklch(52% 0.05 75); padding: 0.18rem 0.5rem; cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.lb-adv-note-cancel:hover { border-color: oklch(45% 0.08 75); color: var(--parchment); }
+.lb-adv-note-save {
+  background: oklch(22% 0.08 75 / 0.7); border: 1px solid var(--gold-dim); border-radius: 2px;
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.05em;
+  color: var(--gold); padding: 0.18rem 0.55rem; cursor: pointer;
+  transition: background 0.12s;
+}
+.lb-adv-note-save:hover { background: oklch(28% 0.10 75 / 0.8); }
+.lb-adv-note-save:disabled { opacity: 0.45; cursor: default; }
+
 /* ══ ORB BAR ══ */
 .orb-activity-row { display: flex; gap: 2%; width: 100%; align-items: flex-start; }
 .orb-bar { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: oklch(from var(--bg-card) l c h / 0.85); border: 1px solid var(--border-glow); border-radius: 3px; width: 33%; min-width: 150px; }
@@ -1531,6 +1578,15 @@ header p {
   font-style: italic; font-size: 0.68rem; color: oklch(42% 0.05 75);
   padding-left: 0.4rem;
 }
+.dash-adv-note {
+  display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap;
+  padding: 0.15rem 0.45rem; margin-top: 0.1rem;
+  border-left: 2px solid var(--border); border-radius: 0 2px 2px 0;
+  background: oklch(14% 0.04 75 / 0.5);
+  font-size: 0.65rem;
+}
+.dash-adv-note-text { font-style: italic; color: oklch(68% 0.04 75); flex: 1; min-width: 0; }
+.dash-adv-note-time { font-size: 0.58rem; color: oklch(46% 0.05 75); white-space: nowrap; flex-shrink: 0; }
 
 /* ── Players page ── */
 .dash-player-card {

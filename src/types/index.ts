@@ -22,6 +22,11 @@ export interface AdvSlot {
   bonusGold?: number; // extra gold awarded to the player who completes this slot
 }
 
+export interface AdvStatusNote {
+  text: string;
+  timestamp: number;
+}
+
 export interface TileAdventurer {
   advId: string;
   name: string;
@@ -30,6 +35,7 @@ export interface TileAdventurer {
   ownerName: string;   // display name for rendering
   slots?: AdvSlot[];
   room?: 1 | 2;
+  statusNote?: AdvStatusNote;
 }
 
 export interface Tile {

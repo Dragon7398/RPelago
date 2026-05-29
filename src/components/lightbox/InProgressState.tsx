@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { ADV_ICONS } from '../../lib/constants';
 import { normalizeSlots } from '../../lib/slotHelpers';
 import { resolveNameColor } from './lbHelpers';
 import { AdvStatusIcons, AdvSlotBlock } from './AdvRow';
 import PublicSlotsList from './PublicSlotsList';
 import ClaimableSlots from './ClaimableSlots';
-import type { Tile, TileAdventurer, AdvClass, AdvSlot, Player, Adventurer, AuthUser } from '../../types';
+import { useGameState } from '../../contexts/GameStateContext';
+import type { Tile, TileAdventurer, AdvClass, AdvSlot, Player, Adventurer, AuthUser, AdvStatusNote } from '../../types';
 
 interface Props {
   tile: Tile;
@@ -17,6 +19,78 @@ interface Props {
   claimingSlotKey: string | null;
   setClaimingSlotKey: (key: string | null) => void;
   onClaimSlot: (slotKey: string, slots: AdvSlot[], advId: string) => Promise<void>;
+}
+
+function formatNoteTime(ts: number): string {
+  return new Date(ts).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
+function AdvNoteEditor({ note, isOwner, coord, advId }: {
+  note: AdvStatusNote | undefined;
+  isOwner: boolean;
+  coord: string;
+  advId: string;
+}) {
+  const { setAdventurerStatusNote } = useGameState();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  if (!isOwner && !note) return null;
+
+  const handleEdit = () => {
+    setDraft(note?.text ?? '');
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await setAdventurerStatusNote(coord, advId, draft.trim() || null);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="lb-adv-note-editor">
+        <textarea
+          className="lb-adv-note-input"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          maxLength={280}
+          placeholder="Leave a status note for your team..."
+          rows={2}
+          autoFocus
+        />
+        <div className="lb-adv-note-actions">
+          <span className="lb-adv-note-chars">{draft.length}/280</span>
+          <button className="lb-adv-note-cancel" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+          <button className="lb-adv-note-save" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="lb-adv-note">
+      {note ? (
+        <>
+          <span className="lb-adv-note-text">{note.text}</span>
+          <span className="lb-adv-note-meta">
+            <span className="lb-adv-note-time">{formatNoteTime(note.timestamp)}</span>
+            {isOwner && <button className="lb-adv-note-edit" onClick={handleEdit}>Edit</button>}
+          </span>
+        </>
+      ) : (
+        isOwner && <button className="lb-adv-note-add" onClick={handleEdit}>+ Add note</button>
+      )}
+    </div>
+  );
 }
 
 export default function InProgressState({
@@ -52,6 +126,7 @@ export default function InProgressState({
                   </span>
                 </div>
                 <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                <AdvNoteEditor note={entry.statusNote} isOwner={entry.owner === user?.id} coord={coord} advId={entry.advId} />
               </div>
             ))}
           </div>
@@ -98,6 +173,7 @@ export default function InProgressState({
                   </span>
                 </div>
                 <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                <AdvNoteEditor note={entry.statusNote} isOwner={entry.owner === user?.id} coord={coord} advId={entry.advId} />
               </div>
             ))}
           </div>
