@@ -99,9 +99,11 @@ export interface Player {
   disabled?: boolean;
   feats?: PlayerFeats;
   warnings?: Record<string, PlayerWarning>;
-  discordHandle?: string;     // Discord username, e.g. 'azura.ttv'
-  avatarHash?: string | null; // Discord CDN avatar hash; null = no avatar set
-  joinedAt?: number;          // Unix ms; written once on first login, never overwritten
+  discordHandle?: string;
+  avatarHash?: string | null;
+  joinedAt?: number;
+  activeMission?:     string | null;
+  basicTrainingDone?: boolean;
 }
 
 export interface OrbConfig {
@@ -141,17 +143,58 @@ export interface Shop {
 }
 
 export interface GameState {
-  tiles: Record<string, Tile>;            // keyed by coord e.g. "A1"
-  players: Record<string, Player>;        // keyed by player ID
+  tiles:    Record<string, Tile>;
+  players:  Record<string, Player>;
+  missions: Record<string, GMMission>;
   orbState: Record<string, OrbAcquisition>;
   orbConfig: OrbConfig;
-  shops: Record<string, Shop>;
-  meta: GameMeta;
+  shops:    Record<string, Shop>;
+  meta:     GameMeta;
 }
 
 export interface AuthUser {
   id: string;
   displayName: string;
+}
+
+export type GMMissionType  = 'basic' | 'patrol';
+export type GMMissionState = 'forming' | 'inprogress' | 'complete';
+
+export interface GMParticipant {
+  playerId:    string;
+  playerName:  string;
+  joinedAt:    number;
+  slots?:      AdvSlot[];
+  statusNote?: AdvStatusNote;
+}
+
+export interface GMMission {
+  id:              string;
+  type:            GMMissionType;
+  series:          number;
+  label:           string;
+  state:           GMMissionState;
+  baseMax:         number;
+  xp:              number;
+  gp:              number;
+  traits?:         Record<string, { value: number }>;
+  release:         TriState;
+  collect:         TriState;
+  hint:            number;
+  link?:           string;
+  firstJoinAt:     number | null;
+  createdAt:       number;
+  deployedAt?:     number;
+  participants:    Record<string, GMParticipant>;
+  claimableSlots?: Record<string, AdvSlot[]>;
+}
+
+export interface CompletedChallenge {
+  coord:       string;
+  name:        string;
+  xpAwarded:   number;
+  goldAwarded: number;
+  completedAt: number;
 }
 
 export type ActivityType =
@@ -160,7 +203,9 @@ export type ActivityType =
   | 'tile_available'
   | 'orb_collected'
   | 'item_purchased'
-  | 'orb_purchased';
+  | 'orb_purchased'
+  | 'mission_deploy'
+  | 'mission_complete';
 
 export interface ActivityEntry {
   id: string;

@@ -254,12 +254,12 @@ function FirebaseBanner() {
 export default function App() {
   return (
     <AuthProvider>
-      <GameStateProvider>
-        <ToastProvider>
+      <ToastProvider>
+        <GameStateProvider>
           <FirebaseBanner />
           <AppContent />
-        </ToastProvider>
-      </GameStateProvider>
+        </GameStateProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }

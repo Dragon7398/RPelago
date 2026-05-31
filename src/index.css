@@ -43,6 +43,10 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --boss-bg-1:   oklch(15% 0.08 40);
   --boss-bg-2:   oklch(20% 0.06 40);
 
+  /* ── Guildmaster mission accent ─────────────────────────────── */
+  --gm-accent:   oklch(68% 0.15 285);
+  --gm-accent-d: oklch(50% 0.14 285);
+
   /* ── State tokens ───────────────────────────────────────────── */
   --state-avail-fg:     oklch(55% 0.14 145);
   --state-avail-border: oklch(45% 0.12 145);
@@ -118,7 +122,7 @@ header p {
   cursor: pointer; display: flex; align-items: center; gap: 0.45rem;
   padding: 0.15rem 0.4rem; border-radius: 2px; transition: background 0.15s;
 }
-.hud-name:hover { background: oklch(from var(--gold) l c h / 0.1); }
+.hud-name:hover:not(:has(.hud-mission-chip:hover)) { background: oklch(from var(--gold) l c h / 0.1); }
 .hud-feat-notify {
   display: inline-flex; align-items: center; justify-content: center;
   width: 0.95rem; height: 0.95rem; border-radius: 50%;
@@ -137,6 +141,13 @@ header p {
   background: oklch(18% 0.07 75 / 0.6); border: 1px solid oklch(48% 0.12 75);
   color: oklch(80% 0.14 75);
 }
+.hud-mission-chip {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
+  padding: 0.12rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: oklch(from var(--gm-accent) l c h / 0.15); border: 1px solid var(--gm-accent-d);
+  color: oklch(from var(--gm-accent) calc(l + 0.08) c h); transition: all 0.15s;
+}
+.hud-mission-chip:hover { background: oklch(from var(--gm-accent) l c h / 0.28); }
 .hud-divider { width: 1px; height: 20px; background: var(--border-glow); }
 .hud-adventurers { display: flex; align-items: center; gap: 0.5rem; }
 .hud-adv-label { font-size: 0.6rem; color: var(--gold-dim); letter-spacing: 0.1em; }
@@ -908,7 +919,13 @@ header p {
 .admin-tri-btn:hover { filter: brightness(1.25); }
 .admin-hint-wrap { display: flex; align-items: center; gap: 0.4rem; }
 .admin-hint-wrap span { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); }
-.admin-state-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.admin-state-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.admin-complete-warn {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem; width: 100%;
+  padding: 0.4rem 0.6rem; border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l - 0.02) 0.04 60); border: 1px solid oklch(44% 0.12 60);
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.74rem; color: oklch(74% 0.10 60);
+}
 .admin-state-btn {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
   padding: 0.28rem 0.65rem; border-radius: 2px; cursor: pointer; border: 1px solid; transition: all 0.13s;
@@ -2351,4 +2368,325 @@ body.theme-tidepool {
 .page-footer-link:hover {
   color: var(--gold);
   text-decoration-color: oklch(from var(--gold) l c h / 0.6);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Guildmaster Missions
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Section header ── */
+.gm-panel { text-align: left; }
+.gm-section-head {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.14em;
+  color: oklch(from var(--gm-accent) calc(l + 0.04) c h);
+  margin: 0.2rem 0 0.9rem;
+}
+.gm-section-head .gm-rule { flex: 1; height: 1px; background: linear-gradient(to right, transparent, var(--gm-accent-d)); }
+.gm-section-head .gm-rule.r { background: linear-gradient(to left, transparent, var(--gm-accent-d)); }
+
+/* ── Active mission banner ── */
+.gm-banner {
+  display: flex; align-items: center; gap: 0.7rem; text-align: left;
+  padding: 0.6rem 0.85rem; margin: 0.2rem 0 1rem; border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.05 285);
+  border: 1px solid var(--gm-accent-d);
+  box-shadow: inset 0 0 18px oklch(from var(--gm-accent) l c h / 0.12);
+}
+.gm-banner-seal {
+  width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, oklch(from var(--gm-accent) calc(l + 0.08) c h), var(--gm-accent-d));
+  border: 1px solid oklch(from var(--gm-accent) calc(l + 0.12) c h);
+  font-size: 1rem; box-shadow: 0 2px 6px #0008;
+}
+.gm-banner-body { flex: 1; min-width: 0; }
+.gm-banner-label { font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.16em; color: oklch(from var(--gm-accent) calc(l + 0.05) c h); }
+.gm-banner-name  { font-family: 'Cinzel', serif; font-size: 0.82rem; letter-spacing: 0.06em; color: var(--parchment); margin-top: 0.1rem; }
+.gm-banner-sub   { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.7rem; color: oklch(60% 0.07 285); margin-top: 0.15rem; }
+.gm-committed {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em; flex-shrink: 0;
+  padding: 0.32rem 0.6rem; border-radius: 2px; color: oklch(72% 0.14 60);
+  border: 1px solid var(--state-prog-border); background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 60);
+}
+.gm-standdown {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.1em;
+  padding: 0.32rem 0.6rem; border-radius: 2px; cursor: pointer; flex-shrink: 0;
+  background: transparent; border: 1px solid var(--gm-accent-d);
+  color: oklch(from var(--gm-accent) calc(l + 0.05) c h);
+  transition: all 0.15s;
+}
+.gm-standdown:hover { background: oklch(from var(--gm-accent) l c h / 0.15); }
+
+/* ── Mission card list ── */
+.gmb-list { display: flex; flex-direction: column; gap: 0.75rem; text-align: left; }
+.gmb-card {
+  position: relative; padding: 0.85rem 0.95rem 0.9rem 1.05rem; border-radius: 4px;
+  background: linear-gradient(135deg, oklch(from var(--gm-accent) l c h / 0.06), transparent 60%), oklch(from var(--bg-card) calc(l - 0.035) c h);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gm-accent);
+}
+.gmb-card.locked { border-left-color: oklch(52% 0.12 60); opacity: 0.85; }
+.gmb-card.you { border-color: var(--gm-accent-d); box-shadow: 0 0 18px oklch(from var(--gm-accent) l c h / 0.18); }
+.gmb-top { display: flex; align-items: flex-start; gap: 0.7rem; }
+.gmb-seal {
+  width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center; font-size: 1.25rem;
+  border-radius: 8px; background: oklch(from var(--gm-accent) calc(l - 0.32) c h / 0.5);
+  border: 1px solid var(--gm-accent-d); box-shadow: inset 0 1px 0 oklch(from var(--gm-accent) l c h / 0.25);
+}
+.gmb-head { flex: 1; min-width: 0; }
+.gmb-titlerow { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.gmb-name { font-family: 'Cinzel', serif; font-size: 0.92rem; letter-spacing: 0.07em; color: var(--parchment); }
+.gmb-series {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.14em; color: var(--gm-accent);
+  border: 1px solid var(--gm-accent-d); border-radius: 10px; padding: 0.08rem 0.45rem;
+}
+.gmb-badges { display: flex; gap: 0.35rem; margin-top: 0.35rem; flex-wrap: wrap; }
+.gmb-rewards .lb-rewards { flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+.gmb-desc { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.82rem; color: oklch(57% 0.05 75); line-height: 1.4; margin: 0.6rem 0 0.65rem; text-wrap: pretty; }
+.gmb-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; flex-wrap: wrap; margin-bottom: 0.55rem; }
+.gmb-slots { display: flex; align-items: center; gap: 0.55rem; }
+.gmb-traitrow { margin-bottom: 0.4rem; }
+
+/* ── Status badges ── */
+.gm-badge {
+  display: inline-block; font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.14em; padding: 0.16rem 0.55rem; border-radius: 2px; border: 1px solid;
+}
+.gm-badge.open       { color: var(--gm-accent); border-color: var(--gm-accent-d); background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 285); }
+.gm-badge.filling    { color: var(--amber); border-color: oklch(48% 0.12 60); background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 60); }
+.gm-badge.inprogress { color: oklch(72% 0.16 60); border-color: var(--state-prog-border); background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 60); }
+.gm-badge.special    { color: oklch(74% 0.13 90); border-color: oklch(48% 0.10 90); background: oklch(from var(--bg-card) calc(l - 0.03) 0.03 90); }
+
+/* ── Trait chip ── */
+.gm-trait {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.08em;
+  padding: 0.22rem 0.55rem; border-radius: 2px;
+  color: oklch(72% 0.12 60); border: 1px solid oklch(42% 0.10 60);
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.04 60);
+}
+.gm-trait-val { color: var(--amber); font-weight: 600; }
+
+/* ── Slot pips ── */
+.gm-pips { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.gm-pip {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 1px solid var(--gm-accent-d); background: transparent;
+  box-sizing: border-box; transition: all 0.25s ease;
+}
+.gm-pip.filled   { background: radial-gradient(circle at 35% 30%, oklch(from var(--gm-accent) calc(l + 0.1) c h), var(--gm-accent)); border-color: var(--gm-accent); }
+.gm-pip.you      { background: radial-gradient(circle at 35% 30%, oklch(82% 0.14 90), oklch(70% 0.16 75)); border-color: oklch(78% 0.14 80); box-shadow: 0 0 6px oklch(72% 0.16 80 / 0.6); }
+.gm-pip.decaying { border-color: var(--red); border-style: dashed; animation: gmPipDecay 1.4s ease-in-out infinite; }
+.gm-pip.lost     { opacity: 0.22; border-style: dotted; }
+@keyframes gmPipDecay { 0%,100% { box-shadow: 0 0 0 oklch(from var(--red) l c h / 0); } 50% { box-shadow: 0 0 7px oklch(from var(--red) l c h / 0.7); } }
+
+/* ── Slot count ── */
+.gm-slot-count { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.08em; color: var(--gold-dim); }
+.gm-slot-count b { color: var(--parchment); font-weight: 600; }
+
+/* ── Countdown renderers ── */
+.gm-cd-subtle { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(64% 0.09 60); display: inline-flex; align-items: center; gap: 0.35rem; }
+.gm-cd-subtle .gm-cd-ico { font-style: normal; opacity: 0.8; }
+.gm-cd-chip {
+  font-family: 'Cinzel', serif; letter-spacing: 0.08em; font-size: 0.6rem; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.26rem 0.6rem; border-radius: 2px;
+  color: oklch(74% 0.12 60); border: 1px solid oklch(44% 0.12 60);
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.04 60);
+}
+.gm-cd-clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--amber); }
+
+/* ── Take/enlist button ── */
+.gm-take-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.12em;
+  padding: 0.5rem 0.9rem; border-radius: 2px; cursor: pointer; width: 100%; margin-top: 0.5rem;
+  background: oklch(from var(--gm-accent) l c h / 0.16); border: 1px solid var(--gm-accent);
+  color: oklch(from var(--gm-accent) calc(l + 0.12) c h); transition: all 0.15s;
+}
+.gm-take-btn:hover { background: oklch(from var(--gm-accent) l c h / 0.28); box-shadow: 0 0 14px oklch(from var(--gm-accent) l c h / 0.3); }
+.gm-take-btn.disabled, .gm-take-btn:disabled {
+  cursor: not-allowed; opacity: 0.4; background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+  border-color: var(--border); color: var(--gold-dim); box-shadow: none;
+}
+.gm-take-btn.done { cursor: default; opacity: 0.85; background: oklch(from var(--bg-card) calc(l - 0.03) 0.02 145); border-color: var(--state-avail-border); color: oklch(64% 0.12 145); }
+
+/* ── Tooltip ── */
+.gm-tip { position: relative; }
+.gm-tip[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 240px;
+  background: oklch(14% 0.02 75); border: 1px solid var(--border-glow); color: var(--parchment);
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.74rem; letter-spacing: 0;
+  padding: 0.4rem 0.6rem; border-radius: 3px; z-index: 20; line-height: 1.35;
+  box-shadow: 0 8px 24px #000a; pointer-events: none;
+}
+
+/* ── Roster ── */
+.gm-roster { text-align: left; margin: 0.1rem 0 0.7rem; }
+.gm-roster-head { font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.14em; color: oklch(from var(--gm-accent) calc(l + 0.05) c h); margin-bottom: 0.4rem; }
+.lb-adv-entry.you .lb-adv-row { border-color: var(--gm-accent-d); background: oklch(from var(--bg-card) calc(l - 0.02) 0.045 285); }
+.gm-you-tag { font-family: 'Cinzel', serif; font-size: 0.44rem; letter-spacing: 0.12em; margin-left: 0.45rem; padding: 0.08rem 0.32rem; border-radius: 2px; color: oklch(from var(--gm-accent) calc(l + 0.12) c h); border: 1px solid var(--gm-accent-d); }
+
+/* ── YAML slot prompt ── */
+.gm-slot-prompt { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: var(--gold-dim); padding: 0.25rem 0.5rem 0.3rem 1.6rem; line-height: 1.35; }
+.gm-slot-prompt-msg { display: block; margin-top: 0.3rem; font-style: normal; font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em; color: oklch(72% 0.12 195); background: oklch(from var(--bg-card) calc(l - 0.05) 0.03 195); border: 1px solid oklch(38% 0.10 195); border-radius: 2px; padding: 0.32rem 0.5rem; }
+
+/* ── Claimable slot claim section ── */
+.gm-claim-section { margin-top: 0.2rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.gm-claim-row { margin-top: 0.3rem; }
+.gm-claim-info {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem;
+  color: var(--gold-dim); display: block; margin-bottom: 0.15rem;
+}
+
+/* ── Basic Training done section ── */
+.gm-bt-done-section { margin-top: 0.25rem; }
+.gm-bt-done-toggle {
+  width: 100%; text-align: left; font-family: 'Cinzel', serif; font-size: 0.58rem;
+  letter-spacing: 0.12em; color: var(--gold-dim); background: none; border: none;
+  cursor: pointer; padding: 0.4rem 0; user-select: none; transition: color 0.15s;
+}
+.gm-bt-done-toggle:hover { color: var(--parchment); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Light-theme overrides — Parchment, Sakura, Mint, Lapis
+   Most GM and shop elements use hardcoded dark-mode colours.
+   These overrides make them readable on light backgrounds.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* 1. CSS custom property remapping ─────────────────────────────────
+   --gm-accent at 68% l is designed for dark cards; all the
+   calc(l + 0.12) / calc(l + 0.05) expressions produce near-white
+   on a light background.  Pull it down to 42% so every relative
+   computation stays in a legible range. */
+body.theme-parchment,
+body.theme-sakura,
+body.theme-mint,
+body.theme-lapis {
+  --gm-accent:   oklch(42% 0.17 285);
+  --gm-accent-d: oklch(30% 0.15 285);
+  /* --amber at 72% l is also invisible on cream; pull it to earthy orange. */
+  --amber:       oklch(46% 0.16 60);
+}
+
+/* 2. GM mission card icon seal — calc(l-0.32) bottoms out at ~10% in dark
+      mode which is correct, but same calc on 42% light accent → 10% (very
+      dark square on a cream card).  Override to a subtle tint instead. */
+body.theme-parchment .gmb-seal,
+body.theme-sakura    .gmb-seal,
+body.theme-mint      .gmb-seal,
+body.theme-lapis     .gmb-seal {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.06 285);
+  border-color: var(--gm-accent-d);
+}
+
+/* 3. GM countdown chip — hardcoded amber text ───────────────────── */
+body.theme-parchment .gm-cd-chip,
+body.theme-sakura    .gm-cd-chip,
+body.theme-mint      .gm-cd-chip,
+body.theme-lapis     .gm-cd-chip {
+  color:            var(--gold);
+  border-color:     var(--border-glow);
+}
+body.theme-parchment .gm-cd-subtle,
+body.theme-sakura    .gm-cd-subtle,
+body.theme-mint      .gm-cd-subtle,
+body.theme-lapis     .gm-cd-subtle { color: var(--gold-dim); }
+
+/* 4. GM badges — inprogress uses hardcoded 72% amber ────────────── */
+body.theme-parchment .gm-badge.inprogress,
+body.theme-sakura    .gm-badge.inprogress,
+body.theme-mint      .gm-badge.inprogress,
+body.theme-lapis     .gm-badge.inprogress { color: var(--gold); }
+
+/* 5. GM trait chip — hardcoded 72% amber ────────────────────────── */
+body.theme-parchment .gm-trait,
+body.theme-sakura    .gm-trait,
+body.theme-mint      .gm-trait,
+body.theme-lapis     .gm-trait { color: var(--gold); }
+
+/* 6. GM committed badge — hardcoded 72% amber ───────────────────── */
+body.theme-parchment .gm-committed,
+body.theme-sakura    .gm-committed,
+body.theme-mint      .gm-committed,
+body.theme-lapis     .gm-committed { color: var(--gold); }
+
+/* 7. GM description text — hardcoded dark-mode muted grey ──────── */
+body.theme-parchment .gmb-desc,
+body.theme-sakura    .gmb-desc,
+body.theme-mint      .gmb-desc,
+body.theme-lapis     .gmb-desc { color: var(--gold-dim); }
+
+/* 8. GM banner subtitle ─────────────────────────────────────────── */
+body.theme-parchment .gm-banner-sub,
+body.theme-sakura    .gm-banner-sub,
+body.theme-mint      .gm-banner-sub,
+body.theme-lapis     .gm-banner-sub { color: var(--gold-dim); }
+
+/* 9. GM YAML prompt ─────────────────────────────────────────────── */
+body.theme-parchment .gm-slot-prompt-msg,
+body.theme-sakura    .gm-slot-prompt-msg,
+body.theme-mint      .gm-slot-prompt-msg,
+body.theme-lapis     .gm-slot-prompt-msg {
+  color:        oklch(38% 0.14 220);
+  border-color: oklch(46% 0.12 220);
+  background:   oklch(from var(--bg-card) calc(l - 0.05) 0.04 220);
+}
+
+/* 10. Shop item rows — hardcoded near-black backgrounds ─────────── */
+body.theme-parchment .lb-shop-item,
+body.theme-sakura    .lb-shop-item,
+body.theme-mint      .lb-shop-item,
+body.theme-lapis     .lb-shop-item {
+  background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
+  border-color: var(--border);
+}
+body.theme-parchment .lb-shop-item-desc,
+body.theme-sakura    .lb-shop-item-desc,
+body.theme-mint      .lb-shop-item-desc,
+body.theme-lapis     .lb-shop-item-desc { color: var(--gold-dim); }
+
+body.theme-parchment .lb-shop-item-cost,
+body.theme-sakura    .lb-shop-item-cost,
+body.theme-mint      .lb-shop-item-cost,
+body.theme-lapis     .lb-shop-item-cost { color: var(--gold); }
+
+body.theme-parchment .lb-shop-item-btn,
+body.theme-sakura    .lb-shop-item-btn,
+body.theme-mint      .lb-shop-item-btn,
+body.theme-lapis     .lb-shop-item-btn {
+  background:   oklch(from var(--bg-card) calc(l - 0.14) c h);
+  border-color: var(--border-glow);
+}
+body.theme-parchment .lb-shop-item-btn:hover:not(:disabled),
+body.theme-sakura    .lb-shop-item-btn:hover:not(:disabled),
+body.theme-mint      .lb-shop-item-btn:hover:not(:disabled),
+body.theme-lapis     .lb-shop-item-btn:hover:not(:disabled) {
+  background: oklch(from var(--bg-card) calc(l - 0.20) c h);
+}
+
+/* 11. Shop orb button — hardcoded purple text + hover/owned states  */
+body.theme-parchment .lb-shop-orb-btn,
+body.theme-sakura    .lb-shop-orb-btn,
+body.theme-mint      .lb-shop-orb-btn,
+body.theme-lapis     .lb-shop-orb-btn {
+  color:        oklch(38% 0.18 290);
+  border-color: oklch(42% 0.16 290);
+  background:   oklch(from var(--bg-card) calc(l - 0.08) 0.04 290);
+}
+body.theme-parchment .lb-shop-orb-btn:hover,
+body.theme-sakura    .lb-shop-orb-btn:hover,
+body.theme-mint      .lb-shop-orb-btn:hover,
+body.theme-lapis     .lb-shop-orb-btn:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.14) 0.05 290);
+  box-shadow: 0 0 10px oklch(42% 0.16 290 / 0.25);
+}
+body.theme-parchment .lb-shop-orb-btn.owned,
+body.theme-sakura    .lb-shop-orb-btn.owned,
+body.theme-mint      .lb-shop-orb-btn.owned,
+body.theme-lapis     .lb-shop-orb-btn.owned {
+  background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
+  border-color: var(--border);
 }

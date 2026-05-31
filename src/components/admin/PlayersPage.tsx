@@ -19,6 +19,7 @@ export default function PlayersPage() {
           player={player}
           tiles={gameState.tiles}
           adminId={adminId}
+          missions={gameState.missions}
         />
       ))}
     </div>

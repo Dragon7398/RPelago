@@ -1,5 +1,6 @@
 import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onValueWritten, onValueCreated } from 'firebase-functions/v2/database';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getDatabase, ServerValue } from 'firebase-admin/database';
@@ -536,3 +537,425 @@ export const pruneActivityLog = onValueCreated(
     await db.ref().update(updates);
   },
 );
+
+// ═══════════════════════════════════════════════════════════════════
+// Guildmaster Missions
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Mission types (mirrors src/types/index.ts) ────────────────────────────────
+
+type GMMissionType  = 'basic' | 'patrol';
+type GMMissionState = 'forming' | 'inprogress' | 'complete';
+type TriState = 'on' | 'off' | 'special';
+type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
+
+interface GMSlot {
+  name:       string;
+  game:       string;
+  status?:    SlotStatus;
+  bonusXP?:   number;
+  bonusGold?: number;
+}
+
+interface GMParticipant {
+  playerId:  string;
+  playerName: string;
+  joinedAt:  number;
+  slots?:    GMSlot[];
+}
+
+interface GMMission {
+  id:           string;
+  type:         GMMissionType;
+  series:       number;
+  label:        string;
+  state:        GMMissionState;
+  baseMax:      number;
+  xp:           number;
+  gp:           number;
+  traits?:      Record<string, { value: number }>;
+  release:      TriState;
+  collect:      TriState;
+  hint:         number;
+  link?:        string;
+  firstJoinAt:  number | null;
+  createdAt:    number;
+  deployedAt?:  number;
+  participants: Record<string, GMParticipant>;
+  claimableSlots?: Record<string, GMSlot[]>;
+}
+
+// ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
+
+interface MissionDef {
+  label:       string;
+  baseMax:     number;
+  xp:          number;
+  gp:          number;
+  traits:      Record<string, { value: number }> | null;
+  release:     TriState;
+  collect:     TriState;
+  hint:        number;
+  special:     boolean;
+}
+
+const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
+  basic: {
+    label:   'Basic Training',
+    baseMax: 5,
+    xp:      100,
+    gp:      0,
+    traits:  { sturdy: { value: 150 } },
+    release: 'on',
+    collect: 'off',
+    hint:    8,
+    special: true,
+  },
+  patrol: {
+    label:   'Patrol',
+    baseMax: 8,
+    xp:      50,
+    gp:      50,
+    traits:  null,
+    release: 'on',
+    collect: 'off',
+    hint:    10,
+    special: false,
+  },
+};
+
+const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+// ── Mission logic helpers ─────────────────────────────────────────────────────
+
+function gmCurrentMaxSlots(m: GMMission, now: number): number {
+  if (m.firstJoinAt == null) return m.baseMax;
+  const steps = Math.floor((now - m.firstJoinAt) / (24 * 3600_000));
+  return Math.max(1, m.baseMax - steps);
+}
+
+function gmFilledCount(m: GMMission): number {
+  return Object.keys(m.participants ?? {}).length;
+}
+
+function gmShouldDeploy(m: GMMission, now: number): boolean {
+  return m.state === 'forming'
+    && gmFilledCount(m) > 0
+    && gmFilledCount(m) >= gmCurrentMaxSlots(m, now);
+}
+
+function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<GMMission, 'id'> {
+  const def = MISSION_DEFS[type];
+  const result: Omit<GMMission, 'id'> = {
+    type,
+    series,
+    label:       def.label,
+    state:       'forming',
+    baseMax:     def.baseMax,
+    xp:          def.xp,
+    gp:          def.gp,
+    release:     def.release,
+    collect:     def.collect,
+    hint:        def.hint,
+    firstJoinAt: null,
+    createdAt:   now,
+    participants: {},
+  };
+  if (def.traits) result.traits = { ...def.traits };
+  return result;
+}
+
+function gmMissionLabel(m: GMMission): string {
+  const roman = ROMAN_NUMERALS[m.series] ?? String(m.series);
+  return `${m.label} · Cohort ${roman}`;
+}
+
+
+
+// ── Deploy routine ────────────────────────────────────────────────────────────
+
+async function deployMission(missionId: string, m: GMMission, now: number): Promise<void> {
+  const db     = getDatabase();
+  const newRef = db.ref('game/missions').push();
+  const newId  = newRef.key!;
+  const fresh  = gmFreshMission(m.type, m.series + 1, now);
+  const label  = gmMissionLabel(m);
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/state`]:      'inprogress',
+    [`game/missions/${missionId}/deployedAt`]: now,
+    [`game/missions/${newId}`]:                { ...fresh, id: newId },
+  };
+
+  // Notify each enrolled participant via push-keyed notification
+  for (const uid of Object.keys(m.participants ?? {})) {
+    const notifRef = db.ref(`game/notifications/${uid}`).push();
+    updates[`game/notifications/${uid}/${notifRef.key}`] = {
+      type:  'mission_deploy',
+      label,
+      ts:    now,
+    };
+  }
+
+  await db.ref().update(updates);
+
+  await db.ref('game/activityLog').push().set({
+    timestamp: now,
+    type:      'mission_deploy',
+    message:   `${label} has deployed.`,
+    icon:      '⚜',
+  });
+}
+
+// ── Player callables ──────────────────────────────────────────────────────────
+
+export const enlistInMission = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId } = request.data as { missionId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const now = Date.now();
+
+  const [playerSnap, missionSnap] = await Promise.all([
+    db.ref(`game/players/${uid}`).get(),
+    db.ref(`game/missions/${missionId}`).get(),
+  ]);
+
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+
+  const player  = playerSnap.val() as { displayName: string; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const mission = missionSnap.val() as GMMission;
+
+  if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
+  if (player.activeMission) throw new HttpsError('failed-precondition', 'already-on-mission');
+  if (mission.state !== 'forming') throw new HttpsError('failed-precondition', 'Mission is not forming.');
+  if (mission.type === 'basic' && player.basicTrainingDone)
+    throw new HttpsError('failed-precondition', 'basic-training-used');
+  if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
+    throw new HttpsError('failed-precondition', 'Mission is full.');
+
+  const participant: GMParticipant = {
+    playerId:   uid,
+    playerName: player.displayName,
+    joinedAt:   now,
+  };
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/participants/${uid}`]: participant,
+    [`game/players/${uid}/activeMission`]:              missionId,
+  };
+  if (mission.firstJoinAt == null) {
+    updates[`game/missions/${missionId}/firstJoinAt`] = now;
+  }
+
+  await db.ref().update(updates);
+
+  // Re-read updated mission to check if deploy fires
+  const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
+  const updated = updatedSnap.val() as GMMission;
+  if (gmShouldDeploy(updated, now)) {
+    await deployMission(missionId, updated, now);
+  }
+
+  return { success: true };
+});
+
+export const standDownFromMission = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId } = request.data as { missionId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+
+  const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+
+  const mission = missionSnap.val() as GMMission;
+  if (mission.state !== 'forming')
+    throw new HttpsError('failed-precondition', 'mission-committed');
+  if (!(uid in (mission.participants ?? {})))
+    throw new HttpsError('failed-precondition', 'not-a-participant');
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/participants/${uid}`]: null,
+    [`game/players/${uid}/activeMission`]:              null,
+  };
+
+  const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
+  if (remaining.length === 0) {
+    updates[`game/missions/${missionId}/firstJoinAt`] = null;
+  }
+
+  await db.ref().update(updates);
+  return { success: true };
+});
+
+export const setMissionParticipantStatusNote = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId, note } = request.data as { missionId?: string; note?: string | null };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+
+  const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = missionSnap.val() as GMMission;
+  if (!(uid in (mission.participants ?? {})))
+    throw new HttpsError('failed-precondition', 'Not a participant.');
+
+  const path = `game/missions/${missionId}/participants/${uid}/statusNote`;
+  if (note == null) {
+    await db.ref(path).remove();
+  } else {
+    await db.ref(path).set({ text: note, timestamp: Date.now() });
+  }
+  return { success: true };
+});
+
+// ── Claim an open spot on an in-progress mission (kicked player replacement) ──
+
+export const claimMissionSlot = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId, slotKey } = request.data as { missionId?: string; slotKey?: string };
+  if (!missionId || !slotKey) throw new HttpsError('invalid-argument', 'Missing parameters.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const now = Date.now();
+
+  const [playerSnap, missionSnap] = await Promise.all([
+    db.ref(`game/players/${uid}`).get(),
+    db.ref(`game/missions/${missionId}`).get(),
+  ]);
+
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+
+  const player  = playerSnap.val() as { displayName: string; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const mission = missionSnap.val() as GMMission;
+
+  if (player.disabled)      throw new HttpsError('permission-denied',  'Account restricted.');
+  if (player.activeMission) throw new HttpsError('failed-precondition', 'already-on-mission');
+  if (mission.state !== 'inprogress')
+    throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+  if (uid in (mission.participants ?? {}))
+    throw new HttpsError('failed-precondition', 'already-a-participant');
+  if (mission.type === 'basic' && player.basicTrainingDone)
+    throw new HttpsError('failed-precondition', 'basic-training-used');
+
+  const slotSnap = await db.ref(`game/missions/${missionId}/claimableSlots/${slotKey}`).get();
+  if (!slotSnap.exists()) throw new HttpsError('not-found', 'Slot no longer available.');
+
+  const inheritedSlots = slotSnap.val() as GMSlot[] | null;
+  const participant: GMParticipant = {
+    playerId:   uid,
+    playerName: player.displayName,
+    joinedAt:   now,
+    ...(inheritedSlots?.length ? { slots: inheritedSlots } : {}),
+  };
+
+  await db.ref().update({
+    [`game/missions/${missionId}/claimableSlots/${slotKey}`]: null,
+    [`game/missions/${missionId}/participants/${uid}`]:        participant,
+    [`game/players/${uid}/activeMission`]:                    missionId,
+  });
+
+  return { success: true };
+});
+
+// ── Admin callables ───────────────────────────────────────────────────────────
+
+async function requireAdmin(uid: string): Promise<void> {
+  const db   = getDatabase();
+  const snap = await db.ref('game/meta/adminId').get();
+  if (!snap.exists() || snap.val() !== uid)
+    throw new HttpsError('permission-denied', 'Admin only.');
+}
+
+
+export const adminKickMissionParticipant = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, playerId } = request.data as { missionId?: string; playerId?: string };
+  if (!missionId || !playerId) throw new HttpsError('invalid-argument', 'Missing parameters.');
+
+  const db = getDatabase();
+  const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = missionSnap.val() as GMMission;
+  if (mission.state !== 'inprogress')
+    throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+
+  const participant = mission.participants?.[playerId];
+  if (!participant) throw new HttpsError('not-found', 'Participant not found.');
+
+  const slotsToAdd: GMSlot[] = participant.slots?.length
+    ? participant.slots.map(s => ({
+        name: s.name, game: s.game,
+        ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+        ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+      }))
+    : [{ name: '', game: '' }];
+
+  const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
+  const warnRef  = db.ref(`game/players/${playerId}/warnings`).push();
+  const label    = gmMissionLabel(mission);
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/participants/${playerId}`]:                null,
+    [`game/missions/${missionId}/claimableSlots/${claimRef.key}`]:         slotsToAdd,
+    [`game/players/${playerId}/activeMission`]:                            null,
+    [`game/players/${playerId}/warnings/${warnRef.key}`]: {
+      timestamp: Date.now(),
+      message:   `Removed from ${label} by admin.`,
+      auto:      true,
+    },
+  };
+
+  await db.ref().update(updates);
+  return { success: true };
+});
+
+export const adminForceDeploy = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId } = request.data as { missionId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db          = getDatabase();
+  const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = missionSnap.val() as GMMission;
+  if (mission.state !== 'forming')
+    throw new HttpsError('failed-precondition', 'Mission is not forming.');
+
+  await deployMission(missionId, mission, Date.now());
+  return { success: true };
+});
+
+
+// ── Scheduled tick: auto-deploy cohorts when decay meets fill count ───────────
+
+export const tickGuildmasterMissions = onSchedule('every 5 minutes', async () => {
+  const db      = getDatabase();
+  const now     = Date.now();
+  const snap    = await db.ref('game/missions').get();
+  if (!snap.exists()) return;
+  const missions = snap.val() as Record<string, GMMission>;
+  for (const [id, m] of Object.entries(missions)) {
+    if (gmShouldDeploy(m, now)) {
+      await deployMission(id, m, now);
+    }
+  }
+});

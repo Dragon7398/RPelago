@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { onAuthStateChanged } from 'firebase/auth';
-import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry } from '../types';
-import { firebaseReady, functions, auth as firebaseAuth } from '../firebase/config';
+import { onValue, ref, remove } from 'firebase/database';
+import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
+import { firebaseReady, functions, auth as firebaseAuth, db as firebaseDb } from '../firebase/config';
 import {
   subscribeToGame, initializeGameIfNeeded,
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
@@ -15,7 +16,20 @@ import {
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
   setAdventurerStatusNote as dbSetAdventurerStatusNote,
+  enlistInMission as dbEnlistInMission,
+  standDownFromMission as dbStandDownFromMission,
+  setMissionParticipantStatusNote as dbSetMissionParticipantStatusNote,
+  adminSetParticipantSlots as dbAdminSetParticipantSlots,
+  adminUpdateParticipantSlotStatus as dbAdminUpdateParticipantSlotStatus,
+  adminSetMissionLink as dbAdminSetMissionLink,
+  adminSetMissionRoomSettings as dbAdminSetMissionRoomSettings,
+  adminKickMissionParticipant as dbAdminKickMissionParticipant,
+  adminForceDeploy as dbAdminForceDeploy,
+  completeMission as dbCompleteMission,
+  backfillChallengeHistory as dbBackfillChallengeHistory,
+  claimMissionSlot as dbClaimMissionSlot,
 } from '../firebase/db';
+import { useToast } from './ToastContext';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
 import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
@@ -60,6 +74,20 @@ interface GameStateContextValue {
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
   adminClearWarnings: (playerId: string) => Promise<void>;
   setAdventurerStatusNote: (coord: string, advId: string, text: string | null) => Promise<void>;
+
+  // Mission actions
+  enlistInMission: (missionId: string, missionLabel: string) => Promise<void>;
+  standDownFromMission: (missionId: string, missionLabel: string) => Promise<void>;
+  setMissionParticipantStatusNote: (missionId: string, note: string | null) => Promise<void>;
+  adminSetParticipantSlots: (missionId: string, playerId: string, slots: AdvSlot[]) => Promise<void>;
+  adminUpdateParticipantSlotStatus: (missionId: string, playerId: string, slotIndex: number, status: SlotStatus) => Promise<void>;
+  adminSetMissionLink: (missionId: string, link: string) => Promise<void>;
+  adminSetMissionRoomSettings: (missionId: string, release: TriState, collect: TriState, hint: number) => Promise<void>;
+  adminKickMissionParticipant: (missionId: string, playerId: string) => Promise<void>;
+  adminForceDeploy: (missionId: string) => Promise<void>;
+  adminCompleteMission: (missionId: string, confirmed?: boolean) => Promise<{ warned?: boolean; unfinishedSlots?: number }>;
+  adminBackfillChallengeHistory: (coord: string) => Promise<number>;
+  claimMissionSlot: (missionId: string, slotKey: string) => Promise<void>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -69,6 +97,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const [gameState, setGameState]   = useState<GameState | null>(null);
   const [loading, setLoading]       = useState(true);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const currentUidRef = useRef<string | null>(null);
+  const { addToast } = useToast();
 
   // Subscribe to game state immediately — reads are open to all users.
   useEffect(() => {
@@ -87,9 +117,11 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   // Initialize the game only after a user is authenticated. The initializing
   // user's UID becomes adminId, preventing unauthenticated initialization.
+  // Also track current UID for the notification listener.
   useEffect(() => {
     if (!firebaseReady || !firebaseAuth) return;
     const unsubscribeAuth = onAuthStateChanged(firebaseAuth, async fbUser => {
+      currentUidRef.current = fbUser?.uid ?? null;
       if (!fbUser) return;
       try {
         await initializeGameIfNeeded(fbUser.uid);
@@ -98,6 +130,35 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
     });
     return () => unsubscribeAuth();
+  }, []);
+
+  // Subscribe to deployment notifications for the current user.
+  // Each push-keyed entry fires a toast and is deleted on read.
+  useEffect(() => {
+    if (!firebaseReady || !firebaseDb) return;
+    let unsubscribe: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(firebaseAuth!, fbUser => {
+      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+      if (!fbUser) return;
+      const notifRef = ref(firebaseDb!, `game/notifications/${fbUser.uid}`);
+      unsubscribe = onValue(notifRef, snap => {
+        if (!snap.exists()) return;
+        const entries = snap.val() as Record<string, { type: string; label: string; ts: number }>;
+        for (const [key, entry] of Object.entries(entries)) {
+          if (entry.type === 'mission_deploy') {
+            addToast(`⚜ ${entry.label} has deployed — you are committed!`, 'info');
+          }
+          remove(ref(firebaseDb!, `game/notifications/${fbUser.uid}/${key}`));
+        }
+      });
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribeAuth();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Player actions ──────────────────────────────────────────────────────────
@@ -198,7 +259,18 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     const tile = gameState.tiles[coord];
     if (!tile) return;
 
-    const updatedPlayers = awardTileRewards(tile, gameState.players, coord);
+    const originalPlayers = gameState.players;
+    const updatedPlayers  = awardTileRewards(tile, originalPlayers, coord);
+
+    const awardedAmounts: Record<string, { xp: number; gold: number }> = {};
+    for (const [pid, updated] of Object.entries(updatedPlayers)) {
+      const original = originalPlayers[pid];
+      if (!original) continue;
+      awardedAmounts[pid] = {
+        xp:   updated.xp   - original.xp,
+        gold: updated.gold - original.gold,
+      };
+    }
     const [r, c]   = rcFromCoord(coord);
     const typeKey  = getTypeKey(r, c);
     const orbState = gameState.orbState ?? {};
@@ -246,7 +318,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions, tileName);
+    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions, tileName, awardedAmounts);
 
     const ownerIds = [...new Set(Object.values(tile.adventurers ?? {}).map(a => a.owner))];
     const participantNames = ownerIds.map(id => gameState.players[id]?.displayName).filter(Boolean).join(', ');
@@ -365,6 +437,61 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await dbSetAdventurerStatusNote(coord, advId, text);
   }, []);
 
+  // ── Mission actions ─────────────────────────────────────────────────────────
+  const enlistInMission = useCallback(async (missionId: string, missionLabel: string) => {
+    await dbEnlistInMission(missionId);
+    addToast(`You have enlisted in ${missionLabel}.`, 'success');
+  }, [addToast]);
+
+  const standDownFromMission = useCallback(async (missionId: string, missionLabel: string) => {
+    await dbStandDownFromMission(missionId);
+    addToast(`You have stood down from ${missionLabel}.`, 'info');
+  }, [addToast]);
+
+  const setMissionParticipantStatusNote = useCallback(async (missionId: string, note: string | null) => {
+    await dbSetMissionParticipantStatusNote(missionId, note);
+  }, []);
+
+  const adminSetParticipantSlots = useCallback(async (missionId: string, playerId: string, slots: AdvSlot[]) => {
+    await dbAdminSetParticipantSlots(missionId, playerId, slots);
+  }, []);
+
+  const adminUpdateParticipantSlotStatus = useCallback(async (missionId: string, playerId: string, slotIndex: number, status: SlotStatus) => {
+    await dbAdminUpdateParticipantSlotStatus(missionId, playerId, slotIndex, status);
+  }, []);
+
+  const adminSetMissionLink = useCallback(async (missionId: string, link: string) => {
+    await dbAdminSetMissionLink(missionId, link);
+  }, []);
+
+  const adminSetMissionRoomSettings = useCallback(async (missionId: string, release: TriState, collect: TriState, hint: number) => {
+    await dbAdminSetMissionRoomSettings(missionId, release, collect, hint);
+  }, []);
+
+  const adminKickMissionParticipant = useCallback(async (missionId: string, playerId: string) => {
+    await dbAdminKickMissionParticipant(missionId, playerId);
+  }, []);
+
+  const adminForceDeploy = useCallback(async (missionId: string) => {
+    await dbAdminForceDeploy(missionId);
+  }, []);
+
+  const adminCompleteMission = useCallback(async (missionId: string, confirmed?: boolean) => {
+    if (!gameState) return {};
+    const mission = gameState.missions?.[missionId];
+    if (!mission) return {};
+    return await dbCompleteMission(mission, gameState.players, confirmed);
+  }, [gameState]);
+
+  const adminBackfillChallengeHistory = useCallback(async (coord: string) => {
+    return await dbBackfillChallengeHistory(coord);
+  }, []);
+
+  const claimMissionSlot = useCallback(async (missionId: string, slotKey: string) => {
+    await dbClaimMissionSlot(missionId, slotKey);
+    addToast('You have claimed the open spot and are now committed to this mission.', 'success');
+  }, [addToast]);
+
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
@@ -375,6 +502,11 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
       adminAddWarning, adminDeleteWarning, adminClearWarnings,
       setAdventurerStatusNote,
+      enlistInMission, standDownFromMission, setMissionParticipantStatusNote,
+      adminSetParticipantSlots, adminUpdateParticipantSlotStatus,
+      adminSetMissionLink, adminSetMissionRoomSettings,
+      adminKickMissionParticipant, adminForceDeploy, adminCompleteMission,
+      adminBackfillChallengeHistory, claimMissionSlot,
     }}>
       {children}
     </GameStateContext.Provider>

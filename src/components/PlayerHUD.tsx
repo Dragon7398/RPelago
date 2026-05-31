@@ -3,7 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
 import { calcLevel, pendingFeatSlot } from '../lib/gameLogic';
-import { ADV_ICONS } from '../lib/constants';
+import { ADV_ICONS, CENTER_COORD } from '../lib/constants';
+import { missionDisplayLabel } from '../lib/missionLogic';
 
 interface Props {
   onLoginClick: () => void;
@@ -21,6 +22,10 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
   const level  = player ? calcLevel(player.xp) : 1;
   const adventurers = player ? Object.values(player.adventurers) : [];
   const pending = player ? pendingFeatSlot(level, player.feats ?? {}) : null;
+
+  const activeMissionId = player?.activeMission ?? null;
+  const activeMission   = activeMissionId ? (gameState?.missions?.[activeMissionId] ?? null) : null;
+  const missionLabel    = activeMission ? missionDisplayLabel(activeMission) : null;
 
   const prevXpRef = useRef<number | null>(null);
   useEffect(() => {
@@ -57,6 +62,15 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         <span>⚔ {user.displayName.toUpperCase()}</span>
         <span className="hud-level-badge">LV {level}</span>
         {pending && <span className="hud-feat-notify">!</span>}
+        {missionLabel && (
+          <button
+            className="hud-mission-chip"
+            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            title={`Currently undertaking: ${missionLabel} — click to view`}
+          >
+            ⚜ {missionLabel}
+          </button>
+        )}
       </span>
       <div className="hud-divider" />
       <div className="hud-adventurers">

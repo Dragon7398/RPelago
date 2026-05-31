@@ -297,6 +297,60 @@ export const FEATS: readonly FeatDef[] = [
   },
 ];
 
+export interface GMMissionDef {
+  type:       'basic' | 'patrol';
+  label:      string;
+  icon:       string;
+  description: string;
+  baseMax:    number;
+  xp:         number;
+  gp:         number;
+  traits:     Record<string, { value: number }> | null;
+  decayHours: number;
+  release:    'on' | 'off' | 'special';
+  collect:    'on' | 'off' | 'special';
+  hint:       number;
+  special:    boolean;   // true = once-per-guildmaster (Basic Training)
+  repeatable: boolean;
+}
+
+export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
+  basic: {
+    type:        'basic',
+    label:       'Basic Training',
+    icon:        '🗡️',
+    description: 'While not glamorous, most adventurers start their career with fighting that most fearsome foe: the training dummies back at the capital.',
+    baseMax:     5,
+    xp:          100,
+    gp:          0,
+    traits:      { sturdy: { value: 150 } },
+    decayHours:  24,
+    release:     'on',
+    collect:     'off',
+    hint:        8,
+    special:     true,
+    repeatable:  false,
+  },
+  patrol: {
+    type:        'patrol',
+    label:       'Patrol',
+    icon:        '🛡️',
+    description: "Someone has to walk the walls and watch the roads. It isn't glorious work — but the gold is steady, the nights are quiet, and a guild that skips its patrols learns why they mattered.",
+    baseMax:     8,
+    xp:          50,
+    gp:          50,
+    traits:      null,
+    decayHours:  24,
+    release:     'on',
+    collect:     'off',
+    hint:        10,
+    special:     false,
+    repeatable:  true,
+  },
+};
+
+export const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
 export function coordFromRC(r: number, c: number): string {
   return `${COL_CHARS[c]}${r + 1}`;
 }

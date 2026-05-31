@@ -3,6 +3,7 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
+import { hasUnfinishedTileSlots } from '../../lib/missionLogic';
 import type { TileState, TriState } from '../../types';
 import MapGridPanel        from './mapPage/MapGridPanel';
 import TraitEditor         from './mapPage/TraitEditor';
@@ -25,6 +26,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const { addToast } = useToast();
   const [selectedCoord, setSelectedCoord] = useState<string | null>(initialCoord ?? null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
+  const [unfinishedSlotWarn, setUnfinishedSlotWarn] = useState<number | null>(null);
 
   if (!gameState) return null;
   const gs = gameState;
@@ -33,17 +35,34 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
 
   const selectCoord = (coord: string) => { setSelectedCoord(coord); setLocalEdits({}); };
 
-  const handleStateBtn = async (state: TileState) => {
+  const doCompleteTile = async () => {
     if (!selectedCoord || !tile) return;
     try {
-      if (state === 'complete') {
-        if (tile.state === 'complete') return;
-        await adminCompleteTile(selectedCoord);
-      } else {
-        await adminSetTileState(selectedCoord, state);
-      }
+      await adminCompleteTile(selectedCoord);
+      setUnfinishedSlotWarn(null);
     } catch {
-      addToast('Failed to update tile state. Please try again.', 'error');
+      addToast('Failed to complete tile. Please try again.', 'error');
+    }
+  };
+
+  const handleStateBtn = async (state: TileState) => {
+    if (!selectedCoord || !tile) return;
+    if (state === 'complete') {
+      if (tile.state === 'complete') return;
+      // Gating: soft warn if any adventurer has unfinished slots
+      const advList = Object.values(tile.adventurers ?? {});
+      const unfinished = hasUnfinishedTileSlots(advList);
+      if (unfinished > 0) {
+        setUnfinishedSlotWarn(unfinished);
+        return;
+      }
+      await doCompleteTile();
+    } else {
+      try {
+        await adminSetTileState(selectedCoord, state);
+      } catch {
+        addToast('Failed to update tile state. Please try again.', 'error');
+      }
     }
   };
 
@@ -66,7 +85,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
     }
   };
 
-  const handleRegenStats = async () => {
+const handleRegenStats = async () => {
     if (!selectedCoord) return;
     try {
       await adminRegenTileStats(selectedCoord);
@@ -117,6 +136,25 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                       </button>
                     ))}
                   </div>
+                  {unfinishedSlotWarn !== null && (
+                    <div className="admin-complete-warn">
+                      <span>{unfinishedSlotWarn} adventurer(s) have unfinished slots. Complete anyway?</span>
+                      <button className="dash-action-btn danger" onClick={doCompleteTile}>Yes, Complete</button>
+                      <button className="dash-action-btn" onClick={() => setUnfinishedSlotWarn(null)}>Cancel</button>
+                    </div>
+                  )}
+                  { /*
+                  {tile.state === 'complete' && Object.keys(tile.adventurers ?? {}).length > 0 && (
+                    <button
+                      className="dash-action-btn"
+                      style={{ marginTop: '0.3rem', fontSize: '0.6rem' }}
+                      onClick={handleBackfill}
+                      disabled={backfilling}
+                      title="Write CompletedChallenge history entries for this tile's players (use for tiles that completed before history tracking was added)"
+                    >
+                      {backfilling ? '…' : '↺ Backfill History'}
+                    </button>
+                  )} */}
                 </div>
 
                 <div className="admin-detail-row">
