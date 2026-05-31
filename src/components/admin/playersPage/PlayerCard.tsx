@@ -3,6 +3,7 @@ import { useGameState } from '../../../contexts/GameStateContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings } from '../../../lib/gameLogic';
+import { missionDisplayLabel } from '../../../lib/missionLogic';
 import { playerReset } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
 
@@ -10,9 +11,10 @@ interface Props {
   player: Player;
   tiles: Record<string, Tile>;
   adminId: string | undefined;
+  missions?: Record<string, import('../../../types').GMMission>;
 }
 
-export default function PlayerCard({ player, tiles, adminId }: Props) {
+export default function PlayerCard({ player, tiles, adminId, missions }: Props) {
   const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
           adminAddWarning, adminDeleteWarning, adminClearWarnings } = useGameState();
   const { addToast } = useToast();
@@ -23,6 +25,8 @@ export default function PlayerCard({ player, tiles, adminId }: Props) {
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
   const isAdmin        = player.id === adminId;
+  const activeMission  = player.activeMission && missions ? missions[player.activeMission] : null;
+  const activeMLabel   = activeMission ? missionDisplayLabel(activeMission) : null;
   const level          = calcLevel(player.xp);
   const featWarnings   = getFeatWarnings(player, tiles);
   const playerWarnings = Object.entries(player.warnings ?? {})
@@ -60,7 +64,17 @@ export default function PlayerCard({ player, tiles, adminId }: Props) {
               {' '}· prev: {player.xpHistory!.map(x => x.toLocaleString()).join(', ')} XP
             </span>
           )}
+          {player.basicTrainingDone && (
+            <span className="dash-mission-badge" style={{ marginLeft: '0.4rem', color: 'oklch(70% 0.12 145)', border: '1px solid oklch(42% 0.10 145)', borderRadius: '2px', padding: '0 0.3rem', fontSize: '0.6rem', fontFamily: "'Cinzel', serif" }}>
+              ✓ BASIC TRAINING
+            </span>
+          )}
         </div>
+        {activeMLabel && (
+          <div className="dash-player-section-label" style={{ marginTop: '0.2rem', color: 'oklch(from var(--gm-accent) calc(l + 0.04) c h)' }}>
+            ⚜ {activeMLabel}
+          </div>
+        )}
       </div>
 
       {busyAdvs.length > 0 && (

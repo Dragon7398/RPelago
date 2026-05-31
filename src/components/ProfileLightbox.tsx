@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { get, ref } from 'firebase/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
 import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
-import type { AdvClass, PlayerFeats } from '../types';
+import { missionDisplayLabel } from '../lib/missionLogic';
+import { db as firebaseDb } from '../firebase/config';
+import type { AdvClass, PlayerFeats, CompletedChallenge, GMMission } from '../types';
 
 interface Props {
   open: boolean;
@@ -34,6 +37,35 @@ export default function ProfileLightbox({ open, onClose }: Props) {
   const feats    = player?.feats ?? {} as PlayerFeats;
   const featIds  = getPlayerFeatIds(feats);
   const pending  = player ? pendingFeatSlot(level, feats) : null;
+
+  // History — lazy loaded when lightbox opens
+  const [pastMissions,   setPastMissions]   = useState<GMMission[] | null>(null);
+  const [pastChallenges, setPastChallenges] = useState<CompletedChallenge[] | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!open || !user || !firebaseDb) return;
+    if (pastMissions !== null) return; // already loaded
+
+    const uid = user.id;
+    Promise.all([
+      get(ref(firebaseDb, 'game/missionsHistory')),
+      get(ref(firebaseDb, `game/players/${uid}/completedChallenges`)),
+    ]).then(([mSnap, cSnap]) => {
+      const allMissions: GMMission[] = mSnap.exists()
+        ? Object.values(mSnap.val() as Record<string, GMMission>).filter(m => m.participants?.[uid])
+        : [];
+      allMissions.sort((a, b) => (b.deployedAt ?? b.createdAt) - (a.deployedAt ?? a.createdAt));
+      setPastMissions(allMissions);
+
+      const challenges: CompletedChallenge[] = cSnap.exists()
+        ? Object.values(cSnap.val() as Record<string, CompletedChallenge>)
+        : [];
+      challenges.sort((a, b) => b.completedAt - a.completedAt);
+      setPastChallenges(challenges);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const [pendingSelection, setPendingSelection] = useState<string | null>(null);
   const [featSaving, setFeatSaving] = useState(false);
@@ -296,6 +328,64 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                   </div>
                 );
               })}
+            </div>
+
+            {/* History sections */}
+            <div className="profile-adv-section" style={{ marginTop: '1rem' }}>
+              <button
+                className="gm-bt-done-toggle"
+                style={{ width: '100%', textAlign: 'left', marginBottom: historyExpanded ? '0.6rem' : 0 }}
+                onClick={() => setHistoryExpanded(e => !e)}
+              >
+                {historyExpanded ? '▾' : '▸'} HISTORY
+              </button>
+
+              {historyExpanded && (
+                <>
+                  {/* Past Missions */}
+                  <div style={{ fontSize: '0.58rem', fontFamily: "'Cinzel', serif", letterSpacing: '0.12em', color: 'var(--gm-accent)', marginBottom: '0.4rem' }}>
+                    PAST MISSIONS
+                  </div>
+                  {pastMissions === null ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>Loading…</div>
+                  ) : pastMissions.length === 0 ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>No missions completed yet.</div>
+                  ) : pastMissions.map(m => {
+                    const label = missionDisplayLabel(m);
+                    const p = m.participants?.[user!.id];
+                    const date = m.deployedAt
+                      ? new Date(m.deployedAt).toLocaleDateString()
+                      : '—';
+                    return (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.2rem 0', borderBottom: '1px solid var(--border)', color: 'var(--parchment)' }}>
+                        <span>{label}</span>
+                        <span style={{ color: 'var(--gold-dim)', display: 'flex', gap: '0.5rem' }}>
+                          {p && <>✨ {m.xp} · 🪙 {m.gp}</>}
+                          <span>{date}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Past Challenges */}
+                  <div style={{ fontSize: '0.58rem', fontFamily: "'Cinzel', serif", letterSpacing: '0.12em', color: 'var(--gold-dim)', marginTop: '0.8rem', marginBottom: '0.4rem' }}>
+                    PAST CHALLENGES
+                  </div>
+                  {pastChallenges === null ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>Loading…</div>
+                  ) : pastChallenges.length === 0 ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>No challenges completed yet.</div>
+                  ) : pastChallenges.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.2rem 0', borderBottom: '1px solid var(--border)', color: 'var(--parchment)' }}>
+                      <span>{c.name} <span style={{ color: 'var(--gold-dim)' }}>({c.coord})</span></span>
+                      <span style={{ color: 'var(--gold-dim)', display: 'flex', gap: '0.5rem' }}>
+                        <span>✨ {c.xpAwarded} · 🪙 {c.goldAwarded}</span>
+                        <span>{new Date(c.completedAt).toLocaleDateString()}</span>
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </>
         )}

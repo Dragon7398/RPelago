@@ -1,9 +1,11 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
-import { db, firebaseReady } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote } from '../types';
+import { httpsCallable } from 'firebase/functions';
+import { db, firebaseReady, functions } from './config';
+import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
+import { freshMission } from '../lib/missionLogic';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -40,12 +42,20 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
     await set(ref(d, 'game/meta'), { adminId: uid ?? '', initialized: true, seed });
 
     // Phase 2: write the rest of the game data. The user is now admin (adminId === uid).
+    const now = Date.now();
+    const basicRef  = push(ref(d, 'game/missions'));
+    const patrolRef = push(ref(d, 'game/missions'));
+    const initialMissions: Record<string, unknown> = {
+      [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
+      [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
+    };
     await update(ref(d), {
       'game/tiles':     buildDefaultTileData(seed),
       'game/players':   {},
       'game/orbState':  {},
       'game/orbConfig': orbConfig,
       'game/shops':     { ...DEFAULT_SHOPS },
+      'game/missions':  initialMissions,
     });
     return;
   }
@@ -531,15 +541,114 @@ export async function playerReset(playerId: string): Promise<void> {
     }
   }
 
+  // Handle active mission — decision E
+  if (player.activeMission) {
+    const missionSnap = await get(ref(db!, `game/missions/${player.activeMission}`));
+    if (missionSnap.exists()) {
+      const mission = missionSnap.val() as GMMission;
+
+      // Remove from participants
+      updates[`game/missions/${player.activeMission}/participants/${playerId}`] = null;
+
+      if (mission.state === 'forming') {
+        // Check if this was the last participant; if so, reset firstJoinAt
+        const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
+        if (remaining.length === 0) {
+          updates[`game/missions/${player.activeMission}/firstJoinAt`] = null;
+        }
+      } else if (mission.state === 'inprogress') {
+        // Full kick: create claimable slot + warning
+        const participant = mission.participants?.[playerId];
+        const slotsToAdd: AdvSlot[] = participant?.slots?.length
+          ? participant.slots.map(s => ({
+              name: s.name, game: s.game,
+              ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+              ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+            }))
+          : [{ name: '', game: '' }];
+        const claimRef = push(ref(db!, `game/missions/${player.activeMission}/claimableSlots`));
+        updates[`game/missions/${player.activeMission}/claimableSlots/${claimRef.key}`] = slotsToAdd;
+
+        const warnRef = push(ref(db!, `game/players/${playerId}/warnings`));
+        updates[`game/players/${playerId}/warnings/${warnRef.key}`] = {
+          timestamp: Date.now(),
+          message: `Removed from ${mission.label} · Cohort ${mission.series} during player reset.`,
+          auto: true,
+        };
+      }
+    }
+  }
+
   updates[`game/players/${playerId}`] = {
     ...player,
-    xp:          0,
-    gold:        0,
-    inventory:   {},
-    adventurers: keptAdvs,
+    xp:               0,
+    gold:             0,
+    inventory:        {},
+    adventurers:      keptAdvs,
     xpHistory,
-    feats:       {},
+    feats:            {},
+    activeMission:    null,
+    basicTrainingDone: false,
   };
 
   await update(ref(db!), updates);
+}
+
+// ── Mission wrappers (all writes go through Cloud Functions / admin SDK) ───────
+
+function assertFunctions() {
+  if (!functions || !firebaseReady) throw new Error('Firebase is not configured.');
+}
+
+export async function enlistInMission(missionId: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'enlistInMission')({ missionId });
+}
+
+export async function standDownFromMission(missionId: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'standDownFromMission')({ missionId });
+}
+
+export async function setMissionParticipantStatusNote(missionId: string, note: string | null): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note });
+}
+
+export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminSetParticipantSlots')({ missionId, playerId, slots });
+}
+
+export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminUpdateParticipantSlotStatus')({ missionId, playerId, slotIndex, status });
+}
+
+export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminSetMissionLink')({ missionId, link });
+}
+
+export async function adminSetMissionRoomSettings(missionId: string, release: TriState, collect: TriState, hint: number): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminSetMissionRoomSettings')({ missionId, release, collect, hint });
+}
+
+export async function adminKickMissionParticipant(missionId: string, playerId: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminKickMissionParticipant')({ missionId, playerId });
+}
+
+export async function adminForceDeploy(missionId: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminForceDeploy')({ missionId });
+}
+
+export async function adminCompleteMission(missionId: string, confirmed?: boolean): Promise<{ warned?: boolean; unfinishedSlots?: number }> {
+  assertFunctions();
+  const result = await httpsCallable<unknown, { warned?: boolean; unfinishedSlots?: number }>(
+    functions!, 'adminCompleteMission',
+  )({ missionId, confirmed });
+  return result.data;
 }

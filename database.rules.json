@@ -99,6 +99,31 @@
 
       "meta": {
         ".write": "auth != null && (root.child('game/meta/adminId').val() === auth.uid || !root.child('game/meta/initialized').exists())"
+      },
+
+      "missions": {
+        ".write": false,
+        "$missionId": {
+          "claimableSlots": {
+            "$slotKey": {
+              // Any authenticated player may delete (claim) an existing slot.
+              // Mirrors the tile claimableSlots pattern.
+              ".write": "auth != null && !newData.exists() && data.exists()"
+            }
+          }
+        }
+      },
+
+      "missionsHistory": {
+        ".write": false
+      },
+
+      "notifications": {
+        "$uid": {
+          // Client deletes its own entries on receipt.
+          // Read is already granted by parent game/.read: true.
+          ".write": "auth != null && auth.uid === $uid"
+        }
       }
     }
   }
