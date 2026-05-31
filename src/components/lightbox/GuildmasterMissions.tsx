@@ -451,14 +451,19 @@ export default function GuildmasterMissions() {
   const [now] = useState(() => Date.now());
 
   // Build and sort the mission card list
+  const sortGroup = (c: GMMissionCard): number => {
+    if (c.youIn) return 0;                                                                      // enrolled mission always first
+    if (!basicTrainingDone && c.mission.state === 'forming' && c.mission.type === 'basic') return 1; // BT priority when not yet done
+    if (c.mission.state === 'forming') return 2;                                                // other forming missions
+    return 3;                                                                                   // inprogress (not enrolled)
+  };
+
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
     .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now))
     .sort((a, b) => {
-      // Player's active mission floats first
-      if (a.youIn && !b.youIn) return -1;
-      if (!a.youIn && b.youIn) return 1;
-      // Then by creation time
+      const ga = sortGroup(a), gb = sortGroup(b);
+      if (ga !== gb) return ga - gb;
       return (a.mission.createdAt ?? 0) - (b.mission.createdAt ?? 0);
     });
 

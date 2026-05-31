@@ -6,7 +6,6 @@ import { SLOT_STATUSES } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions } from '../../firebase/db';
 
-const TRISTATE_OPTIONS: TriState[] = ['on', 'off', 'special'];
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
   { state: 'forming',    label: 'Forming',     cls: 'btn-available'  },
@@ -261,37 +260,52 @@ function MissionCard({ mission }: { mission: GMMission }) {
       {/* Room link + settings — inprogress only */}
       {mission.state === 'inprogress' && (
         <>
-          <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>ROOM LINK</div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="admin-detail-row">
+            <div className="admin-detail-label">ARCH. LINK</div>
             <input
-              className="dash-edit-input" style={{ flex: 1 }}
-              placeholder="Archipelago room URL"
+              className="admin-text-input"
+              placeholder="https://…"
               value={link}
               onChange={e => setLink(e.target.value)}
+              onBlur={() => adminSetMissionLink(mission.id, link)}
             />
-            <button className="dash-action-btn" onClick={() => adminSetMissionLink(mission.id, link)}>Save</button>
           </div>
 
-          <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>ROOM SETTINGS</div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
-              Release:
-              <select className="dash-select" value={release} onChange={e => setRelease(e.target.value as TriState)}>
-                {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
-              Collect:
-              <select className="dash-select" value={collect} onChange={e => setCollect(e.target.value as TriState)}>
-                {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
-              Hint %:
-              <input className="dash-edit-input" type="number" style={{ width: '60px' }}
-                value={hint} onChange={e => setHint(Number(e.target.value))} />
-            </label>
-            <button className="dash-action-btn" onClick={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}>Save</button>
+          {(['release', 'collect'] as const).map(field => {
+            const current = field === 'release' ? release : collect;
+            return (
+              <div className="admin-detail-row" key={field}>
+                <div className="admin-detail-label">{field.toUpperCase()}</div>
+                <div className="admin-tristate">
+                  {(['on', 'off', 'special'] as TriState[]).map(v => (
+                    <button
+                      key={v}
+                      className={`admin-tri-btn${current === v ? ` active-${v}` : ''}`}
+                      onClick={() => {
+                        if (field === 'release') {
+                          setRelease(v); adminSetMissionRoomSettings(mission.id, v, collect, hint);
+                        } else {
+                          setCollect(v); adminSetMissionRoomSettings(mission.id, release, v, hint);
+                        }
+                      }}
+                    >{v.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="admin-detail-row">
+            <div className="admin-detail-label">HINT %</div>
+            <div className="admin-hint-wrap">
+              <input
+                type="number" className="admin-count-input" min={0} max={100}
+                value={hint}
+                onChange={e => setHint(parseInt(e.target.value) || 0)}
+                onBlur={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}
+              />
+              <span>%</span>
+            </div>
           </div>
         </>
       )}
