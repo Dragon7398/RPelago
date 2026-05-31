@@ -339,7 +339,7 @@ function MissionCard({ card, uid, onEnlist, onStandDown }: {
       <RoomSettings mission={card.mission} />
 
       {/* CTA */}
-      {card.youIn && card.status === 'forming' ? (
+      {card.youIn && card.status !== 'inprogress' ? (
         <button className="gm-standdown" style={{ width: '100%', marginTop: '0.4rem' }} onClick={handleStandDown} disabled={actionLoading}>
           {actionLoading ? '…' : 'STAND DOWN'}
         </button>

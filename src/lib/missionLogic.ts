@@ -130,7 +130,7 @@ export function freshMission(
     baseMax:      def.baseMax,
     xp:           def.xp,
     gp:           def.gp,
-    traits:       def.traits ? { ...def.traits } : undefined,
+    ...(def.traits ? { traits: { ...def.traits } } : {}),
     release:      def.release as TriState,
     collect:      def.collect as TriState,
     hint:         def.hint,

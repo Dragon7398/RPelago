@@ -65,7 +65,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         {missionLabel && (
           <button
             className="hud-mission-chip"
-            onClick={() => onTileClick(CENTER_COORD)}
+            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
             title={`Currently undertaking: ${missionLabel} — click to view`}
           >
             ⚜ {missionLabel}

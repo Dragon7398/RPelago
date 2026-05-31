@@ -5,7 +5,7 @@ import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdv
 import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission } from '../lib/missionLogic';
+import { freshMission, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -77,6 +77,41 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
       // Non-admin users can't run the migration; admin will complete it on next load.
     }
   }
+
+  // Migration: seed initial mission cohorts for games created before the mission system
+  const missionsSnap = await get(ref(d, 'game/missions'));
+  if (!missionsSnap.exists()) {
+    const now = Date.now();
+    const basicRef  = push(ref(d, 'game/missions'));
+    const patrolRef = push(ref(d, 'game/missions'));
+    const initialMissions: Record<string, unknown> = {
+      [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
+      [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
+    };
+    try {
+      await update(ref(d), { 'game/missions': initialMissions });
+    } catch (err) {
+      console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
+    }
+  }
+}
+
+// Seed the initial Basic Training and Patrol cohorts. Safe to call on any
+// existing game — no-ops if missions already exist.
+export async function seedInitialMissions(): Promise<boolean> {
+  assertDb();
+  const d = db!;
+  const snap = await get(ref(d, 'game/missions'));
+  if (snap.exists() && Object.keys(snap.val() ?? {}).length > 0) return false;
+
+  const now = Date.now();
+  const basicRef  = push(ref(d, 'game/missions'));
+  const patrolRef = push(ref(d, 'game/missions'));
+  await update(ref(d), {
+    [`game/missions/${basicRef.key}`]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
+    [`game/missions/${patrolRef.key}`]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
+  });
+  return true;
 }
 
 // ── Subscribe to full game state ──────────────────────────────────────────────
@@ -171,6 +206,7 @@ export async function completeTile(
   revealCoords: { coord: string; newState: TileState }[],
   orbAcquisitions: Record<string, OrbAcquisition> = {},
   tileName?: string,
+  awardedAmounts?: Record<string, { xp: number; gold: number }>,
 ): Promise<void> {
   const updates: Record<string, unknown> = {};
   updates[`game/tiles/${coord}/state`] = 'complete';
@@ -185,6 +221,21 @@ export async function completeTile(
     updates[`game/orbState/${orbId}`] = acquisition;
   }
 
+  if (awardedAmounts) {
+    const now = Date.now();
+    const name = tileName || coord;
+    for (const [playerId, amounts] of Object.entries(awardedAmounts)) {
+      const entryKey = push(ref(db!, `game/players/${playerId}/completedChallenges`)).key!;
+      updates[`game/players/${playerId}/completedChallenges/${entryKey}`] = {
+        coord,
+        name,
+        xpAwarded:   amounts.xp,
+        goldAwarded: amounts.gold,
+        completedAt: now,
+      };
+    }
+  }
+
   await update(ref(db!), updates);
 
   for (const orbId of Object.keys(orbAcquisitions)) {
@@ -192,6 +243,44 @@ export async function completeTile(
     const name = tileName || coord;
     await logActivity('orb_collected', `${orb?.label ?? orbId} Orb gathered from ${name}.`, orb?.icon ?? '🔮');
   }
+}
+
+// Writes CompletedChallenge records for a tile that completed before history
+// tracking was added. Uses base tile XP/Gold — feat bonuses at time of
+// completion are unknown and not applied.
+export async function backfillChallengeHistory(coord: string): Promise<number> {
+  assertDb();
+  const [tileSnap, playersSnap] = await Promise.all([
+    get(ref(db!, `game/tiles/${coord}`)),
+    get(ref(db!, 'game/players')),
+  ]);
+  if (!tileSnap.exists()) throw new Error(`Tile ${coord} not found.`);
+
+  const tile    = tileSnap.val() as Tile;
+  const players = (playersSnap.val() ?? {}) as Record<string, Player>;
+  const now     = Date.now();
+  const name    = tile.name || coord;
+
+  const ownerIds = [...new Set(
+    Object.values(tile.adventurers ?? {}).map(a => a.owner),
+  )];
+  if (ownerIds.length === 0) return 0;
+
+  const updates: Record<string, unknown> = {};
+  for (const ownerId of ownerIds) {
+    if (!players[ownerId]) continue;
+    const entryKey = push(ref(db!, `game/players/${ownerId}/completedChallenges`)).key!;
+    updates[`game/players/${ownerId}/completedChallenges/${entryKey}`] = {
+      coord,
+      name,
+      xpAwarded:   tile.xp   ?? 0,
+      goldAwarded: tile.gold  ?? 0,
+      completedAt: now,
+    };
+  }
+
+  await update(ref(db!), updates);
+  return ownerIds.length;
 }
 
 // ── Player queries ────────────────────────────────────────────────────────────
@@ -616,23 +705,23 @@ export async function setMissionParticipantStatusNote(missionId: string, note: s
 }
 
 export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {
-  assertFunctions();
-  await httpsCallable(functions!, 'adminSetParticipantSlots')({ missionId, playerId, slots });
+  assertDb();
+  await set(ref(db!, `game/missions/${missionId}/participants/${playerId}/slots`), slots);
 }
 
 export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
-  assertFunctions();
-  await httpsCallable(functions!, 'adminUpdateParticipantSlotStatus')({ missionId, playerId, slotIndex, status });
+  assertDb();
+  await set(ref(db!, `game/missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
 }
 
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {
-  assertFunctions();
-  await httpsCallable(functions!, 'adminSetMissionLink')({ missionId, link });
+  assertDb();
+  await set(ref(db!, `game/missions/${missionId}/link`), link || null);
 }
 
 export async function adminSetMissionRoomSettings(missionId: string, release: TriState, collect: TriState, hint: number): Promise<void> {
-  assertFunctions();
-  await httpsCallable(functions!, 'adminSetMissionRoomSettings')({ missionId, release, collect, hint });
+  assertDb();
+  await update(ref(db!, `game/missions/${missionId}`), { release, collect, hint });
 }
 
 export async function adminKickMissionParticipant(missionId: string, playerId: string): Promise<void> {
@@ -645,10 +734,69 @@ export async function adminForceDeploy(missionId: string): Promise<void> {
   await httpsCallable(functions!, 'adminForceDeploy')({ missionId });
 }
 
-export async function adminCompleteMission(missionId: string, confirmed?: boolean): Promise<{ warned?: boolean; unfinishedSlots?: number }> {
-  assertFunctions();
-  const result = await httpsCallable<unknown, { warned?: boolean; unfinishedSlots?: number }>(
-    functions!, 'adminCompleteMission',
-  )({ missionId, confirmed });
-  return result.data;
+// Completes a mission: awards XP/GP (with feat bonuses), writes CompletedChallenge
+// records, archives to missionsHistory, and clears participants' activeMission.
+// Returns { warned, unfinishedSlots } without acting when gating applies and
+// confirmed is not true — caller shows the confirmation dialog then re-calls.
+export async function completeMission(
+  mission: GMMission,
+  players: Record<string, Player>,
+  confirmed?: boolean,
+): Promise<{ warned?: boolean; unfinishedSlots?: number }> {
+  assertDb();
+
+  const unfinished = hasUnfinishedSlots(mission.participants ?? {});
+  if (unfinished > 0 && !confirmed) {
+    return { warned: true, unfinishedSlots: unfinished };
+  }
+
+  const ownerIds = Object.keys(mission.participants ?? {});
+  const now      = Date.now();
+  const label    = missionDisplayLabel(mission);
+  const updates: Record<string, unknown> = {};
+
+  for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
+    const player = players[pid];
+    if (!player) continue;
+
+    // Feat bonuses — same calculation as tile rewards
+    const otherIds = ownerIds.filter(id => id !== pid);
+    const isMentor    = Object.values(player.feats ?? {}).includes('mentor');
+    const isTreasurer = Object.values(player.feats ?? {}).includes('treasurer');
+    const otherMentors    = otherIds.filter(id => Object.values(players[id]?.feats ?? {}).includes('mentor')).length;
+    const otherTreasurers = otherIds.filter(id => Object.values(players[id]?.feats ?? {}).includes('treasurer')).length;
+    const xpMultiplier   = 1 + otherMentors    * 0.05 + (isMentor    ? otherIds.length * 0.01 : 0);
+    const goldMultiplier = 1 + otherTreasurers * 0.10 + (isTreasurer ? otherIds.length * 0.03 : 0);
+
+    let earnedXP   = Math.round(mission.xp * xpMultiplier);
+    let earnedGold = Math.round(mission.gp * goldMultiplier);
+    for (const slot of participant.slots ?? []) {
+      earnedXP   += slot.bonusXP   ?? 0;
+      earnedGold += slot.bonusGold ?? 0;
+    }
+
+    updates[`game/players/${pid}/xp`]           = player.xp   + earnedXP;
+    updates[`game/players/${pid}/gold`]          = player.gold + earnedGold;
+    updates[`game/players/${pid}/activeMission`] = null;
+    if (mission.type === 'basic') {
+      updates[`game/players/${pid}/basicTrainingDone`] = true;
+    }
+
+    const entryKey = push(ref(db!, `game/players/${pid}/completedChallenges`)).key!;
+    updates[`game/players/${pid}/completedChallenges/${entryKey}`] = {
+      coord:       'D3',
+      name:        label,
+      xpAwarded:   earnedXP,
+      goldAwarded: earnedGold,
+      completedAt: now,
+    };
+  }
+
+  updates[`game/missionsHistory/${mission.id}`] = { ...mission, state: 'complete' };
+  updates[`game/missions/${mission.id}`]         = null;
+
+  await update(ref(db!), updates);
+  await logActivity('mission_complete', `${label} has completed.`, '⚜');
+
+  return {};
 }

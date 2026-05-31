@@ -85,7 +85,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
     }
   };
 
-  const handleRegenStats = async () => {
+const handleRegenStats = async () => {
     if (!selectedCoord) return;
     try {
       await adminRegenTileStats(selectedCoord);
@@ -143,6 +143,18 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
                       <button className="dash-action-btn" onClick={() => setUnfinishedSlotWarn(null)}>Cancel</button>
                     </div>
                   )}
+                  { /*
+                  {tile.state === 'complete' && Object.keys(tile.adventurers ?? {}).length > 0 && (
+                    <button
+                      className="dash-action-btn"
+                      style={{ marginTop: '0.3rem', fontSize: '0.6rem' }}
+                      onClick={handleBackfill}
+                      disabled={backfilling}
+                      title="Write CompletedChallenge history entries for this tile's players (use for tiles that completed before history tracking was added)"
+                    >
+                      {backfilling ? '…' : '↺ Backfill History'}
+                    </button>
+                  )} */}
                 </div>
 
                 <div className="admin-detail-row">

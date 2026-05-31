@@ -122,7 +122,7 @@ header p {
   cursor: pointer; display: flex; align-items: center; gap: 0.45rem;
   padding: 0.15rem 0.4rem; border-radius: 2px; transition: background 0.15s;
 }
-.hud-name:hover { background: oklch(from var(--gold) l c h / 0.1); }
+.hud-name:hover:not(:has(.hud-mission-chip:hover)) { background: oklch(from var(--gold) l c h / 0.1); }
 .hud-feat-notify {
   display: inline-flex; align-items: center; justify-content: center;
   width: 0.95rem; height: 0.95rem; border-radius: 50%;
@@ -2541,3 +2541,133 @@ body.theme-tidepool {
   cursor: pointer; padding: 0.4rem 0; user-select: none; transition: color 0.15s;
 }
 .gm-bt-done-toggle:hover { color: var(--parchment); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Light-theme overrides — Parchment, Sakura, Mint, Lapis
+   Most GM and shop elements use hardcoded dark-mode colours.
+   These overrides make them readable on light backgrounds.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* 1. CSS custom property remapping ─────────────────────────────────
+   --gm-accent at 68% l is designed for dark cards; all the
+   calc(l + 0.12) / calc(l + 0.05) expressions produce near-white
+   on a light background.  Pull it down to 42% so every relative
+   computation stays in a legible range. */
+body.theme-parchment,
+body.theme-sakura,
+body.theme-mint,
+body.theme-lapis {
+  --gm-accent:   oklch(42% 0.17 285);
+  --gm-accent-d: oklch(30% 0.15 285);
+  /* --amber at 72% l is also invisible on cream; pull it to earthy orange. */
+  --amber:       oklch(46% 0.16 60);
+}
+
+/* 2. GM countdown chip — hardcoded amber text ───────────────────── */
+body.theme-parchment .gm-cd-chip,
+body.theme-sakura    .gm-cd-chip,
+body.theme-mint      .gm-cd-chip,
+body.theme-lapis     .gm-cd-chip {
+  color:            var(--gold);
+  border-color:     var(--border-glow);
+}
+body.theme-parchment .gm-cd-subtle,
+body.theme-sakura    .gm-cd-subtle,
+body.theme-mint      .gm-cd-subtle,
+body.theme-lapis     .gm-cd-subtle { color: var(--gold-dim); }
+
+/* 3. GM badges — inprogress uses hardcoded 72% amber ────────────── */
+body.theme-parchment .gm-badge.inprogress,
+body.theme-sakura    .gm-badge.inprogress,
+body.theme-mint      .gm-badge.inprogress,
+body.theme-lapis     .gm-badge.inprogress { color: var(--gold); }
+
+/* 4. GM trait chip — hardcoded 72% amber ────────────────────────── */
+body.theme-parchment .gm-trait,
+body.theme-sakura    .gm-trait,
+body.theme-mint      .gm-trait,
+body.theme-lapis     .gm-trait { color: var(--gold); }
+
+/* 5. GM committed badge — hardcoded 72% amber ───────────────────── */
+body.theme-parchment .gm-committed,
+body.theme-sakura    .gm-committed,
+body.theme-mint      .gm-committed,
+body.theme-lapis     .gm-committed { color: var(--gold); }
+
+/* 6. GM description text — hardcoded dark-mode muted grey ──────── */
+body.theme-parchment .gmb-desc,
+body.theme-sakura    .gmb-desc,
+body.theme-mint      .gmb-desc,
+body.theme-lapis     .gmb-desc { color: var(--gold-dim); }
+
+/* 7. GM banner subtitle ─────────────────────────────────────────── */
+body.theme-parchment .gm-banner-sub,
+body.theme-sakura    .gm-banner-sub,
+body.theme-mint      .gm-banner-sub,
+body.theme-lapis     .gm-banner-sub { color: var(--gold-dim); }
+
+/* 8. GM YAML prompt ─────────────────────────────────────────────── */
+body.theme-parchment .gm-slot-prompt-msg,
+body.theme-sakura    .gm-slot-prompt-msg,
+body.theme-mint      .gm-slot-prompt-msg,
+body.theme-lapis     .gm-slot-prompt-msg {
+  color:        oklch(38% 0.14 220);
+  border-color: oklch(46% 0.12 220);
+  background:   oklch(from var(--bg-card) calc(l - 0.05) 0.04 220);
+}
+
+/* 9. Shop item rows — hardcoded near-black backgrounds ─────────── */
+body.theme-parchment .lb-shop-item,
+body.theme-sakura    .lb-shop-item,
+body.theme-mint      .lb-shop-item,
+body.theme-lapis     .lb-shop-item {
+  background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
+  border-color: var(--border);
+}
+body.theme-parchment .lb-shop-item-desc,
+body.theme-sakura    .lb-shop-item-desc,
+body.theme-mint      .lb-shop-item-desc,
+body.theme-lapis     .lb-shop-item-desc { color: var(--gold-dim); }
+
+body.theme-parchment .lb-shop-item-cost,
+body.theme-sakura    .lb-shop-item-cost,
+body.theme-mint      .lb-shop-item-cost,
+body.theme-lapis     .lb-shop-item-cost { color: var(--gold); }
+
+body.theme-parchment .lb-shop-item-btn,
+body.theme-sakura    .lb-shop-item-btn,
+body.theme-mint      .lb-shop-item-btn,
+body.theme-lapis     .lb-shop-item-btn {
+  background:   oklch(from var(--bg-card) calc(l - 0.14) c h);
+  border-color: var(--border-glow);
+}
+body.theme-parchment .lb-shop-item-btn:hover:not(:disabled),
+body.theme-sakura    .lb-shop-item-btn:hover:not(:disabled),
+body.theme-mint      .lb-shop-item-btn:hover:not(:disabled),
+body.theme-lapis     .lb-shop-item-btn:hover:not(:disabled) {
+  background: oklch(from var(--bg-card) calc(l - 0.20) c h);
+}
+
+/* 10. Shop orb button — hardcoded purple text + hover/owned states  */
+body.theme-parchment .lb-shop-orb-btn,
+body.theme-sakura    .lb-shop-orb-btn,
+body.theme-mint      .lb-shop-orb-btn,
+body.theme-lapis     .lb-shop-orb-btn {
+  color:        oklch(38% 0.18 290);
+  border-color: oklch(42% 0.16 290);
+  background:   oklch(from var(--bg-card) calc(l - 0.08) 0.04 290);
+}
+body.theme-parchment .lb-shop-orb-btn:hover,
+body.theme-sakura    .lb-shop-orb-btn:hover,
+body.theme-mint      .lb-shop-orb-btn:hover,
+body.theme-lapis     .lb-shop-orb-btn:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.14) 0.05 290);
+  box-shadow: 0 0 10px oklch(42% 0.16 290 / 0.25);
+}
+body.theme-parchment .lb-shop-orb-btn.owned,
+body.theme-sakura    .lb-shop-orb-btn.owned,
+body.theme-mint      .lb-shop-orb-btn.owned,
+body.theme-lapis     .lb-shop-orb-btn.owned {
+  background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
+  border-color: var(--border);
+}

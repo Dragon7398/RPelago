@@ -88,10 +88,9 @@ export default function SectionMissions() {
         boost theirs.
       </p>
       <p>
-        Completing <strong>Basic Training</strong> permanently sets your{' '}
-        <em>basicTrainingDone</em> flag for the season. After that, Basic Training cohorts
-        collapse into a separate section at the bottom of the Guild Hall panel — you can
-        expand it to watch others, but you cannot re-enlist.
+        Completing <strong>Basic Training</strong> can only be done once per guildmaster per season.
+        After that, Basic Training cohorts collapse into a separate section at the bottom of the Guild Hall
+        panel — you can expand it to watch others, but you cannot re-enlist.
       </p>
 
       <div className="help-callout">

@@ -25,7 +25,8 @@ import {
   adminSetMissionRoomSettings as dbAdminSetMissionRoomSettings,
   adminKickMissionParticipant as dbAdminKickMissionParticipant,
   adminForceDeploy as dbAdminForceDeploy,
-  adminCompleteMission as dbAdminCompleteMission,
+  completeMission as dbCompleteMission,
+  backfillChallengeHistory as dbBackfillChallengeHistory,
 } from '../firebase/db';
 import { useToast } from './ToastContext';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
@@ -84,6 +85,7 @@ interface GameStateContextValue {
   adminKickMissionParticipant: (missionId: string, playerId: string) => Promise<void>;
   adminForceDeploy: (missionId: string) => Promise<void>;
   adminCompleteMission: (missionId: string, confirmed?: boolean) => Promise<{ warned?: boolean; unfinishedSlots?: number }>;
+  adminBackfillChallengeHistory: (coord: string) => Promise<number>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -255,7 +257,18 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     const tile = gameState.tiles[coord];
     if (!tile) return;
 
-    const updatedPlayers = awardTileRewards(tile, gameState.players, coord);
+    const originalPlayers = gameState.players;
+    const updatedPlayers  = awardTileRewards(tile, originalPlayers, coord);
+
+    const awardedAmounts: Record<string, { xp: number; gold: number }> = {};
+    for (const [pid, updated] of Object.entries(updatedPlayers)) {
+      const original = originalPlayers[pid];
+      if (!original) continue;
+      awardedAmounts[pid] = {
+        xp:   updated.xp   - original.xp,
+        gold: updated.gold - original.gold,
+      };
+    }
     const [r, c]   = rcFromCoord(coord);
     const typeKey  = getTypeKey(r, c);
     const orbState = gameState.orbState ?? {};
@@ -303,7 +316,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions, tileName);
+    await completeTile(coord, updatedPlayers, revealCoords, orbAcquisitions, tileName, awardedAmounts);
 
     const ownerIds = [...new Set(Object.values(tile.adventurers ?? {}).map(a => a.owner))];
     const participantNames = ownerIds.map(id => gameState.players[id]?.displayName).filter(Boolean).join(', ');
@@ -462,7 +475,14 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adminCompleteMission = useCallback(async (missionId: string, confirmed?: boolean) => {
-    return await dbAdminCompleteMission(missionId, confirmed);
+    if (!gameState) return {};
+    const mission = gameState.missions?.[missionId];
+    if (!mission) return {};
+    return await dbCompleteMission(mission, gameState.players, confirmed);
+  }, [gameState]);
+
+  const adminBackfillChallengeHistory = useCallback(async (coord: string) => {
+    return await dbBackfillChallengeHistory(coord);
   }, []);
 
   return (
@@ -479,6 +499,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetParticipantSlots, adminUpdateParticipantSlotStatus,
       adminSetMissionLink, adminSetMissionRoomSettings,
       adminKickMissionParticipant, adminForceDeploy, adminCompleteMission,
+      adminBackfillChallengeHistory,
     }}>
       {children}
     </GameStateContext.Provider>

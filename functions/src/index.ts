@@ -477,30 +477,6 @@ export const onTileComplete = onValueWritten(
     if (Object.keys(profileUpdates).length > 0) {
       await db.ref().update(profileUpdates);
     }
-
-    // Write CompletedChallenge records for ProfileLightbox history (one per owner).
-    const tileSnap = await db.ref(`game/tiles/${coord}`).get();
-    if (tileSnap.exists()) {
-      const tile = tileSnap.val() as { name?: string; xp?: number; gold?: number };
-      const challengeUpdates: Record<string, unknown> = {};
-      const now = Date.now();
-      for (const [ownerId, games] of byOwner) {
-        const player = players?.[ownerId];
-        if (!player) continue;
-        const entryRef = db.ref(`game/players/${ownerId}/completedChallenges`).push();
-        challengeUpdates[`game/players/${ownerId}/completedChallenges/${entryRef.key}`] = {
-          coord,
-          name:        tile.name ?? coord,
-          xpAwarded:   tile.xp   ?? 0,
-          goldAwarded: tile.gold  ?? 0,
-          completedAt: now,
-        };
-        void games; // games used above for profile; included here for completeness
-      }
-      if (Object.keys(challengeUpdates).length > 0) {
-        await db.ref().update(challengeUpdates);
-      }
-    }
   },
 );
 
@@ -694,35 +670,7 @@ function gmMissionLabel(m: GMMission): string {
   return `${m.label} · Cohort ${roman}`;
 }
 
-// ── Feat helpers (mirrors src/lib/gameLogic.ts) ───────────────────────────────
 
-interface PlayerForFeats {
-  feats?: { level3?: string; level5?: string; level7?: string };
-}
-
-function hasFeat(uid: string, featId: string, players: Record<string, PlayerForFeats>): boolean {
-  const p = players[uid];
-  if (!p?.feats) return false;
-  return Object.values(p.feats).includes(featId);
-}
-
-function calcFeatBonuses(
-  ownerId: string,
-  ownerIds: string[],
-  players: Record<string, PlayerForFeats>,
-): { xpMultiplier: number; goldMultiplier: number } {
-  const otherOwners = ownerIds.filter(id => id !== ownerId);
-  const isMentor    = hasFeat(ownerId, 'mentor',    players);
-  const isTreasurer = hasFeat(ownerId, 'treasurer', players);
-
-  const otherMentorCount    = otherOwners.filter(id => hasFeat(id, 'mentor',    players)).length;
-  const otherTreasurerCount = otherOwners.filter(id => hasFeat(id, 'treasurer', players)).length;
-
-  const xpBonus   = otherMentorCount    * 0.05 + (isMentor    ? otherOwners.length * 0.01 : 0);
-  const goldBonus = otherTreasurerCount * 0.10 + (isTreasurer ? otherOwners.length * 0.03 : 0);
-
-  return { xpMultiplier: 1 + xpBonus, goldMultiplier: 1 + goldBonus };
-}
 
 // ── Deploy routine ────────────────────────────────────────────────────────────
 
@@ -806,14 +754,6 @@ export const enlistInMission = onCall(async (request) => {
 
   await db.ref().update(updates);
 
-  const label = gmMissionLabel(mission);
-  await db.ref('game/activityLog').push().set({
-    timestamp: now,
-    type:      'mission_enlist',
-    message:   `${player.displayName} enlisted in ${label}.`,
-    icon:      '✦',
-  });
-
   // Re-read updated mission to check if deploy fires
   const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
   const updated = updatedSnap.val() as GMMission;
@@ -887,61 +827,6 @@ async function requireAdmin(uid: string): Promise<void> {
     throw new HttpsError('permission-denied', 'Admin only.');
 }
 
-export const adminSetParticipantSlots = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-  await requireAdmin(request.auth.uid);
-
-  const { missionId, playerId, slots } = request.data as { missionId?: string; playerId?: string; slots?: GMSlot[] };
-  if (!missionId || !playerId || !Array.isArray(slots))
-    throw new HttpsError('invalid-argument', 'Missing missionId, playerId, or slots.');
-
-  await getDatabase().ref(`game/missions/${missionId}/participants/${playerId}/slots`).set(slots);
-  return { success: true };
-});
-
-export const adminUpdateParticipantSlotStatus = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-  await requireAdmin(request.auth.uid);
-
-  const { missionId, playerId, slotIndex, status } = request.data as {
-    missionId?: string; playerId?: string; slotIndex?: number; status?: SlotStatus;
-  };
-  if (!missionId || !playerId || slotIndex == null || !status)
-    throw new HttpsError('invalid-argument', 'Missing parameters.');
-
-  await getDatabase().ref(`game/missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`).set(status);
-  return { success: true };
-});
-
-export const adminSetMissionLink = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-  await requireAdmin(request.auth.uid);
-
-  const { missionId, link } = request.data as { missionId?: string; link?: string };
-  if (!missionId || link == null) throw new HttpsError('invalid-argument', 'Missing parameters.');
-
-  await getDatabase().ref(`game/missions/${missionId}/link`).set(link || null);
-  return { success: true };
-});
-
-export const adminSetMissionRoomSettings = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-  await requireAdmin(request.auth.uid);
-
-  const { missionId, release, collect, hint } = request.data as {
-    missionId?: string; release?: TriState; collect?: TriState; hint?: number;
-  };
-  if (!missionId || !release || !collect || hint == null)
-    throw new HttpsError('invalid-argument', 'Missing parameters.');
-
-  const db = getDatabase();
-  await db.ref().update({
-    [`game/missions/${missionId}/release`]: release,
-    [`game/missions/${missionId}/collect`]: collect,
-    [`game/missions/${missionId}/hint`]:    hint,
-  });
-  return { success: true };
-});
 
 export const adminKickMissionParticipant = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
@@ -1005,81 +890,6 @@ export const adminForceDeploy = onCall(async (request) => {
   return { success: true };
 });
 
-export const adminCompleteMission = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-  await requireAdmin(request.auth.uid);
-
-  const { missionId, confirmed } = request.data as { missionId?: string; confirmed?: boolean };
-  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
-
-  const db          = getDatabase();
-  const now         = Date.now();
-  const missionSnap = await db.ref(`game/missions/${missionId}`).get();
-  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
-  const mission = missionSnap.val() as GMMission;
-  if (mission.state !== 'inprogress')
-    throw new HttpsError('failed-precondition', 'Mission is not in progress.');
-
-  // Gating: count participants with unfinished slots
-  let unfinishedSlots = 0;
-  for (const p of Object.values(mission.participants ?? {})) {
-    if (!p.slots || p.slots.length === 0) { unfinishedSlots++; continue; }
-    const anyUnfinished = p.slots.some(
-      s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress',
-    );
-    if (anyUnfinished) unfinishedSlots++;
-  }
-
-  if (unfinishedSlots > 0 && !confirmed) {
-    return { warned: true, unfinishedSlots };
-  }
-
-  // Load all players for feat calculations
-  const playersSnap = await db.ref('game/players').get();
-  const allPlayers  = (playersSnap.val() ?? {}) as Record<string, PlayerForFeats & { xp?: number; gold?: number; displayName?: string }>;
-
-  const ownerIds = Object.keys(mission.participants ?? {});
-  const updates: Record<string, unknown> = {};
-  const label = gmMissionLabel(mission);
-
-  for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
-    const player = allPlayers[pid];
-    if (!player) continue;
-
-    const { xpMultiplier, goldMultiplier } = calcFeatBonuses(pid, ownerIds, allPlayers);
-
-    let earnedXP   = Math.round(mission.xp * xpMultiplier);
-    let earnedGold = Math.round(mission.gp * goldMultiplier);
-
-    // Add slot bonuses
-    for (const slot of participant.slots ?? []) {
-      earnedXP   += slot.bonusXP   ?? 0;
-      earnedGold += slot.bonusGold ?? 0;
-    }
-
-    updates[`game/players/${pid}/xp`]            = (player.xp   ?? 0) + earnedXP;
-    updates[`game/players/${pid}/gold`]           = (player.gold ?? 0) + earnedGold;
-    updates[`game/players/${pid}/activeMission`]  = null;
-    if (mission.type === 'basic') {
-      updates[`game/players/${pid}/basicTrainingDone`] = true;
-    }
-  }
-
-  // Archive to missionsHistory, delete from missions
-  updates[`game/missionsHistory/${missionId}`] = { ...mission, state: 'complete' };
-  updates[`game/missions/${missionId}`]         = null;
-
-  await db.ref().update(updates);
-
-  await db.ref('game/activityLog').push().set({
-    timestamp: now,
-    type:      'mission_complete',
-    message:   `${label} has completed.`,
-    icon:      '⚜',
-  });
-
-  return { success: true };
-});
 
 // ── Scheduled tick: auto-deploy cohorts when decay meets fill count ───────────
 

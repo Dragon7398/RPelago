@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
+import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMParticipant, AdvSlot, SlotStatus, TriState } from '../../types';
 import { SLOT_STATUSES } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
+import { seedInitialMissions } from '../../firebase/db';
 
 const TRISTATE_OPTIONS: TriState[] = ['on', 'off', 'special'];
 
@@ -298,7 +300,9 @@ function FormingMissionCard({ mission }: { mission: GMMission }) {
 
 export default function MissionsPage() {
   const { gameState } = useGameState();
+  const { addToast } = useToast();
   const missions = gameState?.missions ?? {};
+  const [seeding, setSeeding] = useState(false);
 
   const active  = Object.values(missions).filter(m => m.state !== 'complete');
   const forming = active.filter(m => m.state === 'forming').sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
@@ -326,7 +330,26 @@ export default function MissionsPage() {
       )}
 
       {active.length === 0 && (
-        <div className="dash-empty">No active missions. Initialize the game to seed the first cohorts.</div>
+        <div className="dash-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+          <span>No active missions.</span>
+          <button
+            className="dash-action-btn"
+            disabled={seeding}
+            onClick={async () => {
+              setSeeding(true);
+              try {
+                const created = await seedInitialMissions();
+                addToast(created ? 'Missions seeded — Basic Training · Cohort I and Patrol · Cohort I are now live.' : 'Missions already exist.', 'success');
+              } catch (err) {
+                addToast(`Failed to seed missions: ${err instanceof Error ? err.message : String(err)}`, 'error');
+              } finally {
+                setSeeding(false);
+              }
+            }}
+          >
+            {seeding ? '…' : '⚜ Seed Initial Missions'}
+          </button>
+        </div>
       )}
     </div>
   );

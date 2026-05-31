@@ -204,7 +204,6 @@ export type ActivityType =
   | 'orb_collected'
   | 'item_purchased'
   | 'orb_purchased'
-  | 'mission_enlist'
   | 'mission_deploy'
   | 'mission_complete';
 

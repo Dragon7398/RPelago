@@ -102,7 +102,7 @@
       },
 
       "missions": {
-        ".write": false,
+        ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid",
         "$missionId": {
           "claimableSlots": {
             "$slotKey": {
@@ -115,7 +115,7 @@
       },
 
       "missionsHistory": {
-        ".write": false
+        ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid"
       },
 
       "notifications": {
