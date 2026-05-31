@@ -893,34 +893,43 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   const missionSnap = await db.ref(`game/missions/${missionId}`).get();
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = missionSnap.val() as GMMission;
-  if (mission.state !== 'inprogress')
-    throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+  if (mission.state !== 'forming' && mission.state !== 'inprogress')
+    throw new HttpsError('failed-precondition', 'Mission is not active.');
 
   const participant = mission.participants?.[playerId];
   if (!participant) throw new HttpsError('not-found', 'Participant not found.');
 
-  const slotsToAdd: GMSlot[] = participant.slots?.length
-    ? participant.slots.map(s => ({
-        name: s.name, game: s.game,
-        ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
-        ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
-      }))
-    : [{ name: '', game: '' }];
-
-  const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
-  const warnRef  = db.ref(`game/players/${playerId}/warnings`).push();
-  const label    = gmMissionLabel(mission);
+  const label   = gmMissionLabel(mission);
+  const warnRef = db.ref(`game/players/${playerId}/warnings`).push();
 
   const updates: Record<string, unknown> = {
-    [`game/missions/${missionId}/participants/${playerId}`]:                null,
-    [`game/missions/${missionId}/claimableSlots/${claimRef.key}`]:         slotsToAdd,
-    [`game/players/${playerId}/activeMission`]:                            null,
+    [`game/missions/${missionId}/participants/${playerId}`]: null,
+    [`game/players/${playerId}/activeMission`]:             null,
     [`game/players/${playerId}/warnings/${warnRef.key}`]: {
       timestamp: Date.now(),
       message:   `Removed from ${label} by admin.`,
       auto:      true,
     },
   };
+
+  if (mission.state === 'forming') {
+    // Reset the decay timer if this was the last participant.
+    const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
+    if (remaining.length === 0) {
+      updates[`game/missions/${missionId}/firstJoinAt`] = null;
+    }
+  } else {
+    // inprogress — preserve slot info as a claimable slot for a replacement.
+    const slotsToAdd: GMSlot[] = participant.slots?.length
+      ? participant.slots.map(s => ({
+          name: s.name, game: s.game,
+          ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+          ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+        }))
+      : [{ name: '', game: '' }];
+    const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
+    updates[`game/missions/${missionId}/claimableSlots/${claimRef.key}`] = slotsToAdd;
+  }
 
   await db.ref().update(updates);
   return { success: true };

@@ -1,99 +1,149 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
-import type { GMMission, GMParticipant, AdvSlot, SlotStatus, TriState } from '../../types';
+import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState } from '../../types';
 import { SLOT_STATUSES } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions } from '../../firebase/db';
 
 const TRISTATE_OPTIONS: TriState[] = ['on', 'off', 'special'];
 
-// ── Slot editor for one participant ──────────────────────────────────────────
+const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
+  { state: 'forming',    label: 'Forming',     cls: 'btn-available'  },
+  { state: 'inprogress', label: 'In Progress', cls: 'btn-inprogress' },
+  { state: 'complete',   label: 'Complete',    cls: 'btn-complete'   },
+];
 
-function ParticipantSlotEditor({
-  missionId, playerId, participant,
-}: { missionId: string; playerId: string; participant: GMParticipant }) {
+// ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
+
+function MissionParticipantSlots({
+  missionId, playerId, participant, onKick,
+}: {
+  missionId: string;
+  playerId: string;
+  participant: GMParticipant;
+  onKick: () => void;
+}) {
   const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
-  const [slots, setSlots] = useState<AdvSlot[]>(participant.slots ?? []);
-  const [saving, setSaving] = useState(false);
+  const slots = participant.slots ?? [];
+  const [draft, setDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>({
+    name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0,
+  });
+  const [confirmKick, setConfirmKick] = useState(false);
 
-  const handleSlotChange = (i: number, field: keyof AdvSlot, value: string | number) => {
-    setSlots(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s));
-  };
-
-  const addSlot = () => setSlots(prev => [...prev, { name: '', game: '', status: 'Unstarted' }]);
-  const removeSlot = (i: number) => setSlots(prev => prev.filter((_, idx) => idx !== i));
-
-  const saveSlots = async () => {
-    setSaving(true);
-    try {
-      await adminSetParticipantSlots(missionId, playerId, slots);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateStatus = async (i: number, status: SlotStatus) => {
-    const updated = slots.map((s, idx) => idx === i ? { ...s, status } : s);
-    setSlots(updated);
-    await adminUpdateParticipantSlotStatus(missionId, playerId, i, status);
-  };
+  const save = (next: AdvSlot[]) => adminSetParticipantSlots(missionId, playerId, next);
 
   return (
-    <div className="dash-adv-slots" style={{ marginTop: '0.4rem' }}>
-      {slots.map((slot, i) => (
-        <div key={i} className="dash-adv-slot-row" style={{ flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.3rem' }}>
+    <div className="admin-slot-adv">
+      <div className="admin-slot-adv-header">
+        <span className="admin-slot-adv-name">{participant.playerName}</span>
+        {confirmKick ? (
+          <span style={{ display: 'flex', gap: '0.3rem' }}>
+            <button
+              className="dash-action-btn danger"
+              style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+              onClick={() => { onKick(); setConfirmKick(false); }}
+            >Confirm Kick</button>
+            <button
+              className="dash-action-btn"
+              style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+              onClick={() => setConfirmKick(false)}
+            >Cancel</button>
+          </span>
+        ) : (
+          <button className="dash-kick-btn" onClick={() => setConfirmKick(true)}>Kick</button>
+        )}
+      </div>
+
+      {slots.map((s, i) => (
+        <div key={i} className="admin-slot-row">
           <input
-            className="dash-edit-input"
-            style={{ width: '120px' }}
-            placeholder="Slot name"
-            value={slot.name}
-            onChange={e => handleSlotChange(i, 'name', e.target.value)}
+            className="admin-slot-edit-input"
+            key={`mn-${missionId}-${playerId}-${i}-${s.name}`}
+            defaultValue={s.name} placeholder="Slot name"
+            onBlur={e => { const v = e.target.value.trim(); if (v !== s.name) save(slots.map((sl, j) => j === i ? { ...sl, name: v } : sl)); }}
           />
           <input
-            className="dash-edit-input"
-            style={{ flex: 1, minWidth: '120px' }}
-            placeholder="Game title"
-            value={slot.game}
-            onChange={e => handleSlotChange(i, 'game', e.target.value)}
+            className="admin-slot-edit-input"
+            key={`mg-${missionId}-${playerId}-${i}-${s.game}`}
+            defaultValue={s.game} placeholder="Game"
+            onBlur={e => { const v = e.target.value.trim(); if (v !== s.game) save(slots.map((sl, j) => j === i ? { ...sl, game: v } : sl)); }}
+          />
+          <input
+            className="admin-slot-edit-input"
+            key={`md-${missionId}-${playerId}-${i}-${s.details ?? ''}`}
+            defaultValue={s.details ?? ''} placeholder="Details"
+            onBlur={e => {
+              const v = e.target.value.trim();
+              const cur = s.details ?? '';
+              if (v !== cur) {
+                const u = { ...s };
+                if (v) u.details = v; else delete u.details;
+                save(slots.map((sl, j) => j === i ? u : sl));
+              }
+            }}
+          />
+          <input
+            type="number" min={0} className="admin-bonus-input" placeholder="+XP"
+            key={`mx-${missionId}-${playerId}-${i}-${s.bonusXP ?? 0}`}
+            defaultValue={s.bonusXP ?? 0}
+            onBlur={e => { const v = parseInt(e.target.value) || 0; const u = { ...s }; if (v > 0) u.bonusXP = v; else delete u.bonusXP; save(slots.map((sl, j) => j === i ? u : sl)); }}
+          />
+          <input
+            type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
+            key={`mg2-${missionId}-${playerId}-${i}-${s.bonusGold ?? 0}`}
+            defaultValue={s.bonusGold ?? 0}
+            onBlur={e => { const v = parseInt(e.target.value) || 0; const u = { ...s }; if (v > 0) u.bonusGold = v; else delete u.bonusGold; save(slots.map((sl, j) => j === i ? u : sl)); }}
           />
           <select
-            className="dash-select"
-            value={slot.status ?? 'Unstarted'}
-            onChange={e => updateStatus(i, e.target.value as SlotStatus)}
+            className="admin-slot-status-select"
+            value={s.status ?? 'Unstarted'}
+            onChange={e => adminUpdateParticipantSlotStatus(missionId, playerId, i, e.target.value as SlotStatus)}
           >
-            {SLOT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
-          <input
-            className="dash-edit-input"
-            style={{ width: '60px' }}
-            type="number"
-            placeholder="+XP"
-            value={slot.bonusXP ?? ''}
-            onChange={e => handleSlotChange(i, 'bonusXP', e.target.value === '' ? 0 : Number(e.target.value))}
-          />
-          <input
-            className="dash-edit-input"
-            style={{ width: '60px' }}
-            type="number"
-            placeholder="+GP"
-            value={slot.bonusGold ?? ''}
-            onChange={e => handleSlotChange(i, 'bonusGold', e.target.value === '' ? 0 : Number(e.target.value))}
-          />
-          <button className="dash-action-btn danger" onClick={() => removeSlot(i)}>✕</button>
+          <button className="admin-slot-del" title="Remove slot" onClick={() => save(slots.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.3rem' }}>
-        <button className="dash-action-btn" onClick={addSlot}>+ Add Slot</button>
-        <button className="dash-action-btn" onClick={saveSlots} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Slots'}
-        </button>
+
+      <div className="admin-slot-add-row">
+        <input className="admin-text-input" placeholder="Slot name" value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
+        <input className="admin-text-input" placeholder="Game" value={draft.game}
+          onChange={e => setDraft(d => ({ ...d, game: e.target.value }))} />
+        <input className="admin-text-input" placeholder="Details (optional)" value={draft.details}
+          onChange={e => setDraft(d => ({ ...d, details: e.target.value }))} />
+        <input type="number" min={0} className="admin-bonus-input" placeholder="+XP"
+          value={draft.bonusXP || ''}
+          onChange={e => setDraft(d => ({ ...d, bonusXP: parseInt(e.target.value) || 0 }))} />
+        <input type="number" min={0} className="admin-bonus-input" placeholder="+Gold"
+          value={draft.bonusGold || ''}
+          onChange={e => setDraft(d => ({ ...d, bonusGold: parseInt(e.target.value) || 0 }))} />
+        <select className="admin-slot-status-select" value={draft.status}
+          onChange={e => setDraft(d => ({ ...d, status: e.target.value as SlotStatus }))}>
+          {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+        </select>
+        <button
+          className="admin-slot-add-btn"
+          disabled={!draft.name.trim() || !draft.game.trim()}
+          onClick={() => {
+            const newSlot: AdvSlot = { name: draft.name.trim(), game: draft.game.trim(), status: draft.status };
+            if (draft.details.trim()) newSlot.details   = draft.details.trim();
+            if (draft.bonusXP > 0)   newSlot.bonusXP   = draft.bonusXP;
+            if (draft.bonusGold > 0) newSlot.bonusGold = draft.bonusGold;
+            save([...slots, newSlot]);
+            setDraft({ name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0 });
+          }}
+        >+ Add</button>
       </div>
+
       {participant.statusNote && (
         <div className="dash-adv-note" style={{ marginTop: '0.3rem' }}>
           <span className="dash-adv-note-text">{participant.statusNote.text}</span>
           <span className="dash-adv-note-time">
-            {new Date(participant.statusNote.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            {new Date(participant.statusNote.timestamp).toLocaleString(undefined, {
+              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+            })}
           </span>
         </div>
       )}
@@ -101,256 +151,233 @@ function ParticipantSlotEditor({
   );
 }
 
-// ── Inprogress mission card ───────────────────────────────────────────────────
+// ── Unified mission card ───────────────────────────────────────────────────────
 
-function InProgressMissionCard({ mission }: { mission: GMMission }) {
+function MissionCard({ mission }: { mission: GMMission }) {
   const {
+    adminForceDeploy, adminCompleteMission,
     adminSetMissionLink, adminSetMissionRoomSettings,
-    adminKickMissionParticipant, adminCompleteMission,
+    adminKickMissionParticipant,
   } = useGameState();
 
-  const [link, setLink]         = useState(mission.link ?? '');
-  const [release, setRelease]   = useState<TriState>(mission.release);
-  const [collect, setCollect]   = useState<TriState>(mission.collect);
-  const [hint, setHint]         = useState(mission.hint);
-  const [confirmKick, setConfirmKick] = useState<string | null>(null);
-  const [completing, setCompleting] = useState(false);
+  const [link,    setLink]    = useState(mission.link ?? '');
+  const [release, setRelease] = useState<TriState>(mission.release);
+  const [collect, setCollect] = useState<TriState>(mission.collect);
+  const [hint,    setHint]    = useState(mission.hint);
+  const [transitioning,  setTransitioning]  = useState(false);
   const [completionWarn, setCompletionWarn] = useState<{ unfinishedSlots: number } | null>(null);
-
-  const handleSaveLink = () => adminSetMissionLink(mission.id, link);
-  const handleSaveRoom = () => adminSetMissionRoomSettings(mission.id, release, collect, hint);
-
-  const handleKick = async (playerId: string) => {
-    await adminKickMissionParticipant(mission.id, playerId);
-    setConfirmKick(null);
-  };
-
-  const handleComplete = async (confirmed = false) => {
-    setCompleting(true);
-    try {
-      const result = await adminCompleteMission(mission.id, confirmed);
-      if (result.warned && result.unfinishedSlots) {
-        setCompletionWarn({ unfinishedSlots: result.unfinishedSlots });
-      }
-    } finally {
-      setCompleting(false);
-    }
-  };
-
-  const participants = Object.entries(mission.participants ?? {});
-  const label = missionDisplayLabel(mission);
-
-  return (
-    <div className="dash-tile-card">
-      <div className="dash-tile-header">
-        <div>
-          <span className="dash-tile-name">{label}</span>
-          <span className="dash-tile-state inprogress" style={{ marginLeft: '0.5rem' }}>IN PROGRESS</span>
-        </div>
-      </div>
-
-      {/* Room link */}
-      <div className="dash-section-label" style={{ marginTop: '0.75rem' }}>ROOM LINK</div>
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-        <input
-          className="dash-edit-input"
-          style={{ flex: 1 }}
-          placeholder="Archipelago room URL"
-          value={link}
-          onChange={e => setLink(e.target.value)}
-        />
-        <button className="dash-action-btn" onClick={handleSaveLink}>Save</button>
-      </div>
-
-      {/* Room settings */}
-      <div className="dash-section-label" style={{ marginTop: '0.75rem' }}>ROOM SETTINGS</div>
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}>
-          Release:
-          <select className="dash-select" value={release} onChange={e => setRelease(e.target.value as TriState)}>
-            {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}>
-          Collect:
-          <select className="dash-select" value={collect} onChange={e => setCollect(e.target.value as TriState)}>
-            {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}>
-          Hint %:
-          <input
-            className="dash-edit-input"
-            type="number"
-            style={{ width: '60px' }}
-            value={hint}
-            onChange={e => setHint(Number(e.target.value))}
-          />
-        </label>
-        <button className="dash-action-btn" onClick={handleSaveRoom}>Save</button>
-      </div>
-
-      {/* Participants */}
-      <div className="dash-section-label" style={{ marginTop: '0.75rem' }}>PARTICIPANTS</div>
-      {participants.map(([pid, p]) => (
-        <div key={pid} className="dash-player-row" style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="dash-player-tag">{p.playerName}</span>
-            {confirmKick === pid ? (
-              <span style={{ display: 'flex', gap: '0.35rem' }}>
-                <button className="dash-action-btn danger" onClick={() => handleKick(pid)}>Confirm Kick</button>
-                <button className="dash-action-btn" onClick={() => setConfirmKick(null)}>Cancel</button>
-              </span>
-            ) : (
-              <button className="dash-action-btn danger" onClick={() => setConfirmKick(pid)}>Kick</button>
-            )}
-          </div>
-          <ParticipantSlotEditor missionId={mission.id} playerId={pid} participant={p} />
-        </div>
-      ))}
-      {participants.length === 0 && (
-        <div className="dash-empty">No participants.</div>
-      )}
-
-      {/* Mark Complete */}
-      <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-        {completionWarn ? (
-          <>
-            <span style={{ fontSize: '0.72rem', color: 'var(--amber)' }}>
-              {completionWarn.unfinishedSlots} participant(s) have unfinished slots. Complete anyway?
-            </span>
-            <button className="dash-action-btn danger" onClick={() => handleComplete(true)} disabled={completing}>
-              {completing ? '…' : 'Yes, Complete'}
-            </button>
-            <button className="dash-action-btn" onClick={() => setCompletionWarn(null)}>Cancel</button>
-          </>
-        ) : (
-          <button className="dash-action-btn" style={{ background: 'oklch(28% 0.12 145 / 0.4)', borderColor: 'oklch(45% 0.12 145)' }}
-            onClick={() => handleComplete(false)} disabled={completing}>
-            {completing ? '…' : '✓ Mark Complete'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Forming mission card ──────────────────────────────────────────────────────
-
-function FormingMissionCard({ mission }: { mission: GMMission }) {
-  const { adminForceDeploy } = useGameState();
-  const [deploying, setDeploying] = useState(false);
   const [now] = useState(() => Date.now());
-  const maxSlots = currentMaxSlots(mission, now);
-  const filled   = Object.keys(mission.participants ?? {}).length;
-  const label    = missionDisplayLabel(mission);
-  const participants = Object.values(mission.participants ?? {});
 
-  const nextDecayMs = mission.firstJoinAt != null
+  const label        = missionDisplayLabel(mission);
+  const participants = Object.entries(mission.participants ?? {});
+  const filled       = participants.length;
+  const maxSlots     = currentMaxSlots(mission, now);
+
+  const nextDecayMs = mission.state === 'forming' && mission.firstJoinAt != null
     ? mission.firstJoinAt + Math.ceil((now - mission.firstJoinAt) / (24 * 3600_000)) * (24 * 3600_000) - now
     : null;
 
-  const handleForceDeploy = async () => {
-    setDeploying(true);
-    try { await adminForceDeploy(mission.id); }
-    finally { setDeploying(false); }
+  const handleStateBtn = async (target: GMMissionState) => {
+    if (target === mission.state) return;
+    if (target === 'forming') return; // no going back
+
+    if (target === 'inprogress') {
+      setTransitioning(true);
+      try { await adminForceDeploy(mission.id); } finally { setTransitioning(false); }
+    } else if (target === 'complete') {
+      setTransitioning(true);
+      try {
+        const result = await adminCompleteMission(mission.id, false);
+        if (result.warned && result.unfinishedSlots) {
+          setCompletionWarn({ unfinishedSlots: result.unfinishedSlots });
+        }
+      } finally { setTransitioning(false); }
+    }
+  };
+
+  const handleConfirmComplete = async () => {
+    setTransitioning(true);
+    try { await adminCompleteMission(mission.id, true); } finally { setTransitioning(false); setCompletionWarn(null); }
   };
 
   return (
     <div className="dash-tile-card">
+      {/* Header */}
       <div className="dash-tile-header">
-        <div>
-          <span className="dash-tile-name">{label}</span>
-          <span className="dash-tile-state available" style={{ marginLeft: '0.5rem' }}>FORMING</span>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--gold-dim)' }}>{filled}/{maxSlots} slots</span>
-          <button className="dash-action-btn" onClick={handleForceDeploy} disabled={deploying || filled === 0}>
-            {deploying ? '…' : '⚑ Force Deploy'}
-          </button>
+        <span className="dash-tile-name">{label}</span>
+        <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)' }}>{filled}/{maxSlots}</span>
+        {mission.state === 'inprogress' && mission.link && (
+          <a className="dash-tile-link" href={mission.link} target="_blank" rel="noopener noreferrer" title="Open room">🔗</a>
+        )}
+      </div>
+
+      {/* State selector — mirrors Map page */}
+      <div className="admin-detail-row" style={{ marginTop: '0.6rem' }}>
+        <div className="admin-detail-label">STATE</div>
+        <div className="admin-state-btns">
+          {MISSION_STATE_BUTTONS.map(({ state, label: btnLabel, cls }) => {
+            const isCurrent = mission.state === state;
+            const isDisabled =
+              transitioning ||
+              isCurrent ||
+              state === 'forming' ||                                     // can't go back
+              (state === 'inprogress' && mission.state !== 'forming') || // can only deploy from forming
+              (state === 'complete'   && mission.state !== 'inprogress') || // can only complete from inprogress
+              (state === 'inprogress' && filled === 0);                  // can't deploy empty
+
+            return (
+              <button
+                key={state}
+                className={`admin-state-btn ${cls}${isCurrent ? ' active' : ''}`}
+                disabled={isDisabled}
+                onClick={() => handleStateBtn(state)}
+              >
+                {transitioning && !isCurrent && state !== 'forming' ? '…' : btnLabel}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {nextDecayMs != null && (
-        <div style={{ fontSize: '0.7rem', color: 'oklch(60% 0.08 60)', marginTop: '0.3rem' }}>
-          Next slot decay in {Math.floor(nextDecayMs / 3600_000)}h {Math.floor((nextDecayMs % 3600_000) / 60_000)}m
-        </div>
-      )}
-      {!mission.firstJoinAt && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', marginTop: '0.3rem' }}>
-          Timer starts on first enlist.
+      {/* Completion confirmation */}
+      {completionWarn && (
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+          <span className="admin-complete-warn">
+            {completionWarn.unfinishedSlots} participant(s) have unfinished slots. Complete anyway?
+          </span>
+          <button className="dash-action-btn danger" onClick={handleConfirmComplete} disabled={transitioning}>
+            {transitioning ? '…' : 'Yes, Complete'}
+          </button>
+          <button className="dash-action-btn" onClick={() => setCompletionWarn(null)}>Cancel</button>
         </div>
       )}
 
-      {participants.length > 0 && (
-        <div style={{ marginTop: '0.5rem' }}>
-          <div className="dash-section-label">ENLISTED</div>
-          {participants.map(p => (
-            <div key={p.playerId} className="dash-player-tag" style={{ display: 'inline-block', margin: '0.2rem 0.3rem 0 0' }}>
-              {p.playerName}
-            </div>
-          ))}
+      {nextDecayMs != null && (
+        <div style={{ fontSize: '0.68rem', color: 'oklch(60% 0.08 60)', marginTop: '0.35rem' }}>
+          Next decay in {Math.floor(nextDecayMs / 3600_000)}h {Math.floor((nextDecayMs % 3600_000) / 60_000)}m
         </div>
+      )}
+
+      {/* Room link + settings — inprogress only */}
+      {mission.state === 'inprogress' && (
+        <>
+          <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>ROOM LINK</div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              className="dash-edit-input" style={{ flex: 1 }}
+              placeholder="Archipelago room URL"
+              value={link}
+              onChange={e => setLink(e.target.value)}
+            />
+            <button className="dash-action-btn" onClick={() => adminSetMissionLink(mission.id, link)}>Save</button>
+          </div>
+
+          <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>ROOM SETTINGS</div>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
+              Release:
+              <select className="dash-select" value={release} onChange={e => setRelease(e.target.value as TriState)}>
+                {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
+              Collect:
+              <select className="dash-select" value={collect} onChange={e => setCollect(e.target.value as TriState)}>
+                {TRISTATE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem' }}>
+              Hint %:
+              <input className="dash-edit-input" type="number" style={{ width: '60px' }}
+                value={hint} onChange={e => setHint(Number(e.target.value))} />
+            </label>
+            <button className="dash-action-btn" onClick={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}>Save</button>
+          </div>
+        </>
+      )}
+
+      {/* Slots — always shown */}
+      <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.4rem' }}>SLOTS</div>
+      {participants.length > 0 ? participants.map(([pid, p]) => (
+        <MissionParticipantSlots
+          key={pid}
+          missionId={mission.id}
+          playerId={pid}
+          participant={p}
+          onKick={() => adminKickMissionParticipant(mission.id, pid)}
+        />
+      )) : (
+        <div className="dash-empty">No participants yet.</div>
       )}
     </div>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function MissionsPage() {
   const { gameState } = useGameState();
-  const { addToast } = useToast();
-  const missions = gameState?.missions ?? {};
+  const { addToast }  = useToast();
   const [seeding, setSeeding] = useState(false);
 
-  const active  = Object.values(missions).filter(m => m.state !== 'complete');
-  const forming = active.filter(m => m.state === 'forming').sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-  const inprog  = active.filter(m => m.state === 'inprogress').sort((a, b) => (a.deployedAt ?? 0) - (b.deployedAt ?? 0));
+  const missions = gameState?.missions ?? {};
+  const active   = Object.values(missions).filter(m => m.state !== 'complete');
+  const forming  = active.filter(m => m.state === 'forming')   .sort((a, b) => (a.createdAt  ?? 0) - (b.createdAt  ?? 0));
+  const inprog   = active.filter(m => m.state === 'inprogress').sort((a, b) => (a.deployedAt ?? 0) - (b.deployedAt ?? 0));
 
-  // History is stored at missionsHistory — not in game/missions, so we won't have it
-  // in gameState. In a full implementation, this would be lazy-loaded. For now show a note.
+  const handleSeed = async () => {
+    setSeeding(true);
+    try {
+      const created = await seedInitialMissions();
+      addToast(
+        created
+          ? 'Missions seeded — Basic Training · Cohort I and Patrol · Cohort I are now live.'
+          : 'Missions already exist.',
+        'success',
+      );
+    } catch (err) {
+      addToast(`Failed to seed missions: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   return (
     <div className="dash-page">
-      <div className="dash-page-title">⚜ Guildmaster Missions</div>
+      <h2 className="dash-page-title">⚜ Guildmaster Missions</h2>
 
-      {inprog.length > 0 && (
-        <section>
-          <div className="dash-section-label" style={{ marginBottom: '0.75rem' }}>IN PROGRESS</div>
-          {inprog.map(m => <InProgressMissionCard key={m.id} mission={m} />)}
-        </section>
-      )}
-
-      {forming.length > 0 && (
-        <section style={{ marginTop: '1.5rem' }}>
-          <div className="dash-section-label" style={{ marginBottom: '0.75rem' }}>FORMING</div>
-          {forming.map(m => <FormingMissionCard key={m.id} mission={m} />)}
-        </section>
-      )}
-
-      {active.length === 0 && (
-        <div className="dash-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
-          <span>No active missions.</span>
-          <button
-            className="dash-action-btn"
-            disabled={seeding}
-            onClick={async () => {
-              setSeeding(true);
-              try {
-                const created = await seedInitialMissions();
-                addToast(created ? 'Missions seeded — Basic Training · Cohort I and Patrol · Cohort I are now live.' : 'Missions already exist.', 'success');
-              } catch (err) {
-                addToast(`Failed to seed missions: ${err instanceof Error ? err.message : String(err)}`, 'error');
-              } finally {
-                setSeeding(false);
-              }
-            }}
-          >
-            {seeding ? '…' : '⚜ Seed Initial Missions'}
-          </button>
+      <div className="dash-challenges-cols">
+        <div className="dash-col">
+          <div className="dash-col-header">
+            <span>Forming</span>
+            <span className="dash-col-count">{forming.length}</span>
+          </div>
+          {forming.length === 0 ? (
+            <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
+              <span>No forming missions.</span>
+              {active.length === 0 && (
+                <button className="dash-action-btn" disabled={seeding} onClick={handleSeed}>
+                  {seeding ? '…' : '⚜ Seed Initial Missions'}
+                </button>
+              )}
+            </div>
+          ) : (
+            forming.map(m => <MissionCard key={m.id} mission={m} />)
+          )}
         </div>
-      )}
+
+        <div className="dash-col">
+          <div className="dash-col-header">
+            <span>In Progress</span>
+            <span className="dash-col-count">{inprog.length}</span>
+          </div>
+          {inprog.length === 0 ? (
+            <div className="dash-empty">No missions in progress.</div>
+          ) : (
+            inprog.map(m => <MissionCard key={m.id} mission={m} />)
+          )}
+        </div>
+      </div>
     </div>
   );
 }

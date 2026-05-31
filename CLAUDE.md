@@ -14,6 +14,10 @@ npx tsc --noEmit  # Type-check only (no emit)
 
 Firebase Cloud Functions are in `functions/` and deploy separately via `firebase deploy --only functions`.
 
+## Environment
+
+This project runs on Windows: use PowerShell-compatible syntax in all scripts and hooks (no Unix-only commands), and assume the `claude` CLI may not be on PATH.
+
 ## Architecture
 
 **RPelago** is a real-time collaborative metagame overlay for Archipelago randomizer sessions. Players log in via Discord, send adventurers to tiles on a grid map, and an admin controls tile progression. All state lives in Firebase Realtime Database.

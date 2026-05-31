@@ -215,11 +215,16 @@ function MissionRoster({ mission, uid }: { mission: GMMission; uid: string | nul
                       ? 'ss-' + slot.status.replace('%', 'pct').replace('-', '').replace(/\s/g, '')
                       : 'ss-Unstarted';
                     return (
-                      <div key={i} className="lb-slot-row">
-                        <span className="lb-slot-name">{slot.name}</span>
-                        <span className="lb-slot-sep">—</span>
-                        <span className="lb-slot-game">{slot.game}</span>
-                        <span className={`lb-slot-status ${statusCls}`}>{slot.status ?? 'Unstarted'}</span>
+                      <div key={i}>
+                        <div className="lb-slot-row">
+                          <span className="lb-slot-name">{slot.name}</span>
+                          <span className="lb-slot-sep">—</span>
+                          <span className="lb-slot-game">{slot.game}</span>
+                          <span className={`lb-slot-status ${statusCls}`}>{slot.status ?? 'Unstarted'}</span>
+                        </div>
+                        {slot.details && (
+                          <div className="lb-slot-details">{slot.details}</div>
+                        )}
                       </div>
                     );
                   })}
