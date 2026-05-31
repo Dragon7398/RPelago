@@ -73,13 +73,7 @@ function Countdown({ card }: { card: GMMissionCard }) {
     return () => clearInterval(t);
   }, [card.status]);
 
-  if (card.status === 'open') {
-    return (
-      <div className="gm-cd-subtle">
-        <span className="gm-cd-ico">⏳</span> Timer begins when the first recruit enlists
-      </div>
-    );
-  }
+  if (card.status === 'open') return null;
   if (card.status === 'inprogress') {
     return (
       <div className="gm-cd-subtle" style={{ color: 'oklch(64% 0.12 60)' }}>
@@ -89,7 +83,7 @@ function Countdown({ card }: { card: GMMissionCard }) {
   }
   return (
     <div className="gm-cd-chip">
-      <span>NEXT SLOT IN</span>
+      <span>SLOT DECAYS IN</span>
       <span className="gm-cd-clock">{fmtClock(sec)}</span>
     </div>
   );
@@ -297,8 +291,7 @@ function TakeMissionButton({
       </span>
     );
   }
-  const def = MISSION_DEFS[card.mission.type];
-  const txt = def.special ? 'TAKE BASIC TRAINING' : 'TAKE THIS MISSION';
+  const txt = `TAKE ${card.mission.label.toUpperCase()}`;
   return (
     <button className="gm-take-btn" onClick={onEnlist} disabled={loading}>
       {loading ? '…' : txt}
