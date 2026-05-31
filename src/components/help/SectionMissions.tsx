@@ -4,9 +4,10 @@ export default function SectionMissions() {
       <h3>Guildmaster Missions</h3>
       <p>
         While your Adventurers tackle the map, <strong>you</strong> — the Guildmaster — can
-        undertake missions in person. These are found inside the <strong>Centralia Guild
-        Hall</strong> (the center tile, D3): click it to open the lightbox and scroll up to
-        the <strong>⚜ Guildmaster Commissions</strong> panel above the shop.
+        undertake missions in person. These are found inside the{' '}
+        <strong>Centralia Guild Hall</strong> (the center tile, D3): click it to open the
+        lightbox and scroll up to the <strong>⚜ Guildmaster Commissions</strong> panel above
+        the shop.
       </p>
       <p>
         Unlike tile challenges, missions are played <em>by the guildmaster directly</em>. You
@@ -28,34 +29,33 @@ export default function SectionMissions() {
         <div className="help-tile-row">
           <span className="help-tile-icon">🗡️</span>
           <div>
-            <strong>Basic Training</strong> — <em>Once per guildmaster, per season.</em>
-            {' '}Up to 5 players, 100 XP reward. Comes with the <strong>Sturdy 150</strong>{' '}
-            trait — your slot must have at least 150 checks. A good starting point for
-            new guildmasters.
+            <strong>Basic Training</strong> — <em>Once per guildmaster, per season.</em>{' '}
+            Up to 5 players, 100 XP reward. Comes with the <strong>Sturdy 150</strong> trait
+            — your slot must have at least 150 checks. A good starting point for new guildmasters.
           </div>
         </div>
         <div className="help-tile-row">
           <span className="help-tile-icon">🛡️</span>
           <div>
-            <strong>Patrol</strong> — <em>Repeatable.</em>
-            {' '}Up to 8 players, 50 XP + 50 GP reward. No special trait — straightforward
-            steady work. New cohorts keep forming, so there's always one available.
+            <strong>Patrol</strong> — <em>Repeatable.</em>{' '}
+            Up to 8 players, 50 XP + 50 GP reward. No special trait — straightforward steady
+            work. New cohorts keep forming, so there's always one available.
           </div>
         </div>
       </div>
 
       <h4>Cohorts & Slot Decay</h4>
       <p>
-        Each mission runs in numbered cohorts (Cohort I, II, III…). A cohort starts{' '}
-        <strong>Forming</strong> and deploys — locks in — when it fills up.
+        Each mission runs in numbered cohorts (Cohort I, II, III…). A cohort
+        starts <strong>Forming</strong> and deploys — locks in — when it fills up.
       </p>
       <p>
         Cohorts don't need to fill completely to run. Each cohort has a{' '}
-        <strong>24-hour slot decay</strong>: once the first guildmaster enlists, every
-        24 hours one open slot fades away. If that brings the available slots down to
-        match the number already signed up, the cohort deploys automatically — letting
-        a smaller group get started without waiting indefinitely for a full roster. Slot
-        pips on the card show the current state — a{' '}
+        <strong>24-hour slot decay</strong>: once the first guildmaster enlists, every 24 hours
+        one open slot fades away. If that brings the available slots down to match the number
+        already signed up, the cohort deploys automatically — letting a smaller group get
+        started without waiting indefinitely for a full roster. Slot pips on the card show the
+        current state — a{' '}
         <span style={{ color: 'oklch(62% 0.18 25)', fontWeight: 600 }}>dashed red pip</span>{' '}
         marks the next slot due to decay.
       </p>
@@ -63,23 +63,22 @@ export default function SectionMissions() {
       <h4>Enlisting & Standing Down</h4>
       <ol className="help-list">
         <li>
-          Click <strong>TAKE BASIC TRAINING</strong> or <strong>TAKE PATROL</strong>
-          on the card. You're now enlisted — the banner at the top of the panel shows your
-          active mission.
+          Click <strong>TAKE BASIC TRAINING</strong> or <strong>TAKE PATROL</strong> on the
+          card. You're now enlisted — the banner at the top of the panel shows your active mission.
         </li>
         <li>
-          While the cohort is still <strong>Forming</strong>, you may <strong>Stand
-          Down</strong> freely — this does <em>not</em> spend your Basic Training shot; that's
-          only spent on completion.
+          While the cohort is still <strong>Forming</strong>, you may{' '}
+          <strong>Stand Down</strong> freely — this does <em>not</em> spend your Basic Training
+          shot; that's only spent on completion.
         </li>
         <li>
-          Once the cohort <strong>deploys</strong>, you're committed. The Stand Down button
-          is replaced by <strong>⚑ COMMITTED</strong> — you stay until the mission completes.
+          Once the cohort <strong>deploys</strong>, you're committed. The Stand Down button is
+          replaced by <strong>⚑ COMMITTED</strong> — you stay until the mission completes.
         </li>
         <li>
-          After deployment, submit your YAML to the Discord thread as normal:
-          {' '}<em>"Game YAML for Basic Training · Cohort III at RPelago-D3."</em>
-          {' '}The admin will enter your slot details once the room is set up.
+          After deployment, submit your YAML to the Discord thread as normal:{' '}
+          <em>"Game YAML for Basic Training · Cohort III at RPelago-D3."</em>{' '}
+          The admin will enter your slot details once the room is set up.
         </li>
       </ol>
 
@@ -91,9 +90,10 @@ export default function SectionMissions() {
         boost theirs.
       </p>
       <p>
-        Completing <strong>Basic Training</strong> can only be done once per guildmaster per season.
-        After that, Basic Training cohorts collapse into a separate section at the bottom of the Guild Hall
-        panel — you can expand it to watch others, but you cannot re-enlist.
+        Completing <strong>Basic Training</strong> can only be done once per guildmaster per
+        season. After that, Basic Training cohorts collapse into a separate section at the
+        bottom of the Guild Hall panel — you can expand it to watch others, but you cannot
+        re-enlist.
       </p>
 
       <div className="help-callout">
