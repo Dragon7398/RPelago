@@ -2533,6 +2533,14 @@ body.theme-tidepool {
 .gm-slot-prompt { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: var(--gold-dim); padding: 0.25rem 0.5rem 0.3rem 1.6rem; line-height: 1.35; }
 .gm-slot-prompt-msg { display: block; margin-top: 0.3rem; font-style: normal; font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em; color: oklch(72% 0.12 195); background: oklch(from var(--bg-card) calc(l - 0.05) 0.03 195); border: 1px solid oklch(38% 0.10 195); border-radius: 2px; padding: 0.32rem 0.5rem; }
 
+/* ── Claimable slot claim section ── */
+.gm-claim-section { margin-top: 0.2rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.gm-claim-row { margin-top: 0.3rem; }
+.gm-claim-info {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem;
+  color: var(--gold-dim); display: block; margin-bottom: 0.15rem;
+}
+
 /* ── Basic Training done section ── */
 .gm-bt-done-section { margin-top: 0.25rem; }
 .gm-bt-done-toggle {
@@ -2563,7 +2571,18 @@ body.theme-lapis {
   --amber:       oklch(46% 0.16 60);
 }
 
-/* 2. GM countdown chip — hardcoded amber text ───────────────────── */
+/* 2. GM mission card icon seal — calc(l-0.32) bottoms out at ~10% in dark
+      mode which is correct, but same calc on 42% light accent → 10% (very
+      dark square on a cream card).  Override to a subtle tint instead. */
+body.theme-parchment .gmb-seal,
+body.theme-sakura    .gmb-seal,
+body.theme-mint      .gmb-seal,
+body.theme-lapis     .gmb-seal {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.06 285);
+  border-color: var(--gm-accent-d);
+}
+
+/* 3. GM countdown chip — hardcoded amber text ───────────────────── */
 body.theme-parchment .gm-cd-chip,
 body.theme-sakura    .gm-cd-chip,
 body.theme-mint      .gm-cd-chip,
@@ -2576,37 +2595,37 @@ body.theme-sakura    .gm-cd-subtle,
 body.theme-mint      .gm-cd-subtle,
 body.theme-lapis     .gm-cd-subtle { color: var(--gold-dim); }
 
-/* 3. GM badges — inprogress uses hardcoded 72% amber ────────────── */
+/* 4. GM badges — inprogress uses hardcoded 72% amber ────────────── */
 body.theme-parchment .gm-badge.inprogress,
 body.theme-sakura    .gm-badge.inprogress,
 body.theme-mint      .gm-badge.inprogress,
 body.theme-lapis     .gm-badge.inprogress { color: var(--gold); }
 
-/* 4. GM trait chip — hardcoded 72% amber ────────────────────────── */
+/* 5. GM trait chip — hardcoded 72% amber ────────────────────────── */
 body.theme-parchment .gm-trait,
 body.theme-sakura    .gm-trait,
 body.theme-mint      .gm-trait,
 body.theme-lapis     .gm-trait { color: var(--gold); }
 
-/* 5. GM committed badge — hardcoded 72% amber ───────────────────── */
+/* 6. GM committed badge — hardcoded 72% amber ───────────────────── */
 body.theme-parchment .gm-committed,
 body.theme-sakura    .gm-committed,
 body.theme-mint      .gm-committed,
 body.theme-lapis     .gm-committed { color: var(--gold); }
 
-/* 6. GM description text — hardcoded dark-mode muted grey ──────── */
+/* 7. GM description text — hardcoded dark-mode muted grey ──────── */
 body.theme-parchment .gmb-desc,
 body.theme-sakura    .gmb-desc,
 body.theme-mint      .gmb-desc,
 body.theme-lapis     .gmb-desc { color: var(--gold-dim); }
 
-/* 7. GM banner subtitle ─────────────────────────────────────────── */
+/* 8. GM banner subtitle ─────────────────────────────────────────── */
 body.theme-parchment .gm-banner-sub,
 body.theme-sakura    .gm-banner-sub,
 body.theme-mint      .gm-banner-sub,
 body.theme-lapis     .gm-banner-sub { color: var(--gold-dim); }
 
-/* 8. GM YAML prompt ─────────────────────────────────────────────── */
+/* 9. GM YAML prompt ─────────────────────────────────────────────── */
 body.theme-parchment .gm-slot-prompt-msg,
 body.theme-sakura    .gm-slot-prompt-msg,
 body.theme-mint      .gm-slot-prompt-msg,
@@ -2616,7 +2635,7 @@ body.theme-lapis     .gm-slot-prompt-msg {
   background:   oklch(from var(--bg-card) calc(l - 0.05) 0.04 220);
 }
 
-/* 9. Shop item rows — hardcoded near-black backgrounds ─────────── */
+/* 10. Shop item rows — hardcoded near-black backgrounds ─────────── */
 body.theme-parchment .lb-shop-item,
 body.theme-sakura    .lb-shop-item,
 body.theme-mint      .lb-shop-item,
@@ -2648,7 +2667,7 @@ body.theme-lapis     .lb-shop-item-btn:hover:not(:disabled) {
   background: oklch(from var(--bg-card) calc(l - 0.20) c h);
 }
 
-/* 10. Shop orb button — hardcoded purple text + hover/owned states  */
+/* 11. Shop orb button — hardcoded purple text + hover/owned states  */
 body.theme-parchment .lb-shop-orb-btn,
 body.theme-sakura    .lb-shop-orb-btn,
 body.theme-mint      .lb-shop-orb-btn,

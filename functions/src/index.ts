@@ -779,6 +779,8 @@ export const standDownFromMission = onCall(async (request) => {
   const mission = missionSnap.val() as GMMission;
   if (mission.state !== 'forming')
     throw new HttpsError('failed-precondition', 'mission-committed');
+  if (!(uid in (mission.participants ?? {})))
+    throw new HttpsError('failed-precondition', 'not-a-participant');
 
   const updates: Record<string, unknown> = {
     [`game/missions/${missionId}/participants/${uid}`]: null,
@@ -815,6 +817,58 @@ export const setMissionParticipantStatusNote = onCall(async (request) => {
   } else {
     await db.ref(path).set({ text: note, timestamp: Date.now() });
   }
+  return { success: true };
+});
+
+// ── Claim an open spot on an in-progress mission (kicked player replacement) ──
+
+export const claimMissionSlot = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId, slotKey } = request.data as { missionId?: string; slotKey?: string };
+  if (!missionId || !slotKey) throw new HttpsError('invalid-argument', 'Missing parameters.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const now = Date.now();
+
+  const [playerSnap, missionSnap] = await Promise.all([
+    db.ref(`game/players/${uid}`).get(),
+    db.ref(`game/missions/${missionId}`).get(),
+  ]);
+
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+
+  const player  = playerSnap.val() as { displayName: string; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const mission = missionSnap.val() as GMMission;
+
+  if (player.disabled)      throw new HttpsError('permission-denied',  'Account restricted.');
+  if (player.activeMission) throw new HttpsError('failed-precondition', 'already-on-mission');
+  if (mission.state !== 'inprogress')
+    throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+  if (uid in (mission.participants ?? {}))
+    throw new HttpsError('failed-precondition', 'already-a-participant');
+  if (mission.type === 'basic' && player.basicTrainingDone)
+    throw new HttpsError('failed-precondition', 'basic-training-used');
+
+  const slotSnap = await db.ref(`game/missions/${missionId}/claimableSlots/${slotKey}`).get();
+  if (!slotSnap.exists()) throw new HttpsError('not-found', 'Slot no longer available.');
+
+  const inheritedSlots = slotSnap.val() as GMSlot[] | null;
+  const participant: GMParticipant = {
+    playerId:   uid,
+    playerName: player.displayName,
+    joinedAt:   now,
+    ...(inheritedSlots?.length ? { slots: inheritedSlots } : {}),
+  };
+
+  await db.ref().update({
+    [`game/missions/${missionId}/claimableSlots/${slotKey}`]: null,
+    [`game/missions/${missionId}/participants/${uid}`]:        participant,
+    [`game/players/${uid}/activeMission`]:                    missionId,
+  });
+
   return { success: true };
 });
 

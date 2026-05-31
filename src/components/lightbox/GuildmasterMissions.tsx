@@ -5,6 +5,56 @@ import type { GMMission, AdvSlot, AdvStatusNote } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { MISSION_DEFS } from '../../lib/constants';
 
+// ── Claimable slot row ────────────────────────────────────────────────────────
+
+function ClaimableSlots({
+  mission, uid, activeMissionId, basicTrainingDone,
+}: {
+  mission: GMMission;
+  uid: string | null;
+  activeMissionId: string | null;
+  basicTrainingDone: boolean;
+}) {
+  const { claimMissionSlot } = useGameState();
+  const [loading, setLoading] = useState<string | null>(null);
+
+  const entries = Object.entries(mission.claimableSlots ?? {});
+  if (entries.length === 0 || !uid) return null;
+
+  const alreadyIn    = uid in (mission.participants ?? {});
+  const onOtherMission = activeMissionId !== null && activeMissionId !== mission.id;
+  const btBlocked    = mission.type === 'basic' && basicTrainingDone;
+  if (alreadyIn || onOtherMission || btBlocked) return null;
+
+  return (
+    <div className="gm-claim-section">
+      <div className="gm-roster-head" style={{ marginTop: '0.6rem' }}>⚐ OPEN SPOTS — REPLACEMENT AVAILABLE</div>
+      {entries.map(([key, slots]) => {
+        const games = (slots as AdvSlot[]).map(s => s.game).filter(Boolean);
+        return (
+          <div key={key} className="gm-claim-row">
+            {games.length > 0 && (
+              <span className="gm-claim-info">{games.join(', ')}</span>
+            )}
+            <button
+              className="gm-take-btn"
+              style={{ marginTop: '0.3rem' }}
+              onClick={async () => {
+                setLoading(key);
+                try { await claimMissionSlot(mission.id, key); }
+                finally { setLoading(null); }
+              }}
+              disabled={loading !== null}
+            >
+              {loading === key ? '…' : '⚑ CLAIM THIS SPOT'}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Countdown chip ────────────────────────────────────────────────────────────
 
 function Countdown({ card }: { card: GMMissionCard }) {
@@ -258,9 +308,11 @@ function TakeMissionButton({
 
 // ── Mission card ──────────────────────────────────────────────────────────────
 
-function MissionCard({ card, uid, onEnlist, onStandDown }: {
+function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, onStandDown }: {
   card: GMMissionCard;
   uid: string | null;
+  activeMissionId: string | null;
+  basicTrainingDone: boolean;
   onEnlist: (card: GMMissionCard) => void;
   onStandDown: (card: GMMissionCard) => void;
 }) {
@@ -345,6 +397,16 @@ function MissionCard({ card, uid, onEnlist, onStandDown }: {
         </button>
       ) : (
         <TakeMissionButton card={card} onEnlist={handleEnlist} loading={actionLoading} />
+      )}
+
+      {/* Claimable slots — replacement spots created when a participant was kicked */}
+      {card.status === 'inprogress' && (
+        <ClaimableSlots
+          mission={card.mission}
+          uid={uid}
+          activeMissionId={activeMissionId}
+          basicTrainingDone={basicTrainingDone}
+        />
       )}
     </div>
   );
@@ -448,6 +510,8 @@ export default function GuildmasterMissions() {
             key={card.key}
             card={card}
             uid={uid}
+            activeMissionId={activeMissionId}
+            basicTrainingDone={basicTrainingDone}
             onEnlist={handleEnlist}
             onStandDown={handleStandDown}
           />
@@ -466,6 +530,8 @@ export default function GuildmasterMissions() {
                 key={card.key}
                 card={card}
                 uid={uid}
+                activeMissionId={activeMissionId}
+                basicTrainingDone={basicTrainingDone}
                 onEnlist={handleEnlist}
                 onStandDown={handleStandDown}
               />

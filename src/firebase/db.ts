@@ -729,6 +729,11 @@ export async function adminKickMissionParticipant(missionId: string, playerId: s
   await httpsCallable(functions!, 'adminKickMissionParticipant')({ missionId, playerId });
 }
 
+export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'claimMissionSlot')({ missionId, slotKey });
+}
+
 export async function adminForceDeploy(missionId: string): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'adminForceDeploy')({ missionId });

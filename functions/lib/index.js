@@ -599,13 +599,6 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
         updates[`game/missions/${missionId}/firstJoinAt`] = now;
     }
     await db.ref().update(updates);
-    const label = gmMissionLabel(mission);
-    await db.ref('game/activityLog').push().set({
-        timestamp: now,
-        type: 'mission_enlist',
-        message: `${player.displayName} enlisted in ${label}.`,
-        icon: '✦',
-    });
     // Re-read updated mission to check if deploy fires
     const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
     const updated = updatedSnap.val();

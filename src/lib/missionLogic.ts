@@ -74,9 +74,7 @@ export function computeMissionCard(
     : 0;
 
   const decayPct = status === 'filling' ? hoursIntoWindow / 24 : (status === 'open' ? 0 : 1);
-  const liveSec  = status === 'filling'
-    ? (24 - hoursIntoWindow) * 3600
-    : (24 - hoursIntoWindow) * 3600;
+  const liveSec = (24 - hoursIntoWindow) * 3600;
 
   const roman = ROMAN_NUMERALS[m.series] ?? String(m.series);
   const seriesLabel = `COHORT ${roman}`;
