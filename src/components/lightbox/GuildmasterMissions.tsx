@@ -253,14 +253,6 @@ function RoomSettings({ mission }: { mission: GMMission }) {
       <span>Collect: <b>{mission.collect}</b></span>
       <span style={{ margin: '0 0.5rem' }}>·</span>
       <span>Hint: <b>{mission.hint}%</b></span>
-      {mission.link && (
-        <>
-          <span style={{ margin: '0 0.5rem' }}>·</span>
-          <a href={mission.link} target="_blank" rel="noopener noreferrer" className="lb-link">
-            Room Link ↗
-          </a>
-        </>
-      )}
     </div>
   );
 }
@@ -369,6 +361,13 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
         </div>
         <Countdown card={card} />
       </div>
+
+      {/* Room link — same style as tile challenges */}
+      {card.mission.link && (
+        <div className="lb-archipelago-link">
+          <a href={card.mission.link} target="_blank" rel="noopener noreferrer">🗺 Open Archipelago Game →</a>
+        </div>
+      )}
 
       {/* Roster */}
       <MissionRoster mission={card.mission} uid={uid} />
