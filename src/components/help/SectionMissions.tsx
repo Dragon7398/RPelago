@@ -29,7 +29,7 @@ export default function SectionMissions() {
           <span className="help-tile-icon">🗡️</span>
           <div>
             <strong>Basic Training</strong> — <em>Once per guildmaster, per season.</em>
-            {' '}Up to 5 players, 100 XP reward. Comes with the <strong>Sturdy 150</strong>
+            {' '}Up to 5 players, 100 XP reward. Comes with the <strong>Sturdy 150</strong>{' '}
             trait — your slot must have at least 150 checks. A good starting point for
             new guildmasters.
           </div>
@@ -50,17 +50,20 @@ export default function SectionMissions() {
         <strong>Forming</strong> and deploys — locks in — when it fills up.
       </p>
       <p>
-        There's a catch: each cohort has a <strong>24-hour slot decay</strong>. The timer
-        begins when the first guildmaster enlists. Every 24 hours without filling, one
-        available slot disappears. If decay brings the open slots down to match the number
-        of people already signed up, the cohort deploys automatically. Slots pips on the
-        card show the current state — a <span style={{ color: 'oklch(62% 0.18 25)', fontWeight: 600 }}>dashed red pip</span> is the next one at risk.
+        Cohorts don't need to fill completely to run. Each cohort has a{' '}
+        <strong>24-hour slot decay</strong>: once the first guildmaster enlists, every
+        24 hours one open slot fades away. If that brings the available slots down to
+        match the number already signed up, the cohort deploys automatically — letting
+        a smaller group get started without waiting indefinitely for a full roster. Slot
+        pips on the card show the current state — a{' '}
+        <span style={{ color: 'oklch(62% 0.18 25)', fontWeight: 600 }}>dashed red pip</span>{' '}
+        marks the next slot due to decay.
       </p>
 
       <h4>Enlisting & Standing Down</h4>
       <ol className="help-list">
         <li>
-          Click <strong>TAKE BASIC TRAINING</strong> or <strong>TAKE THIS MISSION</strong>
+          Click <strong>TAKE BASIC TRAINING</strong> or <strong>TAKE PATROL</strong>
           on the card. You're now enlisted — the banner at the top of the panel shows your
           active mission.
         </li>
