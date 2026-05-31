@@ -226,13 +226,23 @@ export async function completeTile(
     const name = tileName || coord;
     for (const [playerId, amounts] of Object.entries(awardedAmounts)) {
       const entryKey = push(ref(db!, `game/players/${playerId}/completedChallenges`)).key!;
-      updates[`game/players/${playerId}/completedChallenges/${entryKey}`] = {
+      const entry = {
         coord,
         name,
         xpAwarded:   amounts.xp,
         goldAwarded: amounts.gold,
         completedAt: now,
       };
+      // Merge into the existing player write rather than adding a separate child
+      // path — Firebase RTDB rejects update() calls where one path is a prefix
+      // of another (key-path conflict).
+      const playerWrite = updates[`game/players/${playerId}`] as Record<string, unknown>;
+      if (playerWrite) {
+        const existing = (playerWrite.completedChallenges ?? {}) as Record<string, unknown>;
+        playerWrite.completedChallenges = { ...existing, [entryKey]: entry };
+      } else {
+        updates[`game/players/${playerId}/completedChallenges/${entryKey}`] = entry;
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tickGuildmasterMissions = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.tickGuildmasterMissions = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -621,6 +621,8 @@ exports.standDownFromMission = (0, https_1.onCall)(async (request) => {
     const mission = missionSnap.val();
     if (mission.state !== 'forming')
         throw new https_1.HttpsError('failed-precondition', 'mission-committed');
+    if (!(uid in (mission.participants ?? {})))
+        throw new https_1.HttpsError('failed-precondition', 'not-a-participant');
     const updates = {
         [`game/missions/${missionId}/participants/${uid}`]: null,
         [`game/players/${uid}/activeMission`]: null,
@@ -655,6 +657,53 @@ exports.setMissionParticipantStatusNote = (0, https_1.onCall)(async (request) =>
     }
     return { success: true };
 });
+// ── Claim an open spot on an in-progress mission (kicked player replacement) ──
+exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { missionId, slotKey } = request.data;
+    if (!missionId || !slotKey)
+        throw new https_1.HttpsError('invalid-argument', 'Missing parameters.');
+    const uid = request.auth.uid;
+    const db = (0, database_2.getDatabase)();
+    const now = Date.now();
+    const [playerSnap, missionSnap] = await Promise.all([
+        db.ref(`game/players/${uid}`).get(),
+        db.ref(`game/missions/${missionId}`).get(),
+    ]);
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    if (!missionSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Mission not found.');
+    const player = playerSnap.val();
+    const mission = missionSnap.val();
+    if (player.disabled)
+        throw new https_1.HttpsError('permission-denied', 'Account restricted.');
+    if (player.activeMission)
+        throw new https_1.HttpsError('failed-precondition', 'already-on-mission');
+    if (mission.state !== 'inprogress')
+        throw new https_1.HttpsError('failed-precondition', 'Mission is not in progress.');
+    if (uid in (mission.participants ?? {}))
+        throw new https_1.HttpsError('failed-precondition', 'already-a-participant');
+    if (mission.type === 'basic' && player.basicTrainingDone)
+        throw new https_1.HttpsError('failed-precondition', 'basic-training-used');
+    const slotSnap = await db.ref(`game/missions/${missionId}/claimableSlots/${slotKey}`).get();
+    if (!slotSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Slot no longer available.');
+    const inheritedSlots = slotSnap.val();
+    const participant = {
+        playerId: uid,
+        playerName: player.displayName,
+        joinedAt: now,
+        ...(inheritedSlots?.length ? { slots: inheritedSlots } : {}),
+    };
+    await db.ref().update({
+        [`game/missions/${missionId}/claimableSlots/${slotKey}`]: null,
+        [`game/missions/${missionId}/participants/${uid}`]: participant,
+        [`game/players/${uid}/activeMission`]: missionId,
+    });
+    return { success: true };
+});
 // ── Admin callables ───────────────────────────────────────────────────────────
 async function requireAdmin(uid) {
     const db = (0, database_2.getDatabase)();
@@ -674,24 +723,15 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     if (!missionSnap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = missionSnap.val();
-    if (mission.state !== 'inprogress')
-        throw new https_1.HttpsError('failed-precondition', 'Mission is not in progress.');
+    if (mission.state !== 'forming' && mission.state !== 'inprogress')
+        throw new https_1.HttpsError('failed-precondition', 'Mission is not active.');
     const participant = mission.participants?.[playerId];
     if (!participant)
         throw new https_1.HttpsError('not-found', 'Participant not found.');
-    const slotsToAdd = participant.slots?.length
-        ? participant.slots.map(s => ({
-            name: s.name, game: s.game,
-            ...(s.bonusXP ? { bonusXP: s.bonusXP } : {}),
-            ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
-        }))
-        : [{ name: '', game: '' }];
-    const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
-    const warnRef = db.ref(`game/players/${playerId}/warnings`).push();
     const label = gmMissionLabel(mission);
+    const warnRef = db.ref(`game/players/${playerId}/warnings`).push();
     const updates = {
         [`game/missions/${missionId}/participants/${playerId}`]: null,
-        [`game/missions/${missionId}/claimableSlots/${claimRef.key}`]: slotsToAdd,
         [`game/players/${playerId}/activeMission`]: null,
         [`game/players/${playerId}/warnings/${warnRef.key}`]: {
             timestamp: Date.now(),
@@ -699,6 +739,25 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
             auto: true,
         },
     };
+    if (mission.state === 'forming') {
+        // Reset the decay timer if this was the last participant.
+        const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
+        if (remaining.length === 0) {
+            updates[`game/missions/${missionId}/firstJoinAt`] = null;
+        }
+    }
+    else {
+        // inprogress — preserve slot info as a claimable slot for a replacement.
+        const slotsToAdd = participant.slots?.length
+            ? participant.slots.map(s => ({
+                name: s.name, game: s.game,
+                ...(s.bonusXP ? { bonusXP: s.bonusXP } : {}),
+                ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+            }))
+            : [{ name: '', game: '' }];
+        const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
+        updates[`game/missions/${missionId}/claimableSlots/${claimRef.key}`] = slotsToAdd;
+    }
     await db.ref().update(updates);
     return { success: true };
 });

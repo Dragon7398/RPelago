@@ -266,10 +266,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     for (const [pid, updated] of Object.entries(updatedPlayers)) {
       const original = originalPlayers[pid];
       if (!original) continue;
-      awardedAmounts[pid] = {
-        xp:   updated.xp   - original.xp,
-        gold: updated.gold - original.gold,
-      };
+      const xp   = updated.xp   - original.xp;
+      const gold = updated.gold - original.gold;
+      if (xp === 0 && gold === 0) continue; // skip players not on this tile
+      awardedAmounts[pid] = { xp, gold };
     }
     const [r, c]   = rcFromCoord(coord);
     const typeKey  = getTypeKey(r, c);

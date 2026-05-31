@@ -60,6 +60,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
 
       const challenges: CompletedChallenge[] = cSnap.exists()
         ? Object.values(cSnap.val() as Record<string, CompletedChallenge>)
+            .filter(c => c.xpAwarded !== 0 || c.goldAwarded !== 0)
         : [];
       challenges.sort((a, b) => b.completedAt - a.completedAt);
       setPastChallenges(challenges);
