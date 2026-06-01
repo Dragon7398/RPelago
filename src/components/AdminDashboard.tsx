@@ -41,6 +41,11 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
+    document.body.classList.add('admin-active');
+    return () => document.body.classList.remove('admin-active');
+  }, []);
+
+  useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node))
         setMenuOpen(false);

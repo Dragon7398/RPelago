@@ -1411,10 +1411,13 @@ header p {
 }
 
 /* ══ ADMIN DASHBOARD (full-page) ═════════════════════════════════════════════ */
+body.admin-active { overflow-x: auto; align-items: flex-start; }
+
 .dash-root {
   min-height: 100vh; display: flex; flex-direction: column;
   background: var(--bg); color: var(--text);
   font-family: 'Crimson Pro', serif;
+  min-width: 100%;
 }
 
 /* ── Header ── */
