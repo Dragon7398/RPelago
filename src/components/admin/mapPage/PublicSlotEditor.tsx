@@ -32,9 +32,10 @@ export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
   const { adminSetPublicSlots } = useGameState();
   const [draft, setDraft] = useState<PublicDraft>({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
 
-  const pubSlots    = normalizeSlots(tile.publicSlots as AdvSlot[] | Record<string, AdvSlot> | undefined);
+  const pubSlots     = normalizeSlots(tile.publicSlots as AdvSlot[] | Record<string, AdvSlot> | undefined);
   const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
-  const save        = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord, next);
+  const locked       = tile.slotsLocked ?? false;
+  const save         = (next: AdvSlot[]) => adminSetPublicSlots(selectedCoord, next);
 
   return (
     <>
@@ -90,10 +91,10 @@ export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
                 onChange={room => save(pubSlots.map((slot, j) => j === i ? { ...slot, room } : slot))}
               />
             )}
-            <button className="admin-slot-del" onClick={() => save(pubSlots.filter((_, j) => j !== i))} title="Remove slot">✕</button>
+            {!locked && <button className="admin-slot-del" onClick={() => save(pubSlots.filter((_, j) => j !== i))} title="Remove slot">✕</button>}
           </div>
         ))}
-        <div className="admin-slot-add-row">
+        {!locked && <div className="admin-slot-add-row">
           <input className="admin-text-input" placeholder="Slot name" value={draft.name}
             onChange={e => setDraft(p => ({ ...p, name: e.target.value }))} />
           <input className="admin-text-input" placeholder="Game" value={draft.game}
@@ -118,7 +119,7 @@ export default function PublicSlotEditor({ tile, selectedCoord }: Props) {
               setDraft({ name: '', game: '', details: '', status: 'Unstarted', room: undefined });
             }}
           >+ Add</button>
-        </div>
+        </div>}
       </div>
     </>
   );

@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState } from '../../types';
 import { SLOT_STATUSES } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock } from '../../firebase/db';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -16,11 +16,12 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, onKick,
+  missionId, playerId, participant, locked, onKick,
 }: {
   missionId: string;
   playerId: string;
   participant: GMParticipant;
+  locked: boolean;
   onKick: () => void;
 }) {
   const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
@@ -101,11 +102,11 @@ function MissionParticipantSlots({
           >
             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
-          <button className="admin-slot-del" title="Remove slot" onClick={() => save(slots.filter((_, j) => j !== i))}>✕</button>
+          {!locked && <button className="admin-slot-del" title="Remove slot" onClick={() => save(slots.filter((_, j) => j !== i))}>✕</button>}
         </div>
       ))}
 
-      <div className="admin-slot-add-row">
+      {!locked && <div className="admin-slot-add-row">
         <input className="admin-text-input" placeholder="Slot name" value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
         <input className="admin-text-input" placeholder="Game" value={draft.game}
@@ -134,7 +135,7 @@ function MissionParticipantSlots({
             setDraft({ name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0 });
           }}
         >+ Add</button>
-      </div>
+      </div>}
 
       {participant.statusNote && (
         <div className="dash-adv-note" style={{ marginTop: '0.3rem' }}>
@@ -165,6 +166,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const [hint,    setHint]    = useState(mission.hint);
   const [transitioning,  setTransitioning]  = useState(false);
   const [completionWarn, setCompletionWarn] = useState<{ unfinishedSlots: number } | null>(null);
+  const slotsLocked = mission.slotsLocked ?? false;
   const [now] = useState(() => Date.now());
 
   const label        = missionDisplayLabel(mission);
@@ -311,13 +313,19 @@ function MissionCard({ mission }: { mission: GMMission }) {
       )}
 
       {/* Slots — always shown */}
-      <div className="admin-detail-label" style={{ marginTop: '0.75rem', marginBottom: '0.4rem' }}>SLOTS</div>
+      <div className="admin-detail-row" style={{ marginTop: '0.75rem', marginBottom: '0.4rem', alignItems: 'center' }}>
+        <div className="admin-detail-label">SLOTS</div>
+        <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`} onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
+          {slotsLocked ? '🔒 LOCKED' : '🔓 LOCK'}
+        </button>
+      </div>
       {participants.length > 0 ? participants.map(([pid, p]) => (
         <MissionParticipantSlots
           key={pid}
           missionId={mission.id}
           playerId={pid}
           participant={p}
+          locked={slotsLocked}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />
       )) : (

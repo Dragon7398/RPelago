@@ -1051,6 +1051,15 @@ header p {
   display: flex; gap: 0.3rem; margin-top: 0.3rem;
 }
 .admin-slot-add-row .admin-text-input { flex: 1; font-size: 0.6rem; padding: 0.2rem 0.35rem; }
+.admin-slot-lock-btn {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  padding: 0.14rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--gold-dim); transition: all 0.15s;
+}
+.admin-slot-lock-btn:hover        { border-color: var(--border-glow); color: var(--parchment); }
+.admin-slot-lock-btn.locked       { border-color: oklch(44% 0.12 60); color: var(--amber); }
+.admin-slot-lock-btn.locked:hover { border-color: oklch(52% 0.14 60); color: oklch(76% 0.14 75); }
 .admin-slot-add-btn {
   font-family: 'Cinzel', serif; font-size: 0.55rem; padding: 0.2rem 0.45rem; cursor: pointer;
   border-radius: 2px; flex-shrink: 0;

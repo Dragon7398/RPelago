@@ -954,9 +954,79 @@ export const adminForceDeploy = onCall(async (request) => {
 });
 
 
+// ── onMissionComplete ─────────────────────────────────────────────────────────
+// Mirrors onTileComplete: fires when a completed mission is archived to
+// missionsHistory and updates participant profiles with XP snapshot, mission
+// count, games from slots, and identity fields.
+
+export const onMissionComplete = onValueCreated(
+  'game/missionsHistory/{missionId}',
+  async (event) => {
+    const mission = event.data.val() as GMMission | null;
+    if (!mission || mission.state !== 'complete') return;
+
+    const db = getDatabase();
+
+    const participantIds = Object.keys(mission.participants ?? {});
+    if (participantIds.length === 0) return;
+
+    const playersSnap = await db.ref('game/players').get();
+    const players = playersSnap.val() as Record<string, PlayerRecord> | null;
+
+    // Batch-read firstEvent for all participants to avoid overwriting an earlier claim.
+    const firstEventSnaps = await Promise.all(
+      participantIds.map(uid => db.ref(`profiles/players/${uid}/firstEvent`).get()),
+    );
+    const firstEventMap = new Map(
+      participantIds.map((uid, i) => [uid, firstEventSnaps[i].val() as string | null]),
+    );
+
+    const profileUpdates: Record<string, unknown> = {};
+
+    for (const [playerId, participant] of Object.entries(mission.participants ?? {})) {
+      const player = players?.[playerId];
+      if (!player) continue;
+
+      const base = `profiles/players/${playerId}`;
+
+      // Identity — kept current on every mission completion.
+      profileUpdates[`${base}/id`]            = playerId;
+      profileUpdates[`${base}/displayName`]   = player.displayName;
+      profileUpdates[`${base}/discordHandle`] = player.discordHandle ?? null;
+      profileUpdates[`${base}/avatarHash`]    = player.avatarHash    ?? null;
+      profileUpdates[`${base}/joinedAt`]      = player.joinedAt      ?? null;
+
+      if (!firstEventMap.get(playerId)) {
+        profileUpdates[`${base}/firstEvent`] = 'rpelago_s1';
+      }
+
+      // XP — snapshot of the player's current total (already includes this mission's reward).
+      profileUpdates[`${base}/events/rpelago_s1/xp`] = player.xp ?? 0;
+
+      // Missions — separate counter from tiles.
+      profileUpdates[`${base}/events/rpelago_s1/missions`] = ServerValue.increment(1);
+
+      // Games — collect from this participant's slots, same encoding as onTileComplete.
+      for (const slot of participant.slots ?? []) {
+        if (slot.game?.trim()) {
+          profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
+        }
+      }
+
+      if (player.discordHandle) {
+        profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+      }
+    }
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await db.ref().update(profileUpdates);
+    }
+  },
+);
+
 // ── Scheduled tick: auto-deploy cohorts when decay meets fill count ───────────
 
-export const tickGuildmasterMissions = onSchedule('every 5 minutes', async () => {
+export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () => {
   const db      = getDatabase();
   const now     = Date.now();
   const snap    = await db.ref('game/missions').get();

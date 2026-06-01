@@ -22,6 +22,7 @@ export interface GMMissionCard {
 }
 
 export function currentMaxSlots(m: GMMission, now: number): number {
+  if (m.state === 'inprogress') return filledCount(m);
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / (24 * 3600_000));
   return Math.max(1, m.baseMax - steps);
@@ -65,8 +66,8 @@ export function computeMissionCard(
     status = 'filling';
   }
 
-  const decaySteps = m.firstJoinAt != null
-    ? Math.floor((now - m.firstJoinAt) / (24 * 3600_000))
+  const decaySteps = m.state === 'forming' && m.firstJoinAt != null
+    ? Math.floor(Math.max(0, now - m.firstJoinAt) / (24 * 3600_000))
     : 0;
 
   const elapsedMs = m.firstJoinAt != null ? Math.max(0, now - m.firstJoinAt) : 0;

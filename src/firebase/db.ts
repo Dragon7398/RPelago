@@ -484,6 +484,25 @@ export async function setClaimableSlotBonus(
   await set(ref(db!, `game/tiles/${coord}/claimableSlots/${slotKey}`), slotArr);
 }
 
+// ── Admin: slot lock ─────────────────────────────────────────────────────────
+export async function setTileSlotLock(coord: string, locked: boolean): Promise<void> {
+  assertDb();
+  if (locked) {
+    await set(ref(db!, `game/tiles/${coord}/slotsLocked`), true);
+  } else {
+    await remove(ref(db!, `game/tiles/${coord}/slotsLocked`));
+  }
+}
+
+export async function setMissionSlotLock(missionId: string, locked: boolean): Promise<void> {
+  assertDb();
+  if (locked) {
+    await set(ref(db!, `game/missions/${missionId}/slotsLocked`), true);
+  } else {
+    await remove(ref(db!, `game/missions/${missionId}/slotsLocked`));
+  }
+}
+
 // ── Admin: public slots ───────────────────────────────────────────────────────
 export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
   const path = `game/tiles/${coord}/publicSlots`;

@@ -12,11 +12,11 @@ type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map' | 'missions'
 
 const PAGES: { id: DashPage; label: string }[] = [
   { id: 'challenges', label: '⚔ Challenges' },
+  { id: 'missions',   label: '⚜ Missions'   },
+  { id: 'map',        label: '🗺 Map'        },
   { id: 'players',    label: '👥 Players'    },
   { id: 'shops',      label: '🛒 Shops'      },
   { id: 'orbs',       label: '⚗ Orbs'       },
-  { id: 'map',        label: '🗺 Map'        },
-  { id: 'missions',   label: '⚜ Missions'   },
 ];
 
 export default function AdminDashboard() {
@@ -114,11 +114,11 @@ export default function AdminDashboard() {
       </header>
       <main className="dash-main">
         {page === 'challenges' && <ChallengesPage navigateToMap={navigateToMap} />}
+        {page === 'missions'   && <MissionsPage />}
+        {page === 'map'        && <MapPage initialCoord={mapInitCoord} />}
         {page === 'players'    && <PlayersPage />}
         {page === 'shops'      && <ShopsPage />}
         {page === 'orbs'       && <OrbsPage />}
-        {page === 'map'        && <MapPage initialCoord={mapInitCoord} />}
-        {page === 'missions'   && <MissionsPage />}
       </main>
     </div>
   );

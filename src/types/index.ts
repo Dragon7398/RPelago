@@ -64,6 +64,7 @@ export interface Tile {
   baseHint: number;
   adminOverride: boolean;
   shopId?: string;
+  slotsLocked?: boolean;
 }
 
 export interface Adventurer {
@@ -187,6 +188,7 @@ export interface GMMission {
   deployedAt?:     number;
   participants:    Record<string, GMParticipant>;
   claimableSlots?: Record<string, AdvSlot[]>;
+  slotsLocked?:   boolean;
 }
 
 export interface CompletedChallenge {

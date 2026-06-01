@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { SLOT_STATUSES } from '../../../lib/constants';
 import { useGameState } from '../../../contexts/GameStateContext';
+import { setTileSlotLock } from '../../../firebase/db';
 import { normalizeSlots } from '../../../lib/slotHelpers';
 import type { Tile, AdvSlot, SlotStatus } from '../../../types';
 
@@ -14,13 +15,19 @@ interface Props {
 export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
   const { adminSetAdventurerSlots } = useGameState();
   const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
+  const locked = tile.slotsLocked ?? false;
 
   const entries = Object.values(tile.adventurers ?? {});
   if (entries.length === 0) return null;
 
   return (
     <>
-      <div className="admin-detail-label" style={{ marginTop: '0.8rem', marginBottom: '0.4rem' }}>SLOTS</div>
+      <div className="admin-detail-row" style={{ marginTop: '0.8rem', marginBottom: '0.4rem', alignItems: 'center' }}>
+        <div className="admin-detail-label">SLOTS</div>
+        <button className={`admin-slot-lock-btn${locked ? ' locked' : ''}`} onClick={() => setTileSlotLock(selectedCoord, !locked)}>
+          {locked ? '🔒 LOCKED' : '🔓 LOCK'}
+        </button>
+      </div>
       {entries.map(entry => {
         const slots = normalizeSlots(entry.slots as any);
         const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus, bonusXP: 0, bonusGold: 0 };
@@ -97,10 +104,10 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
                 >
                   {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
                 </select>
-                <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>
+                {!locked && <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>}
               </div>
             ))}
-            <div className="admin-slot-add-row">
+            {!locked && <div className="admin-slot-add-row">
               <input className="admin-text-input" placeholder="Slot name" value={draft.name}
                 onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, name: e.target.value } }))} />
               <input className="admin-text-input" placeholder="Game" value={draft.game}
@@ -129,7 +136,7 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
                   setSlotDrafts(p => ({ ...p, [entry.advId]: { name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0 } }));
                 }}
               >+ Add</button>
-            </div>
+            </div>}
           </div>
         );
       })}
