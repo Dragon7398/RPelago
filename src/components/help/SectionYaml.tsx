@@ -65,7 +65,7 @@ export default function SectionYaml() {
           [e.g. using BLJ to reach goal early in SM64].
         </li>
         <li>
-          <strong>YAML settings:</strong> Unless approved by a special challenge or feat, you are limited to:
+          <strong>YAML settings:</strong> Unless approved by special permission, a challenge, or a feat, you are limited to:
           <ul className="help-list help-list-sub">
             <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''}</li>
             <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations</li>
