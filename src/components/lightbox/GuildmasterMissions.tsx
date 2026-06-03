@@ -247,12 +247,10 @@ function MissionRoster({ mission, uid }: { mission: GMMission; uid: string | nul
 
 function RoomSettings({ mission }: { mission: GMMission }) {
   return (
-    <div className="lb-link-row" style={{ fontSize: '0.68rem', color: 'var(--gold-dim)', margin: '0.3rem 0' }}>
-      <span>Release: <b>{mission.release}</b></span>
-      <span style={{ margin: '0 0.5rem' }}>·</span>
-      <span>Collect: <b>{mission.collect}</b></span>
-      <span style={{ margin: '0 0.5rem' }}>·</span>
-      <span>Hint: <b>{mission.hint}%</b></span>
+    <div className="lb-meta-row" style={{ justifyContent: 'flex-start', margin: '0.35rem 0 0' }}>
+      <span className={`lb-meta-chip ${mission.release}`}>RELEASE: {mission.release.toUpperCase()}</span>
+      <span className={`lb-meta-chip ${mission.collect}`}>COLLECT: {mission.collect.toUpperCase()}</span>
+      <span className="lb-meta-chip hint">HINT: {mission.hint}%</span>
     </div>
   );
 }
@@ -341,6 +339,17 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
             {def.special    && <span className="gm-badge special">ONCE PER GM</span>}
             {!def.special   && <span className="gm-badge open">REPEATABLE</span>}
           </div>
+          <RoomSettings mission={card.mission} />
+          {card.mission.traits && Object.entries(card.mission.traits).map(([traitId, tv], i) => {
+            const traitName = traitId.charAt(0).toUpperCase() + traitId.slice(1);
+            return (
+              <div key={traitId} className="gmb-traitrow" style={i === 0 ? { marginTop: '0.35rem' } : undefined}>
+                <span className="gm-trait gm-tip" data-tip={`${traitName}: your slot must have at least ${tv.value} checks.`}>
+                  ⛨ {traitName} <span className="gm-trait-val">{tv.value}</span>
+                </span>
+              </div>
+            );
+          })}
         </div>
         <Rewards m={card.mission} />
       </div>
@@ -371,21 +380,6 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
 
       {/* Roster */}
       <MissionRoster mission={card.mission} uid={uid} />
-
-      {/* Trait row */}
-      {card.mission.traits && Object.entries(card.mission.traits).map(([traitId, tv]) => {
-        const traitName = traitId.charAt(0).toUpperCase() + traitId.slice(1);
-        return (
-          <div key={traitId} className="gmb-traitrow">
-            <span className="gm-trait gm-tip" data-tip={`${traitName}: your slot must have at least ${tv.value} checks.`}>
-              ⛨ {traitName} <span className="gm-trait-val">{tv.value}</span>
-            </span>
-          </div>
-        );
-      })}
-
-      {/* Room settings */}
-      <RoomSettings mission={card.mission} />
 
       {/* CTA */}
       {card.youIn && card.status !== 'inprogress' ? (
