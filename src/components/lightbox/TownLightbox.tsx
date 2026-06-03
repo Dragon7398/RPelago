@@ -50,11 +50,16 @@ export default function TownLightbox({ coord, tile, info, open, onClose, onLogin
     }
   };
 
+  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+
   return (
     <div className={`lightbox-overlay ${open ? 'open' : ''}`}
          onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="lightbox">
         <button className="lightbox-close" onClick={onClose}>✕</button>
+        {isAdmin && (
+          <a className="lb-admin-link" href={`/?coord=${coord}#admin`} target="_blank" rel="noreferrer" title="Open in Map Editor">🗺</a>
+        )}
         <div className="lb-coord">Grid Position: {coord}</div>
         <div className="lb-icon">{info.icon}</div>
         <div className="lb-title town">{tile.name || info.label}</div>

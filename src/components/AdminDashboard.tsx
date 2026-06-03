@@ -22,8 +22,14 @@ const PAGES: { id: DashPage; label: string }[] = [
 export default function AdminDashboard() {
   const { user } = useAuth();
   const { gameState, loading } = useGameState();
-  const [page, setPage]         = useState<DashPage>('challenges');
-  const [mapInitCoord, setMapInitCoord] = useState<string | undefined>(undefined);
+  const [page, setPage]         = useState<DashPage>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('coord') ? 'map' : 'challenges';
+  });
+  const [mapInitCoord, setMapInitCoord] = useState<string | undefined>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('coord') ?? undefined;
+  });
   const [menuOpen, setMenuOpen] = useState(false);
 
   const navigateToMap = (coord: string) => {

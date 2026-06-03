@@ -470,6 +470,13 @@ header p {
   transition: color 0.15s; font-family: 'Crimson Pro', serif; line-height: 1;
 }
 .lightbox-close:hover { color: var(--gold); }
+.lb-admin-link {
+  position: absolute; top: 0.8rem; left: 1rem;
+  color: var(--gold-dim); font-size: 1rem; text-decoration: none;
+  padding: 0.2rem 0.3rem; border-radius: 2px; line-height: 1;
+  transition: color 0.15s; opacity: 0.6;
+}
+.lb-admin-link:hover { opacity: 1; }
 
 .lb-state-badge {
   display: inline-block; font-family: 'Cinzel', serif; font-size: 0.58rem;

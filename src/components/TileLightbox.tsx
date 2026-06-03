@@ -130,11 +130,16 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
     available: 'AVAILABLE', inprogress: 'IN PROGRESS', complete: 'COMPLETE',
   };
 
+  const isAdmin = !!user && user.id === gameState.meta?.adminId;
+
   return (
     <div className={`lightbox-overlay ${open ? 'open' : ''}`}
          onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="lightbox">
         <button className="lightbox-close" onClick={onClose}>✕</button>
+        {isAdmin && (
+          <a className="lb-admin-link" href={`/?coord=${coord}#admin`} target="_blank" rel="noreferrer" title="Open in Map Editor">🗺</a>
+        )}
         {state !== 'complete' && (
           <div className={`lb-state-badge ${state === 'inprogress' ? 'inprogress' : state}`}>
             {stateBadgeText[state]}
