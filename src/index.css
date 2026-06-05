@@ -1252,7 +1252,7 @@ header p {
 .activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; }
 .activity-feed-empty { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(40% 0.06 75); text-align: center; padding: 0.3rem 0; }
 .activity-entry {
-  display: flex; align-items: baseline; gap: 0.5rem;
+  display: flex; align-items: center; gap: 0.5rem;
   font-family: 'Crimson Pro', serif; font-size: 0.76rem; line-height: 1.4;
 }
 .activity-icon { font-size: 0.8rem; flex-shrink: 0; }
