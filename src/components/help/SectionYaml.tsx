@@ -67,14 +67,14 @@ export default function SectionYaml() {
         <li>
           <strong>YAML settings:</strong> Unless approved by special permission, a challenge, or a feat, you are limited to:
           <ul className="help-list help-list-sub">
-            <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''}</li>
-            <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations</li>
-            <li><YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations</li>
+            <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''} per game</li>
+            <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations per game</li>
+            <li><YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations per game</li>
             <li>
               Either <YamlVal base={0} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? '' : 's'} and{' '}
-              <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''}, or{' '}
+              <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''} per game, or{' '}
               <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? 's' : ''} and{' '}
-              <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations
+              <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations per game
               <ul className="help-list help-list-sub">
                 <li>Starting hints that affect too many items, such as hinting your primary macguffin [e.g. Yoshi Eggs in SMW] are not allowed.</li>
               </ul>
