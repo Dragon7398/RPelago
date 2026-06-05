@@ -97,7 +97,7 @@ Discord OAuth → `exchangeDiscordCode` Cloud Function → Firebase custom token
 
 ### Cloud Functions
 
-Six functions in `functions/src/index.ts`:
+All in `functions/src/index.ts`:
 
 | Function | Trigger | Purpose |
 |----------|---------|---------|
@@ -107,6 +107,14 @@ Six functions in `functions/src/index.ts`:
 | `onTileComplete` | DB write on `game/tiles/{coord}/state` | Fires when a tile reaches `complete`; updates `profiles/` with XP snapshot and game stats. |
 | `onOrbAcquired` | DB create on `game/orbState/{orbId}` | Removes boss traits unlocked by the acquired orb. |
 | `pruneActivityLog` | DB create on `game/activityLog/{entryId}` | Trims the activity log to the most recent 25 entries. |
+| `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. |
+| `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed). |
+| `setMissionParticipantStatusNote` | Callable | Updates a participant's status note. |
+| `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). |
+| `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot. |
+| `adminForceDeploy` | Callable | Admin-forces a forming mission into `inprogress`. |
+| `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. |
+| `tickGuildmasterMissions` | Scheduled every 15 minutes | Auto-deploys any forming mission whose decay has reduced max slots to the current fill count. |
 
 ### Shops and items
 
@@ -179,9 +187,24 @@ The Players page shows a count badge and an inline list with AUTO/ADMIN tags, da
 
 `playerReset()` in `db.ts` archives the player's XP, zeroes all stats, clears inventory and feats, and trims to one adventurer. It mirrors kick behavior for any tiles the player is currently on: tile adventurer entries are removed, and a claimable slot is created for any tile that is `inprogress`. All writes are atomic in a single multi-path `update()`.
 
+### Guildmaster Missions
+
+A parallel progression system independent of the tile map. Missions are stored in `game/missions/` and completed missions are moved to `game/missionsHistory/`. Two mission types are defined in `MISSION_DEFS` (`constants.ts`):
+
+- **Basic Training** (`basic`) — one-time per player, requires 150-check sturdy slot, tracked via `player.basicTrainingDone`.
+- **Patrol** (`patrol`) — repeatable, no traits, earns steady gold.
+
+Mission state machine: `forming → inprogress → complete`. `player.activeMission` holds the current mission ID (or null); a player may only be in one mission at a time.
+
+**Decay mechanic**: max slots reduce by 1 per 24h after the first participant joins (`currentMaxSlots()` in `missionLogic.ts`). `tickGuildmasterMissions` (scheduled every 15 min) auto-deploys any forming mission where fill count has reached the decayed max. Deployment also fires immediately on enlist if full.
+
+`claimableSlots?: Record<string, AdvSlot[]>` on missions mirrors the tile claimable slot mechanic — created when a participant is kicked. `slotsLocked` prevents slot edits once locked by admin.
+
+`seedInitialMissions()` in `db.ts` bootstraps the first Basic Training and Patrol cohorts; it is a no-op if missions already exist. The admin Missions page allows state transitions, slot editing, kicking, force-deploy, and slot lock.
+
 ### Activity log
 
-Real-time event feed stored in `game/activityLog` in Firebase, automatically pruned to 25 entries by the `pruneActivityLog` Cloud Function trigger. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, and orb purchases. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
+Real-time event feed stored in `game/activityLog` in Firebase, automatically pruned to 25 entries by the `pruneActivityLog` Cloud Function trigger. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, orb purchases, mission deploys, and mission completions. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
 
 ### Player customization
 
@@ -201,6 +224,7 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards` |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `computeMissionCard`, `freshMission` |
 | `src/lib/slotHelpers.ts` | Slot normalization utilities (`normalizeSlots`, `slotsFromEntry`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions` |
 | `src/firebase/db.ts` | All RTDB read/write functions |
@@ -218,10 +242,10 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | `src/components/ActivityFeed.tsx` | Collapsible real-time event feed |
 | `src/components/OrbBar.tsx` | Orb collection display |
 | `src/components/HelpModal.tsx` | Help modal shell |
-| `src/components/help/` | Help section components (10 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml) |
-| `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers) |
+| `src/components/help/` | Help section components (11 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml, Missions) |
+| `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers, GuildmasterMissions) |
 | `src/components/AdminDashboard.tsx` | Admin dashboard shell |
-| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage |
+| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage |
 | `src/components/admin/mapPage/` | Map page sub-editors: MapGridPanel, AdvSlotEditor, PublicSlotEditor, ClaimableBonusEditor, TraitEditor |
 | `src/components/admin/playersPage/` | PlayerCard sub-component |
 | `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |

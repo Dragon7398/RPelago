@@ -1,11 +1,12 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission } from '../types';
-import { buildDefaultTileData, initializeGrid, computeTownShopIds } from '../lib/tileGen';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission } from '../types';
+import { buildDefaultTileData, initializeGrid, computeTownShopIds, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -809,8 +810,14 @@ export async function completeMission(
       earnedGold += slot.bonusGold ?? 0;
     }
 
-    updates[`game/players/${pid}/xp`]           = player.xp   + earnedXP;
+    const prevLevel     = calcLevel(player.xp);
+    const newXp         = player.xp + earnedXP;
+    const newLevel      = calcLevel(newXp);
+    const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
+
+    updates[`game/players/${pid}/xp`]           = newXp;
     updates[`game/players/${pid}/gold`]          = player.gold + earnedGold;
+    updates[`game/players/${pid}/adventurers`]   = updatedPlayer.adventurers;
     updates[`game/players/${pid}/activeMission`] = null;
     if (mission.type === 'basic') {
       updates[`game/players/${pid}/basicTrainingDone`] = true;
@@ -833,4 +840,29 @@ export async function completeMission(
   await logActivity('mission_complete', `${label} has completed.`, '⚜');
 
   return {};
+}
+
+// Checks how many adventurers a player should have at their current level and
+// grants any that are missing. Returns the number of adventurers granted.
+export async function grantMissingAdventurers(playerId: string, player: Player): Promise<number> {
+  assertDb();
+  const level         = calcLevel(player.xp);
+  const expectedCount = adventurerCountForLevel(level);
+  const currentCount  = Object.keys(player.adventurers ?? {}).length;
+  const toAdd         = expectedCount - currentCount;
+  if (toAdd <= 0) return 0;
+
+  const updates: Record<string, unknown> = {};
+  const existing = { ...player.adventurers };
+  for (let i = 0; i < toAdd; i++) {
+    const usedClasses = Object.values(existing).map(a => a.cls);
+    const cls = randomAdvClass(usedClasses) as AdvClass;
+    const { firstName, lastName } = randomAdvName();
+    const id = `${playerId}-adv-${Date.now()}-${i}`;
+    existing[id] = { id, firstName, lastName, cls, busy: false, busyTile: null };
+    updates[`game/players/${playerId}/adventurers/${id}`] = existing[id];
+  }
+
+  await update(ref(db!), updates);
+  return toAdd;
 }

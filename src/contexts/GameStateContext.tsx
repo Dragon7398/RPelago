@@ -28,6 +28,7 @@ import {
   completeMission as dbCompleteMission,
   backfillChallengeHistory as dbBackfillChallengeHistory,
   claimMissionSlot as dbClaimMissionSlot,
+  grantMissingAdventurers as dbGrantMissingAdventurers,
 } from '../firebase/db';
 import { useToast } from './ToastContext';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
@@ -88,6 +89,7 @@ interface GameStateContextValue {
   adminCompleteMission: (missionId: string, confirmed?: boolean) => Promise<{ warned?: boolean; unfinishedSlots?: number }>;
   adminBackfillChallengeHistory: (coord: string) => Promise<number>;
   claimMissionSlot: (missionId: string, slotKey: string) => Promise<void>;
+  adminGrantMissingAdventurers: (playerId: string) => Promise<number>;
 }
 
 const GameStateContext = createContext<GameStateContextValue | null>(null);
@@ -492,6 +494,13 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     addToast('You have claimed the open spot and are now committed to this mission.', 'success');
   }, [addToast]);
 
+  const adminGrantMissingAdventurers = useCallback(async (playerId: string) => {
+    if (!gameState) return 0;
+    const player = gameState.players[playerId];
+    if (!player) return 0;
+    return await dbGrantMissingAdventurers(playerId, player);
+  }, [gameState]);
+
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
@@ -507,6 +516,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetMissionLink, adminSetMissionRoomSettings,
       adminKickMissionParticipant, adminForceDeploy, adminCompleteMission,
       adminBackfillChallengeHistory, claimMissionSlot,
+      adminGrantMissingAdventurers,
     }}>
       {children}
     </GameStateContext.Provider>

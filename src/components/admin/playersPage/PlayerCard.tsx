@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGameState } from '../../../contexts/GameStateContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
-import { calcLevel, getFeatWarnings } from '../../../lib/gameLogic';
+import { calcLevel, getFeatWarnings, adventurerCountForLevel } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
 import { playerReset } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
@@ -16,18 +16,21 @@ interface Props {
 
 export default function PlayerCard({ player, tiles, adminId, missions }: Props) {
   const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
-          adminAddWarning, adminDeleteWarning, adminClearWarnings } = useGameState();
+          adminAddWarning, adminDeleteWarning, adminClearWarnings,
+          adminGrantMissingAdventurers } = useGameState();
   const { addToast } = useToast();
   const [addingWarning, setAddingWarning] = useState(false);
   const [warningDraft, setWarningDraft]   = useState('');
   const [resetting, setResetting]         = useState(false);
+  const [granting, setGranting]           = useState(false);
 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
   const isAdmin        = player.id === adminId;
   const activeMission  = player.activeMission && missions ? missions[player.activeMission] : null;
   const activeMLabel   = activeMission ? missionDisplayLabel(activeMission) : null;
-  const level          = calcLevel(player.xp);
+  const level             = calcLevel(player.xp);
+  const missingAdventurers = adventurerCountForLevel(level) - Object.keys(player.adventurers ?? {}).length;
   const featWarnings   = getFeatWarnings(player, tiles);
   const playerWarnings = Object.entries(player.warnings ?? {})
     .sort(([, a], [, b]) => b.timestamp - a.timestamp);
@@ -167,6 +170,26 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
       )}
 
       <div className="dash-player-actions">
+        {missingAdventurers > 0 && (
+          <button
+            className="dash-player-grant-adv"
+            disabled={granting}
+            onClick={async () => {
+              setGranting(true);
+              try {
+                const granted = await adminGrantMissingAdventurers(player.id);
+                if (granted > 0) addToast(`Granted ${granted} adventurer${granted !== 1 ? 's' : ''} to ${player.displayName}.`, 'success');
+                else addToast(`${player.displayName} already has all adventurers for their level.`, 'info');
+              } catch {
+                addToast(`Failed to grant adventurers to ${player.displayName}.`, 'error');
+              } finally {
+                setGranting(false);
+              }
+            }}
+          >
+            {granting ? 'Granting…' : `Grant Adventurer${missingAdventurers !== 1 ? 's' : ''} (${missingAdventurers})`}
+          </button>
+        )}
         <button
           className="dash-player-reset"
           disabled={resetting}
