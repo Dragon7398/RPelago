@@ -249,7 +249,7 @@ header p {
 .tile.state-available { cursor: pointer; border-color: var(--state-avail-border); color: var(--state-avail-fg); }
 .tile.state-available:hover { transform: translateY(-3px) scale(1.04); z-index: 2; }
 .tile.state-available:hover .tile-icon { transform: scale(1.1); }
-.tile.state-available .tile-progress { color: oklch(60% 0.08 75); }
+.tile.state-available .tile-progress { color: oklch(75% 0.10 75); font-size: clamp(0.38rem, 0.6vw, 0.52rem); font-weight: 600; }
 
 /* ══ STATE: IN-PROGRESS ══ */
 .tile.state-inprogress { cursor: pointer; border-color: var(--state-prog-border); }
@@ -2588,6 +2588,15 @@ body.theme-lapis {
   --gm-accent-d: oklch(30% 0.15 285);
   /* --amber at 72% l is also invisible on cream; pull it to earthy orange. */
   --amber:       oklch(46% 0.16 60);
+}
+
+/* Available tile adventurer count — the dark-theme brightness (82% l) washes
+   out on light backgrounds; pull down to a dark, saturated value instead. */
+body.theme-parchment .tile.state-available .tile-progress,
+body.theme-sakura    .tile.state-available .tile-progress,
+body.theme-mint      .tile.state-available .tile-progress,
+body.theme-lapis     .tile.state-available .tile-progress {
+  color: oklch(32% 0.16 75);
 }
 
 /* 2. GM mission card icon seal — calc(l-0.32) bottoms out at ~10% in dark
