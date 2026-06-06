@@ -349,7 +349,15 @@ export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
   },
 };
 
-export const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+export function toRoman(n: number): string {
+  const vals = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
+  const syms = ['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
+  let result = '';
+  for (let i = 0; i < vals.length; i++) {
+    while (n >= vals[i]) { result += syms[i]; n -= vals[i]; }
+  }
+  return result;
+}
 
 export function coordFromRC(r: number, c: number): string {
   return `${COL_CHARS[c]}${r + 1}`;

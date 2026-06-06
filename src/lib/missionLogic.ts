@@ -1,5 +1,5 @@
 import type { GMMission, GMMissionType, GMParticipant, AdvSlot } from '../types';
-import { MISSION_DEFS, ROMAN_NUMERALS } from './constants';
+import { MISSION_DEFS, toRoman } from './constants';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -39,7 +39,7 @@ export function shouldDeploy(m: GMMission, now: number): boolean {
 }
 
 export function missionDisplayLabel(m: GMMission): string {
-  const roman = ROMAN_NUMERALS[m.series] ?? String(m.series);
+  const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
 }
 
@@ -76,7 +76,7 @@ export function computeMissionCard(
   const decayPct = status === 'filling' ? hoursIntoWindow / 24 : (status === 'open' ? 0 : 1);
   const liveSec = (24 - hoursIntoWindow) * 3600;
 
-  const roman = ROMAN_NUMERALS[m.series] ?? String(m.series);
+  const roman = toRoman(m.series);
   const seriesLabel = `COHORT ${roman}`;
 
   let takeable = false;

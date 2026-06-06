@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
-import type { GMMission, AdvSlot, AdvStatusNote } from '../../types';
+import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { MISSION_DEFS } from '../../lib/constants';
 
@@ -143,7 +143,6 @@ function MissionStatusNote({
           <button className="lb-adv-note-cancel" onClick={() => setEditing(false)}>Cancel</button>
           <button
             className="lb-adv-note-save"
-            disabled={!draft.trim()}
             onClick={async () => {
               await setMissionParticipantStatusNote(missionId, draft.trim() || null);
               setEditing(false);
@@ -155,17 +154,16 @@ function MissionStatusNote({
   }
 
   if (note) {
-    const ts = new Date(note.timestamp).toLocaleDateString();
+    const ts = new Date(note.timestamp).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
     return (
       <div className="lb-adv-note">
         <span className="lb-adv-note-text">{note.text}</span>
         <span className="lb-adv-note-meta">
           <span className="lb-adv-note-time">{ts}</span>
           {isOwner && (
-            <>
-              <button className="lb-adv-note-edit" onClick={() => { setDraft(note.text); setEditing(true); }}>edit</button>
-              <button className="lb-adv-note-edit" onClick={() => setMissionParticipantStatusNote(missionId, null)}>✕</button>
-            </>
+            <button className="lb-adv-note-edit" onClick={() => { setDraft(note.text); setEditing(true); }}>edit</button>
           )}
         </span>
       </div>
@@ -181,7 +179,7 @@ function MissionStatusNote({
 
 // ── Participant roster ────────────────────────────────────────────────────────
 
-function MissionRoster({ mission, uid }: { mission: GMMission; uid: string | null }) {
+function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: string | null; players: Record<string, Player> }) {
   const participants = Object.values(mission.participants ?? {});
   if (participants.length === 0) return null;
 
@@ -199,6 +197,9 @@ function MissionRoster({ mission, uid }: { mission: GMMission; uid: string | nul
                 <span className="lb-adv-owner">
                   {p.playerName}
                   {isOwner && <span className="gm-you-tag">YOU</span>}
+                  {players[p.playerId]?.discordHandle && (
+                    <span className="lb-adv-discord">@{players[p.playerId].discordHandle}</span>
+                  )}
                 </span>
               </div>
               {(!p.slots || p.slots.length === 0) ? (
@@ -207,7 +208,7 @@ function MissionRoster({ mission, uid }: { mission: GMMission; uid: string | nul
                     No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
                     <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
                   </div>
-                ) : null
+                ) : <div className="gm-slot-prompt">No game set yet.</div>
               ) : (
                 <div className="lb-adv-slots">
                   {(p.slots as AdvSlot[]).map((slot, i) => {
@@ -296,11 +297,12 @@ function TakeMissionButton({
 
 // ── Mission card ──────────────────────────────────────────────────────────────
 
-function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, onStandDown }: {
+function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, onStandDown, players }: {
   card: GMMissionCard;
   uid: string | null;
   activeMissionId: string | null;
   basicTrainingDone: boolean;
+  players: Record<string, Player>;
   onEnlist: (card: GMMissionCard) => void;
   onStandDown: (card: GMMissionCard) => void;
 }) {
@@ -379,7 +381,7 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
       )}
 
       {/* Roster */}
-      <MissionRoster mission={card.mission} uid={uid} />
+      <MissionRoster mission={card.mission} uid={uid} players={players} />
 
       {/* CTA */}
       {card.youIn && card.status !== 'inprogress' ? (
@@ -435,7 +437,8 @@ export default function GuildmasterMissions() {
 
   const missions = gameState?.missions ?? {};
   const uid = user?.id ?? null;
-  const player = uid ? gameState?.players[uid] : null;
+  const players = gameState?.players ?? {};
+  const player = uid ? players[uid] : null;
   const activeMissionId = player?.activeMission ?? null;
   const basicTrainingDone = player?.basicTrainingDone ?? false;
 
@@ -508,6 +511,7 @@ export default function GuildmasterMissions() {
             uid={uid}
             activeMissionId={activeMissionId}
             basicTrainingDone={basicTrainingDone}
+            players={players}
             onEnlist={handleEnlist}
             onStandDown={handleStandDown}
           />
@@ -528,6 +532,7 @@ export default function GuildmasterMissions() {
                 uid={uid}
                 activeMissionId={activeMissionId}
                 basicTrainingDone={basicTrainingDone}
+                players={players}
                 onEnlist={handleEnlist}
                 onStandDown={handleStandDown}
               />

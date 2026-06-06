@@ -36,10 +36,11 @@ export default function AvailableState({
         <>
           <div className="lb-adv-list">
             {advEntries.map(entry => (
-              <div key={entry.advId} className="lb-adv-entry">
+              <div key={entry.advId} className={`lb-adv-entry${entry.owner === user?.id ? ' you' : ''}`}>
                 <div className="lb-adv-row">
                   <span className="lb-adv-owner" style={{ color: resolveNameColor(players[entry.owner]?.nameColor) }}>
                     {entry.ownerName}
+                    {user && entry.owner === user.id && <span className="gm-you-tag">YOU</span>}
                     {players[entry.owner]?.discordHandle && (
                       <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
                     )}
