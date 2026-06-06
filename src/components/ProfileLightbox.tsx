@@ -5,9 +5,8 @@ import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
 import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
-import { missionDisplayLabel } from '../lib/missionLogic';
 import { db as firebaseDb } from '../firebase/config';
-import type { AdvClass, PlayerFeats, CompletedChallenge, GMMission } from '../types';
+import type { AdvClass, PlayerFeats, CompletedChallenge } from '../types';
 
 interface Props {
   open: boolean;
@@ -39,25 +38,15 @@ export default function ProfileLightbox({ open, onClose }: Props) {
   const pending  = player ? pendingFeatSlot(level, feats) : null;
 
   // History — lazy loaded when lightbox opens
-  const [pastMissions,   setPastMissions]   = useState<GMMission[] | null>(null);
   const [pastChallenges, setPastChallenges] = useState<CompletedChallenge[] | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     if (!open || !user || !firebaseDb) return;
-    if (pastMissions !== null) return; // already loaded
+    if (pastChallenges !== null) return; // already loaded
 
     const uid = user.id;
-    Promise.all([
-      get(ref(firebaseDb, 'game/missionsHistory')),
-      get(ref(firebaseDb, `game/players/${uid}/completedChallenges`)),
-    ]).then(([mSnap, cSnap]) => {
-      const allMissions: GMMission[] = mSnap.exists()
-        ? Object.values(mSnap.val() as Record<string, GMMission>).filter(m => m.participants?.[uid])
-        : [];
-      allMissions.sort((a, b) => (b.deployedAt ?? b.createdAt) - (a.deployedAt ?? a.createdAt));
-      setPastMissions(allMissions);
-
+    get(ref(firebaseDb, `game/players/${uid}/completedChallenges`)).then(cSnap => {
       const challenges: CompletedChallenge[] = cSnap.exists()
         ? Object.values(cSnap.val() as Record<string, CompletedChallenge>)
             .filter(c => c.xpAwarded !== 0 || c.goldAwarded !== 0)
@@ -343,35 +332,6 @@ export default function ProfileLightbox({ open, onClose }: Props) {
 
               {historyExpanded && (
                 <>
-                  {/* Past Missions */}
-                  <div style={{ fontSize: '0.58rem', fontFamily: "'Cinzel', serif", letterSpacing: '0.12em', color: 'var(--gm-accent)', marginBottom: '0.4rem' }}>
-                    PAST MISSIONS
-                  </div>
-                  {pastMissions === null ? (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>Loading…</div>
-                  ) : pastMissions.length === 0 ? (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>No missions completed yet.</div>
-                  ) : pastMissions.map(m => {
-                    const label = missionDisplayLabel(m);
-                    const p = m.participants?.[user!.id];
-                    const date = m.deployedAt
-                      ? new Date(m.deployedAt).toLocaleDateString()
-                      : '—';
-                    return (
-                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.2rem 0', borderBottom: '1px solid var(--border)', color: 'var(--parchment)' }}>
-                        <span>{label}</span>
-                        <span style={{ color: 'var(--gold-dim)', display: 'flex', gap: '0.5rem' }}>
-                          {p && <>✨ {m.xp} · 🪙 {m.gp}</>}
-                          <span>{date}</span>
-                        </span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Past Challenges */}
-                  <div style={{ fontSize: '0.58rem', fontFamily: "'Cinzel', serif", letterSpacing: '0.12em', color: 'var(--gold-dim)', marginTop: '0.8rem', marginBottom: '0.4rem' }}>
-                    PAST CHALLENGES
-                  </div>
                   {pastChallenges === null ? (
                     <div style={{ fontSize: '0.7rem', color: 'var(--gold-dim)', fontStyle: 'italic' }}>Loading…</div>
                   ) : pastChallenges.length === 0 ? (
