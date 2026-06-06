@@ -3,6 +3,8 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
 import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
+import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
+import { AdvFeatIcons } from './AdvRow';
 import { MISSION_DEFS } from '../../lib/constants';
 
 // ── Claimable slot row ────────────────────────────────────────────────────────
@@ -105,13 +107,39 @@ function Pips({ card }: { card: GMMissionCard }) {
 
 // ── Rewards ───────────────────────────────────────────────────────────────────
 
-function Rewards({ m }: { m: GMMission }) {
+function Rewards({ m, uid, players }: { m: GMMission; uid: string | null; players: Record<string, Player> }) {
+  const participantIds = Object.keys(m.participants ?? {});
+  const userIn = !!uid && participantIds.includes(uid);
+  const { xpMultiplier, goldMultiplier } = userIn
+    ? calcFeatBonuses(uid!, participantIds, players)
+    : { xpMultiplier: 1, goldMultiplier: 1 };
+  const xpTip   = userIn ? buildXpBonusTooltip(uid!, participantIds, players)   : null;
+  const goldTip = userIn ? buildGoldBonusTooltip(uid!, participantIds, players) : null;
+  const adjXP   = Math.round(m.xp * xpMultiplier);
+  const adjGold = Math.round(m.gp * goldMultiplier);
+
   return (
     <div className="lb-rewards" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
-      <span className="lb-reward-chip xp">✨ {m.xp} XP</span>
-      {m.gp > 0
-        ? <span className="lb-reward-chip gold">🪙 {m.gp} GP</span>
-        : <span className="lb-reward-chip zero">🪙 0 GP</span>}
+      {xpTip ? (
+        <span className="lb-reward-chip xp trait-ref" data-tooltip={xpTip}>
+          ✨ <span className="lb-val-struck">{m.xp}</span>{' '}
+          <span className="lb-val-new">{adjXP}</span> XP *
+        </span>
+      ) : (
+        <span className="lb-reward-chip xp">✨ {m.xp} XP</span>
+      )}
+      {m.gp > 0 ? (
+        goldTip ? (
+          <span className="lb-reward-chip gold trait-ref" data-tooltip={goldTip}>
+            🪙 <span className="lb-val-struck">{m.gp}</span>{' '}
+            <span className="lb-val-new">{adjGold}</span> GP *
+          </span>
+        ) : (
+          <span className="lb-reward-chip gold">🪙 {m.gp} GP</span>
+        )
+      ) : (
+        <span className="lb-reward-chip zero">🪙 0 GP</span>
+      )}
     </div>
   );
 }
@@ -201,6 +229,7 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                     <span className="lb-adv-discord">@{players[p.playerId].discordHandle}</span>
                   )}
                 </span>
+                <AdvFeatIcons playerId={p.playerId} players={players} />
               </div>
               {(!p.slots || p.slots.length === 0) ? (
                 isOwner ? (
@@ -353,7 +382,7 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
             );
           })}
         </div>
-        <Rewards m={card.mission} />
+        <Rewards m={card.mission} uid={uid} players={players} />
       </div>
 
       {/* Description */}

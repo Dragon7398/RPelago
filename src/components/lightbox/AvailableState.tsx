@@ -17,21 +17,30 @@ interface Props {
   onClose: () => void;
 }
 
+function ChallengePips({ filled, required }: { filled: number; required: number }) {
+  return (
+    <div className="gmb-meta" style={{ marginBottom: '0.4rem' }}>
+      <div className="gmb-slots">
+        <span className="gm-pips">
+          {Array.from({ length: required }, (_, i) => (
+            <span key={i} className={`gm-pip${i < filled ? ' filled' : ''}`} />
+          ))}
+        </span>
+        <span className="gm-slot-count">
+          <b>{filled}</b> / {required} adventurers
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function AvailableState({
   tile, coord, advEntries, user, players, alreadySent, freeAdvs,
   onSendAdventurer, onRecall, onLoginRequest, onClose,
 }: Props) {
   return (
     <>
-      <div className="lb-progress-wrap">
-        <div className="lb-progress-label">ADVENTURERS: {advEntries.length} / {tile.required}</div>
-        <div className="lb-progress-bar-bg">
-          <div
-            className={`lb-progress-bar-fill${advEntries.length >= tile.required ? ' full' : ''}`}
-            style={{ width: `${tile.required > 0 ? Math.round((advEntries.length / tile.required) * 100) : 100}%` }}
-          />
-        </div>
-      </div>
+      <ChallengePips filled={advEntries.length} required={tile.required} />
       {advEntries.length > 0 && (
         <>
           <div className="lb-adv-list">
