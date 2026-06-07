@@ -1,0 +1,143 @@
+// Casino card deck — data model and deck construction.
+// Ported from the prototype's casino/data.js.
+// This module is imported by both the browser client and Cloud Functions.
+
+export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
+
+export interface CardTypeDef {
+  key:     CardTypeKey;
+  label:   string;
+  suit:    string;     // casino/tarot mark for the type
+  copies:  number;     // how many copies of each category card go in the deck
+  range:   readonly [number, number] | null;  // [lo, hi] gold range; null = flat value (wild)
+  order:   number;     // display order
+}
+
+// A unique card definition (one per category + wild)
+export interface CardDef {
+  name:      string;
+  type:      CardTypeKey;
+  count:     number | null;  // number of distinct games in this category (null for wild)
+  value:     number;         // gold value of this card
+  copies:    number;         // copies in the deck
+  blurb?:    string;         // optional flavour note
+}
+
+// A physical card instance in a shuffled deck; carries a uid for React keys and server tracking
+export interface DeckCard extends CardDef {
+  uid:       number;
+  copyIndex: number;
+}
+
+export const CARD_TYPES: Readonly<Record<CardTypeKey, CardTypeDef>> = {
+  wild:      { key: 'wild',      label: 'Wild',      suit: '✦', copies: 5, range: null,     order: 0 },
+  broad:     { key: 'broad',     label: 'Broad',     suit: '♦', copies: 3, range: [15, 30], order: 1 },
+  platform:  { key: 'platform',  label: 'Platform',  suit: '♠', copies: 2, range: [20, 35], order: 2 },
+  franchise: { key: 'franchise', label: 'Franchise', suit: '♥', copies: 1, range: [25, 40], order: 3 },
+  narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [25, 50], order: 4 },
+};
+
+// Raw category data: [name, type, gameCount]
+const RAW: readonly [string, CardTypeKey, number][] = [
+  // Broad (3 copies each, gold range 15–30)
+  ['2D platformer',           'broad',     57],
+  ['3D platformer',           'broad',     24],
+  ['Action RPG',              'broad',     35],
+  ['Turn-based RPG',          'broad',     35],
+  ['Roguelike / roguelite',   'broad',     19],
+  ['Puzzle',                  'broad',     21],
+  ['FPS / shooter',           'broad',     11],
+  ['Strategy',                'broad',     12],
+  ['Simulation / builder',    'broad',     15],
+  ['Exploration / open world','broad',     17],
+  // Narrow (1 copy each, gold range 25–50)
+  ['Metroidvania',            'narrow',    35],
+  ['Factory builder',         'narrow',     6],
+  ['Survival / sandbox',      'narrow',     9],
+  ['Horror / unsettling',     'narrow',    10],
+  ['Cozy games',              'narrow',    19],
+  ['Card games',              'narrow',    14],
+  ['Rhythm / music game',     'narrow',     8],
+  ['Tactical RPG',            'narrow',     6],
+  ['Racing / driving',        'narrow',     8],
+  // Franchise (1 copy each, gold range 25–40)
+  ['Zelda',                   'franchise', 14],
+  ['Mario',                   'franchise', 25],
+  ['Pokemon',                 'franchise', 14],
+  ['Castlevania',             'franchise',  5],
+  ['Mega Man',                'franchise',  6],
+  ['Kingdom Hearts',          'franchise',  5],
+  ['Final Fantasy',           'franchise',  9],
+  ['Sonic',                   'franchise',  9],
+  ['Metroid',                 'franchise',  5],
+  ['Donkey Kong',             'franchise',  7],
+  // Platform (2 copies each, gold range 20–35)
+  ['NES / Famicom',           'platform',   9],
+  ['SNES / Super Famicom',    'platform',  30],
+  ['Game Boy',                'platform',  25],
+  ['Non-Nintendo Console',    'platform',  10],
+  ['AP-original',             'platform',  30],
+];
+
+// Optional flavour notes displayed on a card's details line
+const CARD_NOTES: Readonly<Record<string, string>> = {
+  'Game Boy':  'e.g. GB, GBA, GBC',
+  'AP-original': 'A game made specifically for Archipelago',
+};
+
+// Value rule: more games in a category → lower value; fewer → higher.
+// Interpolated (inverted) inside each type's gold range, rounded to nearest 1g.
+function computeCategories(): CardDef[] {
+  const bounds: Record<string, { min: number; max: number }> = {};
+  for (const [, type, count] of RAW) {
+    if (!bounds[type]) bounds[type] = { min: count, max: count };
+    bounds[type].min = Math.min(bounds[type].min, count);
+    bounds[type].max = Math.max(bounds[type].max, count);
+  }
+  return RAW.map(([name, type, count]) => {
+    const typeDef = CARD_TYPES[type];
+    const [lo, hi] = typeDef.range!;
+    const { min, max } = bounds[type];
+    const frac  = max === min ? 0 : (max - count) / (max - min);
+    const value = Math.round(lo + frac * (hi - lo));
+    const def: CardDef = { name, type, count, value, copies: typeDef.copies };
+    if (CARD_NOTES[name]) def.blurb = CARD_NOTES[name];
+    return def;
+  });
+}
+
+export const WILD_DEF: CardDef = {
+  name:  'Wild',
+  type:  'wild',
+  count: null,
+  value: 10,
+  copies: 5,
+  blurb: 'Choose any game you like.',
+};
+
+// All unique card definitions (wild first, then one per category)
+export const CARD_DEFS: readonly CardDef[] = [WILD_DEF, ...computeCategories()];
+
+// The full deck as a multiset: CARD_DEFS expanded by copies count (64 cards total)
+export function buildDeck(): DeckCard[] {
+  const deck: DeckCard[] = [];
+  let uid = 0;
+  for (const def of CARD_DEFS) {
+    for (let i = 0; i < def.copies; i++) {
+      deck.push({ ...def, uid: uid++, copyIndex: i });
+    }
+  }
+  return deck;
+}
+
+export function shuffle<T>(arr: readonly T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Total number of cards in a full deck
+export const DECK_TOTAL = CARD_DEFS.reduce((n, d) => n + d.copies, 0);
