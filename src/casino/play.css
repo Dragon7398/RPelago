@@ -1,0 +1,223 @@
+/* RPelago Casino — play table styles.
+   All colors flow from the active theme (themes.css → body.theme-*).
+   Local aliases map the original short names onto the canonical tokens. */
+
+body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
+
+.cz-root {
+  /* local aliases → theme tokens */
+  --parch:    var(--parchment);
+  --line:     var(--border);
+  --line-glow: var(--border-glow);
+  /* --felt, --gold, --gold-dim, --panel, --bg-card, --ink-soft supplied by themes.css */
+  font-family: 'Cinzel', serif;
+  max-width: 1180px; margin: 0 auto; padding: 1.4rem 1rem 6rem;
+  display: flex; flex-direction: column; gap: 1.2rem;
+}
+
+/* ── top bar ── */
+.cz-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cz-brand { display: flex; flex-direction: column; }
+.cz-brand .cz-kick { font-size: 0.6rem; letter-spacing: 0.36em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-brand h1 { font-weight: 800; font-size: clamp(1.3rem, 3.4vw, 1.9rem); color: var(--gold); letter-spacing: 0.06em; text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.4); margin: 0; }
+.cz-room-tag { font-family: 'Crimson Pro', serif; font-style: italic; color: var(--gold-dim); font-size: 0.92rem; }
+
+/* ── pot chip ── */
+.cz-pot {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: radial-gradient(ellipse at 50% 0%, oklch(from var(--gold) l c h / 0.16), var(--panel));
+  border: 1px solid var(--line-glow); border-radius: 999px; padding: 0.5rem 1.2rem 0.5rem 0.6rem;
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 6px 18px #0007;
+}
+.cz-pot-coins { position: relative; width: 2.4rem; height: 2.4rem; flex-shrink: 0; }
+.cz-pot-coin { position: absolute; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(54% 0.12 66)); box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), 0 1px 2px #0007; border: 1px solid oklch(48% 0.10 64 / 0.6); }
+.cz-pot-coin:nth-child(1){ left: 0; top: 0.5rem; } .cz-pot-coin:nth-child(2){ left: 0.5rem; top: 0; } .cz-pot-coin:nth-child(3){ left: 0.8rem; top: 0.7rem; }
+.cz-pot-info { display: flex; flex-direction: column; line-height: 1.05; }
+.cz-pot-label { font-size: 0.56rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-pot-amt { font-weight: 800; font-size: 1.5rem; color: var(--gold); transition: color 0.3s; }
+.cz-pot-amt.bump { animation: potBump 0.5s ease; }
+@keyframes potBump { 0%{ transform: scale(1);} 40%{ transform: scale(1.18); color: oklch(from var(--gold) calc(l + 0.10) c h);} 100%{ transform: scale(1);} }
+
+/* ── player rail ── */
+.cz-rail { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.6rem; }
+@media (max-width: 760px){ .cz-rail { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 460px){ .cz-rail { grid-template-columns: repeat(2, 1fr); } }
+.cz-seat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.6rem 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; position: relative; transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
+.cz-seat.you { border-color: var(--line-glow); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3), 0 0 18px oklch(from var(--gold) l c h / 0.12); }
+.cz-seat.active { border-color: var(--gold); box-shadow: 0 0 22px oklch(from var(--gold) l c h / 0.3); transform: translateY(-3px); }
+.cz-seat.folded { opacity: 0.55; }
+.cz-seat.empty { opacity: 0.35; border-style: dashed; }
+.cz-seat-head { display: flex; align-items: center; gap: 0.45rem; }
+.cz-seat-av { width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; color: oklch(18% 0.03 70); background: linear-gradient(150deg, oklch(80% 0.11 var(--seat-hue,75)), oklch(58% 0.12 var(--seat-hue,75))); }
+.cz-seat.you .cz-seat-av { background: linear-gradient(150deg, oklch(86% 0.13 86), oklch(66% 0.13 70)); box-shadow: 0 0 10px oklch(from var(--gold) l c h / 0.4); }
+.cz-seat-id { display: flex; flex-direction: column; line-height: 1.05; min-width: 0; }
+.cz-seat-name { font-size: 0.72rem; letter-spacing: 0.04em; color: var(--parch); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cz-seat-stake { display: flex; align-items: center; gap: 0.25rem; margin-top: 0.2rem; }
+.cz-seat-stake-val { font-weight: 700; font-size: 0.88rem; color: var(--gold); }
+.cz-seat-stake-lbl { font-size: 0.52rem; letter-spacing: 0.1em; color: var(--gold-dim); text-transform: uppercase; }
+.cz-seat-status { font-size: 0.55rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); display: flex; align-items: center; gap: 0.3rem; }
+.cz-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-dim); }
+.cz-status-dot.live { background: var(--pos); box-shadow: 0 0 6px var(--pos); animation: pulse 1.2s infinite; }
+.cz-status-dot.lock { background: var(--gold); }
+.cz-status-dot.wait { background: var(--xp); }
+.cz-seat-startby { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.64rem; color: var(--neg); margin-top: 0.1rem; }
+@keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity: 0.35; } }
+
+/* ── Archipelago challenge panel ── */
+.cz-challenge { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 1.1rem; width: 100%; }
+.cz-ch-head { font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); text-align: center; margin-bottom: 0.55rem; }
+.cz-ch-stats { display: flex; justify-content: space-around; gap: 0.8rem 1.4rem; flex-wrap: wrap; }
+.cz-ch-stat { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+.cz-ch-label { font-size: 0.54rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-ch-val { font-weight: 800; font-size: 1.35rem; line-height: 1; color: oklch(var(--stat-l, 82%) 0.12 var(--ch-hue, 75)); }
+.cz-ch-val small { font-size: 0.5em; font-weight: 600; color: var(--gold-dim); }
+.cz-ch-stat.xp .cz-ch-val { color: var(--xp); }
+.cz-ch-diff { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: var(--gold-dim); }
+.cz-ch-diff.flat { opacity: 0.45; }
+.cz-ch-diff.up { color: var(--pos); } .cz-ch-diff.down { color: var(--neg); }
+.cz-ch-stat.xp .cz-ch-diff.up { color: var(--xp); font-style: normal; letter-spacing: 0.06em; }
+.cz-ch-roll { font-size: 0.56rem; font-weight: 700; letter-spacing: 0.12em; padding: 0.08rem 0.5rem; border-radius: 999px; border: 1px solid; }
+.cz-ch-roll.on  { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.20); }
+.cz-ch-roll.off { color: var(--neg); border-color: oklch(from var(--neg) l c h / 0.50); background: oklch(from var(--neg) l c h / 0.18); }
+
+/* ── felt stage ── */
+.cz-felt {
+  background: radial-gradient(ellipse 65% 80% at 50% 22%, oklch(from var(--felt) calc(l + 0.06) c h) 0%, var(--felt) 72%), var(--felt);
+  border: 1px solid oklch(from var(--felt) calc(l + 0.12) c h / 0.6); border-radius: 14px;
+  box-shadow: inset 0 0 70px #0007, inset 0 2px 0 oklch(100% 0 0 / 0.05), 0 20px 50px #000a;
+  padding: 1.6rem; min-height: 340px; position: relative;
+}
+.cz-felt-rim { position: absolute; inset: 0.6rem; border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.35); border-radius: 10px; pointer-events: none; }
+.cz-stage { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
+.cz-stage-title { font-size: 0.92rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); text-align: center; }
+.cz-stage-note { font-family: 'Crimson Pro', serif; font-style: italic; color: var(--ink-soft); font-size: 0.92rem; text-align: center; max-width: 46ch; margin-top: -0.5rem; }
+
+/* ── game chooser ── */
+.cz-choices { display: flex; gap: 1.1rem; flex-wrap: wrap; justify-content: center; margin-top: 0.4rem; }
+.cz-choice { width: 220px; max-width: 80vw; text-align: left; cursor: pointer; background: linear-gradient(160deg, oklch(from var(--bg-card) l c h / 0.92), oklch(from var(--bg-card) calc(l - 0.03) c h / 0.92)); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.2rem; color: var(--parch); transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s; font-family: 'Cinzel', serif; }
+.cz-choice:hover:not(:disabled) { border-color: var(--line-glow); transform: translateY(-4px); box-shadow: 0 12px 28px #0008, 0 0 18px oklch(from var(--gold) l c h / 0.12); }
+.cz-choice:disabled { opacity: 0.4; cursor: not-allowed; }
+.cz-choice-name { font-size: 1.05rem; font-weight: 600; color: var(--gold); display: flex; align-items: center; justify-content: space-between; }
+.cz-choice-cost { font-size: 0.7rem; color: var(--gold-dim); }
+.cz-choice-desc { font-family: 'Crimson Pro', serif; font-size: 0.9rem; line-height: 1.4; color: var(--ink-soft); margin-top: 0.5rem; }
+.cz-choice.sit .cz-choice-name { color: var(--gold-dim); }
+
+/* ── hand area ── */
+.cz-hand { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; }
+.cz-card-slot { position: relative; cursor: pointer; transition: transform 0.16s; }
+.cz-card-slot .ck { animation: dealIn 0.4s cubic-bezier(0.34,1.1,0.5,1); }
+@keyframes dealIn { 0%{ transform: translateY(20px) scale(0.9) rotate(-3deg);} 100%{ transform:none; } }
+.cz-card-slot:hover { transform: translateY(-6px); }
+.cz-card-slot.rejected .ck { filter: grayscale(0.7) brightness(0.6); transform: scale(0.94); }
+.cz-card-slot.discarding .ck { filter: grayscale(0.5) brightness(0.7); transform: scale(0.94); }
+.cz-card-slot .cz-mark { position: absolute; top: -0.5rem; right: -0.5rem; z-index: 9; width: 1.6rem; height: 1.6rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Cinzel', serif; font-weight: 800; font-size: 0.85rem; border: 1px solid; box-shadow: 0 2px 5px #0008; }
+.cz-mark.keep   { background: var(--pos); color: oklch(from var(--pos) calc(l - 0.55) c h); border-color: oklch(from var(--pos) calc(l + 0.10) c h); }
+.cz-mark.reject { background: var(--neg); color: oklch(from var(--neg) calc(l + 0.42) c h); border-color: oklch(from var(--neg) calc(l + 0.12) c h); }
+.cz-card-cap { text-align: center; font-size: 0.52rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); margin-top: 0.4rem; }
+
+/* ── readout ── */
+.cz-readout { display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap; justify-content: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem 1.4rem; }
+.cz-readout .ro-block { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.cz-readout .ro-label { font-size: 0.54rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-readout .ro-val { font-weight: 700; font-size: 1.1rem; color: var(--parch); }
+.cz-readout .ro-total { font-size: 1.5rem; color: oklch(from var(--gold) calc(l + 0.06) c h); }
+.cz-readout .ro-net-pos { color: var(--pos); }
+.cz-readout .ro-net-neg { color: var(--neg); }
+.cz-readout .ro-x { color: var(--gold-dim); font-size: 1rem; align-self: center; }
+
+/* ── blackjack gauge ── */
+.cz-gauge { width: min(520px, 90%); }
+.cz-gauge-head { display: flex; justify-content: space-between; font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.35rem; }
+.cz-gauge-track { height: 14px; border-radius: 999px; background: oklch(from var(--bg-card) calc(l - 0.05) c h); border: 1px solid var(--line); overflow: hidden; }
+.cz-gauge-fill { height: 100%; border-radius: 999px; transition: width 0.4s cubic-bezier(0.3,1,0.4,1), background 0.3s; }
+.cz-gauge-fill.safe  { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.16) c h), var(--pos)); }
+.cz-gauge-fill.sharp { background: linear-gradient(90deg, oklch(from var(--gold) calc(l - 0.12) c h), var(--gold)); }
+.cz-gauge-fill.bust  { background: linear-gradient(90deg, oklch(from var(--neg) calc(l - 0.12) c h), var(--neg)); }
+.cz-gauge-nums { display: flex; justify-content: space-between; margin-top: 0.3rem; font-size: 0.8rem; }
+.cz-gauge-sum { color: var(--parch); font-weight: 700; }
+.cz-gauge-tgt { color: var(--gold-dim); }
+
+/* ── buttons ── */
+.cz-actions { display: flex; gap: 0.7rem; flex-wrap: wrap; justify-content: center; }
+.cz-btn { font-family: 'Cinzel', serif; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; padding: 0.65rem 1.25rem; border-radius: 4px; background: oklch(from var(--bg-card) l c h / 0.85); border: 1px solid var(--line); color: var(--gold-dim); transition: all 0.15s; }
+.cz-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.15); }
+.cz-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.cz-btn.primary { background: linear-gradient(180deg, oklch(from var(--gold) calc(l + 0.06) c h), oklch(from var(--gold) calc(l - 0.08) c h)); border-color: var(--gold); color: var(--bg-deep); font-weight: 700; }
+.cz-btn.primary:hover:not(:disabled) { box-shadow: 0 0 18px oklch(from var(--gold) l c h / 0.4); }
+.cz-btn.danger { color: var(--neg); border-color: oklch(from var(--neg) calc(l - 0.20) c h / 0.7); }
+.cz-btn.danger:hover:not(:disabled) { color: oklch(from var(--neg) calc(l + 0.08) c h); border-color: var(--neg); }
+.cz-btn.ghost { background: transparent; }
+
+/* ── gambit offer ── */
+.cz-gambit-offer { display: flex; gap: 1.1rem; justify-content: center; flex-wrap: wrap; }
+.cz-gambit-pick { cursor: pointer; transition: transform 0.16s ease; display: flex; flex-direction: column; align-items: center; }
+.cz-gambit-pick:hover { transform: translateY(-6px); }
+.cz-gambit-pick.selected { transform: translateY(-8px); }
+.cz-gambit-pick.selected .ck { box-shadow: 0 0 0 2px var(--gold), 0 0 24px oklch(from var(--gold) l c h / 0.45), 0 14px 32px #000b; }
+.cz-gambit-pick.unaffordable { opacity: 0.45; cursor: not-allowed; }
+.cz-gambit-pick.unaffordable:hover { transform: none; }
+
+/* ── reveal roll banner ── */
+.cz-roll-banner { display: flex; gap: 0.8rem; justify-content: center; }
+.cz-roll { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.1em; padding: 0.35rem 1rem; border-radius: 6px; border: 1px solid; }
+.cz-roll.on  { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.7); background: oklch(from var(--pos) l c h / 0.24); box-shadow: 0 0 16px oklch(from var(--pos) l c h / 0.25); }
+.cz-roll.off { color: var(--neg); border-color: oklch(from var(--neg) l c h / 0.6); background: oklch(from var(--neg) l c h / 0.22); }
+
+/* ── gambit chip in result row ── */
+.cz-rr-gambit { font-size: 0.58rem; letter-spacing: 0.05em; white-space: nowrap; --rr-col: var(--pos); padding: 0.16rem 0.5rem; border-radius: 999px; color: var(--rr-col); border: 1px solid oklch(from var(--rr-col) l c h / 0.5); background: oklch(from var(--rr-col) l c h / 0.18); }
+.cz-rr-gambit.raise { --rr-col: var(--neg); }
+
+/* ── results ── */
+.cz-results { display: flex; flex-direction: column; gap: 0.55rem; width: 100%; }
+.cz-result-row { display: grid; grid-template-columns: 1.7rem minmax(0,7rem) minmax(0,1fr) auto; align-items: center; gap: 0.7rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.55rem 0.8rem; animation: rowIn 0.35s ease; }
+@keyframes rowIn { from{ transform: translateX(-10px);} to{ transform:none; } }
+.cz-result-row.you  { border-color: var(--line-glow); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.25); }
+.cz-result-row.win  { box-shadow: inset 3px 0 0 var(--pos); }
+.cz-result-row.fold { opacity: 0.62; }
+.cz-rr-name { font-size: 0.78rem; color: var(--parch); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cz-rr-name .cz-rr-game { display: block; font-size: 0.54rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-rr-mid { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.cz-rr-cards { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.cz-rr-combo { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.84rem; color: var(--gold); white-space: nowrap; }
+.cz-rr-combo .cz-rr-detail { color: var(--gold-dim); font-style: normal; font-size: 0.74rem; }
+.cz-rr-net { font-weight: 700; font-size: 0.95rem; text-align: right; white-space: nowrap; }
+.cz-rr-net.pos { color: var(--pos); } .cz-rr-net.neg { color: var(--neg); }
+.cz-rr-net .cz-rr-sub { display: block; font-family: 'Crimson Pro', serif; font-style: italic; font-weight: 400; font-size: 0.66rem; color: var(--gold-dim); }
+
+/* ── misc ── */
+.cz-flash { font-family: 'Crimson Pro', serif; font-style: italic; color: var(--neg); font-size: 0.86rem; min-height: 1.2em; text-align: center; }
+.cz-ap-banner { text-align: center; }
+.cz-ap-banner .cz-ap-icon { font-size: 2.4rem; color: var(--gold); text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.5); }
+@media (prefers-reduced-motion: reduce) { .cz-card-slot .ck, .cz-result-row, .cz-pot-amt.bump { animation: none !important; } }
+
+/* ── Mission bar ── */
+.cz-mission-bar { display: flex; align-items: center; gap: 0.75rem; width: 100%; background: linear-gradient(100deg, oklch(from var(--mission) calc(l - 0.35) c h / 0.5), var(--panel) 70%); border: 1px solid oklch(from var(--mission) calc(l - 0.16) c h / 0.7); border-left: 3px solid var(--mission); border-radius: 8px; padding: 0.6rem 0.95rem; }
+.cz-mission-seal { width: 2rem; height: 2rem; flex-shrink: 0; display: grid; place-items: center; font-size: 1.05rem; border-radius: 7px; background: oklch(from var(--mission) calc(l - 0.34) c h / 0.6); border: 1px solid oklch(from var(--mission) calc(l - 0.14) c h); box-shadow: inset 0 1px 0 oklch(from var(--mission) calc(l + 0.12) c h / 0.25); }
+.cz-mission-id { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.cz-mission-kick { font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--mission); }
+.cz-mission-name { font-size: 0.82rem; letter-spacing: 0.05em; color: var(--parch); }
+.cz-mission-stake { margin-left: auto; display: flex; align-items: baseline; gap: 0.4rem; text-align: right; flex-shrink: 0; }
+.cz-mission-stake-lbl { font-size: 0.52rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-mission-stake-lbl.idle { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; letter-spacing: 0; text-transform: none; }
+.cz-mission-stake-val { font-weight: 800; font-size: 1.2rem; color: var(--gold); }
+
+/* ── Mission slots panel ── */
+.cz-slots-panel { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1.1rem 1rem; }
+.cz-slots-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+.cz-slots-title { font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mission); }
+.cz-slots-sub { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.82rem; color: var(--gold-dim); }
+.cz-slots-note { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.8rem; color: var(--gold-dim); margin: 0.5rem 0 0.6rem; line-height: 1.45; }
+.cz-slots-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.cz-slot { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 4px; background: oklch(from var(--bg-card) calc(l - 0.03) c h / 0.7); border: 1px solid var(--line); }
+.cz-slot-name { font-size: 0.62rem; letter-spacing: 0.05em; color: var(--gold-dim); opacity: 0.5; white-space: nowrap; }
+.cz-slot-sep { color: var(--line-glow); }
+.cz-slot-game { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: var(--gold-dim); opacity: 0.6; white-space: nowrap; }
+.cz-slot-det { font-family: 'Crimson Pro', serif; font-size: 0.86rem; color: var(--parch); flex: 1; min-width: 0; }
+.cz-slot-det b { font-size: 0.72rem; color: var(--gold); white-space: nowrap; }
+.cz-slot-status { margin-left: auto; font-size: 0.52rem; letter-spacing: 0.08em; flex-shrink: 0; padding: 0.16rem 0.5rem; border-radius: 2px; white-space: nowrap; color: var(--gold-dim); border: 1px solid oklch(from var(--gold-dim) l c h / 0.5); background: oklch(from var(--bg-card) l c h / 0.5); }
+@media (max-width: 520px){ .cz-slot { flex-wrap: wrap; } .cz-slot-det { flex-basis: 100%; order: 5; } .cz-slot-status { margin-left: 0; } }
+
+/* ── loading / error states ── */
+.cz-center { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60dvh; gap: 1rem; color: var(--gold-dim); font-family: 'Crimson Pro', serif; font-style: italic; font-size: 1.1rem; }
+.cz-center .cz-spin { font-size: 1.6rem; animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

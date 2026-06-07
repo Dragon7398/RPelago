@@ -1,0 +1,205 @@
+/* RPelago Casino — card look styles. Scoped to the casino table entry point. */
+
+:root {
+  --pc-bg-deep: #141009;
+  --pc-bg-card: #252010;
+  --pc-parch:   oklch(92% 0.03 80);
+  --pc-parch-2: oklch(86% 0.035 80);
+  --pc-gold:    oklch(76% 0.14 75);
+  --pc-gold-d:  oklch(62% 0.10 75);
+  --pc-border:  #4a3c22;
+}
+
+/* ── Base ── */
+.ck {
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+  border-radius: calc(var(--cw) * 0.055);
+  position: relative; overflow: hidden;
+  font-family: 'Cinzel', serif;
+  -webkit-user-select: none; user-select: none;
+  flex-shrink: 0;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.3s ease;
+  --pad: calc(var(--cw) * 0.07);
+}
+.ck * { box-sizing: border-box; }
+.ck-noise::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 6;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.5; mix-blend-mode: overlay;
+}
+.ck-coin {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; line-height: 1; color: var(--pc-bg-deep);
+  background: radial-gradient(circle at 38% 32%, oklch(88% 0.13 85), oklch(70% 0.14 72) 62%, oklch(55% 0.12 68));
+  border-radius: 50%;
+  box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), inset 0 -2px 3px oklch(40% 0.08 60 / 0.6), 0 1px 2px #0008;
+}
+.ck-coin small { font-size: 0.5em; font-weight: 700; margin-left: 0.08em; opacity: 0.75; }
+
+/* ── Look 1: Tile Sigil ── */
+.look-sigil {
+  background: linear-gradient(135deg, oklch(from var(--acc) calc(l - 0.30) c h / 0.30) 0%, transparent 55%),
+              linear-gradient(160deg, oklch(from var(--acc) 16% 0.06 h) 0%, oklch(from var(--acc) 11% 0.04 h) 100%);
+  border: 1px solid oklch(from var(--acc) calc(l - 0.10) c h / 0.7);
+  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.25), 0 14px 34px #000a;
+  color: var(--pc-parch); padding: var(--pad); display: flex; flex-direction: column;
+}
+.look-sigil .sg-corner { position: absolute; color: oklch(from var(--acc) l c h / 0.6); font-size: calc(var(--cw)*0.07); z-index: 3; }
+.look-sigil .sg-tl { top: calc(var(--cw)*0.04); left: calc(var(--cw)*0.05); }
+.look-sigil .sg-br { bottom: calc(var(--cw)*0.04); right: calc(var(--cw)*0.05); }
+.look-sigil .sg-top { display: flex; align-items: center; justify-content: space-between; z-index: 4; }
+.look-sigil .sg-type { font-size: calc(var(--cw)*0.072); letter-spacing: 0.18em; text-transform: uppercase; color: oklch(from var(--acc) calc(l + 0.08) c h); }
+.look-sigil .sg-suit-sm { font-size: calc(var(--cw)*0.11); color: oklch(from var(--acc) calc(l + 0.05) c h); line-height: 1; }
+.look-sigil .sg-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--cw)*0.95); color: oklch(from var(--acc) l c h / 0.10); z-index: 1; line-height: 1; pointer-events: none; }
+.look-sigil .sg-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--cw)*0.03); z-index: 4; text-align: center; }
+.look-sigil .sg-name { font-size: calc(var(--cw)*0.115); font-weight: 600; letter-spacing: 0.04em; line-height: 1.12; text-wrap: balance; text-shadow: 0 2px 6px #000a; }
+.look-sigil .sg-blurb { font-family: 'Crimson Pro', serif; font-style: italic; font-size: calc(var(--cw)*0.072); color: oklch(from var(--acc) calc(l + 0.06) c h / 0.85); letter-spacing: 0.02em; margin-top: 0.1em; }
+.look-sigil .sg-foot { display: flex; align-items: center; justify-content: center; z-index: 4; }
+.look-sigil .ck-coin { width: calc(var(--cw)*0.30); height: calc(var(--cw)*0.30); font-size: calc(var(--cw)*0.14); }
+
+/* ── Paper-card ink clamps (CB theme safety) ─────────────────────────────────
+   CB themes push the Wild accent to L≈0.86–0.90. On cream-paper faces (Court,
+   Plate) the raw accent would wash out. These clamps are no-ops at equal
+   lightness (Gilded Hearth) and only activate for the high-L CB values. */
+.look-court .crt-corner  { color: oklch(from var(--acc) min(l, 0.55) c h); }
+.look-court .crt-bigsuit { color: oklch(from var(--acc) min(l, 0.58) c h); }
+.look-court .crt-type    { color: oklch(from var(--acc) min(calc(l - 0.12), 0.48) c h); }
+.look-plate {
+  --pl-edge: oklch(from var(--acc) min(calc(l - 0.14), 0.50) c h);
+  --pl-engr: oklch(from var(--acc) min(calc(l - 0.10), 0.55) c h);
+}
+.look-plate .pl-value { color: oklch(from var(--acc) min(calc(l - 0.20), 0.42) c h); }
+
+/* ── Look 2: Court Card ── */
+.look-court {
+  background: radial-gradient(120% 80% at 50% 0%, oklch(96% 0.02 82) 0%, oklch(90% 0.035 80) 100%);
+  border: 1px solid oklch(from var(--acc) calc(l - 0.06) c h / 0.55);
+  box-shadow: 0 0 0 calc(var(--cw)*0.012) oklch(95% 0.02 82) inset, 0 0 0 calc(var(--cw)*0.020) oklch(from var(--acc) calc(l - 0.05) c h / 0.5) inset, 0 14px 30px #000a;
+  color: oklch(28% 0.03 60);
+}
+.look-court .crt-corner { position: absolute; display: flex; flex-direction: column; align-items: center; line-height: 0.9; color: var(--acc); z-index: 3; }
+.look-court .crt-corner .crt-rank { font-size: calc(var(--cw)*0.13); font-weight: 800; }
+.look-court .crt-corner .crt-suit { font-size: calc(var(--cw)*0.10); }
+.look-court .crt-tl { top: calc(var(--cw)*0.055); left: calc(var(--cw)*0.06); }
+.look-court .crt-br { bottom: calc(var(--cw)*0.055); right: calc(var(--cw)*0.06); transform: rotate(180deg); }
+.look-court .crt-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--cw)*0.04); z-index: 2; padding: 0 calc(var(--cw)*0.16); }
+.look-court .crt-bigsuit { font-size: calc(var(--cw)*0.46); color: var(--acc); line-height: 1; text-shadow: 0 2px 4px oklch(from var(--acc) calc(l - 0.30) c h / 0.4); }
+.look-court .crt-banner { width: 100%; text-align: center; padding: calc(var(--cw)*0.045) 0; border-top: 1px solid oklch(from var(--acc) l c h / 0.4); border-bottom: 1px solid oklch(from var(--acc) l c h / 0.4); background: oklch(from var(--acc) 96% 0.03 h / 0.5); }
+.look-court .crt-name { font-size: calc(var(--cw)*0.10); font-weight: 600; letter-spacing: 0.02em; line-height: 1.1; color: oklch(30% 0.04 60); text-wrap: balance; }
+.look-court .crt-type { font-size: calc(var(--cw)*0.062); letter-spacing: 0.2em; text-transform: uppercase; color: oklch(from var(--acc) calc(l - 0.12) c h); margin-top: 0.5em; }
+
+/* ── Look 3: Arcana ── */
+.look-arcana {
+  background: linear-gradient(165deg, oklch(from var(--acc) 15% 0.05 h) 0%, oklch(8% 0.02 70) 100%);
+  border: 1px solid oklch(from var(--acc) calc(l - 0.04) c h / 0.6);
+  box-shadow: 0 16px 36px #000b, inset 0 0 24px oklch(from var(--acc) calc(l - 0.30) c h / 0.3);
+  color: var(--pc-parch); padding: calc(var(--cw)*0.05);
+}
+.look-arcana .arc-frame { position: absolute; inset: calc(var(--cw)*0.045); border: 1px solid oklch(from var(--acc) l c h / 0.45); border-radius: calc(var(--cw)*0.03); box-shadow: inset 0 0 0 2px oklch(from var(--acc) calc(l - 0.20) c h / 0.25); z-index: 2; pointer-events: none; }
+.look-arcana .arc-fil { position: absolute; color: oklch(from var(--acc) calc(l + 0.05) c h / 0.8); font-size: calc(var(--cw)*0.09); z-index: 3; line-height: 1; }
+.look-arcana .arc-fil.tl { top: calc(var(--cw)*0.075); left: calc(var(--cw)*0.085); }
+.look-arcana .arc-fil.tr { top: calc(var(--cw)*0.075); right: calc(var(--cw)*0.085); }
+.look-arcana .arc-fil.bl { bottom: calc(var(--cw)*0.075); left: calc(var(--cw)*0.085); }
+.look-arcana .arc-fil.br { bottom: calc(var(--cw)*0.075); right: calc(var(--cw)*0.085); }
+.look-arcana .arc-inner { position: relative; z-index: 4; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: calc(var(--cw)*0.12) calc(var(--cw)*0.10); }
+.look-arcana .arc-numeral { font-size: calc(var(--cw)*0.085); letter-spacing: 0.2em; color: oklch(from var(--acc) calc(l + 0.08) c h); border-bottom: 1px solid oklch(from var(--acc) l c h / 0.4); padding-bottom: 0.35em; }
+.look-arcana .arc-emblem { display: flex; align-items: center; justify-content: center; width: calc(var(--cw)*0.46); height: calc(var(--cw)*0.46); border-radius: 50%; background: radial-gradient(circle, oklch(from var(--acc) l c h / 0.18), transparent 70%); border: 1px solid oklch(from var(--acc) l c h / 0.35); position: relative; }
+.look-arcana .arc-emblem .arc-suit { font-size: calc(var(--cw)*0.26); color: oklch(from var(--acc) calc(l + 0.06) c h); text-shadow: 0 0 14px oklch(from var(--acc) l c h / 0.5); }
+.look-arcana .arc-emblem::before, .look-arcana .arc-emblem::after { content: '✦'; position: absolute; font-size: calc(var(--cw)*0.06); color: oklch(from var(--acc) calc(l + 0.05) c h / 0.7); }
+.look-arcana .arc-emblem::before { top: -0.4em; }
+.look-arcana .arc-emblem::after { bottom: -0.4em; }
+.look-arcana .arc-foot { text-align: center; width: 100%; }
+.look-arcana .arc-name { font-size: calc(var(--cw)*0.10); font-weight: 600; letter-spacing: 0.05em; line-height: 1.12; text-transform: uppercase; text-wrap: balance; text-shadow: 0 2px 6px #000a; }
+.look-arcana .arc-type { font-family: 'Crimson Pro', serif; font-style: italic; font-size: calc(var(--cw)*0.066); letter-spacing: 0.08em; color: oklch(from var(--acc) calc(l + 0.06) c h / 0.85); margin-top: 0.3em; }
+
+/* ── Look 4: Minimal Foil ── */
+.look-foil {
+  background: linear-gradient(168deg, oklch(17% 0.012 70) 0%, oklch(11% 0.01 70) 100%);
+  border: 1px solid oklch(from var(--acc) 30% 0.05 h / 0.6); box-shadow: 0 14px 32px #000b;
+  color: var(--pc-parch); padding: calc(var(--cw)*0.11); display: flex; flex-direction: column; justify-content: space-between;
+}
+.look-foil .fl-line { height: 2px; width: 38%; background: linear-gradient(90deg, var(--acc), oklch(from var(--acc) calc(l + 0.15) c h), transparent); border-radius: 2px; }
+.look-foil .fl-top { display: flex; align-items: center; justify-content: space-between; }
+.look-foil .fl-tag { display: inline-flex; align-items: center; gap: 0.4em; font-size: calc(var(--cw)*0.062); letter-spacing: 0.18em; text-transform: uppercase; color: oklch(from var(--acc) calc(l + 0.06) c h); }
+.look-foil .fl-tag .fl-suit { font-size: calc(var(--cw)*0.10); }
+.look-foil .fl-hero { display: flex; flex-direction: column; }
+.look-foil .fl-value { font-size: calc(var(--cw)*0.46); font-weight: 800; line-height: 0.92; letter-spacing: -0.01em; background: linear-gradient(180deg, oklch(95% 0.02 82), oklch(78% 0.04 80)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.look-foil .fl-gold { font-size: calc(var(--cw)*0.06); letter-spacing: 0.28em; color: var(--pc-gold-d); margin-top: 0.2em; }
+.look-foil .fl-name { font-size: calc(var(--cw)*0.092); font-weight: 600; letter-spacing: 0.03em; line-height: 1.15; text-transform: uppercase; text-wrap: balance; }
+
+/* ── Look 5: Gilded Plate ── */
+.look-plate {
+  --pl-paper1: oklch(95% 0.020 84); --pl-paper2: oklch(89% 0.036 78);
+  --pl-edge: oklch(from var(--acc) calc(l - 0.14) c h);
+  background: linear-gradient(158deg, var(--pl-paper1) 0%, var(--pl-paper2) 100%);
+  border: 1px solid oklch(from var(--acc) calc(l - 0.16) c h / 0.5);
+  box-shadow: 0 14px 30px #000a, inset 0 0 22px oklch(from var(--acc) calc(l - 0.05) c h / 0.07);
+  color: oklch(30% 0.04 60); padding: calc(var(--cw)*0.045); isolation: isolate;
+}
+.look-plate .pl-guilloche {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.55;
+  background: repeating-radial-gradient(circle at 50% 36%, oklch(from var(--acc) calc(l - 0.12) c h / 0.11) 0 0.5px, transparent 0.5px 5.5px),
+              repeating-radial-gradient(circle at 50% 80%, oklch(from var(--acc) calc(l - 0.12) c h / 0.09) 0 0.5px, transparent 0.5px 8px),
+              repeating-linear-gradient(90deg, oklch(from var(--acc) calc(l - 0.12) c h / 0.045) 0 1px, transparent 1px 6px);
+  -webkit-mask: radial-gradient(circle at 50% 50%, #000 55%, transparent 100%);
+          mask: radial-gradient(circle at 50% 50%, #000 55%, transparent 100%);
+}
+.look-plate .pl-frame { position: absolute; inset: calc(var(--cw)*0.042); z-index: 1; pointer-events: none; border: calc(var(--cw)*0.010) double var(--pl-edge); border-radius: calc(var(--cw)*0.026); box-shadow: inset 0 0 0 1px oklch(from var(--acc) l c h / 0.18); }
+.look-plate .pl-corner { position: absolute; z-index: 3; color: var(--pl-edge); font-size: calc(var(--cw)*0.085); line-height: 1; opacity: 0.85; }
+.look-plate .pl-corner.tl { top: calc(var(--cw)*0.06); left: calc(var(--cw)*0.075); }
+.look-plate .pl-corner.tr { top: calc(var(--cw)*0.06); right: calc(var(--cw)*0.075); transform: scaleX(-1); }
+.look-plate .pl-corner.bl { bottom: calc(var(--cw)*0.055); left: calc(var(--cw)*0.075); transform: scaleY(-1); }
+.look-plate .pl-corner.br { bottom: calc(var(--cw)*0.055); right: calc(var(--cw)*0.075); transform: scale(-1); }
+.look-plate .pl-inner { position: relative; z-index: 4; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: calc(var(--cw)*0.10) calc(var(--cw)*0.095) calc(var(--cw)*0.085); }
+.look-plate .pl-ribbon { font-size: calc(var(--cw)*0.055); letter-spacing: 0.22em; text-transform: uppercase; font-weight: 700; color: oklch(97% 0.018 86); background: linear-gradient(180deg, oklch(from var(--acc) calc(l + 0.05) c h), oklch(from var(--acc) calc(l - 0.12) c h)); padding: calc(var(--cw)*0.026) calc(var(--cw)*0.13); box-shadow: 0 1px 3px #0007, inset 0 1px 0 oklch(100% 0 0 / 0.3), inset 0 -1px 0 oklch(0% 0 0 / 0.18); clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 50%, 100% 100%, 0 100%, 7px 50%); }
+.look-plate .pl-seal { width: calc(var(--cw)*0.42); height: calc(var(--cw)*0.42); border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; background: radial-gradient(circle at 38% 30%, oklch(from var(--acc) calc(l + 0.13) c h), oklch(from var(--acc) calc(l - 0.05) c h) 56%, oklch(from var(--acc) calc(l - 0.18) c h)); border: calc(var(--cw)*0.009) solid oklch(from var(--acc) calc(l - 0.24) c h / 0.5); box-shadow: inset 0 calc(var(--cw)*0.022) calc(var(--cw)*0.03) oklch(100% 0 0 / 0.38), inset 0 calc(var(--cw)*-0.03) calc(var(--cw)*0.045) oklch(from var(--acc) calc(l - 0.32) c h / 0.55), 0 calc(var(--cw)*0.016) calc(var(--cw)*0.03) #0008; }
+.look-plate .pl-seal::before { content: ''; position: absolute; inset: calc(var(--cw)*0.036); border-radius: 50%; border: 1px dashed oklch(98% 0.02 90 / 0.42); }
+.look-plate .pl-seal .pl-suit { font-size: calc(var(--cw)*0.20); color: oklch(98% 0.02 90); text-shadow: 0 1px 2px oklch(from var(--acc) calc(l - 0.32) c h / 0.8); position: relative; }
+.look-plate .pl-titleblock { width: 100%; display: flex; flex-direction: column; align-items: center; gap: calc(var(--cw)*0.032); }
+.look-plate .pl-name { font-size: calc(var(--cw)*0.096); font-weight: 600; letter-spacing: 0.012em; line-height: 1.08; text-align: center; text-wrap: balance; color: oklch(27% 0.045 58); }
+.look-plate .pl-rule { width: 58%; height: 1px; background: linear-gradient(90deg, transparent, var(--pl-edge), transparent); opacity: 0.8; }
+.look-plate .pl-note { font-family: 'Crimson Pro', serif; font-style: italic; font-size: calc(var(--cw)*0.062); color: oklch(42% 0.04 60); line-height: 1.2; text-align: center; max-width: 94%; }
+.look-plate .pl-value { display: inline-flex; align-items: center; gap: 0.34em; font-weight: 800; color: oklch(from var(--acc) calc(l - 0.20) c h); }
+.look-plate .pl-value .pl-num { font-size: calc(var(--cw)*0.135); line-height: 1; }
+.look-plate .pl-coin { width: calc(var(--cw)*0.085); height: calc(var(--cw)*0.085); border-radius: 50%; flex-shrink: 0; background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(55% 0.12 68)); box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), inset 0 calc(var(--cw)*-0.008) calc(var(--cw)*0.012) oklch(40% 0.08 60 / 0.6), 0 1px 1px #0006; }
+
+/* ── Card back ── */
+.ck-back {
+  background: linear-gradient(135deg, oklch(20% 0.05 75 / 0.6) 0%, transparent 55%), linear-gradient(160deg, oklch(16% 0.04 72) 0%, oklch(10% 0.025 70) 100%);
+  border: 1px solid var(--pc-gold-d);
+  box-shadow: inset 0 0 0 calc(var(--cw)*0.018) oklch(40% 0.06 72 / 0.4), inset 0 0 26px oklch(8% 0.02 70 / 0.8), 0 14px 30px #000b;
+  display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+}
+.ck-back::before { content: ''; position: absolute; inset: calc(var(--cw)*0.05); border: 1px solid oklch(from var(--pc-gold) l c h / 0.35); border-radius: calc(var(--cw)*0.03); background-image: repeating-linear-gradient(45deg, oklch(from var(--pc-gold) l c h / 0.05) 0 2px, transparent 2px 9px), repeating-linear-gradient(-45deg, oklch(from var(--pc-gold) l c h / 0.05) 0 2px, transparent 2px 9px); }
+.ck-back .ck-back-mark { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: calc(var(--cw)*0.03); color: var(--pc-gold); }
+.ck-back .ck-back-star { font-size: calc(var(--cw)*0.28); line-height: 1; text-shadow: 0 0 18px oklch(from var(--pc-gold) l c h / 0.5); }
+.ck-back .ck-back-word { font-size: calc(var(--cw)*0.07); letter-spacing: 0.3em; color: var(--pc-gold-d); }
+
+/* flip card animation */
+.flip-card { perspective: 900px; }
+.flip-inner { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.5s cubic-bezier(0.4,0.2,0.2,1); }
+.flip-inner.is-flipped { transform: rotateY(180deg); }
+.flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.flip-face.flip-back { }
+.flip-face.flip-front { transform: rotateY(180deg); }
+
+/* ── Gambit card ── */
+.gambit {
+  background: radial-gradient(120% 80% at 50% 16%, oklch(from var(--acc) calc(l - 0.10) c h / 0.30) 0%, transparent 60%), linear-gradient(165deg, oklch(from var(--acc) 17% 0.05 h) 0%, oklch(9% 0.02 70) 100%);
+  border: 1px solid oklch(from var(--acc) calc(l - 0.04) c h / 0.7);
+  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.30), 0 14px 32px #000b;
+  color: var(--pc-parch); padding: calc(var(--cw)*0.05);
+}
+.gambit .gm-frame { position: absolute; inset: calc(var(--cw)*0.045); border: 1px solid oklch(from var(--acc) l c h / 0.45); border-radius: calc(var(--cw)*0.03); box-shadow: inset 0 0 0 2px oklch(from var(--acc) calc(l - 0.20) c h / 0.22); z-index: 2; pointer-events: none; }
+.gambit .gm-corner { position: absolute; z-index: 3; color: oklch(from var(--acc) calc(l + 0.05) c h / 0.8); font-size: calc(var(--cw)*0.07); line-height: 1; }
+.gambit .gm-corner.tl { top: calc(var(--cw)*0.075); left: calc(var(--cw)*0.085); }
+.gambit .gm-corner.br { bottom: calc(var(--cw)*0.075); right: calc(var(--cw)*0.085); }
+.gambit .gm-inner { position: relative; z-index: 4; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: calc(var(--cw)*0.085) calc(var(--cw)*0.06); }
+.gambit .gm-ribbon { font-size: calc(var(--cw)*0.058); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; text-align: center; color: oklch(95% 0.02 90); background: linear-gradient(180deg, oklch(60% 0.13 var(--stat-hue,200)), oklch(46% 0.11 var(--stat-hue,200))); padding: calc(var(--cw)*0.022) calc(var(--cw)*0.07); border-radius: 2px; box-shadow: 0 1px 3px #0007, inset 0 1px 0 oklch(100% 0 0 / 0.25); }
+.gambit .gm-hero { display: flex; flex-direction: column; align-items: center; gap: calc(var(--cw)*0.005); }
+.gambit .gm-arrow { font-size: calc(var(--cw)*0.16); line-height: 1; color: oklch(from var(--acc) calc(l + 0.08) c h); text-shadow: 0 0 14px oklch(from var(--acc) l c h / 0.5); }
+.gambit .gm-delta { font-family:'Cinzel',serif; font-weight: 800; font-size: calc(var(--cw)*0.22); line-height: 1; color: oklch(from var(--acc) calc(l + 0.1) c h); text-shadow: 0 2px 8px #000a; }
+.gambit .gm-kind { font-size: calc(var(--cw)*0.055); letter-spacing: 0.26em; text-transform: uppercase; color: oklch(from var(--acc) calc(l + 0.06) c h / 0.85); }
+.gambit .gm-effect { font-family:'Crimson Pro',serif; font-style: italic; font-weight: 600; font-size: calc(var(--cw)*0.092); text-align: center; line-height: 1.18; color: oklch(from var(--acc) calc(l + 0.12) c h); border-top: 1px solid oklch(from var(--acc) l c h / 0.4); padding-top: calc(var(--cw)*0.05); width: 92%; }
+.gambit .gm-size { position: absolute; top: calc(var(--cw)*0.07); right: calc(var(--cw)*0.085); z-index: 5; font-size: calc(var(--cw)*0.05); letter-spacing: 0.1em; text-transform: uppercase; color: oklch(from var(--acc) calc(l + 0.05) c h / 0.7); }

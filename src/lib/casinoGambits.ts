@@ -87,6 +87,11 @@ export const GAMBIT_DEFS: readonly GambitDef[] = RAW.map((r, i) => {
   };
 });
 
+// Lookup by defId — used by the table UI to resolve the chosen gambit for display.
+export const GAMBIT_DEFS_BY_ID: Readonly<Record<string, GambitDef>> = Object.fromEntries(
+  GAMBIT_DEFS.map(d => [d.defId, d]),
+);
+
 export function buildGambitDeck(): GambitCard[] {
   const deck: GambitCard[] = [];
   let uid = 0;

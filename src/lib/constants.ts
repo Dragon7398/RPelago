@@ -324,6 +324,10 @@ export interface GMMissionDef {
 export const CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 } as const;
 // Minimum gold a player must hold to enlist (= cheapest game ante: blackjack).
 export const CASINO_MIN_ENLIST_GOLD = 30;
+// Ante costs by game type.
+export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, blackjack: 30 };
+// Cost to reroll rejected cards in poker.
+export const CASINO_REROLL_COST = 20;
 
 export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
   basic: {
