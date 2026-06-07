@@ -46,9 +46,11 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
     const now = Date.now();
     const basicRef  = push(ref(d, 'game/missions'));
     const patrolRef = push(ref(d, 'game/missions'));
+    const casinoRef = push(ref(d, 'game/missions'));
     const initialMissions: Record<string, unknown> = {
       [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
       [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
+      [casinoRef.key!]: { ...freshMission('casino', 1, now), id: casinoRef.key },
     };
     await update(ref(d), {
       'game/tiles':     buildDefaultTileData(seed),
@@ -79,39 +81,60 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
     }
   }
 
-  // Migration: seed initial mission cohorts for games created before the mission system
+  // Migration: seed mission cohorts for games created before the mission system,
+  // or add casino cohort to games created before the casino mission was added.
   const missionsSnap = await get(ref(d, 'game/missions'));
-  if (!missionsSnap.exists()) {
+  const existingMissions = missionsSnap.exists() ? (missionsSnap.val() as Record<string, GMMission>) : {};
+  const activeMissions = Object.values(existingMissions);
+  const needsBasic  = !activeMissions.some(m => m.type === 'basic'  && m.state !== 'complete');
+  const needsPatrol = !activeMissions.some(m => m.type === 'patrol' && m.state !== 'complete');
+  const needsCasino = !activeMissions.some(m => m.type === 'casino' && m.state !== 'complete');
+  if (needsBasic || needsPatrol || needsCasino) {
     const now = Date.now();
-    const basicRef  = push(ref(d, 'game/missions'));
-    const patrolRef = push(ref(d, 'game/missions'));
-    const initialMissions: Record<string, unknown> = {
-      [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
-      [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
-    };
+    const migrationUpdates: Record<string, unknown> = {};
+    if (needsBasic)  { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key }; }
+    if (needsPatrol) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key }; }
+    if (needsCasino) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key }; }
     try {
-      await update(ref(d), { 'game/missions': initialMissions });
+      await update(ref(d), migrationUpdates);
     } catch (err) {
       console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
     }
   }
 }
 
-// Seed the initial Basic Training and Patrol cohorts. Safe to call on any
-// existing game — no-ops if missions already exist.
+// Seed mission cohorts for each type that has no active (forming/inprogress) cohort.
+// Safe to call on any existing game mid-season — only creates what is missing.
 export async function seedInitialMissions(): Promise<boolean> {
   assertDb();
   const d = db!;
   const snap = await get(ref(d, 'game/missions'));
-  if (snap.exists() && Object.keys(snap.val() ?? {}).length > 0) return false;
+  const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
+  const active = Object.values(existing);
+
+  const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
+  const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
+  const hasCasino = active.some(m => m.type === 'casino' && m.state !== 'complete');
+
+  if (hasBasic && hasPatrol && hasCasino) return false;
 
   const now = Date.now();
-  const basicRef  = push(ref(d, 'game/missions'));
-  const patrolRef = push(ref(d, 'game/missions'));
-  await update(ref(d), {
-    [`game/missions/${basicRef.key}`]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
-    [`game/missions/${patrolRef.key}`]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
-  });
+  const updates: Record<string, unknown> = {};
+
+  if (!hasBasic) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key };
+  }
+  if (!hasPatrol) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key };
+  }
+  if (!hasCasino) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key };
+  }
+
+  await update(ref(d), updates);
   return true;
 }
 

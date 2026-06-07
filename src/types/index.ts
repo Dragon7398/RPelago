@@ -158,8 +158,16 @@ export interface AuthUser {
   displayName: string;
 }
 
-export type GMMissionType  = 'basic' | 'patrol';
+export type GMMissionType  = 'basic' | 'patrol' | 'casino';
 export type GMMissionState = 'forming' | 'inprogress' | 'complete';
+
+// Shared odds table for casino missions; all participants' gambits write to this.
+export interface CasinoStats {
+  release: number;  // 0–100 — percentage chance release is ON at deploy
+  collect: number;  // 0–100 — percentage chance collect is ON at deploy
+  hint:    number;  // hint cost modifier (percentage)
+  xp:      number;  // XP floor; raised by penalty gambits
+}
 
 export interface GMParticipant {
   playerId:    string;
@@ -167,6 +175,11 @@ export interface GMParticipant {
   joinedAt:    number;
   slots?:      AdvSlot[];
   statusNote?: AdvStatusNote;
+  // casino-only fields
+  startBy?:   number;   // epoch ms — must start a casino round by this time or be stood down
+  played?:    boolean;  // true once the player has locked their casino hand (immutable)
+  goldSwing?: number;   // sum of committed card values; paid out at mission complete
+  casinoXp?:  number;   // XP earned from gambits; merged into mission.xp at deploy
 }
 
 export interface GMMission {
@@ -189,6 +202,12 @@ export interface GMMission {
   participants:    Record<string, GMParticipant>;
   claimableSlots?: Record<string, AdvSlot[]>;
   slotsLocked?:   boolean;
+  // casino-only fields
+  variableReward?: boolean;                         // true → show "50+ XP / ? GP" until locked
+  tableUrl?:       string;                          // route opened in a new tab
+  entryCosts?:     { label: string; gold: number }[]; // house-cut note on the mission card
+  pot?:            number;                          // shared gold pot; seeded at cohort creation
+  casinoStats?:    CasinoStats;                     // shared odds table modified by gambits
 }
 
 export interface CompletedChallenge {

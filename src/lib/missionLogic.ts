@@ -1,5 +1,5 @@
 import type { GMMission, GMMissionType, GMParticipant, AdvSlot } from '../types';
-import { MISSION_DEFS, toRoman } from './constants';
+import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -32,10 +32,18 @@ export function filledCount(m: GMMission): number {
   return Object.keys(m.participants ?? {}).length;
 }
 
+export function allSeatsPlayed(m: GMMission): boolean {
+  const participants = Object.values(m.participants ?? {});
+  if (participants.length === 0) return false;
+  return participants.every(p => p.played === true);
+}
+
 export function shouldDeploy(m: GMMission, now: number): boolean {
-  return m.state === 'forming'
-    && filledCount(m) > 0
-    && filledCount(m) >= currentMaxSlots(m, now);
+  if (m.state !== 'forming') return false;
+  if (filledCount(m) === 0) return false;
+  if (filledCount(m) < currentMaxSlots(m, now)) return false;
+  if (m.type === 'casino' && !allSeatsPlayed(m)) return false;
+  return true;
 }
 
 export function missionDisplayLabel(m: GMMission): string {
@@ -128,13 +136,19 @@ export function freshMission(
     baseMax:      def.baseMax,
     xp:           def.xp,
     gp:           def.gp,
-    ...(def.traits ? { traits: { ...def.traits } } : {}),
+    ...(def.traits        ? { traits:          { ...def.traits }      } : {}),
     release:      def.release as TriState,
     collect:      def.collect as TriState,
     hint:         def.hint,
     firstJoinAt:  null,
     createdAt:    now,
     participants: {},
+    // casino-only optional fields
+    ...(def.variableReward ? { variableReward: true                   } : {}),
+    ...(def.tableUrl       ? { tableUrl:       def.tableUrl           } : {}),
+    ...(def.entryCosts     ? { entryCosts:     [...def.entryCosts]    } : {}),
+    ...(def.potSeed != null ? { pot:           def.potSeed            } : {}),
+    ...(type === 'casino'  ? { casinoStats:    { ...CASINO_START_STATS } } : {}),
   };
 }
 
