@@ -2560,6 +2560,37 @@ body.theme-tidepool {
   color: var(--gold-dim); display: block; margin-bottom: 0.15rem;
 }
 
+/* ── Casino mission additions ── */
+.gm-cost { margin: 0.35rem 0 0.55rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.gm-cost-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--gold-dim);
+}
+.gm-cost-items { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; }
+.gm-cost-item {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; color: var(--gold-dim);
+}
+.gm-cost-item b { color: var(--parchment); font-weight: 600; }
+.gm-cost-note {
+  font-family: 'Crimson Pro', serif; font-style: italic; flex-basis: 100%;
+  font-size: 0.7rem; font-weight: normal; opacity: 0.8;
+}
+.gm-table-link { flex-direction: column; gap: 0.1rem; }
+.gm-table-newtab {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.68rem;
+  color: var(--gold-dim); display: block; margin-top: 0.15rem;
+}
+.gm-stake {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.06em;
+  color: var(--gold); padding: 0.2rem 0.5rem 0.2rem 1.6rem;
+}
+.gm-startby {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem;
+  color: oklch(72% 0.13 38); padding: 0.22rem 0.5rem 0.25rem 1.6rem; line-height: 1.35;
+}
+.gm-startby b { font-style: normal; font-family: 'Cinzel', serif; font-size: 0.66rem; color: oklch(78% 0.14 38); }
+.gm-startby.expired { color: oklch(60% 0.08 60); }
+
 /* ── Basic Training done section ── */
 .gm-bt-done-section { margin-top: 0.25rem; }
 .gm-bt-done-toggle {
