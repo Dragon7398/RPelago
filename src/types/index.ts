@@ -176,10 +176,11 @@ export interface GMParticipant {
   slots?:      AdvSlot[];
   statusNote?: AdvStatusNote;
   // casino-only fields
-  startBy?:   number;   // epoch ms — must start a casino round by this time or be stood down
-  played?:    boolean;  // true once the player has locked their casino hand (immutable)
-  goldSwing?: number;   // sum of committed card values; paid out at mission complete
-  casinoXp?:  number;   // XP earned from gambits; merged into mission.xp at deploy
+  startBy?:     number;   // epoch ms — must start a casino round by this time or be stood down
+  played?:      boolean;  // true once the player has locked their casino hand (immutable)
+  goldSwing?:   number;   // sum of committed card values; paid out at mission complete
+  casinoXp?:    number;   // XP earned from gambits; merged into mission.xp at deploy
+  gambitPlayed?: boolean;  // true once the player has played (or skipped) their gambit
 }
 
 export interface GMMission {

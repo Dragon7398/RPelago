@@ -5,6 +5,14 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getDatabase, ServerValue } from 'firebase-admin/database';
 import { defineSecret } from 'firebase-functions/params';
+import {
+  type DeckCard, type CasinoStats, type GambitDef,
+  CASINO_MIN_ENLIST_GOLD, CASINO_POT_SEED, CASINO_POT_CUT_PCT,
+  CASINO_START_STATS, CASINO_ANTE, CASINO_REROLL_COST,
+  GAMBIT_DEFS_BY_ID,
+  buildDeck, shuffle, makeDrawableDeck,
+  handStake, applyGambit, rollCasinoOdds, cardsToSlots,
+} from './casinoEngine';
 
 initializeApp();
 
@@ -544,7 +552,7 @@ export const pruneActivityLog = onValueCreated(
 
 // ── Mission types (mirrors src/types/index.ts) ────────────────────────────────
 
-type GMMissionType  = 'basic' | 'patrol';
+type GMMissionType  = 'basic' | 'patrol' | 'casino';
 type GMMissionState = 'forming' | 'inprogress' | 'complete';
 type TriState = 'on' | 'off' | 'special';
 type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
@@ -552,16 +560,26 @@ type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
 interface GMSlot {
   name:       string;
   game:       string;
+  details?:   string;
   status?:    SlotStatus;
   bonusXP?:   number;
   bonusGold?: number;
 }
 
 interface GMParticipant {
-  playerId:  string;
-  playerName: string;
-  joinedAt:  number;
-  slots?:    GMSlot[];
+  playerId:     string;
+  playerName:   string;
+  joinedAt:     number;
+  slots?:       GMSlot[];
+  statusNote?:  { text: string; timestamp: number };
+  // casino-only
+  startBy?:     number;     // deadline to start a casino round (epoch ms)
+  played?:      boolean;    // true once the seat is locked (immutable)
+  goldSwing?:   number;     // sum of committed card values
+  casinoXp?:   number;     // XP this seat contributed via gambits
+  gambitPlayed?: boolean;   // true once the gambit phase is resolved for this seat
+  deck?:        DeckCard[]; // server-held remaining draw deck (cleared at lock)
+  hand?:        DeckCard[]; // cards currently in the player's hand
 }
 
 interface GMMission {
@@ -583,6 +601,12 @@ interface GMMission {
   deployedAt?:  number;
   participants: Record<string, GMParticipant>;
   claimableSlots?: Record<string, GMSlot[]>;
+  // casino-only
+  variableReward?: boolean;
+  tableUrl?:       string;
+  entryCosts?:     { label: string; gold: number }[];
+  pot?:            number;
+  casinoStats?:    CasinoStats;
 }
 
 // ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
@@ -597,6 +621,11 @@ interface MissionDef {
   collect:     TriState;
   hint:        number;
   special:     boolean;
+  // casino-only
+  variableReward?: boolean;
+  tableUrl?:       string;
+  entryCosts?:     { label: string; gold: number }[];
+  potSeed?:        number;
 }
 
 const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
@@ -622,6 +651,25 @@ const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
     hint:    10,
     special: false,
   },
+  casino: {
+    label:   'A Night at the Casino',
+    baseMax: 6,
+    xp:      50,
+    gp:      0,
+    traits:  null,
+    release: 'special',
+    collect: 'special',
+    hint:    10,
+    special: false,
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts: [
+      { label: 'Poker ante',     gold: 40 },
+      { label: 'Blackjack ante', gold: 30 },
+      { label: 'Reroll',         gold: 20 },
+    ],
+    potSeed: CASINO_POT_SEED,
+  },
 };
 
 const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
@@ -639,9 +687,14 @@ function gmFilledCount(m: GMMission): number {
 }
 
 function gmShouldDeploy(m: GMMission, now: number): boolean {
-  return m.state === 'forming'
-    && gmFilledCount(m) > 0
-    && gmFilledCount(m) >= gmCurrentMaxSlots(m, now);
+  if (m.state !== 'forming') return false;
+  if (gmFilledCount(m) === 0) return false;
+  if (gmFilledCount(m) < gmCurrentMaxSlots(m, now)) return false;
+  if (m.type === 'casino') {
+    const parts = Object.values(m.participants ?? {});
+    if (!parts.every(p => p.played === true)) return false;
+  }
+  return true;
 }
 
 function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<GMMission, 'id'> {
@@ -649,19 +702,26 @@ function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<
   const result: Omit<GMMission, 'id'> = {
     type,
     series,
-    label:       def.label,
-    state:       'forming',
-    baseMax:     def.baseMax,
-    xp:          def.xp,
-    gp:          def.gp,
-    release:     def.release,
-    collect:     def.collect,
-    hint:        def.hint,
-    firstJoinAt: null,
-    createdAt:   now,
+    label:        def.label,
+    state:        'forming',
+    baseMax:      def.baseMax,
+    xp:           def.xp,
+    gp:           def.gp,
+    release:      def.release,
+    collect:      def.collect,
+    hint:         def.hint,
+    firstJoinAt:  null,
+    createdAt:    now,
     participants: {},
   };
   if (def.traits) result.traits = { ...def.traits };
+  if (type === 'casino') {
+    result.variableReward = true;
+    result.tableUrl       = def.tableUrl;
+    result.entryCosts     = def.entryCosts ? [...def.entryCosts] : [];
+    result.pot            = CASINO_POT_SEED;
+    result.casinoStats    = { ...CASINO_START_STATS };
+  }
   return result;
 }
 
@@ -686,6 +746,19 @@ async function deployMission(missionId: string, m: GMMission, now: number): Prom
     [`game/missions/${missionId}/deployedAt`]: now,
     [`game/missions/${newId}`]:                { ...fresh, id: newId },
   };
+
+  // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
+  // and clear per-seat deck data (no longer needed once deployed).
+  if (m.type === 'casino' && m.casinoStats) {
+    const { releaseOn, collectOn } = rollCasinoOdds(m.casinoStats);
+    updates[`game/missions/${missionId}/release`] = releaseOn ? 'on' : 'off';
+    updates[`game/missions/${missionId}/collect`] = collectOn ? 'on' : 'off';
+    updates[`game/missions/${missionId}/hint`]    = m.casinoStats.hint;
+    updates[`game/missions/${missionId}/xp`]      = m.casinoStats.xp;
+    for (const uid of Object.keys(m.participants ?? {})) {
+      updates[`game/missions/${missionId}/participants/${uid}/deck`] = null;
+    }
+  }
 
   // Notify each enrolled participant via push-keyed notification
   for (const uid of Object.keys(m.participants ?? {})) {
@@ -727,7 +800,7 @@ export const enlistInMission = onCall(async (request) => {
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
 
-  const player  = playerSnap.val() as { displayName: string; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const player  = playerSnap.val() as { displayName: string; gold: number; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
   const mission = missionSnap.val() as GMMission;
 
   if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
@@ -737,11 +810,14 @@ export const enlistInMission = onCall(async (request) => {
     throw new HttpsError('failed-precondition', 'basic-training-used');
   if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
     throw new HttpsError('failed-precondition', 'Mission is full.');
+  if (mission.type === 'casino' && (player.gold ?? 0) < CASINO_MIN_ENLIST_GOLD)
+    throw new HttpsError('failed-precondition', 'not-enough-gold');
 
   const participant: GMParticipant = {
     playerId:   uid,
     playerName: player.displayName,
     joinedAt:   now,
+    ...(mission.type === 'casino' ? { startBy: now + 3_600_000 } : {}),
   };
 
   const updates: Record<string, unknown> = {
@@ -870,6 +946,261 @@ export const claimMissionSlot = onCall(async (request) => {
   });
 
   return { success: true };
+});
+
+// ── Casino callables ──────────────────────────────────────────────────────────
+
+// Shared guard: reads and validates that the caller is seated and hasn't locked yet.
+async function mustCasinoSeat(
+  db: ReturnType<typeof getDatabase>,
+  missionId: string,
+  uid: string,
+): Promise<{ mission: GMMission; seat: GMParticipant }> {
+  const snap = await db.ref(`game/missions/${missionId}`).get();
+  if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = snap.val() as GMMission;
+  if (mission.type !== 'casino') throw new HttpsError('failed-precondition', 'Not a casino mission.');
+  if (mission.state !== 'forming') throw new HttpsError('failed-precondition', 'Casino is no longer forming.');
+  const seat = mission.participants?.[uid];
+  if (!seat) throw new HttpsError('permission-denied', 'Not seated at this table.');
+  if (seat.played) throw new HttpsError('failed-precondition', 'You have already locked your result.');
+  return { mission, seat };
+}
+
+// Deal a fresh hand. Debits the ante from the player's gold, routes 40% to the pot,
+// deals 5 cards (poker) or 2 cards (blackjack) from a freshly shuffled deck.
+// Clears startBy — the player has started within their hour window.
+export const dealCasinoHand = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, game } = request.data as { missionId?: string; game?: 'poker' | 'blackjack' };
+  if (!missionId || !game) throw new HttpsError('invalid-argument', 'Missing missionId or game.');
+  if (game !== 'poker' && game !== 'blackjack') throw new HttpsError('invalid-argument', 'Invalid game.');
+
+  const db = getDatabase();
+  const { seat } = await mustCasinoSeat(db, missionId, uid);
+
+  // Prevent re-dealing if a hand is already in progress (they must fold first).
+  if (seat.hand && seat.hand.length > 0)
+    throw new HttpsError('failed-precondition', 'A hand is already in progress. Fold first to redeal.');
+
+  const ante    = CASINO_ANTE[game];
+  const potCut  = Math.floor(ante * CASINO_POT_CUT_PCT);
+  const drawCount = game === 'poker' ? 5 : 2;
+
+  // Debit ante atomically; abort if player can't afford it.
+  let abortReason = 'Gold deduction failed.';
+  const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
+    (current: number | null) => {
+      if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
+      if (current < ante) { abortReason = 'Not enough gold for the ante.'; return undefined; }
+      return current - ante;
+    },
+  );
+  if (!committed) throw new HttpsError('failed-precondition', abortReason);
+
+  // Build deck, deal initial hand.
+  const deckArr  = shuffle(buildDeck());
+  const drawable = makeDrawableDeck(deckArr);
+  const hand     = drawable.draw(drawCount);
+  const remaining = drawable.toArray();
+
+  await db.ref().update({
+    [`game/missions/${missionId}/participants/${uid}/hand`]:    hand,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:    remaining,
+    [`game/missions/${missionId}/participants/${uid}/startBy`]: null,
+    [`game/missions/${missionId}/pot`]: ServerValue.increment(potCut),
+  });
+
+  return { hand, deckRemaining: remaining.length, potAdd: potCut };
+});
+
+// Draw action: 'reroll' (poker, replaces rejected cards) or 'hit' (blackjack, draws one more).
+// Reroll deducts the reroll cost and routes 40% to the pot.
+export const casinoDraw = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, action, rejectUids } = request.data as {
+    missionId?: string;
+    action?: 'reroll' | 'hit';
+    rejectUids?: number[];
+  };
+  if (!missionId || !action) throw new HttpsError('invalid-argument', 'Missing parameters.');
+
+  const db = getDatabase();
+  const { seat } = await mustCasinoSeat(db, missionId, uid);
+
+  const hand = seat.hand ?? [];
+  const deck = seat.deck ?? [];
+  if (hand.length === 0) throw new HttpsError('failed-precondition', 'No hand in progress.');
+
+  if (action === 'reroll') {
+    if (!rejectUids || rejectUids.length === 0)
+      throw new HttpsError('invalid-argument', 'No cards selected to reroll.');
+    if (deck.length < rejectUids.length)
+      throw new HttpsError('failed-precondition', 'Not enough cards left in the deck to reroll.');
+
+    const potCut = Math.floor(CASINO_REROLL_COST * CASINO_POT_CUT_PCT);
+    let abortReason = 'Gold deduction failed.';
+    const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
+      (current: number | null) => {
+        if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
+        if (current < CASINO_REROLL_COST) { abortReason = 'Not enough gold to reroll.'; return undefined; }
+        return current - CASINO_REROLL_COST;
+      },
+    );
+    if (!committed) throw new HttpsError('failed-precondition', abortReason);
+
+    const rejectSet = new Set(rejectUids);
+    const drawable  = makeDrawableDeck(deck);
+    const fresh     = drawable.draw(rejectUids.length);
+    let fi = 0;
+    const newHand = hand.map((card: DeckCard) => rejectSet.has(card.uid) ? fresh[fi++] : card);
+
+    await db.ref().update({
+      [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
+      [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
+      [`game/missions/${missionId}/pot`]: ServerValue.increment(potCut),
+    });
+    return { hand: newHand, deckRemaining: drawable.remaining() };
+  }
+
+  if (action === 'hit') {
+    if (hand.length >= 6) throw new HttpsError('failed-precondition', 'Maximum 6 cards reached.');
+    if (deck.length === 0) throw new HttpsError('failed-precondition', 'Deck is empty.');
+    const drawable = makeDrawableDeck(deck);
+    const card     = drawable.drawOne();
+    const newHand  = [...hand, card];
+    await db.ref().update({
+      [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
+      [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
+    });
+    return { hand: newHand, deckRemaining: drawable.remaining() };
+  }
+
+  throw new HttpsError('invalid-argument', 'Unknown action.');
+});
+
+// Fold the current hand. Clears hand and deck, resets the 1-hour startBy clock.
+// The ante already paid is not refunded (40% went to the pot, the rest is the house take).
+export const casinoFold = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId } = request.data as { missionId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db  = getDatabase();
+  const now = Date.now();
+  await mustCasinoSeat(db, missionId, uid);
+
+  await db.ref().update({
+    [`game/missions/${missionId}/participants/${uid}/hand`]:    null,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:    null,
+    [`game/missions/${missionId}/participants/${uid}/startBy`]: now + 3_600_000,
+  });
+  return { startBy: now + 3_600_000 };
+});
+
+// Play a gambit. Validates the defId, applies it to the shared mission.casinoStats,
+// deducts any gold cost from the player, adds to the pot. One gambit per seat.
+export const playCasinoGambit = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, gambitDefId } = request.data as { missionId?: string; gambitDefId?: string | null };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { mission, seat } = await mustCasinoSeat(db, missionId, uid);
+
+  if (seat.gambitPlayed) throw new HttpsError('failed-precondition', 'Gambit phase already resolved.');
+  if (!seat.hand || seat.hand.length === 0) throw new HttpsError('failed-precondition', 'No committed hand.');
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/participants/${uid}/gambitPlayed`]: true,
+  };
+
+  if (gambitDefId) {
+    const gambitDef = GAMBIT_DEFS_BY_ID[gambitDefId] as GambitDef | undefined;
+    if (!gambitDef) throw new HttpsError('invalid-argument', 'Unknown gambit.');
+
+    const currentStats: CasinoStats = mission.casinoStats ?? { ...CASINO_START_STATS };
+    const result = applyGambit(currentStats, gambitDef);
+
+    if (gambitDef.goldCost > 0) {
+      let abortReason = 'Gold deduction failed.';
+      const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
+        (current: number | null) => {
+          if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
+          if (current < gambitDef.goldCost) { abortReason = 'Not enough gold for this gambit.'; return undefined; }
+          return current - gambitDef.goldCost;
+        },
+      );
+      if (!committed) throw new HttpsError('failed-precondition', abortReason);
+    }
+
+    updates[`game/missions/${missionId}/casinoStats`] = result.stats;
+    if (result.potAdd > 0) {
+      updates[`game/missions/${missionId}/pot`] = ServerValue.increment(result.potAdd);
+    }
+    if (gambitDef.xp > 0) {
+      updates[`game/missions/${missionId}/participants/${uid}/casinoXp`] =
+        ServerValue.increment(gambitDef.xp);
+    }
+  }
+
+  await db.ref().update(updates);
+  return { ok: true };
+});
+
+// Lock in the player's result. Computes goldSwing from the committed hand, writes
+// AdvSlots to the participant, marks the seat as played (immutable).
+// If this is the last seat needed, triggers the deploy gate check.
+export const lockCasinoResult = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, discardUid } = request.data as {
+    missionId?: string;
+    discardUid?: number | null;  // optional blackjack 6-card discard
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db  = getDatabase();
+  const now = Date.now();
+  const { seat } = await mustCasinoSeat(db, missionId, uid);
+
+  if (!seat.gambitPlayed)
+    throw new HttpsError('failed-precondition', 'Resolve the gambit phase before locking.');
+
+  let hand = seat.hand ?? [];
+  if (hand.length === 0) throw new HttpsError('failed-precondition', 'No hand to lock.');
+  if (hand.length > 5 && discardUid == null)
+    throw new HttpsError('failed-precondition', 'A 6-card hand requires one discard before locking.');
+  if (discardUid != null) {
+    hand = hand.filter((c: DeckCard) => c.uid !== discardUid);
+    if (hand.length === seat.hand!.length)
+      throw new HttpsError('invalid-argument', 'discardUid not found in hand.');
+  }
+
+  const goldSwing = handStake(hand);
+  const slots     = cardsToSlots(hand);
+
+  const updates: Record<string, unknown> = {
+    [`game/missions/${missionId}/participants/${uid}/played`]:    true,
+    [`game/missions/${missionId}/participants/${uid}/goldSwing`]: goldSwing,
+    [`game/missions/${missionId}/participants/${uid}/slots`]:     slots,
+    [`game/missions/${missionId}/participants/${uid}/hand`]:      null,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:      null,
+  };
+  await db.ref().update(updates);
+
+  // Re-read mission to check deploy gate.
+  const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
+  const updated = updatedSnap.val() as GMMission;
+  if (gmShouldDeploy(updated, now)) {
+    await deployMission(missionId, updated, now);
+  }
+
+  return { goldSwing, slots };
 });
 
 // ── Admin callables ───────────────────────────────────────────────────────────
@@ -1032,6 +1363,31 @@ export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () =
   const snap    = await db.ref('game/missions').get();
   if (!snap.exists()) return;
   const missions = snap.val() as Record<string, GMMission>;
+
+  // Casino pass: auto-stand-down any seated player whose startBy deadline has expired.
+  // This runs before the deploy pass so freed seats are visible to shouldDeploy.
+  const standDownUpdates: Record<string, unknown> = {};
+  for (const [id, m] of Object.entries(missions)) {
+    if (m.type !== 'casino' || m.state !== 'forming') continue;
+    let anyRemoved = false;
+    for (const [uid, p] of Object.entries(m.participants ?? {})) {
+      if (p.startBy && now > p.startBy && !p.played) {
+        standDownUpdates[`game/missions/${id}/participants/${uid}`] = null;
+        standDownUpdates[`game/players/${uid}/activeMission`]      = null;
+        delete m.participants[uid];
+        anyRemoved = true;
+      }
+    }
+    if (anyRemoved && Object.keys(m.participants ?? {}).length === 0) {
+      standDownUpdates[`game/missions/${id}/firstJoinAt`] = null;
+      m.firstJoinAt = null;
+    }
+  }
+  if (Object.keys(standDownUpdates).length > 0) {
+    await db.ref().update(standDownUpdates);
+  }
+
+  // Deploy pass: check all mission types.
   for (const [id, m] of Object.entries(missions)) {
     if (gmShouldDeploy(m, now)) {
       await deployMission(id, m, now);

@@ -813,6 +813,22 @@ export async function completeMission(
   const label    = missionDisplayLabel(mission);
   const updates: Record<string, unknown> = {};
 
+  // For casino missions, pre-compute each played player's pot share.
+  // Gold comes from goldSwing (card values) + equal pot split; no feat multiplier on gambling winnings.
+  const casinoPotShares = new Map<string, number>();
+  if (mission.type === 'casino') {
+    const playedEntries = Object.entries(mission.participants ?? {})
+      .filter(([, p]) => p.played);
+    const pot   = (mission as unknown as { pot?: number }).pot ?? 0;
+    const count = playedEntries.length;
+    const base  = count > 0 ? Math.floor(pot / count) : 0;
+    const rem   = count > 0 ? pot - base * count : pot;
+    const remIdx = count > 0 ? Math.floor(Math.random() * count) : -1;
+    playedEntries.forEach(([pid], i) => {
+      casinoPotShares.set(pid, base + (i === remIdx ? rem : 0));
+    });
+  }
+
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
     const player = players[pid];
     if (!player) continue;
@@ -826,11 +842,22 @@ export async function completeMission(
     const xpMultiplier   = 1 + otherMentors    * 0.05 + (isMentor    ? otherIds.length * 0.01 : 0);
     const goldMultiplier = 1 + otherTreasurers * 0.10 + (isTreasurer ? otherIds.length * 0.03 : 0);
 
-    let earnedXP   = Math.round(mission.xp * xpMultiplier);
-    let earnedGold = Math.round(mission.gp * goldMultiplier);
-    for (const slot of participant.slots ?? []) {
-      earnedXP   += slot.bonusXP   ?? 0;
-      earnedGold += slot.bonusGold ?? 0;
+    let earnedXP: number;
+    let earnedGold: number;
+
+    if (mission.type === 'casino') {
+      // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
+      earnedXP = Math.round(mission.xp * xpMultiplier);
+      // Gold: gambling winnings (goldSwing + pot share); no feat multiplier on gambling.
+      const goldSwing = (participant as unknown as { goldSwing?: number }).goldSwing ?? 0;
+      earnedGold = goldSwing + (casinoPotShares.get(pid) ?? 0);
+    } else {
+      earnedXP   = Math.round(mission.xp * xpMultiplier);
+      earnedGold = Math.round(mission.gp * goldMultiplier);
+      for (const slot of participant.slots ?? []) {
+        earnedXP   += slot.bonusXP   ?? 0;
+        earnedGold += slot.bonusGold ?? 0;
+      }
     }
 
     const prevLevel     = calcLevel(player.xp);
