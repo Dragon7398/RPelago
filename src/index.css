@@ -1592,6 +1592,12 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   transition: filter 0.15s; color: inherit;
 }
 .dash-tile-link:hover { filter: brightness(1.4); }
+.dash-mission-type-pill {
+  font-family: 'Cinzel', serif; font-size: 0.46rem; letter-spacing: 0.14em;
+  padding: 0.1rem 0.4rem; border-radius: 2px; flex-shrink: 0;
+  color: oklch(72% 0.13 80); border: 1px solid oklch(48% 0.10 80);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 80);
+}
 .dash-tile-players {
   display: flex; flex-wrap: wrap; gap: 0.3rem;
 }
