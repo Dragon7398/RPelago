@@ -526,12 +526,12 @@ export function CasinoTable() {
               </div>
               <div className="cz-gambit-offer">
                 {gOffer.map(card => {
-                  const selected = gPick === card.uid;
+                  const selected = gPick === card.defId;
                   return (
                     <div
                       key={card.uid}
                       className={`cz-gambit-pick${selected ? ' selected' : ''}`}
-                      onClick={() => !busy && setGPick(sel => sel === card.uid ? null : card.uid)}
+                      onClick={() => !busy && setGPick(sel => sel === card.defId ? null : card.defId)}
                     >
                       <GambitCardFace card={card} width={GAMB_W} />
                       <div className="cz-card-cap">{selected ? 'selected' : 'tap to choose'}</div>
