@@ -46,6 +46,7 @@ function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: num
   if (p.played) return 'locked' as const;
   if (isMe) return 'playing' as const;
   if (p.startBy && now > p.startBy - 900_000) return 'deadline' as const; // warn in last 15 min
+  if (p.gameType) return 'playing' as const;
   return 'waiting' as const;
 }
 
