@@ -12,6 +12,10 @@ npm run preview   # Preview production build
 npx tsc --noEmit  # Type-check only (no emit)
 ```
 
+The build is a **multi-page Vite app** with two HTML entry points (configured in `vite.config.ts`):
+- `index.html` → main game app (`src/main.tsx`)
+- `casino/table.html` → casino table mini-app (`src/casino/main.tsx`, served at `/casino/table.html`)
+
 Firebase Cloud Functions are in `functions/` and deploy separately via `firebase deploy --only functions`.
 
 ## Environment
@@ -216,6 +220,24 @@ Real-time event feed stored in `game/activityLog` in Firebase, automatically pru
 
 All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrades gracefully if `.env` is missing (`firebaseReady` guard in `config.ts`).
 
+### Casino subsystem
+
+A separate mini-app (`casino/table.html`) where players select their Guildmaster Mission game slots by playing card games. It is a standalone Vite entry point that shares Firebase auth and the same RTDB mission state but has its own CSS theming (`themes.css`, `cards.css`, `play.css`).
+
+**Phase flow**: `loading → choose → poker|blackjack → gambit → locked → deployed`
+
+Two card games are offered:
+- **Poker** — player commits cards; reward = sum of committed card values (no combo multiplier).
+- **Blackjack** — player draws until 6 cards, must drop one to lock; reward = sum of remaining card values.
+
+After locking a hand, the player is dealt **gambit cards** that shift shared `casinoStats` (release %, collect %, hint cost) for the entire mission cohort. Bonus gambits cost gold; penalty gambits add XP and pot to the mission.
+
+Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSlots.ts`): each card becomes a slot with blank `name`/`game` and the card's genre + gold value stamped into `details` (format: `"Genre · Ng"`). Players fill in the real game info later via the normal slot-editing flow.
+
+The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
+
+`CASINO_START_STATS`, `CASINO_ANTE`, and `CASINO_REROLL_COST` are defined in `constants.ts`.
+
 ### File map
 
 | Path | Role |
@@ -250,3 +272,13 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 | `src/components/admin/playersPage/` | PlayerCard sub-component |
 | `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |
 | `database.rules.json` | Firebase security rules |
+| `src/lib/casinoData.ts` | Deck definition, card types, `buildDeck`, `shuffle` |
+| `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
+| `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
+| `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
+| `src/casino/CasinoTable.tsx` | Casino table root component; owns phase state machine and Firebase subscription |
+| `src/casino/CardFace.tsx` | Single playing card render |
+| `src/casino/GambitCardFace.tsx` | Gambit card render |
+| `src/casino/TableComponents.tsx` | PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow |
+| `src/casino/MissionBar.tsx` | Mission slot display strip shown below the table |
+| `casino/table.html` | Casino table HTML entry point |

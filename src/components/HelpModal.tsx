@@ -10,6 +10,7 @@ import SectionOrbs        from './help/SectionOrbs';
 import SectionBoss        from './help/SectionBoss';
 import SectionShop        from './help/SectionShop';
 import SectionMissions    from './help/SectionMissions';
+import SectionCasino     from './help/SectionCasino';
 import './HelpModal.css';
 
 interface Props {
@@ -17,7 +18,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Section = 'overview' | 'map' | 'adventurers' | 'challenges' | 'yaml' | 'feats' | 'traits' | 'orbs' | 'boss' | 'shop' | 'missions';
+type Section = 'overview' | 'map' | 'adventurers' | 'challenges' | 'yaml' | 'feats' | 'traits' | 'orbs' | 'boss' | 'shop' | 'missions' | 'casino';
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'overview',    label: 'What is RPelago?', icon: '⚔' },
@@ -31,6 +32,7 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'boss',        label: 'The Boss',          icon: '🐉' },
   { id: 'shop',        label: 'The Shop',          icon: '🏰' },
   { id: 'missions',    label: 'GM Missions',       icon: '⚜' },
+  { id: 'casino',     label: 'Casino',            icon: '🂡' },
 ];
 
 export default function HelpModal({ open, onClose }: Props) {
@@ -72,6 +74,7 @@ export default function HelpModal({ open, onClose }: Props) {
             {section === 'boss'        && <SectionBoss />}
             {section === 'shop'        && <SectionShop />}
             {section === 'missions'    && <SectionMissions />}
+            {section === 'casino'     && <SectionCasino />}
           </div>
         </div>
       </div>

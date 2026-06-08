@@ -42,6 +42,14 @@ export default function SectionMissions() {
             work. New cohorts keep forming, so there's always one available.
           </div>
         </div>
+        <div className="help-tile-row">
+          <span className="help-tile-icon">🛡️</span>
+          <div>
+            <strong>Casino</strong> — <em>Repeatable.</em>{' '}
+            Special missions with a card game minigame to determine your slots and reward. See the{' '}
+            <a href="#casino" className="help-link">Casino Missions</a> section below for details.
+          </div>
+        </div>
       </div>
 
       <h4>Cohorts & Slot Decay</h4>
@@ -63,7 +71,7 @@ export default function SectionMissions() {
       <h4>Enlisting & Standing Down</h4>
       <ol className="help-list">
         <li>
-          Click <strong>TAKE BASIC TRAINING</strong> or <strong>TAKE PATROL</strong> on the
+          Click the<strong>TAKE</strong> button with your mission's name on the
           card. You're now enlisted — the banner at the top of the panel shows your active mission.
         </li>
         <li>
