@@ -573,13 +573,15 @@ interface GMParticipant {
   slots?:       GMSlot[];
   statusNote?:  { text: string; timestamp: number };
   // casino-only
-  startBy?:     number;     // deadline to start a casino round (epoch ms)
-  played?:      boolean;    // true once the seat is locked (immutable)
-  goldSwing?:   number;     // sum of committed card values
-  casinoXp?:   number;     // XP this seat contributed via gambits
-  gambitPlayed?: boolean;   // true once the gambit phase is resolved for this seat
-  deck?:        DeckCard[]; // server-held remaining draw deck (cleared at lock)
-  hand?:        DeckCard[]; // cards currently in the player's hand
+  startBy?:     number;                    // deadline to start a casino round (epoch ms)
+  played?:      boolean;                   // true once the seat is locked (immutable)
+  goldSwing?:   number;                    // sum of committed card values
+  casinoXp?:   number;                    // XP this seat contributed via gambits
+  gambitPlayed?: boolean;                  // true once the gambit phase is resolved for this seat
+  gameType?:    'poker' | 'blackjack';     // which game was chosen (for session recovery)
+  rerolled?:    boolean;                   // true once the poker reroll has been used
+  deck?:        DeckCard[];               // server-held remaining draw deck (cleared at lock)
+  hand?:        DeckCard[];               // cards currently in the player's hand
 }
 
 interface GMMission {
@@ -988,13 +990,28 @@ export const dealCasinoHand = onCall(async (request) => {
   const potCut  = Math.floor(ante * CASINO_POT_CUT_PCT);
   const drawCount = game === 'poker' ? 5 : 2;
 
-  // Debit ante atomically; abort if player can't afford it.
+  // Pre-read the player record to catch a genuinely missing record early.
+  // The Admin SDK transaction callback always receives null on its first
+  // invocation for any path (regardless of whether data exists), because the
+  // SDK assumes no local state and doesn't share the get() cache with the
+  // transaction mechanism. Using the pre-read value as a fallback (`?? snap`)
+  // lets the transaction return a non-undefined value on that first null call,
+  // which causes Firebase to attempt a conditional write. When the server has
+  // real data (current ≠ null on the server), the conditional write fails and
+  // Firebase retries the callback with the actual data — so the final commit
+  // always uses the live server value.
+  const playerSnap = await db.ref(`game/players/${uid}`).get();
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  const snapData = playerSnap.val() as { gold?: number; disabled?: boolean };
+
   let abortReason = 'Gold deduction failed.';
-  const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
-    (current: number | null) => {
-      if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
-      if (current < ante) { abortReason = 'Not enough gold for the ante.'; return undefined; }
-      return current - ante;
+  const { committed } = await db.ref(`game/players/${uid}`).transaction(
+    (current: { gold?: number; disabled?: boolean } | null) => {
+      const data = current ?? snapData;
+      if (data.disabled) { abortReason = 'Account restricted.'; return undefined; }
+      const gold = data.gold ?? 0;
+      if (gold < ante) { abortReason = 'Not enough gold for the ante.'; return undefined; }
+      return { ...data, gold: gold - ante };
     },
   );
   if (!committed) throw new HttpsError('failed-precondition', abortReason);
@@ -1006,9 +1023,11 @@ export const dealCasinoHand = onCall(async (request) => {
   const remaining = drawable.toArray();
 
   await db.ref().update({
-    [`game/missions/${missionId}/participants/${uid}/hand`]:    hand,
-    [`game/missions/${missionId}/participants/${uid}/deck`]:    remaining,
-    [`game/missions/${missionId}/participants/${uid}/startBy`]: null,
+    [`game/missions/${missionId}/participants/${uid}/hand`]:     hand,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:     remaining,
+    [`game/missions/${missionId}/participants/${uid}/startBy`]:  null,
+    [`game/missions/${missionId}/participants/${uid}/gameType`]: game,
+    [`game/missions/${missionId}/participants/${uid}/rerolled`]: null,  // clear from any previous session
     [`game/missions/${missionId}/pot`]: ServerValue.increment(potCut),
   });
 
@@ -1037,16 +1056,22 @@ export const casinoDraw = onCall(async (request) => {
   if (action === 'reroll') {
     if (!rejectUids || rejectUids.length === 0)
       throw new HttpsError('invalid-argument', 'No cards selected to reroll.');
+    if (seat.rerolled)
+      throw new HttpsError('failed-precondition', 'You may only reroll once per hand.');
     if (deck.length < rejectUids.length)
       throw new HttpsError('failed-precondition', 'Not enough cards left in the deck to reroll.');
 
     const potCut = Math.floor(CASINO_REROLL_COST * CASINO_POT_CUT_PCT);
+    const rerollSnap = await db.ref(`game/players/${uid}`).get();
+    if (!rerollSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+    const rerollSnapData = rerollSnap.val() as { gold?: number };
     let abortReason = 'Gold deduction failed.';
-    const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
-      (current: number | null) => {
-        if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
-        if (current < CASINO_REROLL_COST) { abortReason = 'Not enough gold to reroll.'; return undefined; }
-        return current - CASINO_REROLL_COST;
+    const { committed } = await db.ref(`game/players/${uid}`).transaction(
+      (current: { gold?: number } | null) => {
+        const data = current ?? rerollSnapData;
+        const gold = data.gold ?? 0;
+        if (gold < CASINO_REROLL_COST) { abortReason = 'Not enough gold to reroll.'; return undefined; }
+        return { ...data, gold: gold - CASINO_REROLL_COST };
       },
     );
     if (!committed) throw new HttpsError('failed-precondition', abortReason);
@@ -1058,8 +1083,9 @@ export const casinoDraw = onCall(async (request) => {
     const newHand = hand.map((card: DeckCard) => rejectSet.has(card.uid) ? fresh[fi++] : card);
 
     await db.ref().update({
-      [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
-      [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
+      [`game/missions/${missionId}/participants/${uid}/hand`]:     newHand,
+      [`game/missions/${missionId}/participants/${uid}/deck`]:     drawable.toArray(),
+      [`game/missions/${missionId}/participants/${uid}/rerolled`]: true,
       [`game/missions/${missionId}/pot`]: ServerValue.increment(potCut),
     });
     return { hand: newHand, deckRemaining: drawable.remaining() };
@@ -1094,9 +1120,11 @@ export const casinoFold = onCall(async (request) => {
   await mustCasinoSeat(db, missionId, uid);
 
   await db.ref().update({
-    [`game/missions/${missionId}/participants/${uid}/hand`]:    null,
-    [`game/missions/${missionId}/participants/${uid}/deck`]:    null,
-    [`game/missions/${missionId}/participants/${uid}/startBy`]: now + 3_600_000,
+    [`game/missions/${missionId}/participants/${uid}/hand`]:     null,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:     null,
+    [`game/missions/${missionId}/participants/${uid}/gameType`]: null,
+    [`game/missions/${missionId}/participants/${uid}/rerolled`]: null,
+    [`game/missions/${missionId}/participants/${uid}/startBy`]:  now + 3_600_000,
   });
   return { startBy: now + 3_600_000 };
 });
@@ -1127,12 +1155,16 @@ export const playCasinoGambit = onCall(async (request) => {
     const result = applyGambit(currentStats, gambitDef);
 
     if (gambitDef.goldCost > 0) {
+      const gambitSnap = await db.ref(`game/players/${uid}`).get();
+      if (!gambitSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+      const gambitSnapData = gambitSnap.val() as { gold?: number };
       let abortReason = 'Gold deduction failed.';
-      const { committed } = await db.ref(`game/players/${uid}/gold`).transaction(
-        (current: number | null) => {
-          if (typeof current !== 'number') { abortReason = 'Player gold not found.'; return undefined; }
-          if (current < gambitDef.goldCost) { abortReason = 'Not enough gold for this gambit.'; return undefined; }
-          return current - gambitDef.goldCost;
+      const { committed } = await db.ref(`game/players/${uid}`).transaction(
+        (current: { gold?: number } | null) => {
+          const data = current ?? gambitSnapData;
+          const gold = data.gold ?? 0;
+          if (gold < gambitDef.goldCost) { abortReason = 'Not enough gold for this gambit.'; return undefined; }
+          return { ...data, gold: gold - gambitDef.goldCost };
         },
       );
       if (!committed) throw new HttpsError('failed-precondition', abortReason);

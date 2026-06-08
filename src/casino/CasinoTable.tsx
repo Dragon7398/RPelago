@@ -117,10 +117,14 @@ export function CasinoTable() {
     });
   }, [db, missionId]);
 
-  // Derive phase from Firebase state (only when not in an active local game phase)
+  // Extended seat type — includes server-side fields readable by the seat owner.
+  type Seat = GMParticipant & { hand?: DeckCard[]; gameType?: Game; rerolled?: boolean };
+
+  // Derive phase from Firebase state (only when not in an active local game phase).
+  // Also handles session recovery when the player reloads mid-hand.
   useEffect(() => {
     if (!uid || !mission) return;
-    const seat = mission.participants?.[uid] as (GMParticipant & { hand?: DeckCard[] }) | undefined;
+    const seat = mission.participants?.[uid] as Seat | undefined;
 
     if (mission.state === 'inprogress' || mission.state === 'complete') {
       setPhase('deployed');
@@ -130,8 +134,27 @@ export function CasinoTable() {
       setPhase('locked');
       return;
     }
-    // Don't override active local phases
+    // Don't override active local phases already set by user interaction.
     if (['poker', 'blackjack', 'folded', 'gambit'].includes(phase)) return;
+
+    // Session recovery: gambit already resolved but not locked — skip straight to lock.
+    if (seat?.gambitPlayed && !seat.played && seat.hand?.length) {
+      setHand(seat.hand);
+      setGameType(seat.gameType ?? null);
+      setGOffer([]);  // empty = gambit already done, lock button goes directly to lockCasinoResult
+      setPhase('gambit');
+      return;
+    }
+
+    // Session recovery: hand in progress (poker/blackjack) after page reload.
+    if (seat?.hand?.length && seat.gameType && !seat.gambitPlayed) {
+      setHand(seat.hand);
+      setGameType(seat.gameType);
+      setPRedrawn(seat.rerolled ?? false);
+      setPhase(seat.gameType);
+      return;
+    }
+
     setPhase('choose');
   }, [uid, mission]); // intentionally omit `phase` to avoid loop
 
@@ -234,12 +257,16 @@ export function CasinoTable() {
   async function doLock() {
     setBusy(true);
     try {
-      // 1. Resolve gambit (or skip)
-      await call<object, unknown>('playCasinoGambit')({
-        missionId,
-        gambitDefId: gPick ?? null,
-      });
-      // 2. Lock result
+      // Skip the gambit callable if it was already resolved before a page reload.
+      const seatGambitPlayed =
+        uid ? (mission?.participants?.[uid] as { gambitPlayed?: boolean } | undefined)?.gambitPlayed === true : false;
+
+      if (!seatGambitPlayed) {
+        await call<object, unknown>('playCasinoGambit')({
+          missionId,
+          gambitDefId: gPick ?? null,
+        });
+      }
       await call<object, { goldSwing: number }>('lockCasinoResult')({
         missionId,
         discardUid: gameType === 'blackjack' ? bDiscardUid : null,

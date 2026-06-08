@@ -110,6 +110,30 @@
               // Mirrors the tile claimableSlots pattern.
               ".write": "auth != null && !newData.exists() && data.exists()"
             }
+          },
+
+          "participants": {
+            "$participantId": {
+              // Casino game state written exclusively by Cloud Functions (admin SDK bypasses rules).
+              // Client-side protections below are an extra safety net.
+
+              "deck": {
+                // The server-held draw deck must never be exposed to any browser client —
+                // seeing the remaining cards would let a player engineer their hand.
+                // Cloud Functions read/write this via the admin SDK (bypasses all rules).
+                ".read":  false,
+                ".write": false
+              },
+
+              "hand": {
+                // The player's current hand is readable only by that player's own session
+                // so the table UI can recover after a page reload.  Other players (and
+                // the admin client) cannot read an active hand in progress.
+                // Writes go exclusively through Cloud Functions.
+                ".read":  "auth != null && auth.uid === $participantId",
+                ".write": false
+              }
+            }
           }
         }
       },

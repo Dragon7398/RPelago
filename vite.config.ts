@@ -8,7 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main:        resolve(__dirname, 'index.html'),
-        casinoTable: resolve(__dirname, 'casino-table.html'),
+        casinoTable: resolve(__dirname, 'casino/table.html'),
       },
     },
   },

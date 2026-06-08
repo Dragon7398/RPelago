@@ -406,11 +406,12 @@ function TakeMissionButton({
     );
   }
   if (!card.takeable) {
+    const label = card.status === 'inprogress' ? 'COHORT DEPLOYED'
+      : card.insufficientGold ? 'NOT ENOUGH GOLD'
+      : 'UNAVAILABLE';
     return (
       <span className="gm-tip" data-tip={card.disabledReason ?? undefined} style={{ display: 'block' }}>
-        <button className="gm-take-btn disabled" disabled>
-          {card.status === 'inprogress' ? 'COHORT DEPLOYED' : 'UNAVAILABLE'}
-        </button>
+        <button className="gm-take-btn disabled" disabled>{label}</button>
       </span>
     );
   }
@@ -593,7 +594,7 @@ export default function GuildmasterMissions() {
 
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
-    .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now))
+    .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now, player?.gold))
     .sort((a, b) => {
       const ga = sortGroup(a), gb = sortGroup(b);
       if (ga !== gb) return ga - gb;

@@ -1,24 +1,25 @@
 import type { GMMission, GMMissionType, GMParticipant, AdvSlot } from '../types';
-import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
+import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, CASINO_ANTE, toRoman } from './constants';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
 
 export interface GMMissionCard {
-  key:          string;
-  mission:      GMMission;
-  def:          typeof MISSION_DEFS[string];
-  status:       GMMissionStatus;
-  maxSlots:     number;
-  filled:       number;
-  decaySteps:   number;
-  decayPct:     number;
-  liveSec:      number;
-  youIn:        boolean;
-  seriesLabel:  string;
-  takeable:     boolean;
-  disabledReason: string | null;
-  doneLabel:    string | null;
+  key:             string;
+  mission:         GMMission;
+  def:             typeof MISSION_DEFS[string];
+  status:          GMMissionStatus;
+  maxSlots:        number;
+  filled:          number;
+  decaySteps:      number;
+  decayPct:        number;
+  liveSec:         number;
+  youIn:           boolean;
+  seriesLabel:     string;
+  takeable:        boolean;
+  disabledReason:  string | null;
+  doneLabel:       string | null;
+  insufficientGold?: boolean;  // true when the player lacks the casino entry minimum
 }
 
 export function currentMaxSlots(m: GMMission, now: number): number {
@@ -57,6 +58,7 @@ export function computeMissionCard(
   activeMissionId: string | null,
   basicTrainingDone: boolean,
   now: number,
+  playerGold?: number,
 ): GMMissionCard {
   const def = MISSION_DEFS[m.type];
   const maxSlots = currentMaxSlots(m, now);
@@ -69,7 +71,9 @@ export function computeMissionCard(
   } else if (filled === 0 || m.firstJoinAt == null) {
     status = 'open';
   } else if (filled >= maxSlots) {
-    status = 'inprogress';
+    // Casino missions require all seats to have played before deploying.
+    // A full but not-yet-deployed casino cohort is still 'filling'.
+    status = (m.type === 'casino' && !allSeatsPlayed(m)) ? 'filling' : 'inprogress';
   } else {
     status = 'filling';
   }
@@ -90,6 +94,7 @@ export function computeMissionCard(
   let takeable = false;
   let disabledReason: string | null = null;
   let doneLabel: string | null = null;
+  let insufficientGold = false;
 
   if (m.state === 'inprogress') {
     disabledReason = 'This cohort has already deployed. A fresh cohort is forming below.';
@@ -98,6 +103,11 @@ export function computeMissionCard(
     disabledReason = 'You have already completed Basic Training — it can be undertaken only once per guildmaster.';
   } else if (activeMissionId && activeMissionId !== m.id) {
     disabledReason = `You are already undertaking another mission. A guildmaster may only undertake one mission at a time.`;
+  } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
+    disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
+  } else if (m.type === 'casino' && playerGold != null && playerGold < CASINO_MIN_ENLIST_GOLD && !youIn) {
+    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up. The cheapest game (Blackjack) costs ${CASINO_ANTE.blackjack}g to play.`;
+    insufficientGold = true;
   } else if (youIn) {
     doneLabel = 'YOU ARE ENLISTED';
   } else {
@@ -119,6 +129,7 @@ export function computeMissionCard(
     takeable,
     disabledReason,
     doneLabel,
+    ...(insufficientGold ? { insufficientGold: true } : {}),
   };
 }
 
