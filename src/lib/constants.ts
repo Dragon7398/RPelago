@@ -298,7 +298,7 @@ export const FEATS: readonly FeatDef[] = [
 ];
 
 export interface GMMissionDef {
-  type:       'basic' | 'patrol';
+  type:       'basic' | 'patrol' | 'casino';
   label:      string;
   icon:       string;
   description: string;
@@ -312,7 +312,22 @@ export interface GMMissionDef {
   hint:       number;
   special:    boolean;   // true = once-per-guildmaster (Basic Training)
   repeatable: boolean;
+  // casino-only optional fields
+  variableReward?: boolean;
+  tableUrl?:       string;
+  entryCosts?:     { label: string; gold: number }[];
+  potSeed?:        number;
 }
+
+// ── Casino mission constants ───────────────────────────────────────────────────
+// Starting odds written to casinoStats when a casino cohort is created.
+export const CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 } as const;
+// Minimum gold a player must hold to enlist (= cheapest game ante: blackjack).
+export const CASINO_MIN_ENLIST_GOLD = 30;
+// Ante costs by game type.
+export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, blackjack: 30 };
+// Cost to reroll rejected cards in poker.
+export const CASINO_REROLL_COST = 20;
 
 export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
   basic: {
@@ -346,6 +361,30 @@ export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
     hint:        10,
     special:     false,
     repeatable:  true,
+  },
+  casino: {
+    type:        'casino',
+    label:       'A Night at the Casino',
+    icon:        '🎲',
+    description: "The guild's coffers won't fill themselves, and a guildmaster's evenings are long. Ante up at the card table, commit whatever games fortune deals you, and let the Archipelago decide who walks away richer — and who only walks away.",
+    baseMax:     6,
+    xp:          50,    // floor; settles at 50 + Σ gambit XP at deploy
+    gp:          0,     // unknown until hands are locked; shown as "? GP" in the UI
+    traits:      null,
+    decayHours:  24,
+    release:     'special',  // rolled from casinoStats at deploy
+    collect:     'special',  // rolled from casinoStats at deploy
+    hint:        10,
+    special:     false,
+    repeatable:  true,
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts: [
+      { label: 'Poker ante',     gold: 40 },
+      { label: 'Blackjack ante', gold: 30 },
+      { label: 'Reroll',         gold: 20 },
+    ],
+    potSeed: 50,
   },
 };
 

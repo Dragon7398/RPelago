@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RPelago — The Card Table</title>
+    <meta name="theme-color" content="#141009" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+  </head>
+  <body style="background:#141009;margin:0;">
+    <script>
+      (function () {
+        var t = localStorage.getItem('realm_theme');
+        if (t && t !== 'gilded') document.body.classList.add('theme-' + t);
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/casino/main.tsx"></script>
+  </body>
+</html>

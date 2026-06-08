@@ -46,9 +46,11 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
     const now = Date.now();
     const basicRef  = push(ref(d, 'game/missions'));
     const patrolRef = push(ref(d, 'game/missions'));
+    const casinoRef = push(ref(d, 'game/missions'));
     const initialMissions: Record<string, unknown> = {
       [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
       [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
+      [casinoRef.key!]: { ...freshMission('casino', 1, now), id: casinoRef.key },
     };
     await update(ref(d), {
       'game/tiles':     buildDefaultTileData(seed),
@@ -79,39 +81,60 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
     }
   }
 
-  // Migration: seed initial mission cohorts for games created before the mission system
+  // Migration: seed mission cohorts for games created before the mission system,
+  // or add casino cohort to games created before the casino mission was added.
   const missionsSnap = await get(ref(d, 'game/missions'));
-  if (!missionsSnap.exists()) {
+  const existingMissions = missionsSnap.exists() ? (missionsSnap.val() as Record<string, GMMission>) : {};
+  const activeMissions = Object.values(existingMissions);
+  const needsBasic  = !activeMissions.some(m => m.type === 'basic'  && m.state !== 'complete');
+  const needsPatrol = !activeMissions.some(m => m.type === 'patrol' && m.state !== 'complete');
+  const needsCasino = !activeMissions.some(m => m.type === 'casino' && m.state !== 'complete');
+  if (needsBasic || needsPatrol || needsCasino) {
     const now = Date.now();
-    const basicRef  = push(ref(d, 'game/missions'));
-    const patrolRef = push(ref(d, 'game/missions'));
-    const initialMissions: Record<string, unknown> = {
-      [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
-      [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
-    };
+    const migrationUpdates: Record<string, unknown> = {};
+    if (needsBasic)  { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key }; }
+    if (needsPatrol) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key }; }
+    if (needsCasino) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key }; }
     try {
-      await update(ref(d), { 'game/missions': initialMissions });
+      await update(ref(d), migrationUpdates);
     } catch (err) {
       console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
     }
   }
 }
 
-// Seed the initial Basic Training and Patrol cohorts. Safe to call on any
-// existing game — no-ops if missions already exist.
+// Seed mission cohorts for each type that has no active (forming/inprogress) cohort.
+// Safe to call on any existing game mid-season — only creates what is missing.
 export async function seedInitialMissions(): Promise<boolean> {
   assertDb();
   const d = db!;
   const snap = await get(ref(d, 'game/missions'));
-  if (snap.exists() && Object.keys(snap.val() ?? {}).length > 0) return false;
+  const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
+  const active = Object.values(existing);
+
+  const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
+  const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
+  const hasCasino = active.some(m => m.type === 'casino' && m.state !== 'complete');
+
+  if (hasBasic && hasPatrol && hasCasino) return false;
 
   const now = Date.now();
-  const basicRef  = push(ref(d, 'game/missions'));
-  const patrolRef = push(ref(d, 'game/missions'));
-  await update(ref(d), {
-    [`game/missions/${basicRef.key}`]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
-    [`game/missions/${patrolRef.key}`]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
-  });
+  const updates: Record<string, unknown> = {};
+
+  if (!hasBasic) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key };
+  }
+  if (!hasPatrol) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key };
+  }
+  if (!hasCasino) {
+    const r = push(ref(d, 'game/missions'));
+    updates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key };
+  }
+
+  await update(ref(d), updates);
   return true;
 }
 
@@ -790,6 +813,22 @@ export async function completeMission(
   const label    = missionDisplayLabel(mission);
   const updates: Record<string, unknown> = {};
 
+  // For casino missions, pre-compute each played player's pot share.
+  // Gold comes from goldSwing (card values) + equal pot split; no feat multiplier on gambling winnings.
+  const casinoPotShares = new Map<string, number>();
+  if (mission.type === 'casino') {
+    const playedEntries = Object.entries(mission.participants ?? {})
+      .filter(([, p]) => p.played);
+    const pot   = (mission as unknown as { pot?: number }).pot ?? 0;
+    const count = playedEntries.length;
+    const base  = count > 0 ? Math.floor(pot / count) : 0;
+    const rem   = count > 0 ? pot - base * count : pot;
+    const remIdx = count > 0 ? Math.floor(Math.random() * count) : -1;
+    playedEntries.forEach(([pid], i) => {
+      casinoPotShares.set(pid, base + (i === remIdx ? rem : 0));
+    });
+  }
+
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
     const player = players[pid];
     if (!player) continue;
@@ -803,11 +842,22 @@ export async function completeMission(
     const xpMultiplier   = 1 + otherMentors    * 0.05 + (isMentor    ? otherIds.length * 0.01 : 0);
     const goldMultiplier = 1 + otherTreasurers * 0.10 + (isTreasurer ? otherIds.length * 0.03 : 0);
 
-    let earnedXP   = Math.round(mission.xp * xpMultiplier);
-    let earnedGold = Math.round(mission.gp * goldMultiplier);
-    for (const slot of participant.slots ?? []) {
-      earnedXP   += slot.bonusXP   ?? 0;
-      earnedGold += slot.bonusGold ?? 0;
+    let earnedXP: number;
+    let earnedGold: number;
+
+    if (mission.type === 'casino') {
+      // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
+      earnedXP = Math.round(mission.xp * xpMultiplier);
+      // Gold: gambling winnings (goldSwing + pot share); no feat multiplier on gambling.
+      const goldSwing = (participant as unknown as { goldSwing?: number }).goldSwing ?? 0;
+      earnedGold = goldSwing + (casinoPotShares.get(pid) ?? 0);
+    } else {
+      earnedXP   = Math.round(mission.xp * xpMultiplier);
+      earnedGold = Math.round(mission.gp * goldMultiplier);
+      for (const slot of participant.slots ?? []) {
+        earnedXP   += slot.bonusXP   ?? 0;
+        earnedGold += slot.bonusGold ?? 0;
+      }
     }
 
     const prevLevel     = calcLevel(player.xp);

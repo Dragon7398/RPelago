@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
-import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState } from '../../types';
-import { SLOT_STATUSES } from '../../lib/constants';
+import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats } from '../../types';
+import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock } from '../../firebase/db';
 
@@ -16,12 +16,13 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, locked, onKick,
+  missionId, playerId, participant, locked, isCasino, onKick,
 }: {
   missionId: string;
   playerId: string;
   participant: GMParticipant;
   locked: boolean;
+  isCasino?: boolean;
   onKick: () => void;
 }) {
   const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
@@ -106,7 +107,9 @@ function MissionParticipantSlots({
         </div>
       ))}
 
-      {!locked && <div className="admin-slot-add-row">
+      {/* Casino: slots are written by lockCasinoResult — suppress the manual add row.
+          Admin can still edit existing details lines for fixups via the rows above. */}
+      {!locked && !isCasino && <div className="admin-slot-add-row">
         <input className="admin-text-input" placeholder="Slot name" value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
         <input className="admin-text-input" placeholder="Game" value={draft.game}
@@ -206,11 +209,33 @@ function MissionCard({ mission }: { mission: GMMission }) {
       {/* Header */}
       <div className="dash-tile-header">
         <span className="dash-tile-name">{label}</span>
-        <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)' }}>{filled}/{maxSlots}</span>
+        {mission.type === 'casino' && (
+          <span className="dash-mission-type-pill">🎲 CASINO</span>
+        )}
+        <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }}>{filled}/{maxSlots}</span>
+        {/* Casino: spectate / test the card table */}
+        {mission.type === 'casino' && mission.tableUrl && (
+          <a
+            className="dash-tile-link"
+            href={`${mission.tableUrl}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(toRoman(mission.series))}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open card table"
+          >🎰</a>
+        )}
         {mission.state === 'inprogress' && mission.link && (
           <a className="dash-tile-link" href={mission.link} target="_blank" rel="noopener noreferrer" title="Open room">🔗</a>
         )}
       </div>
+
+      {/* Casino: variable reward display */}
+      {mission.variableReward && (
+        <div style={{ fontSize: '0.62rem', color: 'var(--gold-dim)', marginTop: '0.2rem' }}>
+          {mission.state === 'inprogress'
+            ? <>{mission.xp} XP · <span style={{ opacity: 0.7 }}>? GP (paid at complete)</span></>
+            : <>{mission.xp}+ XP · <span style={{ opacity: 0.7 }}>? GP</span></>}
+        </div>
+      )}
 
       {/* State selector — mirrors Map page */}
       <div className="admin-detail-row" style={{ marginTop: '0.6rem' }}>
@@ -258,6 +283,20 @@ function MissionCard({ mission }: { mission: GMMission }) {
           Next decay in {Math.floor(nextDecayMs / 3600_000)}h {Math.floor((nextDecayMs % 3600_000) / 60_000)}m
         </div>
       )}
+
+      {/* Casino: live gambit odds while forming — read-only, updated as players play gambits */}
+      {mission.type === 'casino' && mission.state === 'forming' && (() => {
+        const s = mission.casinoStats as CasinoStats | undefined;
+        if (!s) return null;
+        return (
+          <div style={{ fontSize: '0.62rem', color: 'var(--gold-dim)', marginTop: '0.3rem', display: 'flex', gap: '0.7rem', flexWrap: 'wrap' }}>
+            <span>Release <b style={{ color: 'var(--parchment)' }}>{s.release}%</b></span>
+            <span>Collect <b style={{ color: 'var(--parchment)' }}>{s.collect}%</b></span>
+            <span>Hint <b style={{ color: 'var(--parchment)' }}>{s.hint}%</b></span>
+            <span>XP floor <b style={{ color: 'var(--parchment)' }}>{s.xp}</b></span>
+          </div>
+        );
+      })()}
 
       {/* Room link + settings — inprogress only */}
       {mission.state === 'inprogress' && (
@@ -326,6 +365,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
           playerId={pid}
           participant={p}
           locked={slotsLocked}
+          isCasino={mission.type === 'casino'}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />
       )) : (
@@ -353,8 +393,8 @@ export default function MissionsPage() {
       const created = await seedInitialMissions();
       addToast(
         created
-          ? 'Missions seeded — Basic Training · Cohort I and Patrol · Cohort I are now live.'
-          : 'Missions already exist.',
+          ? 'Missions seeded — Basic Training · Cohort I, Patrol · Cohort I, and A Night at the Casino · Cohort I are now live.'
+          : 'All mission types already have an active cohort.',
         'success',
       );
     } catch (err) {

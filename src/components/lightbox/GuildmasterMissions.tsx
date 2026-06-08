@@ -5,7 +5,8 @@ import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
 import { AdvFeatIcons } from './AdvRow';
-import { MISSION_DEFS } from '../../lib/constants';
+import { MISSION_DEFS, toRoman } from '../../lib/constants';
+import { handStakeFromSlots } from '../../lib/casinoSlots';
 
 // ── Claimable slot row ────────────────────────────────────────────────────────
 
@@ -108,6 +109,26 @@ function Pips({ card }: { card: GMMissionCard }) {
 // ── Rewards ───────────────────────────────────────────────────────────────────
 
 function Rewards({ m, uid, players }: { m: GMMission; uid: string | null; players: Record<string, Player> }) {
+  // Casino missions have variable rewards: XP settles when all seats lock in,
+  // gold (hand value + pot share) is unknown until the room runs.
+  if (m.variableReward) {
+    const deployed = m.state === 'inprogress';
+    return (
+      <div className="lb-rewards" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
+        <span className="lb-reward-chip xp gm-tip" data-tip={
+          deployed
+            ? 'XP locked when the cohort deployed. Gambits raised it from the 50 floor.'
+            : 'Starts at 50 XP; each penalty gambit played raises it. Locks when all seats commit.'
+        }>
+          ✨ {deployed ? `${m.xp} XP` : `${m.xp}+ XP`}
+        </span>
+        <span className="lb-reward-chip zero gm-tip" data-tip="Your hand's card values plus a share of the pot, minus antes paid. Credited when the admin marks this mission complete.">
+          🪙 ? GP
+        </span>
+      </div>
+    );
+  }
+
   const participantIds = Object.keys(m.participants ?? {});
   const userIn = !!uid && participantIds.includes(uid);
   const { xpMultiplier, goldMultiplier } = userIn
@@ -205,6 +226,63 @@ function MissionStatusNote({
   );
 }
 
+// ── Casino: house-cut note ────────────────────────────────────────────────────
+
+function CasinoCostNote({ mission }: { mission: GMMission }) {
+  const costs = mission.entryCosts;
+  if (!costs?.length) return null;
+  return (
+    <div className="gm-cost">
+      <span className="gm-cost-lbl">House takes its cut</span>
+      <div className="gm-cost-items">
+        {costs.map(c => (
+          <span key={c.label} className="gm-cost-item">{c.label} <b>{c.gold}g</b></span>
+        ))}
+        <span className="gm-cost-item gm-cost-note">
+          40% of every ante feeds the shared pot — non-folded seats split it at reveal.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Casino: table link (enter or view results) ────────────────────────────────
+
+function CasinoTableLink({ mission, deployed }: { mission: GMMission; deployed: boolean }) {
+  const url = mission.tableUrl;
+  if (!url) return null;
+  const cohort = toRoman(mission.series);
+  const href = `${url}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(cohort)}`;
+  return (
+    <div className="lb-archipelago-link gm-table-link">
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {deployed ? '📊 View Results →' : '🂡 Enter the Table →'}
+      </a>
+      <span className="gm-table-newtab">Opens in a new tab</span>
+    </div>
+  );
+}
+
+// ── Casino: per-seat start deadline countdown ─────────────────────────────────
+
+function CasinoStartByCountdown({ startBy }: { startBy: number }) {
+  const [ms, setMs] = useState(() => Math.max(0, startBy - Date.now()));
+
+  useEffect(() => {
+    const t = setInterval(() => setMs(Math.max(0, startBy - Date.now())), 1000);
+    return () => clearInterval(t);
+  }, [startBy]);
+
+  if (ms <= 0) {
+    return <div className="gm-startby expired">Seat deadline passed — may be reclaimed by tick</div>;
+  }
+  return (
+    <div className="gm-startby">
+      ⏱ Start at the table within <b>{fmtClock(ms / 1000)}</b> or your seat opens
+    </div>
+  );
+}
+
 // ── Participant roster ────────────────────────────────────────────────────────
 
 function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: string | null; players: Record<string, Player> }) {
@@ -232,7 +310,16 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                 <AdvFeatIcons playerId={p.playerId} players={players} />
               </div>
               {(!p.slots || p.slots.length === 0) ? (
-                isOwner ? (
+                mission.type === 'casino' ? (
+                  // Casino: slots are committed at the card table, not via YAML
+                  <div className="gm-slot-prompt">
+                    {isOwner
+                      ? 'Lock in your hand at the card table to commit your slots.'
+                      : p.startBy
+                        ? 'Playing at the table.'
+                        : 'Waiting to start.'}
+                  </div>
+                ) : isOwner ? (
                   <div className="gm-slot-prompt">
                     No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
                     <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
@@ -259,6 +346,17 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                     );
                   })}
                 </div>
+              )}
+              {/* Casino: show locked stake once the seat has played */}
+              {mission.type === 'casino' && p.played && (() => {
+                const stake = handStakeFromSlots(p.slots);
+                return stake > 0
+                  ? <div className="gm-stake">{stake}g on the table</div>
+                  : null;
+              })()}
+              {/* Casino: startBy countdown on the player's own unlocked seat */}
+              {mission.type === 'casino' && isOwner && !p.played && p.startBy && (
+                <CasinoStartByCountdown startBy={p.startBy} />
               )}
               <MissionStatusNote
                 missionId={mission.id}
@@ -308,11 +406,12 @@ function TakeMissionButton({
     );
   }
   if (!card.takeable) {
+    const label = card.status === 'inprogress' ? 'COHORT DEPLOYED'
+      : card.insufficientGold ? 'NOT ENOUGH GOLD'
+      : 'UNAVAILABLE';
     return (
       <span className="gm-tip" data-tip={card.disabledReason ?? undefined} style={{ display: 'block' }}>
-        <button className="gm-take-btn disabled" disabled>
-          {card.status === 'inprogress' ? 'COHORT DEPLOYED' : 'UNAVAILABLE'}
-        </button>
+        <button className="gm-take-btn disabled" disabled>{label}</button>
       </span>
     );
   }
@@ -388,6 +487,9 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
       {/* Description */}
       <div className="gmb-desc">{def.description}</div>
 
+      {/* Casino: house-cut note below description */}
+      {card.mission.type === 'casino' && <CasinoCostNote mission={card.mission} />}
+
       {/* Meta row: pips + countdown */}
       <div className="gmb-meta">
         <div className="gmb-slots">
@@ -402,7 +504,14 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
         <Countdown card={card} />
       </div>
 
-      {/* Room link — same style as tile challenges */}
+      {/* Casino: table link (enter to play, or view results once deployed) */}
+      {card.mission.type === 'casino' && card.mission.tableUrl && card.youIn && (
+        <CasinoTableLink
+          mission={card.mission}
+          deployed={card.status === 'inprogress'}
+        />
+      )}
+      {/* Archipelago game link — shown for all mission types when set */}
       {card.mission.link && (
         <div className="lb-archipelago-link">
           <a href={card.mission.link} target="_blank" rel="noopener noreferrer">🗺 Open Archipelago Game →</a>
@@ -485,7 +594,7 @@ export default function GuildmasterMissions() {
 
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
-    .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now))
+    .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now, player?.gold))
     .sort((a, b) => {
       const ga = sortGroup(a), gb = sortGroup(b);
       if (ga !== gb) return ga - gb;
