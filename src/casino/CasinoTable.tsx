@@ -142,6 +142,7 @@ export function CasinoTable() {
       setHand(seat.hand);
       setGameType(seat.gameType ?? null);
       setGOffer([]);  // empty = gambit already done, lock button goes directly to lockCasinoResult
+      if (seat.gameType) setSpent(CASINO_ANTE[seat.gameType] + (seat.rerolled ? CASINO_REROLL_COST : 0));
       setPhase('gambit');
       return;
     }
@@ -150,6 +151,7 @@ export function CasinoTable() {
     if (seat?.hand?.length && seat.gameType && !seat.gambitPlayed) {
       setHand(seat.hand);
       setGameType(seat.gameType);
+      setSpent(CASINO_ANTE[seat.gameType] + (seat.rerolled ? CASINO_REROLL_COST : 0));
       setPRedrawn(seat.rerolled ?? false);
       setPhase(seat.gameType);
       return;
