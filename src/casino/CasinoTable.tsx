@@ -283,7 +283,6 @@ export function CasinoTable() {
 
   // ── Derived state ────────────────────────────────────────────────────────
 
-  const seat     = uid ? (mission?.participants?.[uid] as (GMParticipant & { hand?: DeckCard[] }) | undefined) : undefined;
   const pot      = (mission as any)?.pot as number ?? 0;
   const stats    = (mission?.casinoStats ?? CASINO_START_STATS) as CasinoStats;
   const allSeats = Object.values(mission?.participants ?? {}) as (GMParticipant & { hand?: DeckCard[] })[];
@@ -316,7 +315,6 @@ export function CasinoTable() {
   // ── Render helpers ───────────────────────────────────────────────────────
 
   const HAND_W  = 108;
-  const MINI_W  = 60;
   const GAMB_W  = 130;
 
   if (phase === 'loading') {
@@ -462,7 +460,7 @@ export function CasinoTable() {
             <>
               <div className="cz-stage-title">Blackjack · Push Your Luck</div>
               <div className="cz-hand">
-                {hand.map((c, i) => {
+                {hand.map((c) => {
                   const isDiscard = c.uid === bDiscardUid;
                   return (
                     <div
@@ -588,7 +586,6 @@ export function CasinoTable() {
                       played={!!(p as GMParticipant).played}
                       stake={stake}
                       gambit={gambitDefId ? (GAMBIT_DEFS_BY_ID[gambitDefId] ?? null) : null}
-                      miniWidth={MINI_W}
                     />
                   );
                 })}

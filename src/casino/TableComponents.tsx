@@ -2,7 +2,6 @@
 
 import type { DeckCard } from '../lib/casinoData';
 import type { CasinoStats } from '../types';
-import { CardFace } from './CardFace';
 import type { GambitDef } from '../lib/casinoGambits';
 
 // ── Pot display ───────────────────────────────────────────────────────────────
@@ -207,10 +206,9 @@ interface ResultRowProps {
   played: boolean;
   stake: number;         // sum of card values from slots
   gambit?: GambitDef | null;
-  miniWidth?: number;
 }
 
-export function ResultRow({ name, isMe, played, stake, gambit, miniWidth = 52 }: ResultRowProps) {
+export function ResultRow({ name, isMe, played, stake, gambit }: ResultRowProps) {
   const cls = ['cz-result-row'];
   if (isMe)   cls.push('you');
   if (played) cls.push('win'); else cls.push('fold');
