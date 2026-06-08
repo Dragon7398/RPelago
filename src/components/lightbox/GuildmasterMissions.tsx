@@ -241,6 +241,9 @@ function CasinoCostNote({ mission }: { mission: GMMission }) {
         <span className="gm-cost-item gm-cost-note">
           40% of every ante feeds the shared pot — non-folded seats split it at reveal.
         </span>
+        <span className="gm-cost-item gm-cost-note" style={{ marginTop: '0.35rem', opacity: 0.75 }}>
+          Dev note: The casino is a risky pick. If you tend to play a limited set of games, or are in the mood to play something particular, it may not be a great fit — it pays best when you can commit 2 or more of the cards you're dealt.
+        </span>
       </div>
     </div>
   );
