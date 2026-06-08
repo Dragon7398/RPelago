@@ -988,7 +988,7 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, discardUid } = request.data;
+    const { missionId, discardUid, pokerRejectUids } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
@@ -1005,6 +1005,12 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
         hand = hand.filter((c) => c.uid !== discardUid);
         if (hand.length === seat.hand.length)
             throw new https_1.HttpsError('invalid-argument', 'discardUid not found in hand.');
+    }
+    if (pokerRejectUids && pokerRejectUids.length > 0) {
+        const rejectSet = new Set(pokerRejectUids);
+        hand = hand.filter((c) => !rejectSet.has(c.uid));
+        if (hand.length === 0)
+            throw new https_1.HttpsError('invalid-argument', 'Cannot reject all cards.');
     }
     const goldSwing = (0, casinoEngine_1.handStake)(hand);
     const slots = (0, casinoEngine_1.cardsToSlots)(hand);

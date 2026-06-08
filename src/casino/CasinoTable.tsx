@@ -271,7 +271,8 @@ export function CasinoTable() {
       }
       await call<object, { goldSwing: number }>('lockCasinoResult')({
         missionId,
-        discardUid: gameType === 'blackjack' ? bDiscardUid : null,
+        discardUid:       gameType === 'blackjack' ? bDiscardUid : null,
+        pokerRejectUids:  gameType === 'poker' ? [...pReject] : null,
       });
       setPhase('locked');
     } catch (e: any) {

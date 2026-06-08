@@ -1190,9 +1190,10 @@ export const playCasinoGambit = onCall(async (request) => {
 export const lockCasinoResult = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
-  const { missionId, discardUid } = request.data as {
+  const { missionId, discardUid, pokerRejectUids } = request.data as {
     missionId?: string;
-    discardUid?: number | null;  // optional blackjack 6-card discard
+    discardUid?: number | null;       // optional blackjack 6-card discard
+    pokerRejectUids?: number[] | null; // poker cards marked rejected but not rerolled
   };
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
 
@@ -1211,6 +1212,12 @@ export const lockCasinoResult = onCall(async (request) => {
     hand = hand.filter((c: DeckCard) => c.uid !== discardUid);
     if (hand.length === seat.hand!.length)
       throw new HttpsError('invalid-argument', 'discardUid not found in hand.');
+  }
+  if (pokerRejectUids && pokerRejectUids.length > 0) {
+    const rejectSet = new Set(pokerRejectUids);
+    hand = hand.filter((c: DeckCard) => !rejectSet.has(c.uid));
+    if (hand.length === 0)
+      throw new HttpsError('invalid-argument', 'Cannot reject all cards.');
   }
 
   const goldSwing = handStake(hand);
