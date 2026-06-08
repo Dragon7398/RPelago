@@ -11,7 +11,7 @@ import { CASINO_START_STATS, CASINO_ANTE, CASINO_REROLL_COST } from '../lib/cons
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
-import { MissionBar, MissionSlots } from './MissionBar';
+import { MissionSlots } from './MissionBar';
 import { handStakeFromSlots } from '../lib/casinoSlots';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,7 +36,6 @@ function getParams() {
   return {
     missionId:    q.get('missionId') ?? '',
     missionLabel: q.get('mission')   ?? 'A Night at the Casino',
-    cohortLabel:  q.get('cohort')    ?? '',
   };
 }
 
@@ -63,7 +62,7 @@ function fmtCountdown(ms: number): string {
 
 export function CasinoTable() {
   const params = useMemo(() => getParams(), []);
-  const { missionId, missionLabel, cohortLabel } = params;
+  const { missionId, missionLabel } = params;
 
   const [uid, setUid]             = useState<string | null>(null);
   const [mission, setMission]     = useState<GMMission | null>(null);
@@ -302,9 +301,6 @@ export function CasinoTable() {
     return [];
   }, [phase, hand, pReject, bDiscardUid, gameType]);
 
-  const myStake   = handStake(lockedHand);
-  const isLocked  = phase === 'locked' || phase === 'deployed';
-
   // Fill empty seats up to baseMax
   const baseMax   = mission?.baseMax ?? 6;
   const seatEntries: [string, (GMParticipant & { hand?: DeckCard[] }) | null][] = [];
@@ -353,15 +349,6 @@ export function CasinoTable() {
           ? `${allSeats.filter(p => p?.played).length}/${baseMax} seats played · ${Math.round(40)}% of every ante feeds the pot · non-folded players split it`
           : 'This table has concluded.'}
       </div>
-
-      {/* ── Mission bar ── */}
-      <MissionBar
-        missionLabel={missionLabel}
-        cohortLabel={cohortLabel}
-        stake={myStake}
-        pot={pot}
-        locked={isLocked}
-      />
 
       {/* ── Seat rail ── */}
       <div className="cz-rail">
