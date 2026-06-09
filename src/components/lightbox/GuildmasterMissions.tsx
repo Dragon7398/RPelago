@@ -329,12 +329,29 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                   </div>
                 ) : <div className="gm-slot-prompt">No game set yet.</div>
               ) : (mission.type === 'casino' && (p.slots as AdvSlot[]).every(s => !s.game)) ? (
-                isOwner ? (
-                  <div className="gm-slot-prompt">
-                    No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
-                    <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                <>
+                  {isOwner ? (
+                    <div className="gm-slot-prompt">
+                      No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
+                      <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                    </div>
+                  ) : <div className="gm-slot-prompt">No game set yet.</div>}
+                  <div className="lb-adv-slots">
+                    {(p.slots as AdvSlot[]).map((slot, i) => (
+                      <div key={i}>
+                        <div className="lb-slot-row">
+                          <span className="lb-slot-name">{slot.name}</span>
+                          <span className="lb-slot-sep">—</span>
+                          <span className="lb-slot-game">{slot.game}</span>
+                          <span className="lb-slot-status ss-Unstarted">{slot.status ?? 'Unstarted'}</span>
+                        </div>
+                        {slot.details && (
+                          <div className="lb-slot-details">{slot.details}</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ) : <div className="gm-slot-prompt">No game set yet.</div>
+                </>
               ) : (
                 <div className="lb-adv-slots">
                   {(p.slots as AdvSlot[]).map((slot, i) => {
