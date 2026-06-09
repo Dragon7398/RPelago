@@ -66,9 +66,10 @@ interface TileCardProps {
 }
 
 function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: TileCardProps) {
-  const typeKey = typeKeyForCoord(coord);
-  const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
-  const advs    = Object.values(tile.adventurers ?? {});
+  const typeKey      = typeKeyForCoord(coord);
+  const info         = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
+  const advs         = Object.values(tile.adventurers ?? {});
+  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
 
   return (
     <div className="dash-tile-card">
@@ -90,16 +91,38 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
       </div>
       {advs.length > 0 && (
         <div className="dash-tile-advs">
-          {advs.map(adv => (
-            <div key={adv.advId} className="dash-adv-kickable">
-              <AdvSlotList entry={adv} players={players} />
-              <button
-                className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
-                title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
-                onClick={() => onKick(adv.advId, adv.owner)}
-              >Kick</button>
-            </div>
-          ))}
+          {isBifurcated ? (
+            ([1, 2] as const).map(roomNum => {
+              const roomAdvs = advs.filter(a => (a.room ?? 1) === roomNum);
+              return (
+                <div key={roomNum} className="dash-room-group">
+                  <div className="dash-room-group-header">Room {roomNum}</div>
+                  {roomAdvs.map(adv => (
+                    <div key={adv.advId} className="dash-adv-kickable">
+                      <AdvSlotList entry={adv} players={players} />
+                      <button
+                        className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
+                        title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
+                        onClick={() => onKick(adv.advId, adv.owner)}
+                      >Kick</button>
+                    </div>
+                  ))}
+                  {roomAdvs.length === 0 && <div className="dash-room-empty">No players</div>}
+                </div>
+              );
+            })
+          ) : (
+            advs.map(adv => (
+              <div key={adv.advId} className="dash-adv-kickable">
+                <AdvSlotList entry={adv} players={players} />
+                <button
+                  className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
+                  title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
+                  onClick={() => onKick(adv.advId, adv.owner)}
+                >Kick</button>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

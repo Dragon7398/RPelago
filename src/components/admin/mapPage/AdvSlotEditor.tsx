@@ -17,7 +17,8 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
   const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
   const locked = tile.slotsLocked ?? false;
 
-  const entries = Object.values(tile.adventurers ?? {});
+  const entries      = Object.values(tile.adventurers ?? {});
+  const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
   if (entries.length === 0) return null;
 
   return (
@@ -28,7 +29,12 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
           {locked ? '🔒 LOCKED' : '🔓 LOCK'}
         </button>
       </div>
-      {entries.map(entry => {
+      {(isBifurcated ? ([1, 2] as const) : [null]).map(roomNum => {
+        const roomEntries = roomNum === null ? entries : entries.filter(e => (e.room ?? 1) === roomNum);
+        return (
+          <div key={roomNum ?? 'all'} className={isBifurcated ? 'admin-room-group' : undefined}>
+            {isBifurcated && <div className="admin-room-group-header">Room {roomNum}</div>}
+            {roomEntries.map(entry => {
         const slots = normalizeSlots(entry.slots as any);
         const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus, bonusXP: 0, bonusGold: 0 };
         const save  = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord, entry.advId, next);
@@ -137,6 +143,9 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
                 }}
               >+ Add</button>
             </div>}
+          </div>
+        );
+      })}
           </div>
         );
       })}
