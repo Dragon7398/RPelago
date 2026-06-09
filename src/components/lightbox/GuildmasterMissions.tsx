@@ -328,6 +328,13 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                     <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
                   </div>
                 ) : <div className="gm-slot-prompt">No game set yet.</div>
+              ) : (mission.type === 'casino' && (p.slots as AdvSlot[]).every(s => !s.game)) ? (
+                isOwner ? (
+                  <div className="gm-slot-prompt">
+                    No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
+                    <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                  </div>
+                ) : <div className="gm-slot-prompt">No game set yet.</div>
               ) : (
                 <div className="lb-adv-slots">
                   {(p.slots as AdvSlot[]).map((slot, i) => {
