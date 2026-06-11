@@ -187,16 +187,6 @@ const ITEM_COSTS = {
     ring_of_resistance: 500,
     warhammer: 600,
 };
-const ITEM_NAMES = {
-    map: 'Map',
-    scroll_of_magnetism: 'Scroll of Magnetism',
-    scroll_of_generosity: 'Scroll of Generosity',
-    coat_of_many_colors: 'Coat of Many Colors',
-    wand_of_piercing: 'Wand of Piercing',
-    throwing_dagger: 'Throwing Dagger',
-    ring_of_resistance: 'Ring of Resistance',
-    warhammer: 'Warhammer',
-};
 // Items that cannot be purchased more than once
 const NON_CONSUMABLE_ITEMS = new Set(['coat_of_many_colors', 'wand_of_piercing', 'throwing_dagger', 'ring_of_resistance', 'warhammer']);
 const ORB_SHOP_COST = 1500;
@@ -224,40 +214,33 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     const cost = ITEM_COSTS[itemId];
     if (cost == null)
         throw new https_1.HttpsError('not-found', 'Unknown item.');
+    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    const snapData = playerSnap.val();
     let abortReason = 'Purchase failed. Please try again.';
-    const { committed, snapshot } = await db.ref(`game/players/${uid}`).transaction((current) => {
-        if (!current) {
-            abortReason = 'Player not found.';
-            return undefined;
-        }
-        if (current.disabled) {
+    const { committed } = await db.ref(`game/players/${uid}`).transaction((current) => {
+        const data = current ?? snapData;
+        if (data.disabled) {
             abortReason = 'Account restricted.';
             return undefined;
         }
-        if (current.gold < cost) {
+        if (data.gold < cost) {
             abortReason = 'Not enough gold.';
             return undefined;
         }
-        if (NON_CONSUMABLE_ITEMS.has(itemId) && (current.inventory?.[itemId] ?? 0) > 0) {
+        if (NON_CONSUMABLE_ITEMS.has(itemId) && (data.inventory?.[itemId] ?? 0) > 0) {
             abortReason = 'Item already owned.';
             return undefined;
         }
         return {
-            ...current,
-            gold: current.gold - cost,
-            inventory: { ...(current.inventory ?? {}), [itemId]: (current.inventory?.[itemId] ?? 0) + 1 },
+            ...data,
+            gold: data.gold - cost,
+            inventory: { ...(data.inventory ?? {}), [itemId]: (data.inventory?.[itemId] ?? 0) + 1 },
         };
     });
     if (!committed)
         throw new https_1.HttpsError('failed-precondition', abortReason);
-    const itemName = ITEM_NAMES[itemId] ?? itemId;
-    const displayName = snapshot.val().displayName;
-    await db.ref('game/activityLog').push().set({
-        timestamp: Date.now(),
-        type: 'item_purchased',
-        message: `${displayName} purchased ${itemName} from ${shop.name ?? shopId}.`,
-        icon: '🛒',
-    });
     return { success: true };
 });
 // ── purchaseShopOrb ───────────────────────────────────────────────────────────
@@ -307,17 +290,15 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     if (!committed)
         throw new https_1.HttpsError('already-exists', 'This orb has already been claimed.');
     // Deduct gold via transaction so stale snapshot value can't cause incorrect set().
+    const snapGold = player.gold;
     let goldAbortReason = 'Gold deduction failed.';
     const { committed: goldCommitted } = await db.ref(`game/players/${uid}/gold`).transaction((current) => {
-        if (typeof current !== 'number') {
-            goldAbortReason = 'Player gold not found.';
-            return undefined;
-        }
-        if (current < ORB_SHOP_COST) {
+        const gold = typeof current === 'number' ? current : snapGold;
+        if (gold < ORB_SHOP_COST) {
             goldAbortReason = 'Not enough gold.';
             return undefined;
         }
-        return current - ORB_SHOP_COST;
+        return gold - ORB_SHOP_COST;
     });
     if (!goldCommitted) {
         try {
