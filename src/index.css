@@ -1605,6 +1605,13 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   transition: filter 0.15s; color: inherit;
 }
 .dash-tile-link:hover { filter: brightness(1.4); }
+.dash-copy-room-btn {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  padding: 0.14rem 0.5rem; border-radius: 2px; cursor: pointer; flex-shrink: 0;
+  background: transparent; border: 1px solid oklch(40% 0.08 220);
+  color: oklch(62% 0.10 220); transition: all 0.15s;
+}
+.dash-copy-room-btn:hover { border-color: oklch(55% 0.12 220); color: oklch(75% 0.12 220); }
 .dash-mission-type-pill {
   font-family: 'Cinzel', serif; font-size: 0.46rem; letter-spacing: 0.14em;
   padding: 0.1rem 0.4rem; border-radius: 2px; flex-shrink: 0;

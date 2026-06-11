@@ -160,7 +160,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const {
     adminForceDeploy, adminCompleteMission,
     adminSetMissionLink, adminSetMissionRoomSettings,
-    adminKickMissionParticipant,
+    adminKickMissionParticipant, gameState,
   } = useGameState();
 
   const [link,    setLink]    = useState(mission.link ?? '');
@@ -310,6 +310,19 @@ function MissionCard({ mission }: { mission: GMMission }) {
               onChange={e => setLink(e.target.value)}
               onBlur={() => adminSetMissionLink(mission.id, link)}
             />
+            {link && (
+              <button
+                className="dash-copy-room-btn"
+                onClick={() => {
+                  const pids = Object.keys(mission.participants ?? {});
+                  const handles = pids.map(pid => {
+                    const p = gameState?.players[pid];
+                    return '@' + (p?.discordHandle ?? p?.displayName ?? pid);
+                  }).join(', ');
+                  navigator.clipboard.writeText(`New room generated:  ${label}!\n${link}\n${handles}`);
+                }}
+              >Copy Room Text</button>
+            )}
           </div>
 
           {(['release', 'collect'] as const).map(field => {

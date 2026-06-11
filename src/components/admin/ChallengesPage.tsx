@@ -82,11 +82,27 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
             {tile.required > 0 && advs.length >= tile.required ? '✓' : '○'} {advs.length}/{tile.required}
           </span>
         ) : (
-          tile.link && (
-            <a className="dash-tile-link" href={tile.link} target="_blank" rel="noopener noreferrer" title="Open Archipelago link">
-              🔗
-            </a>
-          )
+          <>
+            {tile.link && (
+              <a className="dash-tile-link" href={tile.link} target="_blank" rel="noopener noreferrer" title="Open Archipelago link">
+                🔗
+              </a>
+            )}
+            {tile.link && (
+              <button
+                className="dash-copy-room-btn"
+                onClick={() => {
+                  const title = tile.name ? `${coord} - ${tile.name}` : coord;
+                  const advList = Object.values(tile.adventurers ?? {});
+                  const handles = advList.map(adv => {
+                    const p = players[adv.owner];
+                    return '@' + (p?.discordHandle ?? p?.displayName ?? adv.ownerName);
+                  }).join(', ');
+                  navigator.clipboard.writeText(`New room generated:  ${title}!\n${tile.link}\n${handles}`);
+                }}
+              >Copy Room Text</button>
+            )}
+          </>
         )}
       </div>
       {advs.length > 0 && (
