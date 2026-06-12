@@ -318,7 +318,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
                   const handles = pids.map(pid => {
                     const p = gameState?.players[pid];
                     return '@' + (p?.discordHandle ?? p?.displayName ?? pid);
-                  }).join(', ');
+                  }).join(' ');
                   navigator.clipboard.writeText(`New room generated:  ${label}!\n${link}\n${handles}`);
                 }}
               >Copy Room Text</button>

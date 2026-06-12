@@ -97,8 +97,16 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                   const handles = advList.map(adv => {
                     const p = players[adv.owner];
                     return '@' + (p?.discordHandle ?? p?.displayName ?? adv.ownerName);
-                  }).join(', ');
-                  navigator.clipboard.writeText(`New room generated:  ${title}!\n${tile.link}\n${handles}`);
+                  }).join(' ');
+                  let text = `New room generated:  ${title}!\n${tile.link}\n${handles}`;
+                  const pubSlots = tile.publicSlots ?? [];
+                  if (pubSlots.length > 0) {
+                    const slotLines = pubSlots.map(s =>
+                      `\`\`${s.name}\`\`: ${s.game}${s.details ? ` [${s.details}]` : ''}`
+                    ).join('\n');
+                    text += `\n\nThis world has the following Public slots.  These are available for anyone to play, whether they are on this tile or not:\n${slotLines}`;
+                  }
+                  navigator.clipboard.writeText(text);
                 }}
               >Copy Room Text</button>
             )}
