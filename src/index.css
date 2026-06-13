@@ -59,6 +59,10 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --hidden-bg-2:   oklch(11% 0.02 75);
   --hidden-bg-3:   oklch(6% 0.01 75);
   --hidden-border: oklch(13% 0.02 75);
+
+  /* ── Muted text ─────────────────────────────────────────────────── */
+  --text-muted: oklch(54% 0.04 75);
+  --text-dim:   oklch(40% 0.04 75);
 }
 
 body {
@@ -1326,7 +1330,7 @@ header p {
   color: var(--bg-card); background: var(--gold-dim);
   padding: 0.1em 0.5em; border-radius: 2px;
 }
-.activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 250px; overflow-y: auto; }
 .activity-feed-empty { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(40% 0.06 75); text-align: center; padding: 0.3rem 0; }
 .activity-entry {
   display: flex; align-items: center; gap: 0.5rem;
@@ -2054,6 +2058,471 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   .profile-box { max-height: 88vh; max-height: 88dvh; }
 }
 
+/* ══ KEYMASTER'S KEEP ════════════════════════════════════════════════════════ */
+
+/* ── List switcher strip ──────────────────────────────────────────────────── */
+.kmk-strip-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+.kmk-strip-header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.kmk-open-player-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.28rem 0.7rem; border-radius: 2px;
+  border: 1px solid var(--border-glow); color: var(--gold-dim);
+  background: transparent; text-decoration: none; transition: all 0.15s;
+}
+.kmk-open-player-btn:hover { color: var(--gold); border-color: var(--gold); }
+.kmk-new-list-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.28rem 0.7rem; border-radius: 2px; cursor: pointer;
+  background: oklch(14% 0.06 220 / 0.4); border: 1px solid oklch(40% 0.14 220);
+  color: oklch(68% 0.14 220); transition: all 0.15s;
+}
+.kmk-new-list-btn:hover { background: oklch(18% 0.08 220 / 0.5); color: oklch(76% 0.16 220); }
+
+.kmk-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.kmk-strip-item {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.5rem 0.75rem; border-radius: 3px; cursor: pointer; min-width: 160px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+  border: 1px solid var(--border); transition: border-color 0.15s;
+}
+.kmk-strip-item:hover { border-color: var(--border-glow); }
+.kmk-strip-item.selected { border-color: var(--gold-dim); }
+.kmk-strip-item-top { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.kmk-strip-name {
+  font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.08em;
+  color: var(--parchment); flex: 1;
+}
+.kmk-active-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em;
+  padding: 0.1rem 0.35rem; border-radius: 2px;
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.04 150);
+  border: 1px solid oklch(42% 0.12 150); color: oklch(62% 0.14 150);
+}
+.kmk-strip-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.kmk-strip-btn {
+  font-family: 'Cinzel', serif; font-size: 0.54rem; letter-spacing: 0.08em;
+  padding: 0.15rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-strip-btn:hover:not(:disabled) { border-color: var(--border-glow); color: var(--gold-dim); }
+.kmk-strip-btn:disabled { opacity: 0.35; cursor: default; }
+.kmk-strip-btn.danger { border-color: oklch(38% 0.12 25); color: oklch(56% 0.14 25); }
+.kmk-strip-btn.danger:hover:not(:disabled) { background: oklch(16% 0.08 25 / 0.4); color: oklch(68% 0.16 25); }
+
+/* ── Import form ──────────────────────────────────────────────────────────── */
+.kmk-import { display: flex; flex-direction: column; gap: 0.75rem; max-width: 780px; margin: 0 auto; width: 100%; }
+.kmk-import-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.kmk-import-label {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.14em;
+  color: var(--gold-dim); text-transform: uppercase;
+}
+.kmk-import-input {
+  font-family: 'Cinzel', serif; font-size: 0.78rem; padding: 0.4rem 0.65rem;
+  border-radius: 2px; width: 100%;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--parchment); transition: border-color 0.15s;
+}
+.kmk-import-input:focus { outline: none; border-color: var(--gold-dim); }
+.kmk-import-textarea {
+  font-family: 'Courier New', monospace; font-size: 0.78rem; line-height: 1.5;
+  padding: 0.55rem 0.65rem; border-radius: 2px; resize: vertical; min-height: 240px; width: 100%;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--parchment); transition: border-color 0.15s;
+}
+.kmk-import-textarea:focus { outline: none; border-color: var(--gold-dim); }
+.kmk-import-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.78rem; color: var(--text-muted);
+}
+.kmk-import-errors {
+  padding: 0.65rem 0.9rem; border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 25);
+  border: 1px solid oklch(42% 0.14 25);
+}
+.kmk-import-errors-title {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  color: oklch(68% 0.16 25); margin-bottom: 0.45rem;
+}
+.kmk-import-error-item {
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  color: oklch(64% 0.12 25); padding: 0.1rem 0; line-height: 1.4;
+}
+.kmk-import-error-item code {
+  font-family: 'Courier New', monospace; font-size: 0.72rem;
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.03 25);
+  padding: 0.05rem 0.3rem; border-radius: 2px;
+}
+.kmk-import-actions { display: flex; gap: 0.5rem; align-items: center; }
+.kmk-import-submit {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  padding: 0.35rem 0.9rem; border-radius: 2px; cursor: pointer;
+  background: oklch(14% 0.06 145 / 0.4); border: 1px solid oklch(40% 0.12 145);
+  color: oklch(66% 0.14 145); transition: all 0.15s;
+}
+.kmk-import-submit:hover:not(:disabled) { background: oklch(20% 0.08 145 / 0.5); color: oklch(74% 0.16 145); }
+.kmk-import-submit:disabled { opacity: 0.4; cursor: default; }
+.kmk-import-cancel {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  padding: 0.35rem 0.9rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-import-cancel:hover { border-color: var(--border-glow); color: var(--gold-dim); }
+
+/* ── Ledger ───────────────────────────────────────────────────────────────── */
+.kmk-ledger-header {
+  display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+}
+.kmk-ledger-title {
+  font-family: 'Cinzel', serif; font-size: 1.15rem; letter-spacing: 0.06em; color: var(--gold);
+}
+.kmk-ledger-stats { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-muted); }
+.kmk-area-stack { display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* ── Area card ────────────────────────────────────────────────────────────── */
+.kmk-area-card {
+  border-radius: 3px; border: 1px solid var(--border);
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h); overflow: hidden;
+  transition: border-color 0.15s;
+}
+.kmk-area-card.unlocked { border-color: var(--border-glow); }
+.kmk-area-header {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.75rem; flex-wrap: wrap;
+}
+.kmk-lock-btn {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border); font-size: 0.88rem;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  color: var(--text-muted);
+}
+.kmk-lock-btn:hover { border-color: var(--border-glow); color: var(--gold-dim); }
+.kmk-area-info { flex: 1; min-width: 0; }
+.kmk-area-name {
+  font-family: 'Cinzel', serif; font-size: 0.88rem; letter-spacing: 0.06em;
+  color: var(--gold); line-height: 1.2;
+}
+.kmk-area-sub {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.72rem; color: var(--text-muted); margin-top: 0.05rem;
+}
+.kmk-meter-and-count { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.kmk-meter { display: flex; gap: 2px; align-items: center; }
+.kmk-seg {
+  width: 12px; height: 10px; border-radius: 2px; flex-shrink: 0;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.02 75);
+}
+.kmk-seg.kmk-s-Pending   { background: oklch(62% 0.15 62);  }
+.kmk-seg.kmk-s-Verifying { background: oklch(60% 0.15 235); }
+.kmk-seg.kmk-s-Complete  { background: oklch(58% 0.15 150); }
+.kmk-count-chip {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.08em;
+  padding: 0.1rem 0.4rem; border-radius: 2px; white-space: nowrap;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--gold-dim);
+}
+.kmk-count-chip.all-done { border-color: oklch(42% 0.12 150); color: oklch(62% 0.14 150); }
+.kmk-area-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border-glow), transparent);
+  margin: 0 0.75rem;
+}
+
+/* ── Task rows ────────────────────────────────────────────────────────────── */
+.kmk-tasks { display: flex; flex-direction: column; }
+.kmk-task-row {
+  display: flex; align-items: stretch; border-top: 1px solid var(--border); min-height: 2.5rem;
+}
+.kmk-task-accent {
+  width: 3px; flex-shrink: 0;
+  background: oklch(from var(--bg-card) calc(l - 0.02) 0.02 75);
+}
+.kmk-task-accent.kmk-s-Pending   { background: oklch(62% 0.15 62);  }
+.kmk-task-accent.kmk-s-Verifying { background: oklch(60% 0.15 235); }
+.kmk-task-accent.kmk-s-Complete  { background: oklch(58% 0.15 150); }
+.kmk-task-body {
+  flex: 1; min-width: 0; padding: 0.45rem 0.65rem;
+  display: flex; flex-direction: column; justify-content: center; gap: 0.1rem;
+}
+.kmk-task-trial {
+  font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.06em;
+  color: var(--gold-dim); line-height: 1.2;
+}
+.kmk-task-desc {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.8rem;
+  color: var(--parchment); line-height: 1.3;
+}
+.kmk-task-right {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 0.3rem; padding: 0.45rem 0.65rem; flex-shrink: 0; min-width: 180px;
+}
+.kmk-player-row { display: flex; align-items: center; gap: 0.25rem; }
+.kmk-player-icon { font-size: 0.72rem; flex-shrink: 0; color: var(--text-muted); }
+.kmk-player-input {
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  padding: 0.15rem 0.35rem; border-radius: 2px; flex: 1; min-width: 0;
+  background: transparent; border: 1px solid transparent;
+  color: var(--parchment); transition: all 0.15s;
+}
+.kmk-player-input:hover { border-color: var(--border); }
+.kmk-player-input:focus { outline: none; border-color: var(--border-glow); background: oklch(from var(--bg-card) calc(l - 0.04) c h); }
+
+/* Status select */
+.kmk-status-select {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.06em;
+  padding: 0.18rem 0.4rem; border-radius: 2px; cursor: pointer; width: 100%;
+  border: 1px solid var(--border);
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  color: var(--parchment); transition: all 0.15s;
+}
+.kmk-status-select:focus { outline: none; }
+.kmk-status-select.kmk-s-Incomplete {
+  border-color: oklch(42% 0.05 75);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.05 75);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.02 75);
+}
+.kmk-status-select.kmk-s-Pending {
+  border-color: oklch(45% 0.12 62);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 62);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 62);
+}
+.kmk-status-select.kmk-s-Verifying {
+  border-color: oklch(45% 0.12 235);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 235);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 235);
+}
+.kmk-status-select.kmk-s-Complete {
+  border-color: oklch(45% 0.12 150);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 150);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 150);
+}
+
+/* ── Completed section ────────────────────────────────────────────────────── */
+.kmk-completed-toggle {
+  width: 100%; text-align: left; padding: 0.35rem 0.75rem;
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 150);
+  border: none; border-top: 1px solid var(--border); cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  color: oklch(62% 0.14 150); transition: color 0.15s;
+}
+.kmk-completed-toggle:hover { color: oklch(70% 0.14 150); }
+.kmk-completed-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.75rem; border-top: 1px solid oklch(from var(--border) l c h / 0.4);
+}
+.kmk-completed-row:first-child { border-top: none; }
+.kmk-completed-check { color: oklch(60% 0.14 150); font-size: 0.8rem; flex-shrink: 0; }
+.kmk-completed-trial {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.05em;
+  color: var(--gold-dim); flex: 1;
+}
+.kmk-completed-player {
+  font-family: 'Crimson Pro', serif; font-size: 0.75rem; font-style: italic;
+  color: var(--text-muted);
+}
+.kmk-completed-select-wrap { flex-shrink: 0; min-width: 120px; }
+
+/* ── Admin KmkPage layout (classes used by KmkPage.tsx) ──────────────────── */
+.kmk-page { display: flex; flex-direction: column; gap: 1.25rem; }
+.kmk-page-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.kmk-page-title { font-family: 'Cinzel', serif; font-size: 0.85rem; letter-spacing: 0.12em; color: var(--gold); font-weight: 400; margin: 0; }
+.kmk-page-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+.kmk-list-strip { display: flex; flex-direction: column; gap: 0.3rem; }
+.kmk-list-item {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.42rem 0.65rem; border-radius: 3px; cursor: pointer;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+  border: 1px solid var(--border); transition: border-color 0.15s;
+}
+.kmk-list-item:hover { border-color: var(--border-glow); }
+.kmk-list-item.selected { border-color: var(--gold-dim); }
+.kmk-list-item-name {
+  flex: 1; display: flex; align-items: center; gap: 0.45rem;
+  font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.08em; color: var(--parchment);
+}
+.kmk-list-item-controls { display: flex; align-items: center; gap: 0.3rem; flex-shrink: 0; }
+
+.kmk-player-view-link {
+  font-size: 0.78rem; text-decoration: none; padding: 0.16rem 0.38rem;
+  border-radius: 2px; border: 1px solid var(--border); color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-player-view-link:hover { border-color: var(--border-glow); color: var(--gold-dim); }
+
+.kmk-set-active-btn {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  padding: 0.16rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid oklch(38% 0.11 145); color: oklch(58% 0.13 145); transition: all 0.15s;
+}
+.kmk-set-active-btn:hover:not(:disabled) { background: oklch(13% 0.06 145 / 0.4); color: oklch(68% 0.14 145); }
+.kmk-set-active-btn:disabled { opacity: 0.3; cursor: default; }
+
+.kmk-delete-btn {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  padding: 0.16rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-delete-btn:hover:not(:disabled) { border-color: oklch(42% 0.14 25); color: oklch(62% 0.16 25); }
+.kmk-delete-btn:disabled { opacity: 0.3; cursor: default; }
+.kmk-delete-btn.confirm { border-color: oklch(48% 0.16 25); color: oklch(68% 0.18 25); }
+
+/* ── Player Trial Board ───────────────────────────────────────────────────── */
+.kmk-board {
+  min-height: 100vh;
+  width: min(900px, calc(100vw - 2rem));
+  margin: 0 auto;
+  display: flex; flex-direction: column;
+}
+.kmk-board-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--border);
+  background: var(--bg-deep); position: sticky; top: 0; z-index: 10;
+}
+.kmk-board-header-left { display: flex; flex-direction: column; gap: 0.1rem; }
+.kmk-board-eyebrow {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.16em;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.kmk-board-list-name { font-family: 'Cinzel', serif; font-size: 1rem; letter-spacing: 0.1em; color: var(--gold); font-weight: 400; }
+.kmk-board-home-link {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.1em;
+  color: var(--text-muted); text-decoration: none;
+  padding: 0.28rem 0.65rem; border: 1px solid var(--border); border-radius: 2px; transition: all 0.15s; flex-shrink: 0;
+}
+.kmk-board-home-link:hover { color: var(--gold-dim); border-color: var(--border-glow); }
+
+.kmk-board-login-prompt {
+  display: flex; align-items: center; justify-content: center; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.55rem 1.5rem; background: oklch(14% 0.06 60 / 0.5);
+  border-bottom: 1px solid oklch(36% 0.09 60);
+  font-family: 'Crimson Pro', serif; font-size: 0.84rem;
+}
+.kmk-board-login-msg { color: oklch(72% 0.11 60); }
+.kmk-board-login-link {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.1em;
+  padding: 0.22rem 0.6rem; border-radius: 2px; text-decoration: none;
+  background: oklch(16% 0.08 60 / 0.5); border: 1px solid oklch(42% 0.11 60);
+  color: oklch(70% 0.13 60); transition: all 0.15s;
+}
+.kmk-board-login-link:hover { background: oklch(20% 0.10 60 / 0.5); color: oklch(78% 0.15 60); }
+
+.kmk-board-areas { display: flex; flex-direction: column; padding: 1rem 1.5rem; gap: 0.6rem; }
+
+.kmk-board-area {
+  border: 1px solid var(--border); border-radius: 4px;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h); overflow: hidden;
+}
+.kmk-board-area-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border);
+  background: oklch(from var(--bg-deep) calc(l + 0.02) c h);
+}
+.kmk-board-area-name { font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.1em; color: var(--gold-dim); }
+.kmk-board-area-count { font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.06em; color: var(--text-muted); }
+
+.kmk-board-area-sealed {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.6rem 0.8rem; border: 1px dashed var(--border); border-radius: 4px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+}
+.kmk-board-sealed-icon { font-size: 0.72rem; flex-shrink: 0; opacity: 0.55; }
+.kmk-board-sealed-name { font-family: 'Cinzel', serif; font-size: 0.63rem; letter-spacing: 0.08em; color: var(--text-muted); flex: 1; }
+.kmk-board-sealed-sub { font-family: 'Crimson Pro', serif; font-size: 0.7rem; font-style: italic; color: var(--text-muted); flex-shrink: 0; }
+
+/* Up to 4 cards wide; gap:1px + background creates a border-between-cells effect */
+.kmk-board-trials {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+@media (max-width: 540px) {
+  .kmk-board-trials { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 320px) {
+  .kmk-board-trials { grid-template-columns: 1fr; }
+}
+.kmk-board-trial {
+  display: flex; flex-direction: column;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+}
+
+.kmk-board-trial-accent { height: 4px; width: 100%; flex-shrink: 0; background: var(--border); }
+.kmk-board-trial-accent.kmk-s-Incomplete { background: var(--border); }
+.kmk-board-trial-accent.kmk-s-Pending    { background: oklch(62% 0.15 62); }
+.kmk-board-trial-accent.kmk-s-Verifying  { background: oklch(60% 0.15 235); }
+.kmk-board-trial-accent.kmk-s-Complete   { background: oklch(58% 0.15 150); }
+
+.kmk-board-trial-body { flex: 1; display: flex; flex-direction: column; gap: 0.28rem; padding: 0.6rem 0.75rem; min-width: 0; }
+.kmk-board-trial-name { font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.06em; color: var(--parchment); }
+.kmk-board-trial-desc { font-family: 'Crimson Pro', serif; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4; flex: 1; }
+.kmk-board-trial-footer { display: flex; flex-direction: column; gap: 0.3rem; margin-top: auto; padding-top: 0.45rem; }
+.kmk-board-trial-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+.kmk-board-claimer { font-family: 'Crimson Pro', serif; font-size: 0.74rem; font-style: italic; color: var(--text-muted); }
+
+.kmk-board-badge {
+  font-family: 'Cinzel', serif; font-size: 0.48rem; letter-spacing: 0.1em;
+  padding: 0.08rem 0.36rem; border-radius: 2px; border: 1px solid; flex-shrink: 0;
+}
+/* Badge colors derive their lightness from --gold-dim, which each theme already sets
+   to the correct contrast level for its background (62%+ on dark, 32–42% on light).
+   The hue is then swapped to the status color, giving theme-adaptive status badges. */
+.kmk-board-badge-Incomplete { border-color: var(--text-muted); color: var(--text-muted); }
+.kmk-board-badge-Pending    { border-color: oklch(from var(--gold-dim) l 0.15 62);  color: oklch(from var(--gold-dim) l 0.15 62); }
+.kmk-board-badge-Verifying  { border-color: oklch(from var(--gold-dim) l 0.15 235); color: oklch(from var(--gold-dim) l 0.15 235); }
+.kmk-board-badge-Complete   { border-color: oklch(from var(--gold-dim) l 0.15 150); color: oklch(from var(--gold-dim) l 0.15 150); }
+
+.kmk-board-actions { display: flex; flex-direction: column; gap: 0.2rem; }
+.kmk-board-btn {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
+  padding: 0.2rem 0.5rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid; transition: all 0.15s;
+}
+.kmk-board-btn:disabled { opacity: 0.4; cursor: default; }
+.kmk-board-btn-claim   { border-color: oklch(38% 0.12 145); color: oklch(60% 0.14 145); }
+.kmk-board-btn-claim:hover:not(:disabled)   { background: oklch(55% 0.12 145 / 0.15); color: oklch(70% 0.15 145); }
+.kmk-board-btn-done    { border-color: oklch(36% 0.12 235); color: oklch(58% 0.14 235); }
+.kmk-board-btn-done:hover:not(:disabled)    { background: oklch(55% 0.12 235 / 0.15); color: oklch(68% 0.15 235); }
+.kmk-board-btn-resume  { border-color: oklch(38% 0.12 62);  color: oklch(60% 0.14 62); }
+.kmk-board-btn-resume:hover:not(:disabled)  { background: oklch(55% 0.12 62  / 0.15); color: oklch(70% 0.15 62); }
+.kmk-board-btn-abandon { border-color: oklch(34% 0.12 25);  color: oklch(54% 0.14 25); }
+.kmk-board-btn-abandon:hover:not(:disabled) { background: oklch(55% 0.12 25  / 0.15); color: oklch(66% 0.15 25); }
+
+.kmk-board-completed-toggle {
+  display: block; width: 100%; text-align: left;
+  padding: 0.38rem 0.8rem; background: none; border: none; border-top: 1px solid var(--border);
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  color: oklch(50% 0.10 150); cursor: pointer; transition: color 0.15s;
+}
+.kmk-board-completed-toggle:hover { color: oklch(64% 0.14 150); }
+
+.kmk-board-completed-list { border-top: 1px solid var(--border); }
+.kmk-board-completed-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.38rem 0.8rem; border-top: 1px solid oklch(from var(--border) l c h / 0.5);
+}
+.kmk-board-completed-row:first-child { border-top: none; }
+.kmk-board-completed-check { color: oklch(56% 0.14 150); font-size: 0.76rem; flex-shrink: 0; }
+.kmk-board-completed-trial { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-dim); flex: 1; text-decoration: line-through; }
+.kmk-board-completed-claimer { font-family: 'Crimson Pro', serif; font-size: 0.73rem; font-style: italic; color: var(--text-dim); flex-shrink: 0; }
+
+.kmk-board-empty { padding: 0.7rem 0.8rem; font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.8rem; color: var(--text-dim); }
+
+.kmk-board-loading, .kmk-board-notfound {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem;
+}
+.kmk-board-notfound-icon { font-size: 2rem; }
+.kmk-board-notfound-msg { font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.1em; color: var(--text-muted); }
+.kmk-board-notfound-link {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  color: var(--gold-dim); text-decoration: none; margin-top: 0.5rem;
+  padding: 0.28rem 0.7rem; border: 1px solid var(--border-glow); border-radius: 2px; transition: all 0.15s;
+}
+.kmk-board-notfound-link:hover { color: var(--gold); border-color: var(--gold); }
+
 /* ══════════════════════════════════════════════════════════════════
    THEMES — each class on <body> overrides the tokens from :root.
    Gilded Hearth (default) needs no class.
@@ -2097,6 +2566,9 @@ body.theme-moonlit {
   --hidden-bg-2:   oklch(12% 0.02 250);
   --hidden-bg-3:   oklch(7% 0.01 250);
   --hidden-border: oklch(15% 0.03 250);
+
+  --text-muted: oklch(56% 0.04 245);
+  --text-dim:   oklch(42% 0.03 245);
 }
 
 /* ── Verdant Hollow ────────────────────────────────────────────────
@@ -2137,6 +2609,9 @@ body.theme-verdant {
   --hidden-bg-2:   oklch(11% 0.02 145);
   --hidden-bg-3:   oklch(7% 0.01 145);
   --hidden-border: oklch(14% 0.03 145);
+
+  --text-muted: oklch(52% 0.04 100);
+  --text-dim:   oklch(38% 0.03 100);
 }
 
 /* ── Aether Bloom ──────────────────────────────────────────────────
@@ -2202,6 +2677,9 @@ body.theme-parchment {
   --hidden-bg-2:   oklch(72% 0.04 80);
   --hidden-bg-3:   oklch(68% 0.04 80);
   --hidden-border: oklch(60% 0.05 80);
+
+  --text-muted: oklch(38% 0.05 70);
+  --text-dim:   oklch(52% 0.04 70);
 }
 /* Kill the dark ambient glow and noise overlay on the light-mode theme */
 body.theme-parchment::before { background: none; }
@@ -2247,6 +2725,9 @@ body.theme-sakura {
   --hidden-bg-2:   oklch(75% 0.03 12);
   --hidden-bg-3:   oklch(72% 0.03 12);
   --hidden-border: oklch(65% 0.04 15);
+
+  --text-muted: oklch(36% 0.05 12);
+  --text-dim:   oklch(50% 0.04 12);
 }
 body.theme-sakura::before { background: none; }
 body.theme-sakura::after  { opacity: 0; }
@@ -2290,6 +2771,9 @@ body.theme-mint {
   --hidden-bg-2:   oklch(72% 0.04 150);
   --hidden-bg-3:   oklch(68% 0.04 150);
   --hidden-border: oklch(58% 0.05 150);
+
+  --text-muted: oklch(36% 0.05 150);
+  --text-dim:   oklch(50% 0.04 150);
 }
 body.theme-mint::before { background: none; }
 body.theme-mint::after  { opacity: 0; }
@@ -2334,6 +2818,9 @@ body.theme-lapis {
   --hidden-bg-2:   oklch(70% 0.05 75);
   --hidden-bg-3:   oklch(66% 0.05 75);
   --hidden-border: oklch(58% 0.07 75);
+
+  --text-muted: oklch(35% 0.07 248);
+  --text-dim:   oklch(50% 0.05 248);
 }
 body.theme-lapis::before { background: none; }
 body.theme-lapis::after  { opacity: 0; }
@@ -2372,6 +2859,9 @@ body.theme-obsidian {
   --state-avail-border: oklch(70% 0.16 150);
   --state-prog-border:  oklch(75% 0.18 70);
   --state-done-border:  oklch(80% 0.17 95);
+
+  --text-muted: oklch(58% 0 0);
+  --text-dim:   oklch(44% 0 0);
 }
 
 /* ── Tidepool Atlas (dark, Deutan/Protan-friendly) ─────────────────
@@ -2413,6 +2903,9 @@ body.theme-tidepool {
   --hidden-bg-2:   oklch(12% 0.02 215);
   --hidden-bg-3:   oklch(7% 0.01 215);
   --hidden-border: oklch(15% 0.03 215);
+
+  --text-muted: oklch(56% 0.05 210);
+  --text-dim:   oklch(42% 0.04 210);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -2852,3 +3345,200 @@ body.theme-lapis     .lb-shop-orb-btn.owned {
   background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
   border-color: var(--border);
 }
+
+/* 12. Archipelago / Casino link buttons — hardcoded near-black bg ─── */
+body.theme-parchment .lb-archipelago-link a,
+body.theme-sakura    .lb-archipelago-link a,
+body.theme-mint      .lb-archipelago-link a,
+body.theme-lapis     .lb-archipelago-link a {
+  color:        oklch(35% 0.16 220);
+  border-color: oklch(48% 0.14 220);
+  background:   oklch(from var(--bg-card) calc(l - 0.07) 0.06 220);
+}
+body.theme-parchment .lb-archipelago-link a:hover,
+body.theme-sakura    .lb-archipelago-link a:hover,
+body.theme-mint      .lb-archipelago-link a:hover,
+body.theme-lapis     .lb-archipelago-link a:hover {
+  background:   oklch(from var(--bg-card) calc(l - 0.13) 0.08 220);
+  box-shadow:   0 0 10px oklch(42% 0.14 220 / 0.25);
+  color:        oklch(28% 0.18 220);
+}
+
+/* 13. Orb reward banner on tiles — hardcoded near-black purple bg ── */
+@keyframes orbRewardPulseLight {
+  0%,100% { box-shadow: 0 0 6px oklch(48% 0.18 290 / 0.2); }
+  50%      { box-shadow: 0 0 14px oklch(48% 0.18 290 / 0.4); }
+}
+body.theme-parchment .lb-orb-reward,
+body.theme-sakura    .lb-orb-reward,
+body.theme-mint      .lb-orb-reward,
+body.theme-lapis     .lb-orb-reward {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.06 290);
+  color:      oklch(35% 0.18 290);
+  animation:  orbRewardPulseLight 2s ease-in-out infinite;
+}
+
+/* 14. Profile feats — near-black backgrounds, high-lightness text ── */
+body.theme-parchment .profile-feat-row,
+body.theme-sakura    .profile-feat-row,
+body.theme-mint      .profile-feat-row,
+body.theme-lapis     .profile-feat-row {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.04 145);
+}
+body.theme-parchment .profile-feat-name,
+body.theme-sakura    .profile-feat-name,
+body.theme-mint      .profile-feat-name,
+body.theme-lapis     .profile-feat-name { color: oklch(35% 0.14 145); }
+
+body.theme-parchment .profile-feat-select,
+body.theme-sakura    .profile-feat-select,
+body.theme-mint      .profile-feat-select,
+body.theme-lapis     .profile-feat-select {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.03 75);
+}
+body.theme-parchment .profile-feat-option,
+body.theme-sakura    .profile-feat-option,
+body.theme-mint      .profile-feat-option,
+body.theme-lapis     .profile-feat-option {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.02 75);
+}
+body.theme-parchment .profile-feat-option:hover,
+body.theme-sakura    .profile-feat-option:hover,
+body.theme-mint      .profile-feat-option:hover,
+body.theme-lapis     .profile-feat-option:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.03 75);
+}
+body.theme-parchment .profile-feat-option.selected,
+body.theme-sakura    .profile-feat-option.selected,
+body.theme-mint      .profile-feat-option.selected,
+body.theme-lapis     .profile-feat-option.selected {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.05 145);
+}
+body.theme-parchment .profile-feat-confirm,
+body.theme-sakura    .profile-feat-confirm,
+body.theme-mint      .profile-feat-confirm,
+body.theme-lapis     .profile-feat-confirm {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.05 145);
+  color:      oklch(35% 0.14 145);
+}
+body.theme-parchment .profile-feat-confirm:hover:not(:disabled),
+body.theme-sakura    .profile-feat-confirm:hover:not(:disabled),
+body.theme-mint      .profile-feat-confirm:hover:not(:disabled),
+body.theme-lapis     .profile-feat-confirm:hover:not(:disabled) {
+  background: oklch(from var(--bg-card) calc(l - 0.13) 0.07 145);
+}
+
+/* 15. Adventurer status notes — near-black bg, high-lightness text ─ */
+body.theme-parchment .lb-adv-note,
+body.theme-sakura    .lb-adv-note,
+body.theme-mint      .lb-adv-note,
+body.theme-lapis     .lb-adv-note {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.02 75);
+}
+body.theme-parchment .lb-adv-note-text,
+body.theme-sakura    .lb-adv-note-text,
+body.theme-mint      .lb-adv-note-text,
+body.theme-lapis     .lb-adv-note-text { color: oklch(32% 0.04 75); }
+
+body.theme-parchment .lb-adv-note-input,
+body.theme-sakura    .lb-adv-note-input,
+body.theme-mint      .lb-adv-note-input,
+body.theme-lapis     .lb-adv-note-input {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.02 75);
+}
+body.theme-parchment .lb-adv-note-save,
+body.theme-sakura    .lb-adv-note-save,
+body.theme-mint      .lb-adv-note-save,
+body.theme-lapis     .lb-adv-note-save {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.04 75);
+}
+body.theme-parchment .lb-adv-note-save:hover,
+body.theme-sakura    .lb-adv-note-save:hover,
+body.theme-mint      .lb-adv-note-save:hover,
+body.theme-lapis     .lb-adv-note-save:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.14) 0.05 75);
+}
+
+/* 16. Boss lock — near-black bg, high-lightness text ───────────── */
+body.theme-parchment .lb-boss-lock,
+body.theme-sakura    .lb-boss-lock,
+body.theme-mint      .lb-boss-lock,
+body.theme-lapis     .lb-boss-lock {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.03 25);
+}
+body.theme-parchment .lb-boss-lock-title,
+body.theme-sakura    .lb-boss-lock-title,
+body.theme-mint      .lb-boss-lock-title,
+body.theme-lapis     .lb-boss-lock-title { color: oklch(38% 0.16 25); }
+
+body.theme-parchment .lb-boss-neg-effect,
+body.theme-sakura    .lb-boss-neg-effect,
+body.theme-mint      .lb-boss-neg-effect,
+body.theme-lapis     .lb-boss-neg-effect {
+  color:         oklch(38% 0.10 25);
+  border-bottom-color: oklch(45% 0.06 25 / 0.4);
+}
+
+/* 17. Slot prompt inline msg — near-black bg ────────────────────── */
+body.theme-parchment .lb-slot-prompt-msg,
+body.theme-sakura    .lb-slot-prompt-msg,
+body.theme-mint      .lb-slot-prompt-msg,
+body.theme-lapis     .lb-slot-prompt-msg {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.02 75);
+}
+
+/* 18. Various high-lightness text colors across lightbox elements ── */
+body.theme-parchment .activity-message,
+body.theme-sakura    .activity-message,
+body.theme-mint      .activity-message,
+body.theme-lapis     .activity-message { color: oklch(30% 0.05 75); }
+
+body.theme-parchment .lb-reward-chip.xp,
+body.theme-sakura    .lb-reward-chip.xp,
+body.theme-mint      .lb-reward-chip.xp,
+body.theme-lapis     .lb-reward-chip.xp { color: oklch(32% 0.14 195); }
+
+body.theme-parchment .tile.state-complete .tile-progress,
+body.theme-sakura    .tile.state-complete .tile-progress,
+body.theme-mint      .tile.state-complete .tile-progress,
+body.theme-lapis     .tile.state-complete .tile-progress { color: oklch(32% 0.14 145); }
+
+body.theme-parchment .lb-public-slots-header,
+body.theme-sakura    .lb-public-slots-header,
+body.theme-mint      .lb-public-slots-header,
+body.theme-lapis     .lb-public-slots-header { color: oklch(36% 0.12 195); }
+
+body.theme-parchment .lb-claimable-header,
+body.theme-sakura    .lb-claimable-header,
+body.theme-mint      .lb-claimable-header,
+body.theme-lapis     .lb-claimable-header { color: oklch(38% 0.14 50); }
+
+body.theme-parchment .lb-claimable-note,
+body.theme-sakura    .lb-claimable-note,
+body.theme-mint      .lb-claimable-note,
+body.theme-lapis     .lb-claimable-note { color: oklch(38% 0.10 50); }
+
+body.theme-parchment .lb-claim-btn,
+body.theme-sakura    .lb-claim-btn,
+body.theme-mint      .lb-claim-btn,
+body.theme-lapis     .lb-claim-btn { color: oklch(38% 0.14 50); }
+
+body.theme-parchment .lb-claim-btn:hover,
+body.theme-sakura    .lb-claim-btn:hover,
+body.theme-mint      .lb-claim-btn:hover,
+body.theme-lapis     .lb-claim-btn:hover { color: oklch(28% 0.16 50); }
+
+body.theme-parchment .lb-slot-bonus-xp,
+body.theme-sakura    .lb-slot-bonus-xp,
+body.theme-mint      .lb-slot-bonus-xp,
+body.theme-lapis     .lb-slot-bonus-xp { color: oklch(35% 0.12 145); }
+
+body.theme-parchment .lb-trait-item-badge,
+body.theme-sakura    .lb-trait-item-badge,
+body.theme-mint      .lb-trait-item-badge,
+body.theme-lapis     .lb-trait-item-badge { color: oklch(36% 0.12 145); }
+
+body.theme-parchment .lb-trait-val-new,
+body.theme-sakura    .lb-trait-val-new,
+body.theme-mint      .lb-trait-val-new,
+body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }

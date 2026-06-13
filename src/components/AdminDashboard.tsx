@@ -7,12 +7,14 @@ import ShopsPage from './admin/ShopsPage';
 import OrbsPage from './admin/OrbsPage';
 import MapPage from './admin/MapPage';
 import MissionsPage from './admin/MissionsPage';
+import KmkPage from './admin/kmk/KmkPage';
 
-type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map' | 'missions';
+type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map' | 'missions' | 'kmk';
 
 const PAGES: { id: DashPage; label: string }[] = [
   { id: 'challenges', label: '⚔ Challenges' },
   { id: 'missions',   label: '⚜ Missions'   },
+  { id: 'kmk',        label: '🗝 Keep'       },
   { id: 'map',        label: '🗺 Map'        },
   { id: 'players',    label: '👥 Players'    },
   { id: 'shops',      label: '🛒 Shops'      },
@@ -121,6 +123,7 @@ export default function AdminDashboard() {
       <main className="dash-main">
         {page === 'challenges' && <ChallengesPage navigateToMap={navigateToMap} />}
         {page === 'missions'   && <MissionsPage />}
+        {page === 'kmk'        && <KmkPage />}
         {page === 'map'        && <MapPage initialCoord={mapInitCoord} />}
         {page === 'players'    && <PlayersPage />}
         {page === 'shops'      && <ShopsPage />}

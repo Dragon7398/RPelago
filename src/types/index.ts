@@ -127,6 +127,33 @@ export interface GameMeta {
   adminId: string;
   initialized: boolean;
   seed: number;
+  kmkActiveListId?: string | null;
+}
+
+// ── Keymaster's Keep ──────────────────────────────────────────────────────────
+export type KmkStatus = 'Incomplete' | 'Pending' | 'Verifying' | 'Complete';
+
+export interface KmkTask {
+  trial: string;
+  desc: string;
+  order: number;
+  status: KmkStatus;
+  playerId?: string | null;
+  playerName?: string | null;
+  claimedAt?: number | null;
+}
+
+export interface KmkArea {
+  name: string;
+  order: number;
+  locked: boolean;
+  tasks: Record<string, KmkTask>;
+}
+
+export interface KmkList {
+  name: string;
+  createdAt: number;
+  areas: Record<string, KmkArea>;
 }
 
 export interface OrbAcquisition {
