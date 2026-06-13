@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.kmkClaimTrial = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1172,5 +1172,46 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
             await deployMission(id, m, now);
         }
     }
+});
+// ── kmkClaimTrial ─────────────────────────────────────────────────────────────
+// Atomically claims a KMK trial: Incomplete → Pending.
+// Rejects disabled players, locked areas, and already-claimed tasks.
+exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { listId, areaId, taskId } = request.data;
+    if (!listId || !areaId || !taskId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing listId, areaId, or taskId.');
+    const uid = request.auth.uid;
+    const db = (0, database_2.getDatabase)();
+    // Player must exist and not be disabled.
+    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    const player = playerSnap.val();
+    if (player.disabled)
+        throw new https_1.HttpsError('permission-denied', 'Account restricted.');
+    // Area must exist and be unlocked.
+    const areaLockedSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/locked`).get();
+    if (!areaLockedSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Area not found.');
+    if (areaLockedSnap.val() === true)
+        throw new https_1.HttpsError('failed-precondition', 'Area is locked.');
+    let abortReason = 'Trial is no longer available.';
+    const { committed } = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`)
+        .transaction((current) => {
+        if (!current) {
+            abortReason = 'Trial not found.';
+            return undefined;
+        }
+        if (current.status !== 'Incomplete') {
+            abortReason = 'Trial is no longer available.';
+            return undefined;
+        }
+        return { ...current, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
+    });
+    if (!committed)
+        throw new https_1.HttpsError('failed-precondition', abortReason);
+    return { success: true };
 });
 //# sourceMappingURL=index.js.map

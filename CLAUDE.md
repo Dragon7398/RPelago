@@ -16,7 +16,12 @@ The build is a **multi-page Vite app** with two HTML entry points (configured in
 - `index.html` → main game app (`src/main.tsx`)
 - `casino/table.html` → casino table mini-app (`src/casino/main.tsx`, served at `/casino/table.html`)
 
-Firebase Cloud Functions are in `functions/` and deploy separately via `firebase deploy --only functions`.
+Firebase Cloud Functions are in `functions/` and deploy separately:
+
+```bash
+cd functions && npm run build   # tsc → functions/lib/
+firebase deploy --only functions
+```
 
 ## Environment
 
@@ -195,10 +200,11 @@ The Players page shows a count badge and an inline list with AUTO/ADMIN tags, da
 
 ### Guildmaster Missions
 
-A parallel progression system independent of the tile map. Missions are stored in `game/missions/` and completed missions are moved to `game/missionsHistory/`. Two mission types are defined in `MISSION_DEFS` (`constants.ts`):
+A parallel progression system independent of the tile map. Missions are stored in `game/missions/` and completed missions are moved to `game/missionsHistory/`. Three mission types are defined in `MISSION_DEFS` (`constants.ts`):
 
 - **Basic Training** (`basic`) — one-time per player, requires 150-check sturdy slot, tracked via `player.basicTrainingDone`.
 - **Patrol** (`patrol`) — repeatable, no traits, earns steady gold.
+- **Casino** (`casino`) — repeatable; slots are chosen via the casino mini-app card game. Reward is variable (`variableReward: true`): XP floor is 50 + gambit XP settled at deploy; GP is drawn from a shared `pot`. `casinoStats` (release %, collect %, hint cost) are rolled at deploy from the cohort's shared odds table.
 
 Mission state machine: `forming → inprogress → complete`. `player.activeMission` holds the current mission ID (or null); a player may only be in one mission at a time.
 
@@ -238,7 +244,21 @@ Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSl
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
 
-`CASINO_START_STATS`, `CASINO_ANTE`, and `CASINO_REROLL_COST` are defined in `constants.ts`.
+`CASINO_START_STATS`, `CASINO_ANTE`, `CASINO_REROLL_COST`, and `CASINO_MIN_ENLIST_GOLD` are defined in `constants.ts`.
+
+> **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus `CASINO_POT_SEED` and `CASINO_POT_CUT_PCT` constants that only live server-side. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
+
+### Keymaster's Keep
+
+A co-op task-list system stored in `game/kmkLists/` in Firebase, separate from the tile map and missions. The active list ID is tracked in `gameState.meta.kmkActiveListId`.
+
+**Data shape**: `KmkList` → `areas: Record<string, KmkArea>` → `tasks: Record<string, KmkTask>`. Tasks have a `status` (`KmkStatus`: `'Incomplete' | 'Pending' | 'Verifying' | 'Complete'`) and an optional claimed player.
+
+**Player flow**: claim a trial (`Incomplete → Pending`), mark it done (`Pending → Verifying`), abandon (`Pending → Incomplete`), or resume (`Verifying → Pending`). Areas can be locked by admin to prevent claiming.
+
+**Admin flow**: import a list from CSV rows (`{ area, trial, desc }`), set it as the active list, lock/unlock areas, override task status, override the assigned player, or delete a list.
+
+State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All writes go through `db.ts` `kmk*` functions. The admin tab renders in `src/components/admin/kmk/KmkPage.tsx`.
 
 ### File map
 
@@ -254,6 +274,7 @@ The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat
 | `src/firebase/db.ts` | All RTDB read/write functions |
 | `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert |
 | `src/contexts/GameStateContext.tsx` | Game subscription, all action callbacks |
+| `src/contexts/KmkContext.tsx` | Keymaster's Keep subscription and action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
 | `src/components/Header.tsx` | Site header with nav/branding |
 | `src/components/PlayerHUD.tsx` | Player XP/gold/level status bar |
@@ -268,11 +289,13 @@ The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat
 | `src/components/HelpModal.tsx` | Help modal shell |
 | `src/components/help/` | Help section components (11 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml, Missions) |
 | `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers, GuildmasterMissions) |
-| `src/components/AdminDashboard.tsx` | Admin dashboard shell |
+| `src/components/AdminDashboard.tsx` | Admin dashboard shell (tabs: challenges, missions, kmk, map, players, shops, orbs) |
 | `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage |
+| `src/components/admin/kmk/` | KmkPage (tab shell), KmkImport (CSV import form), KmkLedger (task list UI) |
 | `src/components/admin/mapPage/` | Map page sub-editors: MapGridPanel, AdvSlotEditor, PublicSlotEditor, ClaimableBonusEditor, TraitEditor |
 | `src/components/admin/playersPage/` | PlayerCard sub-component |
 | `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |
+| `functions/src/casinoEngine.ts` | Server-side casino engine — consolidates all four `src/lib/casino*.ts` files; must stay in sync with them |
 | `database.rules.json` | Firebase security rules |
 | `src/lib/casinoData.ts` | Deck definition, card types, `buildDeck`, `shuffle` |
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
