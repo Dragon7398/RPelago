@@ -120,6 +120,8 @@ All in `functions/src/index.ts`:
 | `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. |
 | `tickGuildmasterMissions` | Scheduled every 15 minutes | Auto-deploys any forming mission whose decay has reduced max slots to the current fill count. |
 
+> **Admin SDK pitfall**: When using `admin.database().ref(path).transaction()`, passing a child path (e.g. `profiles/{uid}/gold`) instead of the parent node can cause the transaction callback to receive `null` on the first invocation — even when data exists. Always verify the transaction ref resolves to a node that exists, and after fixing a null-transaction bug in one function, audit sibling functions (e.g. `purchaseShopItem` and `purchaseShopOrb`) for the same pattern.
+
 ### Shops and items
 
 Four named shops (Centralia, Frostshear, Flamefell, Pinereach) are assigned to town tiles via seeded shuffle. Each shop has one optional orb slot (`orbId: string | null`) and an `itemIds` array. Default shop configs are in `DEFAULT_SHOPS` (`constants.ts`); the live config is stored in `game/shops` in Firebase and is admin-editable.

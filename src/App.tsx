@@ -16,6 +16,7 @@ import HelpModal from './components/HelpModal';
 import PrivacyModal from './components/PrivacyModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
+import KmkBoard from './components/kmk/KmkBoard';
 import { KmkProvider } from './contexts/KmkContext';
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
@@ -214,6 +215,11 @@ function AppContent() {
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
 
   if (window.location.hash === '#admin') return <AdminDashboard />;
+
+  if (window.location.hash.startsWith('#keep/')) {
+    const listId = window.location.hash.slice('#keep/'.length);
+    return <KmkBoard listId={listId} />;
+  }
 
   if (loading) return <LoadingScreen />;
 
