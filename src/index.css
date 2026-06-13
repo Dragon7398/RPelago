@@ -1330,7 +1330,7 @@ header p {
   color: var(--bg-card); background: var(--gold-dim);
   padding: 0.1em 0.5em; border-radius: 2px;
 }
-.activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.activity-feed-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 250px; overflow-y: auto; }
 .activity-feed-empty { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.78rem; color: oklch(40% 0.06 75); text-align: center; padding: 0.3rem 0; }
 .activity-entry {
   display: flex; align-items: center; gap: 0.5rem;
@@ -2371,7 +2371,9 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 
 /* ── Player Trial Board ───────────────────────────────────────────────────── */
 .kmk-board {
-  min-height: 100vh; width: 100%; max-width: 760px; margin: 0 auto;
+  min-height: 100vh;
+  width: min(900px, calc(100vw - 2rem));
+  margin: 0 auto;
   display: flex; flex-direction: column;
 }
 .kmk-board-header {
@@ -2423,39 +2425,57 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 
 .kmk-board-area-sealed {
   display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-  padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: 4px;
-  background: oklch(from var(--bg-card) calc(l - 0.03) c h); opacity: 0.5;
+  padding: 0.6rem 0.8rem; border: 1px dashed var(--border); border-radius: 4px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
 }
-.kmk-board-sealed-icon { font-size: 0.72rem; flex-shrink: 0; }
-.kmk-board-sealed-name { font-family: 'Cinzel', serif; font-size: 0.63rem; letter-spacing: 0.08em; color: var(--parchment); flex: 1; }
-.kmk-board-sealed-sub { font-family: 'Crimson Pro', serif; font-size: 0.7rem; font-style: italic; color: var(--text-dim); flex-shrink: 0; }
+.kmk-board-sealed-icon { font-size: 0.72rem; flex-shrink: 0; opacity: 0.55; }
+.kmk-board-sealed-name { font-family: 'Cinzel', serif; font-size: 0.63rem; letter-spacing: 0.08em; color: var(--text-muted); flex: 1; }
+.kmk-board-sealed-sub { font-family: 'Crimson Pro', serif; font-size: 0.7rem; font-style: italic; color: var(--text-muted); flex-shrink: 0; }
 
-.kmk-board-trials { display: flex; flex-direction: column; }
-.kmk-board-trial { display: flex; align-items: stretch; border-top: 1px solid var(--border); }
-.kmk-board-trial:first-child { border-top: none; }
+/* Up to 4 cards wide; gap:1px + background creates a border-between-cells effect */
+.kmk-board-trials {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+@media (max-width: 540px) {
+  .kmk-board-trials { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 320px) {
+  .kmk-board-trials { grid-template-columns: 1fr; }
+}
+.kmk-board-trial {
+  display: flex; flex-direction: column;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+}
 
-.kmk-board-trial-accent { width: 3px; flex-shrink: 0; background: var(--border); }
+.kmk-board-trial-accent { height: 4px; width: 100%; flex-shrink: 0; background: var(--border); }
 .kmk-board-trial-accent.kmk-s-Incomplete { background: var(--border); }
 .kmk-board-trial-accent.kmk-s-Pending    { background: oklch(62% 0.15 62); }
 .kmk-board-trial-accent.kmk-s-Verifying  { background: oklch(60% 0.15 235); }
 .kmk-board-trial-accent.kmk-s-Complete   { background: oklch(58% 0.15 150); }
 
-.kmk-board-trial-body { flex: 1; display: flex; flex-direction: column; gap: 0.28rem; padding: 0.6rem 0.8rem; min-width: 0; }
+.kmk-board-trial-body { flex: 1; display: flex; flex-direction: column; gap: 0.28rem; padding: 0.6rem 0.75rem; min-width: 0; }
 .kmk-board-trial-name { font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.06em; color: var(--parchment); }
-.kmk-board-trial-desc { font-family: 'Crimson Pro', serif; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4; }
-.kmk-board-trial-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.1rem; }
-.kmk-board-claimer { font-family: 'Crimson Pro', serif; font-size: 0.74rem; font-style: italic; color: var(--text-muted); flex: 1; min-width: 0; }
+.kmk-board-trial-desc { font-family: 'Crimson Pro', serif; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4; flex: 1; }
+.kmk-board-trial-footer { display: flex; flex-direction: column; gap: 0.3rem; margin-top: auto; padding-top: 0.45rem; }
+.kmk-board-trial-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+.kmk-board-claimer { font-family: 'Crimson Pro', serif; font-size: 0.74rem; font-style: italic; color: var(--text-muted); }
 
 .kmk-board-badge {
   font-family: 'Cinzel', serif; font-size: 0.48rem; letter-spacing: 0.1em;
   padding: 0.08rem 0.36rem; border-radius: 2px; border: 1px solid; flex-shrink: 0;
 }
-.kmk-board-badge-Incomplete { border-color: var(--border);           color: var(--text-dim); }
-.kmk-board-badge-Pending    { border-color: oklch(40% 0.12 62);  color: oklch(60% 0.14 62);  background: oklch(11% 0.05 62  / 0.4); }
-.kmk-board-badge-Verifying  { border-color: oklch(38% 0.12 235); color: oklch(58% 0.14 235); background: oklch(11% 0.05 235 / 0.4); }
-.kmk-board-badge-Complete   { border-color: oklch(38% 0.12 150); color: oklch(56% 0.14 150); background: oklch(11% 0.05 150 / 0.4); }
+/* Badge colors derive their lightness from --gold-dim, which each theme already sets
+   to the correct contrast level for its background (62%+ on dark, 32–42% on light).
+   The hue is then swapped to the status color, giving theme-adaptive status badges. */
+.kmk-board-badge-Incomplete { border-color: var(--text-muted); color: var(--text-muted); }
+.kmk-board-badge-Pending    { border-color: oklch(from var(--gold-dim) l 0.15 62);  color: oklch(from var(--gold-dim) l 0.15 62); }
+.kmk-board-badge-Verifying  { border-color: oklch(from var(--gold-dim) l 0.15 235); color: oklch(from var(--gold-dim) l 0.15 235); }
+.kmk-board-badge-Complete   { border-color: oklch(from var(--gold-dim) l 0.15 150); color: oklch(from var(--gold-dim) l 0.15 150); }
 
-.kmk-board-actions { display: flex; gap: 0.28rem; flex-wrap: wrap; flex-shrink: 0; }
+.kmk-board-actions { display: flex; flex-direction: column; gap: 0.2rem; }
 .kmk-board-btn {
   font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
   padding: 0.2rem 0.5rem; border-radius: 2px; cursor: pointer;
@@ -2463,13 +2483,13 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .kmk-board-btn:disabled { opacity: 0.4; cursor: default; }
 .kmk-board-btn-claim   { border-color: oklch(38% 0.12 145); color: oklch(60% 0.14 145); }
-.kmk-board-btn-claim:hover:not(:disabled)   { background: oklch(12% 0.06 145 / 0.5); color: oklch(70% 0.15 145); }
+.kmk-board-btn-claim:hover:not(:disabled)   { background: oklch(55% 0.12 145 / 0.15); color: oklch(70% 0.15 145); }
 .kmk-board-btn-done    { border-color: oklch(36% 0.12 235); color: oklch(58% 0.14 235); }
-.kmk-board-btn-done:hover:not(:disabled)    { background: oklch(12% 0.06 235 / 0.5); color: oklch(68% 0.15 235); }
+.kmk-board-btn-done:hover:not(:disabled)    { background: oklch(55% 0.12 235 / 0.15); color: oklch(68% 0.15 235); }
 .kmk-board-btn-resume  { border-color: oklch(38% 0.12 62);  color: oklch(60% 0.14 62); }
-.kmk-board-btn-resume:hover:not(:disabled)  { background: oklch(12% 0.06 62  / 0.5); color: oklch(70% 0.15 62); }
+.kmk-board-btn-resume:hover:not(:disabled)  { background: oklch(55% 0.12 62  / 0.15); color: oklch(70% 0.15 62); }
 .kmk-board-btn-abandon { border-color: oklch(34% 0.12 25);  color: oklch(54% 0.14 25); }
-.kmk-board-btn-abandon:hover:not(:disabled) { background: oklch(12% 0.06 25  / 0.5); color: oklch(66% 0.15 25); }
+.kmk-board-btn-abandon:hover:not(:disabled) { background: oklch(55% 0.12 25  / 0.15); color: oklch(66% 0.15 25); }
 
 .kmk-board-completed-toggle {
   display: block; width: 100%; text-align: left;
@@ -3325,3 +3345,200 @@ body.theme-lapis     .lb-shop-orb-btn.owned {
   background:   oklch(from var(--bg-card) calc(l - 0.06) c h);
   border-color: var(--border);
 }
+
+/* 12. Archipelago / Casino link buttons — hardcoded near-black bg ─── */
+body.theme-parchment .lb-archipelago-link a,
+body.theme-sakura    .lb-archipelago-link a,
+body.theme-mint      .lb-archipelago-link a,
+body.theme-lapis     .lb-archipelago-link a {
+  color:        oklch(35% 0.16 220);
+  border-color: oklch(48% 0.14 220);
+  background:   oklch(from var(--bg-card) calc(l - 0.07) 0.06 220);
+}
+body.theme-parchment .lb-archipelago-link a:hover,
+body.theme-sakura    .lb-archipelago-link a:hover,
+body.theme-mint      .lb-archipelago-link a:hover,
+body.theme-lapis     .lb-archipelago-link a:hover {
+  background:   oklch(from var(--bg-card) calc(l - 0.13) 0.08 220);
+  box-shadow:   0 0 10px oklch(42% 0.14 220 / 0.25);
+  color:        oklch(28% 0.18 220);
+}
+
+/* 13. Orb reward banner on tiles — hardcoded near-black purple bg ── */
+@keyframes orbRewardPulseLight {
+  0%,100% { box-shadow: 0 0 6px oklch(48% 0.18 290 / 0.2); }
+  50%      { box-shadow: 0 0 14px oklch(48% 0.18 290 / 0.4); }
+}
+body.theme-parchment .lb-orb-reward,
+body.theme-sakura    .lb-orb-reward,
+body.theme-mint      .lb-orb-reward,
+body.theme-lapis     .lb-orb-reward {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.06 290);
+  color:      oklch(35% 0.18 290);
+  animation:  orbRewardPulseLight 2s ease-in-out infinite;
+}
+
+/* 14. Profile feats — near-black backgrounds, high-lightness text ── */
+body.theme-parchment .profile-feat-row,
+body.theme-sakura    .profile-feat-row,
+body.theme-mint      .profile-feat-row,
+body.theme-lapis     .profile-feat-row {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.04 145);
+}
+body.theme-parchment .profile-feat-name,
+body.theme-sakura    .profile-feat-name,
+body.theme-mint      .profile-feat-name,
+body.theme-lapis     .profile-feat-name { color: oklch(35% 0.14 145); }
+
+body.theme-parchment .profile-feat-select,
+body.theme-sakura    .profile-feat-select,
+body.theme-mint      .profile-feat-select,
+body.theme-lapis     .profile-feat-select {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.03 75);
+}
+body.theme-parchment .profile-feat-option,
+body.theme-sakura    .profile-feat-option,
+body.theme-mint      .profile-feat-option,
+body.theme-lapis     .profile-feat-option {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.02 75);
+}
+body.theme-parchment .profile-feat-option:hover,
+body.theme-sakura    .profile-feat-option:hover,
+body.theme-mint      .profile-feat-option:hover,
+body.theme-lapis     .profile-feat-option:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.03 75);
+}
+body.theme-parchment .profile-feat-option.selected,
+body.theme-sakura    .profile-feat-option.selected,
+body.theme-mint      .profile-feat-option.selected,
+body.theme-lapis     .profile-feat-option.selected {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.05 145);
+}
+body.theme-parchment .profile-feat-confirm,
+body.theme-sakura    .profile-feat-confirm,
+body.theme-mint      .profile-feat-confirm,
+body.theme-lapis     .profile-feat-confirm {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.05 145);
+  color:      oklch(35% 0.14 145);
+}
+body.theme-parchment .profile-feat-confirm:hover:not(:disabled),
+body.theme-sakura    .profile-feat-confirm:hover:not(:disabled),
+body.theme-mint      .profile-feat-confirm:hover:not(:disabled),
+body.theme-lapis     .profile-feat-confirm:hover:not(:disabled) {
+  background: oklch(from var(--bg-card) calc(l - 0.13) 0.07 145);
+}
+
+/* 15. Adventurer status notes — near-black bg, high-lightness text ─ */
+body.theme-parchment .lb-adv-note,
+body.theme-sakura    .lb-adv-note,
+body.theme-mint      .lb-adv-note,
+body.theme-lapis     .lb-adv-note {
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.02 75);
+}
+body.theme-parchment .lb-adv-note-text,
+body.theme-sakura    .lb-adv-note-text,
+body.theme-mint      .lb-adv-note-text,
+body.theme-lapis     .lb-adv-note-text { color: oklch(32% 0.04 75); }
+
+body.theme-parchment .lb-adv-note-input,
+body.theme-sakura    .lb-adv-note-input,
+body.theme-mint      .lb-adv-note-input,
+body.theme-lapis     .lb-adv-note-input {
+  background: oklch(from var(--bg-card) calc(l - 0.08) 0.02 75);
+}
+body.theme-parchment .lb-adv-note-save,
+body.theme-sakura    .lb-adv-note-save,
+body.theme-mint      .lb-adv-note-save,
+body.theme-lapis     .lb-adv-note-save {
+  background: oklch(from var(--bg-card) calc(l - 0.10) 0.04 75);
+}
+body.theme-parchment .lb-adv-note-save:hover,
+body.theme-sakura    .lb-adv-note-save:hover,
+body.theme-mint      .lb-adv-note-save:hover,
+body.theme-lapis     .lb-adv-note-save:hover {
+  background: oklch(from var(--bg-card) calc(l - 0.14) 0.05 75);
+}
+
+/* 16. Boss lock — near-black bg, high-lightness text ───────────── */
+body.theme-parchment .lb-boss-lock,
+body.theme-sakura    .lb-boss-lock,
+body.theme-mint      .lb-boss-lock,
+body.theme-lapis     .lb-boss-lock {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.03 25);
+}
+body.theme-parchment .lb-boss-lock-title,
+body.theme-sakura    .lb-boss-lock-title,
+body.theme-mint      .lb-boss-lock-title,
+body.theme-lapis     .lb-boss-lock-title { color: oklch(38% 0.16 25); }
+
+body.theme-parchment .lb-boss-neg-effect,
+body.theme-sakura    .lb-boss-neg-effect,
+body.theme-mint      .lb-boss-neg-effect,
+body.theme-lapis     .lb-boss-neg-effect {
+  color:         oklch(38% 0.10 25);
+  border-bottom-color: oklch(45% 0.06 25 / 0.4);
+}
+
+/* 17. Slot prompt inline msg — near-black bg ────────────────────── */
+body.theme-parchment .lb-slot-prompt-msg,
+body.theme-sakura    .lb-slot-prompt-msg,
+body.theme-mint      .lb-slot-prompt-msg,
+body.theme-lapis     .lb-slot-prompt-msg {
+  background: oklch(from var(--bg-card) calc(l - 0.07) 0.02 75);
+}
+
+/* 18. Various high-lightness text colors across lightbox elements ── */
+body.theme-parchment .activity-message,
+body.theme-sakura    .activity-message,
+body.theme-mint      .activity-message,
+body.theme-lapis     .activity-message { color: oklch(30% 0.05 75); }
+
+body.theme-parchment .lb-reward-chip.xp,
+body.theme-sakura    .lb-reward-chip.xp,
+body.theme-mint      .lb-reward-chip.xp,
+body.theme-lapis     .lb-reward-chip.xp { color: oklch(32% 0.14 195); }
+
+body.theme-parchment .tile.state-complete .tile-progress,
+body.theme-sakura    .tile.state-complete .tile-progress,
+body.theme-mint      .tile.state-complete .tile-progress,
+body.theme-lapis     .tile.state-complete .tile-progress { color: oklch(32% 0.14 145); }
+
+body.theme-parchment .lb-public-slots-header,
+body.theme-sakura    .lb-public-slots-header,
+body.theme-mint      .lb-public-slots-header,
+body.theme-lapis     .lb-public-slots-header { color: oklch(36% 0.12 195); }
+
+body.theme-parchment .lb-claimable-header,
+body.theme-sakura    .lb-claimable-header,
+body.theme-mint      .lb-claimable-header,
+body.theme-lapis     .lb-claimable-header { color: oklch(38% 0.14 50); }
+
+body.theme-parchment .lb-claimable-note,
+body.theme-sakura    .lb-claimable-note,
+body.theme-mint      .lb-claimable-note,
+body.theme-lapis     .lb-claimable-note { color: oklch(38% 0.10 50); }
+
+body.theme-parchment .lb-claim-btn,
+body.theme-sakura    .lb-claim-btn,
+body.theme-mint      .lb-claim-btn,
+body.theme-lapis     .lb-claim-btn { color: oklch(38% 0.14 50); }
+
+body.theme-parchment .lb-claim-btn:hover,
+body.theme-sakura    .lb-claim-btn:hover,
+body.theme-mint      .lb-claim-btn:hover,
+body.theme-lapis     .lb-claim-btn:hover { color: oklch(28% 0.16 50); }
+
+body.theme-parchment .lb-slot-bonus-xp,
+body.theme-sakura    .lb-slot-bonus-xp,
+body.theme-mint      .lb-slot-bonus-xp,
+body.theme-lapis     .lb-slot-bonus-xp { color: oklch(35% 0.12 145); }
+
+body.theme-parchment .lb-trait-item-badge,
+body.theme-sakura    .lb-trait-item-badge,
+body.theme-mint      .lb-trait-item-badge,
+body.theme-lapis     .lb-trait-item-badge { color: oklch(36% 0.12 145); }
+
+body.theme-parchment .lb-trait-val-new,
+body.theme-sakura    .lb-trait-val-new,
+body.theme-mint      .lb-trait-val-new,
+body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }

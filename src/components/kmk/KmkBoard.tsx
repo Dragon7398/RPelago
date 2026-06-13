@@ -44,10 +44,12 @@ function TrialCard({
         <div className="kmk-board-trial-name">{task.trial}</div>
         <div className="kmk-board-trial-desc">{task.desc}</div>
         <div className="kmk-board-trial-footer">
-          {claimed && (
-            <span className="kmk-board-claimer">👤 {task.playerName ?? 'Unknown'}</span>
-          )}
-          <StatusBadge status={task.status} />
+          <div className="kmk-board-trial-meta">
+            <StatusBadge status={task.status} />
+            {claimed && (
+              <span className="kmk-board-claimer">👤 {task.playerName ?? 'Unknown'}</span>
+            )}
+          </div>
           {userId && (
             <div className="kmk-board-actions">
               {task.status === 'Incomplete' && (

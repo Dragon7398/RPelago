@@ -1444,15 +1444,21 @@ export const kmkClaimTrial = onCall(async (request) => {
   if (!areaLockedSnap.exists()) throw new HttpsError('not-found', 'Area not found.');
   if (areaLockedSnap.val() === true) throw new HttpsError('failed-precondition', 'Area is locked.');
 
-  // Transaction: claim only if still Incomplete (guards against simultaneous claims).
+  // Pre-read the task so the transaction callback has a fallback for the null-on-first-invocation
+  // probe that the Admin SDK sends before it knows the current value (see CLAUDE.md pitfall note).
   type RawTask = { trial: string; desc: string; order: number; status: string; playerId?: string | null; playerName?: string | null; claimedAt?: number | null };
+  const taskSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`).get();
+  if (!taskSnap.exists()) throw new HttpsError('not-found', 'Trial not found.');
+  const taskData = taskSnap.val() as RawTask;
+
+  // Transaction: claim only if still Incomplete (guards against simultaneous claims).
   let abortReason = 'Trial is no longer available.';
 
   const { committed } = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`)
     .transaction((current: RawTask | null) => {
-      if (!current) { abortReason = 'Trial not found.'; return undefined; }
-      if (current.status !== 'Incomplete') { abortReason = 'Trial is no longer available.'; return undefined; }
-      return { ...current, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
+      const task = current ?? taskData; // use pre-read on null probe; server retries if stale
+      if (task.status !== 'Incomplete') { abortReason = 'Trial is no longer available.'; return undefined; }
+      return { ...task, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
     });
 
   if (!committed) throw new HttpsError('failed-precondition', abortReason);

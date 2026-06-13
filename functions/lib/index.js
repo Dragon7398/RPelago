@@ -1197,18 +1197,20 @@ exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('not-found', 'Area not found.');
     if (areaLockedSnap.val() === true)
         throw new https_1.HttpsError('failed-precondition', 'Area is locked.');
+    const taskSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`).get();
+    if (!taskSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Trial not found.');
+    const taskData = taskSnap.val();
+    // Transaction: claim only if still Incomplete (guards against simultaneous claims).
     let abortReason = 'Trial is no longer available.';
     const { committed } = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`)
         .transaction((current) => {
-        if (!current) {
-            abortReason = 'Trial not found.';
-            return undefined;
-        }
-        if (current.status !== 'Incomplete') {
+        const task = current ?? taskData; // use pre-read on null probe; server retries if stale
+        if (task.status !== 'Incomplete') {
             abortReason = 'Trial is no longer available.';
             return undefined;
         }
-        return { ...current, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
+        return { ...task, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
     });
     if (!committed)
         throw new https_1.HttpsError('failed-precondition', abortReason);
