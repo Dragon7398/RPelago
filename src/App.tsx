@@ -16,6 +16,7 @@ import HelpModal from './components/HelpModal';
 import PrivacyModal from './components/PrivacyModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
+import { KmkProvider } from './contexts/KmkContext';
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
   const [val, setVal] = useState(() => {
@@ -281,8 +282,10 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <GameStateProvider>
-          <FirebaseBanner />
-          <AppContent />
+          <KmkProvider>
+            <FirebaseBanner />
+            <AppContent />
+          </KmkProvider>
         </GameStateProvider>
       </ToastProvider>
     </AuthProvider>

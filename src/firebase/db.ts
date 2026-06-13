@@ -1,7 +1,7 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
@@ -890,6 +890,86 @@ export async function completeMission(
   await logActivity('mission_complete', `${label} has completed.`, '⚜');
 
   return {};
+}
+
+// ── Keymaster's Keep ──────────────────────────────────────────────────────────
+
+export async function kmkImportList(
+  name: string,
+  rows: { area: string; trial: string; desc: string }[],
+): Promise<string> {
+  assertDb();
+  const d = db!;
+  const listId = push(ref(d, 'kmkEvents')).key!;
+
+  // Group rows by area in first-appearance order
+  const areaMap = new Map<string, { trial: string; desc: string }[]>();
+  for (const row of rows) {
+    if (!areaMap.has(row.area)) areaMap.set(row.area, []);
+    areaMap.get(row.area)!.push({ trial: row.trial, desc: row.desc });
+  }
+
+  const areas: Record<string, unknown> = {};
+  let areaOrder = 0;
+  for (const [areaName, taskRows] of areaMap) {
+    const areaId = push(ref(d, `kmkEvents/${listId}/areas`)).key!;
+    const tasks: Record<string, unknown> = {};
+    let taskOrder = 0;
+    for (const row of taskRows) {
+      const taskId = push(ref(d, `kmkEvents/${listId}/areas/${areaId}/tasks`)).key!;
+      tasks[taskId] = { trial: row.trial, desc: row.desc, order: taskOrder++, status: 'Incomplete' };
+    }
+    areas[areaId] = { name: areaName, order: areaOrder++, locked: true, tasks };
+  }
+
+  await set(ref(d, `kmkEvents/${listId}`), { name, createdAt: Date.now(), areas });
+  return listId;
+}
+
+// Sets (or clears) the active list shown on the player Trial Board.
+export async function kmkSetActiveList(listId: string | null): Promise<void> {
+  assertDb();
+  await update(ref(db!, 'game/meta'), { kmkActiveListId: listId });
+}
+
+export async function kmkSetAreaLocked(listId: string, areaId: string, locked: boolean): Promise<void> {
+  assertDb();
+  await set(ref(db!, `kmkEvents/${listId}/areas/${areaId}/locked`), locked);
+}
+
+// Admin status override. Setting 'Incomplete' is a penalty-free kick: player fields are cleared.
+export async function kmkAdminSetTaskStatus(
+  listId: string,
+  areaId: string,
+  taskId: string,
+  status: KmkStatus,
+): Promise<void> {
+  assertDb();
+  const updates: Record<string, unknown> = { status };
+  if (status === 'Incomplete') {
+    updates.playerId  = null;
+    updates.playerName = null;
+    updates.claimedAt  = null;
+  }
+  await update(ref(db!, `kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`), updates);
+}
+
+// Admin override for the player name shown on a claimed task.
+export async function kmkAdminEditTaskPlayer(
+  listId: string,
+  areaId: string,
+  taskId: string,
+  playerId: string,
+  playerName: string,
+): Promise<void> {
+  assertDb();
+  await update(ref(db!, `kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`), { playerId, playerName });
+}
+
+// Deletes an event list. Caller is responsible for ensuring it is not the active list.
+export async function kmkDeleteList(listId: string): Promise<void> {
+  assertDb();
+  await remove(ref(db!, `kmkEvents/${listId}`));
 }
 
 // Checks how many adventurers a player should have at their current level and
