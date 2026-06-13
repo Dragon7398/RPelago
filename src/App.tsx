@@ -71,6 +71,9 @@ function SettingsPanel() {
   const [theme,         setTheme]         = useStringSetting<ThemeId>('realm_theme', 'gilded');
   const [statePatterns, setStatePatterns] = useBoolSetting('realm_state_patterns',  false);
 
+  type TileNameMode = 'off' | 'hover' | 'always';
+  const [tileNames, setTileNames] = useStringSetting<TileNameMode>('realm_tile_names', 'hover');
+
   useEffect(() => {
     document.documentElement.style.setProperty('--tile-user-size', `${size}px`);
     localStorage.setItem('realm_tile_size', String(size));
@@ -102,6 +105,13 @@ function SettingsPanel() {
   useEffect(() => {
     document.documentElement.classList.toggle('state-patterns', statePatterns);
   }, [statePatterns]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('tilenames-off',    tileNames === 'off');
+    root.classList.toggle('tilenames-hover',  tileNames === 'hover');
+    root.classList.toggle('tilenames-always', tileNames === 'always');
+  }, [tileNames]);
 
   return (
     <>
@@ -158,6 +168,21 @@ function SettingsPanel() {
           <input type="checkbox" className="settings-check" checked={statePatterns} onChange={e => setStatePatterns(e.target.checked)} />
           <span className="settings-label">STATE PATTERNS</span>
         </label>
+        <div className="settings-row settings-segmented-row">
+          <span className="settings-label">TILE NAMES</span>
+          <div className="settings-segmented">
+            {(['off', 'hover', 'always'] as const).map(id => (
+              <button
+                key={id}
+                className={`settings-seg-btn${tileNames === id ? ' selected' : ''}`}
+                onClick={() => setTileNames(id)}
+                aria-pressed={tileNames === id}
+              >
+                {id === 'off' ? 'Off' : id === 'hover' ? 'Hover' : 'Always'}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <button className="settings-toggle" onClick={() => setOpen(o => !o)}>
         ⚙ SETTINGS

@@ -360,6 +360,72 @@ header p {
 /* ── Settings: show tile labels ── */
 .no-tile-labels .tile-label { display: none; }
 
+/* ── Tile name: cell wrapper (lets the banner escape .tile overflow) ── */
+.tile-cell { position: relative; display: inline-flex; }
+.tile-cell:hover { z-index: 6; }
+
+/* ── Tile name: on-face (Always mode) — replaces type label, truncates ── */
+.tile-name {
+  display: none;
+  font-family: 'Cinzel', serif;
+  font-size: clamp(0.40rem, 0.62vw, 0.56rem);
+  letter-spacing: 0.03em; line-height: 1.05;
+  max-width: calc(var(--tile-size) - 12px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  position: relative; z-index: 2;
+  text-shadow: 0 1px 2px #000a;
+}
+.tilenames-always .tile.state-available  .tile-name,
+.tilenames-always .tile.state-inprogress .tile-name { display: block; }
+.tilenames-always .tile.state-available  .tile-label,
+.tilenames-always .tile.state-inprogress .tile-label { display: none; }
+
+/* Per-type accent colors for the on-face name (mirror .tile-label colors) */
+.tile.state-available.tile-battle  .tile-name,
+.tile.state-inprogress.tile-battle .tile-name { color: oklch(from var(--battle-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-puzzle  .tile-name,
+.tile.state-inprogress.tile-puzzle .tile-name { color: oklch(from var(--puzzle-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-elite   .tile-name,
+.tile.state-inprogress.tile-elite  .tile-name { color: oklch(from var(--elite-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-boss    .tile-name,
+.tile.state-inprogress.tile-boss   .tile-name { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
+
+/* ── Tile name: parchment scroll banner (Hover & Always-on-hover) ── */
+.tile-name-banner {
+  display: none;
+  position: absolute; bottom: calc(100% + 9px); left: 50%;
+  transform: translateX(-50%);
+  z-index: 50; pointer-events: none; white-space: nowrap;
+  align-items: stretch;
+  filter: drop-shadow(0 6px 10px #000a);
+}
+.tilenames-hover  .tile-cell:hover .tile-name-banner,
+.tilenames-always .tile-cell:hover .tile-name-banner { display: flex; }
+
+.tnb-body {
+  font-family: 'Cinzel', serif; font-weight: 600;
+  font-size: 0.62rem; letter-spacing: 0.06em; line-height: 1.1;
+  color: oklch(34% 0.07 55);
+  padding: 4px 11px;
+  background: linear-gradient(180deg, oklch(90% 0.045 82) 0%, oklch(83% 0.06 76) 100%);
+  border-top: 1px solid oklch(78% 0.05 82);
+  border-bottom: 1px solid oklch(70% 0.07 70);
+}
+.tnb-cap {
+  width: 6px; align-self: stretch;
+  background: linear-gradient(to right, oklch(58% 0.07 70), oklch(74% 0.06 78), oklch(58% 0.07 70));
+  box-shadow: inset 0 0 3px oklch(35% 0.06 60 / 0.7);
+}
+.tnb-cap:first-child { border-radius: 3px 1px 1px 3px; }
+.tnb-cap:last-of-type { border-radius: 1px 3px 3px 1px; }
+.tnb-point {
+  position: absolute; bottom: -5px; left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 9px; height: 9px; background: oklch(83% 0.06 76);
+  border-right: 1px solid oklch(70% 0.07 70);
+  border-bottom: 1px solid oklch(70% 0.07 70);
+}
+
 /* ── Settings: highlight my adventurers ── */
 .highlight-my-advs .tile-mine.state-available {
   animation: none;
@@ -435,6 +501,17 @@ header p {
 }
 .settings-check-row { margin-top: 8px; cursor: pointer; }
 .settings-check { accent-color: var(--gold); width: 13px; height: 13px; flex-shrink: 0; cursor: pointer; }
+.settings-segmented-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.settings-segmented { display: inline-flex; border: 1px solid var(--border-glow); border-radius: 3px; overflow: hidden; }
+.settings-seg-btn {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
+  text-transform: uppercase; cursor: pointer; padding: 0.32rem 0.6rem;
+  background: transparent; color: oklch(50% 0.07 75); border: none;
+  border-right: 1px solid var(--border-glow); transition: all 0.13s;
+}
+.settings-seg-btn:last-child { border-right: none; }
+.settings-seg-btn.selected { background: var(--gold-dim); color: var(--bg-card); }
+.settings-seg-btn:hover:not(.selected) { color: var(--gold); }
 
 /* ══ LIGHTBOX ══ */
 .lightbox-overlay {

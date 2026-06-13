@@ -83,15 +83,35 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
 
   const isClickable = !hidden;
 
+  const showBanner =
+    !!tile?.name &&
+    state !== 'hidden' &&
+    typeKey !== 'town' && typeKey !== 'town_center';
+
+  const showNameOnFace =
+    showBanner && (state === 'available' || state === 'inprogress');
+
   return (
-    <div
-      className={classes}
-      style={{ animationDelay: animDelay }}
-      onClick={isClickable ? () => onClick(coord) : undefined}
-    >
-      <span className="tile-icon">{icon}</span>
-      {label && <span className="tile-label">{label}</span>}
-      {progressText && <span className="tile-progress">{progressText}</span>}
+    <div className="tile-cell">
+      <div
+        className={classes}
+        style={{ animationDelay: animDelay }}
+        onClick={isClickable ? () => onClick(coord) : undefined}
+      >
+        <span className="tile-icon">{icon}</span>
+        {label && <span className="tile-label">{label}</span>}
+        {showNameOnFace && <span className="tile-name">{tile!.name}</span>}
+        {progressText && <span className="tile-progress">{progressText}</span>}
+      </div>
+
+      {showBanner && (
+        <div className="tile-name-banner" aria-hidden="true">
+          <span className="tnb-cap" />
+          <span className="tnb-body">{tile!.name}</span>
+          <span className="tnb-cap" />
+          <span className="tnb-point" />
+        </div>
+      )}
     </div>
   );
 }
