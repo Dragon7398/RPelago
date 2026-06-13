@@ -9,6 +9,7 @@ import {
   kmkAdminSetTaskStatus as dbKmkAdminSetTaskStatus,
   kmkAdminEditTaskPlayer as dbKmkAdminEditTaskPlayer,
   kmkDeleteList as dbKmkDeleteList,
+  kmkClaimTrial as dbKmkClaimTrial,
   kmkMarkDone as dbKmkMarkDone,
   kmkResume as dbKmkResume,
   kmkAbandon as dbKmkAbandon,
@@ -28,9 +29,10 @@ interface KmkContextValue {
   deleteList: (listId: string) => Promise<void>;
 
   // Player self-service
-  playerMarkDone: (listId: string, areaId: string, taskId: string) => Promise<void>;
-  playerResume:   (listId: string, areaId: string, taskId: string) => Promise<void>;
-  playerAbandon:  (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerClaimTrial: (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerMarkDone:   (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerResume:     (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerAbandon:    (listId: string, areaId: string, taskId: string) => Promise<void>;
 }
 
 const KmkContext = createContext<KmkContextValue | null>(null);
@@ -95,6 +97,10 @@ export function KmkProvider({ children }: { children: ReactNode }) {
     await dbKmkDeleteList(listId);
   }, []);
 
+  const playerClaimTrial = useCallback(async (listId: string, areaId: string, taskId: string) => {
+    await dbKmkClaimTrial(listId, areaId, taskId);
+  }, []);
+
   const playerMarkDone = useCallback(async (listId: string, areaId: string, taskId: string) => {
     await dbKmkMarkDone(listId, areaId, taskId);
   }, []);
@@ -112,7 +118,7 @@ export function KmkProvider({ children }: { children: ReactNode }) {
       lists, activeListId, loading,
       importList, setActiveList, setAreaLocked,
       adminSetTaskStatus, adminEditTaskPlayer, deleteList,
-      playerMarkDone, playerResume, playerAbandon,
+      playerClaimTrial, playerMarkDone, playerResume, playerAbandon,
     }}>
       {children}
     </KmkContext.Provider>

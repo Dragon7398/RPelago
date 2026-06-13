@@ -972,6 +972,13 @@ export async function kmkDeleteList(listId: string): Promise<void> {
   await remove(ref(db!, `kmkEvents/${listId}`));
 }
 
+// Claim a trial via Cloud Function (Incomplete → Pending). Rejects disabled players and locked areas.
+export async function kmkClaimTrial(listId: string, areaId: string, taskId: string): Promise<void> {
+  if (!functions) throw new Error('Firebase is not configured.');
+  const fn = httpsCallable(functions, 'kmkClaimTrial');
+  await fn({ listId, areaId, taskId });
+}
+
 // Player self-service: Pending → Verifying (submit for admin review).
 export async function kmkMarkDone(listId: string, areaId: string, taskId: string): Promise<void> {
   assertDb();

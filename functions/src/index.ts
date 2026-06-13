@@ -1418,3 +1418,43 @@ export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () =
     }
   }
 });
+
+// ── kmkClaimTrial ─────────────────────────────────────────────────────────────
+// Atomically claims a KMK trial: Incomplete → Pending.
+// Rejects disabled players, locked areas, and already-claimed tasks.
+export const kmkClaimTrial = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { listId, areaId, taskId } =
+    request.data as { listId?: string; areaId?: string; taskId?: string };
+  if (!listId || !areaId || !taskId)
+    throw new HttpsError('invalid-argument', 'Missing listId, areaId, or taskId.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+
+  // Player must exist and not be disabled.
+  const playerSnap = await db.ref(`game/players/${uid}`).get();
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  const player = playerSnap.val() as { displayName: string; disabled?: boolean };
+  if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
+
+  // Area must exist and be unlocked.
+  const areaLockedSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/locked`).get();
+  if (!areaLockedSnap.exists()) throw new HttpsError('not-found', 'Area not found.');
+  if (areaLockedSnap.val() === true) throw new HttpsError('failed-precondition', 'Area is locked.');
+
+  // Transaction: claim only if still Incomplete (guards against simultaneous claims).
+  type RawTask = { trial: string; desc: string; order: number; status: string; playerId?: string | null; playerName?: string | null; claimedAt?: number | null };
+  let abortReason = 'Trial is no longer available.';
+
+  const { committed } = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`)
+    .transaction((current: RawTask | null) => {
+      if (!current) { abortReason = 'Trial not found.'; return undefined; }
+      if (current.status !== 'Incomplete') { abortReason = 'Trial is no longer available.'; return undefined; }
+      return { ...current, status: 'Pending', playerId: uid, playerName: player.displayName, claimedAt: Date.now() };
+    });
+
+  if (!committed) throw new HttpsError('failed-precondition', abortReason);
+  return { success: true };
+});
