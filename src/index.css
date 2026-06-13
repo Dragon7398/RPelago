@@ -59,6 +59,10 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --hidden-bg-2:   oklch(11% 0.02 75);
   --hidden-bg-3:   oklch(6% 0.01 75);
   --hidden-border: oklch(13% 0.02 75);
+
+  /* ── Muted text ─────────────────────────────────────────────────── */
+  --text-muted: oklch(54% 0.04 75);
+  --text-dim:   oklch(40% 0.04 75);
 }
 
 body {
@@ -2054,6 +2058,273 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   .profile-box { max-height: 88vh; max-height: 88dvh; }
 }
 
+/* ══ KEYMASTER'S KEEP ════════════════════════════════════════════════════════ */
+
+/* ── List switcher strip ──────────────────────────────────────────────────── */
+.kmk-strip-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+.kmk-strip-header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.kmk-open-player-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.28rem 0.7rem; border-radius: 2px;
+  border: 1px solid var(--border-glow); color: var(--gold-dim);
+  background: transparent; text-decoration: none; transition: all 0.15s;
+}
+.kmk-open-player-btn:hover { color: var(--gold); border-color: var(--gold); }
+.kmk-new-list-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.28rem 0.7rem; border-radius: 2px; cursor: pointer;
+  background: oklch(14% 0.06 220 / 0.4); border: 1px solid oklch(40% 0.14 220);
+  color: oklch(68% 0.14 220); transition: all 0.15s;
+}
+.kmk-new-list-btn:hover { background: oklch(18% 0.08 220 / 0.5); color: oklch(76% 0.16 220); }
+
+.kmk-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.kmk-strip-item {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.5rem 0.75rem; border-radius: 3px; cursor: pointer; min-width: 160px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+  border: 1px solid var(--border); transition: border-color 0.15s;
+}
+.kmk-strip-item:hover { border-color: var(--border-glow); }
+.kmk-strip-item.selected { border-color: var(--gold-dim); }
+.kmk-strip-item-top { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.kmk-strip-name {
+  font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.08em;
+  color: var(--parchment); flex: 1;
+}
+.kmk-active-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em;
+  padding: 0.1rem 0.35rem; border-radius: 2px;
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.04 150);
+  border: 1px solid oklch(42% 0.12 150); color: oklch(62% 0.14 150);
+}
+.kmk-strip-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.kmk-strip-btn {
+  font-family: 'Cinzel', serif; font-size: 0.54rem; letter-spacing: 0.08em;
+  padding: 0.15rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-strip-btn:hover:not(:disabled) { border-color: var(--border-glow); color: var(--gold-dim); }
+.kmk-strip-btn:disabled { opacity: 0.35; cursor: default; }
+.kmk-strip-btn.danger { border-color: oklch(38% 0.12 25); color: oklch(56% 0.14 25); }
+.kmk-strip-btn.danger:hover:not(:disabled) { background: oklch(16% 0.08 25 / 0.4); color: oklch(68% 0.16 25); }
+
+/* ── Import form ──────────────────────────────────────────────────────────── */
+.kmk-import { display: flex; flex-direction: column; gap: 0.75rem; max-width: 780px; margin: 0 auto; width: 100%; }
+.kmk-import-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.kmk-import-label {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.14em;
+  color: var(--gold-dim); text-transform: uppercase;
+}
+.kmk-import-input {
+  font-family: 'Cinzel', serif; font-size: 0.78rem; padding: 0.4rem 0.65rem;
+  border-radius: 2px; width: 100%;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--parchment); transition: border-color 0.15s;
+}
+.kmk-import-input:focus { outline: none; border-color: var(--gold-dim); }
+.kmk-import-textarea {
+  font-family: 'Courier New', monospace; font-size: 0.78rem; line-height: 1.5;
+  padding: 0.55rem 0.65rem; border-radius: 2px; resize: vertical; min-height: 240px; width: 100%;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--parchment); transition: border-color 0.15s;
+}
+.kmk-import-textarea:focus { outline: none; border-color: var(--gold-dim); }
+.kmk-import-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.78rem; color: var(--text-muted);
+}
+.kmk-import-errors {
+  padding: 0.65rem 0.9rem; border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 25);
+  border: 1px solid oklch(42% 0.14 25);
+}
+.kmk-import-errors-title {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  color: oklch(68% 0.16 25); margin-bottom: 0.45rem;
+}
+.kmk-import-error-item {
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  color: oklch(64% 0.12 25); padding: 0.1rem 0; line-height: 1.4;
+}
+.kmk-import-error-item code {
+  font-family: 'Courier New', monospace; font-size: 0.72rem;
+  background: oklch(from var(--bg-card) calc(l - 0.06) 0.03 25);
+  padding: 0.05rem 0.3rem; border-radius: 2px;
+}
+.kmk-import-actions { display: flex; gap: 0.5rem; align-items: center; }
+.kmk-import-submit {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  padding: 0.35rem 0.9rem; border-radius: 2px; cursor: pointer;
+  background: oklch(14% 0.06 145 / 0.4); border: 1px solid oklch(40% 0.12 145);
+  color: oklch(66% 0.14 145); transition: all 0.15s;
+}
+.kmk-import-submit:hover:not(:disabled) { background: oklch(20% 0.08 145 / 0.5); color: oklch(74% 0.16 145); }
+.kmk-import-submit:disabled { opacity: 0.4; cursor: default; }
+.kmk-import-cancel {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.1em;
+  padding: 0.35rem 0.9rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.15s;
+}
+.kmk-import-cancel:hover { border-color: var(--border-glow); color: var(--gold-dim); }
+
+/* ── Ledger ───────────────────────────────────────────────────────────────── */
+.kmk-ledger-header {
+  display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+}
+.kmk-ledger-title {
+  font-family: 'Cinzel', serif; font-size: 1.15rem; letter-spacing: 0.06em; color: var(--gold);
+}
+.kmk-ledger-stats { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-muted); }
+.kmk-area-stack { display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* ── Area card ────────────────────────────────────────────────────────────── */
+.kmk-area-card {
+  border-radius: 3px; border: 1px solid var(--border);
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h); overflow: hidden;
+  transition: border-color 0.15s;
+}
+.kmk-area-card.unlocked { border-color: var(--border-glow); }
+.kmk-area-header {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.75rem; flex-wrap: wrap;
+}
+.kmk-lock-btn {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border); font-size: 0.88rem;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  color: var(--text-muted);
+}
+.kmk-lock-btn:hover { border-color: var(--border-glow); color: var(--gold-dim); }
+.kmk-area-info { flex: 1; min-width: 0; }
+.kmk-area-name {
+  font-family: 'Cinzel', serif; font-size: 0.88rem; letter-spacing: 0.06em;
+  color: var(--gold); line-height: 1.2;
+}
+.kmk-area-sub {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.72rem; color: var(--text-muted); margin-top: 0.05rem;
+}
+.kmk-meter-and-count { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.kmk-meter { display: flex; gap: 2px; align-items: center; }
+.kmk-seg {
+  width: 12px; height: 10px; border-radius: 2px; flex-shrink: 0;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.02 75);
+}
+.kmk-seg.kmk-s-Pending   { background: oklch(62% 0.15 62);  }
+.kmk-seg.kmk-s-Verifying { background: oklch(60% 0.15 235); }
+.kmk-seg.kmk-s-Complete  { background: oklch(58% 0.15 150); }
+.kmk-count-chip {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.08em;
+  padding: 0.1rem 0.4rem; border-radius: 2px; white-space: nowrap;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  border: 1px solid var(--border); color: var(--gold-dim);
+}
+.kmk-count-chip.all-done { border-color: oklch(42% 0.12 150); color: oklch(62% 0.14 150); }
+.kmk-area-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border-glow), transparent);
+  margin: 0 0.75rem;
+}
+
+/* ── Task rows ────────────────────────────────────────────────────────────── */
+.kmk-tasks { display: flex; flex-direction: column; }
+.kmk-task-row {
+  display: flex; align-items: stretch; border-top: 1px solid var(--border); min-height: 2.5rem;
+}
+.kmk-task-accent {
+  width: 3px; flex-shrink: 0;
+  background: oklch(from var(--bg-card) calc(l - 0.02) 0.02 75);
+}
+.kmk-task-accent.kmk-s-Pending   { background: oklch(62% 0.15 62);  }
+.kmk-task-accent.kmk-s-Verifying { background: oklch(60% 0.15 235); }
+.kmk-task-accent.kmk-s-Complete  { background: oklch(58% 0.15 150); }
+.kmk-task-body {
+  flex: 1; min-width: 0; padding: 0.45rem 0.65rem;
+  display: flex; flex-direction: column; justify-content: center; gap: 0.1rem;
+}
+.kmk-task-trial {
+  font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.06em;
+  color: var(--gold-dim); line-height: 1.2;
+}
+.kmk-task-desc {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.8rem;
+  color: var(--parchment); line-height: 1.3;
+}
+.kmk-task-right {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 0.3rem; padding: 0.45rem 0.65rem; flex-shrink: 0; min-width: 180px;
+}
+.kmk-player-row { display: flex; align-items: center; gap: 0.25rem; }
+.kmk-player-icon { font-size: 0.72rem; flex-shrink: 0; color: var(--text-muted); }
+.kmk-player-input {
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  padding: 0.15rem 0.35rem; border-radius: 2px; flex: 1; min-width: 0;
+  background: transparent; border: 1px solid transparent;
+  color: var(--parchment); transition: all 0.15s;
+}
+.kmk-player-input:hover { border-color: var(--border); }
+.kmk-player-input:focus { outline: none; border-color: var(--border-glow); background: oklch(from var(--bg-card) calc(l - 0.04) c h); }
+
+/* Status select */
+.kmk-status-select {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.06em;
+  padding: 0.18rem 0.4rem; border-radius: 2px; cursor: pointer; width: 100%;
+  border: 1px solid var(--border);
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+  color: var(--parchment); transition: all 0.15s;
+}
+.kmk-status-select:focus { outline: none; }
+.kmk-status-select.kmk-s-Incomplete {
+  border-color: oklch(42% 0.05 75);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.05 75);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.02 75);
+}
+.kmk-status-select.kmk-s-Pending {
+  border-color: oklch(45% 0.12 62);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 62);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 62);
+}
+.kmk-status-select.kmk-s-Verifying {
+  border-color: oklch(45% 0.12 235);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 235);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 235);
+}
+.kmk-status-select.kmk-s-Complete {
+  border-color: oklch(45% 0.12 150);
+  color: oklch(from var(--bg-card) calc(1 - l) 0.14 150);
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.04 150);
+}
+
+/* ── Completed section ────────────────────────────────────────────────────── */
+.kmk-completed-toggle {
+  width: 100%; text-align: left; padding: 0.35rem 0.75rem;
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 150);
+  border: none; border-top: 1px solid var(--border); cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  color: oklch(62% 0.14 150); transition: color 0.15s;
+}
+.kmk-completed-toggle:hover { color: oklch(70% 0.14 150); }
+.kmk-completed-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.75rem; border-top: 1px solid oklch(from var(--border) l c h / 0.4);
+}
+.kmk-completed-row:first-child { border-top: none; }
+.kmk-completed-check { color: oklch(60% 0.14 150); font-size: 0.8rem; flex-shrink: 0; }
+.kmk-completed-trial {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.05em;
+  color: var(--gold-dim); flex: 1;
+}
+.kmk-completed-player {
+  font-family: 'Crimson Pro', serif; font-size: 0.75rem; font-style: italic;
+  color: var(--text-muted);
+}
+.kmk-completed-select-wrap { flex-shrink: 0; min-width: 120px; }
+
 /* ══════════════════════════════════════════════════════════════════
    THEMES — each class on <body> overrides the tokens from :root.
    Gilded Hearth (default) needs no class.
@@ -2097,6 +2368,9 @@ body.theme-moonlit {
   --hidden-bg-2:   oklch(12% 0.02 250);
   --hidden-bg-3:   oklch(7% 0.01 250);
   --hidden-border: oklch(15% 0.03 250);
+
+  --text-muted: oklch(56% 0.04 245);
+  --text-dim:   oklch(42% 0.03 245);
 }
 
 /* ── Verdant Hollow ────────────────────────────────────────────────
@@ -2137,6 +2411,9 @@ body.theme-verdant {
   --hidden-bg-2:   oklch(11% 0.02 145);
   --hidden-bg-3:   oklch(7% 0.01 145);
   --hidden-border: oklch(14% 0.03 145);
+
+  --text-muted: oklch(52% 0.04 100);
+  --text-dim:   oklch(38% 0.03 100);
 }
 
 /* ── Aether Bloom ──────────────────────────────────────────────────
@@ -2202,6 +2479,9 @@ body.theme-parchment {
   --hidden-bg-2:   oklch(72% 0.04 80);
   --hidden-bg-3:   oklch(68% 0.04 80);
   --hidden-border: oklch(60% 0.05 80);
+
+  --text-muted: oklch(38% 0.05 70);
+  --text-dim:   oklch(52% 0.04 70);
 }
 /* Kill the dark ambient glow and noise overlay on the light-mode theme */
 body.theme-parchment::before { background: none; }
@@ -2247,6 +2527,9 @@ body.theme-sakura {
   --hidden-bg-2:   oklch(75% 0.03 12);
   --hidden-bg-3:   oklch(72% 0.03 12);
   --hidden-border: oklch(65% 0.04 15);
+
+  --text-muted: oklch(36% 0.05 12);
+  --text-dim:   oklch(50% 0.04 12);
 }
 body.theme-sakura::before { background: none; }
 body.theme-sakura::after  { opacity: 0; }
@@ -2290,6 +2573,9 @@ body.theme-mint {
   --hidden-bg-2:   oklch(72% 0.04 150);
   --hidden-bg-3:   oklch(68% 0.04 150);
   --hidden-border: oklch(58% 0.05 150);
+
+  --text-muted: oklch(36% 0.05 150);
+  --text-dim:   oklch(50% 0.04 150);
 }
 body.theme-mint::before { background: none; }
 body.theme-mint::after  { opacity: 0; }
@@ -2334,6 +2620,9 @@ body.theme-lapis {
   --hidden-bg-2:   oklch(70% 0.05 75);
   --hidden-bg-3:   oklch(66% 0.05 75);
   --hidden-border: oklch(58% 0.07 75);
+
+  --text-muted: oklch(35% 0.07 248);
+  --text-dim:   oklch(50% 0.05 248);
 }
 body.theme-lapis::before { background: none; }
 body.theme-lapis::after  { opacity: 0; }
@@ -2372,6 +2661,9 @@ body.theme-obsidian {
   --state-avail-border: oklch(70% 0.16 150);
   --state-prog-border:  oklch(75% 0.18 70);
   --state-done-border:  oklch(80% 0.17 95);
+
+  --text-muted: oklch(58% 0 0);
+  --text-dim:   oklch(44% 0 0);
 }
 
 /* ── Tidepool Atlas (dark, Deutan/Protan-friendly) ─────────────────
@@ -2413,6 +2705,9 @@ body.theme-tidepool {
   --hidden-bg-2:   oklch(12% 0.02 215);
   --hidden-bg-3:   oklch(7% 0.01 215);
   --hidden-border: oklch(15% 0.03 215);
+
+  --text-muted: oklch(56% 0.05 210);
+  --text-dim:   oklch(42% 0.04 210);
 }
 
 /* ══════════════════════════════════════════════════════════════════
