@@ -9,6 +9,9 @@ import {
   kmkAdminSetTaskStatus as dbKmkAdminSetTaskStatus,
   kmkAdminEditTaskPlayer as dbKmkAdminEditTaskPlayer,
   kmkDeleteList as dbKmkDeleteList,
+  kmkMarkDone as dbKmkMarkDone,
+  kmkResume as dbKmkResume,
+  kmkAbandon as dbKmkAbandon,
 } from '../firebase/db';
 
 interface KmkContextValue {
@@ -23,6 +26,11 @@ interface KmkContextValue {
   adminSetTaskStatus: (listId: string, areaId: string, taskId: string, status: KmkStatus) => Promise<void>;
   adminEditTaskPlayer: (listId: string, areaId: string, taskId: string, playerId: string, playerName: string) => Promise<void>;
   deleteList: (listId: string) => Promise<void>;
+
+  // Player self-service
+  playerMarkDone: (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerResume:   (listId: string, areaId: string, taskId: string) => Promise<void>;
+  playerAbandon:  (listId: string, areaId: string, taskId: string) => Promise<void>;
 }
 
 const KmkContext = createContext<KmkContextValue | null>(null);
@@ -87,11 +95,24 @@ export function KmkProvider({ children }: { children: ReactNode }) {
     await dbKmkDeleteList(listId);
   }, []);
 
+  const playerMarkDone = useCallback(async (listId: string, areaId: string, taskId: string) => {
+    await dbKmkMarkDone(listId, areaId, taskId);
+  }, []);
+
+  const playerResume = useCallback(async (listId: string, areaId: string, taskId: string) => {
+    await dbKmkResume(listId, areaId, taskId);
+  }, []);
+
+  const playerAbandon = useCallback(async (listId: string, areaId: string, taskId: string) => {
+    await dbKmkAbandon(listId, areaId, taskId);
+  }, []);
+
   return (
     <KmkContext.Provider value={{
       lists, activeListId, loading,
       importList, setActiveList, setAreaLocked,
       adminSetTaskStatus, adminEditTaskPlayer, deleteList,
+      playerMarkDone, playerResume, playerAbandon,
     }}>
       {children}
     </KmkContext.Provider>

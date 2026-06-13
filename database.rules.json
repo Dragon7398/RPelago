@@ -163,11 +163,14 @@
           "$areaId": {
             "tasks": {
               "$taskId": {
-                // Player self-service transitions (Mark Done, Resume, Abandon) are added in WS4.
-                // Claim (Incomplete → Pending) always goes through the kmkClaimTrial Cloud Function,
-                // which uses the admin SDK and bypasses these rules.
-                // For now, only admin may write task nodes directly.
-                ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid"
+                // Admin: full write.
+                // Player: may only touch their own claimed task that is not yet Complete.
+                //   Mark Done  → Pending → Verifying    (status only)
+                //   Resume     → Verifying → Pending    (status only)
+                //   Abandon    → Pending|Verifying → Incomplete (clears player fields)
+                // Claim (Incomplete → Pending) goes through kmkClaimTrial Cloud Function (admin SDK).
+                ".write": "auth != null && (root.child('game/meta/adminId').val() === auth.uid || (data.child('playerId').val() === auth.uid && data.child('status').val() !== 'Complete'))",
+                ".validate": "root.child('game/meta/adminId').val() === auth.uid || (newData.child('trial').val() === data.child('trial').val() && newData.child('desc').val() === data.child('desc').val() && newData.child('order').val() === data.child('order').val() && ((newData.child('status').val() === 'Incomplete' && newData.child('playerId').val() === null && newData.child('playerName').val() === null && newData.child('claimedAt').val() === null) || ((newData.child('status').val() === 'Pending' || newData.child('status').val() === 'Verifying') && newData.child('playerId').val() === auth.uid)))"
               }
             }
           }

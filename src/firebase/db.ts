@@ -972,6 +972,29 @@ export async function kmkDeleteList(listId: string): Promise<void> {
   await remove(ref(db!, `kmkEvents/${listId}`));
 }
 
+// Player self-service: Pending → Verifying (submit for admin review).
+export async function kmkMarkDone(listId: string, areaId: string, taskId: string): Promise<void> {
+  assertDb();
+  await update(ref(db!, `kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`), { status: 'Verifying' });
+}
+
+// Player self-service: Verifying → Pending (pull back submission).
+export async function kmkResume(listId: string, areaId: string, taskId: string): Promise<void> {
+  assertDb();
+  await update(ref(db!, `kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`), { status: 'Pending' });
+}
+
+// Player self-service: Pending | Verifying → Incomplete (return trial to pool).
+export async function kmkAbandon(listId: string, areaId: string, taskId: string): Promise<void> {
+  assertDb();
+  await update(ref(db!, `kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`), {
+    status: 'Incomplete',
+    playerId: null,
+    playerName: null,
+    claimedAt: null,
+  });
+}
+
 // Checks how many adventurers a player should have at their current level and
 // grants any that are missing. Returns the number of adventurers granted.
 export async function grantMissingAdventurers(playerId: string, player: Player): Promise<number> {
