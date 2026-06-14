@@ -19,13 +19,14 @@ function StatusBadge({ status }: { status: KmkStatus }) {
 }
 
 function TrialCard({
-  listId, areaId, taskId, task, userId,
+  listId, areaId, taskId, task, userId, areaFull,
 }: {
-  listId:  string;
-  areaId:  string;
-  taskId:  string;
-  task:    { trial: string; desc: string; status: KmkStatus; playerId?: string | null; playerName?: string | null };
-  userId:  string | null;
+  listId:   string;
+  areaId:   string;
+  taskId:   string;
+  task:     { trial: string; desc: string; status: KmkStatus; playerId?: string | null; playerName?: string | null };
+  userId:   string | null;
+  areaFull: boolean;
 }) {
   const { playerClaimTrial, playerMarkDone, playerResume, playerAbandon } = useKmk();
   const [busy, setBusy] = useState(false);
@@ -53,13 +54,15 @@ function TrialCard({
           {userId && (
             <div className="kmk-board-actions">
               {task.status === 'Incomplete' && (
-                <button
-                  className="kmk-board-btn kmk-board-btn-claim"
-                  disabled={busy}
-                  onClick={() => act(() => playerClaimTrial(listId, areaId, taskId))}
-                >
-                  {busy ? '…' : 'Claim'}
-                </button>
+                areaFull
+                  ? <span className="kmk-board-chip-limit">1 per area</span>
+                  : <button
+                      className="kmk-board-btn kmk-board-btn-claim"
+                      disabled={busy}
+                      onClick={() => act(() => playerClaimTrial(listId, areaId, taskId))}
+                    >
+                      {busy ? '…' : 'Claim'}
+                    </button>
               )}
               {task.status === 'Pending' && isOwner && (
                 <>
@@ -118,6 +121,9 @@ function AreaPanel({
   const sortedTasks   = Object.entries(area.tasks ?? {}).sort(([, a], [, b]) => a.order - b.order);
   const activeTasks   = sortedTasks.filter(([, t]) => t.status !== 'Complete');
   const completeTasks = sortedTasks.filter(([, t]) => t.status === 'Complete');
+  const areaFull      = !!userId && sortedTasks.some(
+    ([, t]) => t.playerId === userId && (t.status === 'Pending' || t.status === 'Verifying'),
+  );
 
   if (area.locked) {
     return (
@@ -148,6 +154,7 @@ function AreaPanel({
               taskId={taskId}
               task={task}
               userId={userId}
+              areaFull={areaFull}
             />
           ))}
         </div>

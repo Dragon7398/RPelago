@@ -2482,6 +2482,7 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   background: transparent; border: 1px solid; transition: all 0.15s;
 }
 .kmk-board-btn:disabled { opacity: 0.4; cursor: default; }
+.kmk-board-chip-limit  { font-size: 0.6rem; letter-spacing: 0.06em; color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; padding: 0.15em 0.4em; white-space: nowrap; }
 .kmk-board-btn-claim   { border-color: oklch(38% 0.12 145); color: oklch(60% 0.14 145); }
 .kmk-board-btn-claim:hover:not(:disabled)   { background: oklch(55% 0.12 145 / 0.15); color: oklch(70% 0.15 145); }
 .kmk-board-btn-done    { border-color: oklch(36% 0.12 235); color: oklch(58% 0.14 235); }

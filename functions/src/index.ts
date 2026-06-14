@@ -1421,7 +1421,7 @@ export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () =
 
 // ── kmkClaimTrial ─────────────────────────────────────────────────────────────
 // Atomically claims a KMK trial: Incomplete → Pending.
-// Rejects disabled players, locked areas, and already-claimed tasks.
+// Rejects disabled players, locked areas, one-per-area violations, and already-claimed tasks.
 export const kmkClaimTrial = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
 
@@ -1439,17 +1439,23 @@ export const kmkClaimTrial = onCall(async (request) => {
   const player = playerSnap.val() as { displayName: string; disabled?: boolean };
   if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
 
-  // Area must exist and be unlocked.
-  const areaLockedSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/locked`).get();
-  if (!areaLockedSnap.exists()) throw new HttpsError('not-found', 'Area not found.');
-  if (areaLockedSnap.val() === true) throw new HttpsError('failed-precondition', 'Area is locked.');
-
-  // Pre-read the task so the transaction callback has a fallback for the null-on-first-invocation
-  // probe that the Admin SDK sends before it knows the current value (see CLAUDE.md pitfall note).
+  // Load the whole area: check locked + one-per-area in one read.
+  // Also serves as the pre-read fallback for the transaction's null-on-first-invocation probe.
   type RawTask = { trial: string; desc: string; order: number; status: string; playerId?: string | null; playerName?: string | null; claimedAt?: number | null };
-  const taskSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`).get();
-  if (!taskSnap.exists()) throw new HttpsError('not-found', 'Trial not found.');
-  const taskData = taskSnap.val() as RawTask;
+  const areaSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}`).get();
+  if (!areaSnap.exists()) throw new HttpsError('not-found', 'Area not found.');
+  const area = areaSnap.val() as { locked: boolean; tasks?: Record<string, RawTask> };
+  if (area.locked) throw new HttpsError('failed-precondition', 'Area is locked.');
+
+  // One-per-area: player may not hold a Pending or Verifying trial in the same area.
+  const tasks = area.tasks ?? {};
+  const hasActive = Object.values(tasks).some(
+    t => t.playerId === uid && (t.status === 'Pending' || t.status === 'Verifying'),
+  );
+  if (hasActive) throw new HttpsError('failed-precondition', 'You already have an active trial in this area.');
+
+  const taskData = tasks[taskId];
+  if (!taskData) throw new HttpsError('not-found', 'Trial not found.');
 
   // Transaction: claim only if still Incomplete (guards against simultaneous claims).
   let abortReason = 'Trial is no longer available.';

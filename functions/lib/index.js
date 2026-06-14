@@ -1175,7 +1175,7 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
 });
 // ── kmkClaimTrial ─────────────────────────────────────────────────────────────
 // Atomically claims a KMK trial: Incomplete → Pending.
-// Rejects disabled players, locked areas, and already-claimed tasks.
+// Rejects disabled players, locked areas, one-per-area violations, and already-claimed tasks.
 exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
@@ -1191,16 +1191,20 @@ exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
     const player = playerSnap.val();
     if (player.disabled)
         throw new https_1.HttpsError('permission-denied', 'Account restricted.');
-    // Area must exist and be unlocked.
-    const areaLockedSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/locked`).get();
-    if (!areaLockedSnap.exists())
+    const areaSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}`).get();
+    if (!areaSnap.exists())
         throw new https_1.HttpsError('not-found', 'Area not found.');
-    if (areaLockedSnap.val() === true)
+    const area = areaSnap.val();
+    if (area.locked)
         throw new https_1.HttpsError('failed-precondition', 'Area is locked.');
-    const taskSnap = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`).get();
-    if (!taskSnap.exists())
+    // One-per-area: player may not hold a Pending or Verifying trial in the same area.
+    const tasks = area.tasks ?? {};
+    const hasActive = Object.values(tasks).some(t => t.playerId === uid && (t.status === 'Pending' || t.status === 'Verifying'));
+    if (hasActive)
+        throw new https_1.HttpsError('failed-precondition', 'You already have an active trial in this area.');
+    const taskData = tasks[taskId];
+    if (!taskData)
         throw new https_1.HttpsError('not-found', 'Trial not found.');
-    const taskData = taskSnap.val();
     // Transaction: claim only if still Incomplete (guards against simultaneous claims).
     let abortReason = 'Trial is no longer available.';
     const { committed } = await db.ref(`kmkEvents/${listId}/areas/${areaId}/tasks/${taskId}`)
