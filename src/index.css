@@ -2507,7 +2507,8 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .kmk-board-completed-row:first-child { border-top: none; }
 .kmk-board-completed-check { color: oklch(56% 0.14 150); font-size: 0.76rem; flex-shrink: 0; }
-.kmk-board-completed-trial { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-dim); flex: 1; text-decoration: line-through; }
+.kmk-board-completed-trial { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-dim); flex-shrink: 0; text-decoration: line-through; }
+.kmk-board-completed-desc { font-family: 'Crimson Pro', serif; font-size: 0.8rem; font-style: italic; color: var(--text-muted); flex: 1; }
 .kmk-board-completed-claimer { font-family: 'Crimson Pro', serif; font-size: 0.73rem; font-style: italic; color: var(--text-dim); flex-shrink: 0; }
 
 .kmk-board-empty { padding: 0.7rem 0.8rem; font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.8rem; color: var(--text-dim); }

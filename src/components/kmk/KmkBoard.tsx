@@ -174,6 +174,9 @@ function AreaPanel({
                 <div key={taskId} className="kmk-board-completed-row">
                   <span className="kmk-board-completed-check">✓</span>
                   <span className="kmk-board-completed-trial">{task.trial}</span>
+                  {task.desc && (
+                    <span className="kmk-board-completed-desc">{task.desc}</span>
+                  )}
                   {task.playerName && (
                     <span className="kmk-board-completed-claimer">👤 {task.playerName}</span>
                   )}
