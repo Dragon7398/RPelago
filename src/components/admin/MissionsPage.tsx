@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
 import { fetchRoomStatus } from '../../lib/archipelagoApi';
 
 
@@ -189,6 +189,30 @@ function MissionCard({ mission }: { mission: GMMission }) {
       setMismatchedNames(mismatched);
       if (status.tracker) {
         await setMissionTracker(mission.id, status.tracker);
+        try {
+          const cheeseId = await fetchCheesetrackerId(status.tracker);
+          await setMissionCheese(mission.id, cheeseId);
+          try {
+            const games = await fetchCheeseDetails(cheeseId);
+            const statusMap = new Map<string, SlotStatus>();
+            for (const g of games) {
+              const isGoal = g.tracker_status === 'goal_completed';
+              const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
+              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
+              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
+              if (s) statusMap.set(g.name, s);
+            }
+            for (const [pid, p] of Object.entries(mission.participants ?? {})) {
+              const slots = p.slots ?? [];
+              for (let i = 0; i < slots.length; i++) {
+                const newStatus = statusMap.get(slots[i].name);
+                if (newStatus) await adminUpdateParticipantSlotStatus(mission.id, pid, i, newStatus);
+              }
+            }
+          } catch { /* cheese details fetch is best-effort */ }
+        } catch {
+          // cheese fetch is best-effort
+        }
       }
     } catch (err) {
       console.error('AP sync failed:', err);
@@ -255,6 +279,9 @@ function MissionCard({ mission }: { mission: GMMission }) {
         )}
         {mission.tracker && (
           <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${mission.tracker}`} target="_blank" rel="noopener noreferrer" title="Open Archipelago tracker">📊</a>
+        )}
+        {mission.cheese && (
+          <a className="dash-tile-link" href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese}`} target="_blank" rel="noopener noreferrer" title="Open Cheesetracker">🧀</a>
         )}
         {(mission.link || link) && (
           <button className="dash-copy-room-btn ap-sync-btn" onClick={handleSync} disabled={syncing}>

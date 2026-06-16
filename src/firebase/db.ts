@@ -539,9 +539,52 @@ export async function setTileTracker2(coord: string, tracker: string | null): Pr
   await set(ref(db!, `game/tiles/${coord}/tracker2`), tracker);
 }
 
+export async function setTileCheese(coord: string, cheese: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/cheese`), cheese);
+}
+
+export async function setTileCheese2(coord: string, cheese: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/cheese2`), cheese);
+}
+
 export async function setMissionTracker(missionId: string, tracker: string | null): Promise<void> {
   assertDb();
   await set(ref(db!, `game/missions/${missionId}/tracker`), tracker);
+}
+
+export async function setMissionCheese(missionId: string, cheese: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/missions/${missionId}/cheese`), cheese);
+}
+
+export async function fetchCheesetrackerId(apTrackerId: string): Promise<string> {
+  assertFunctions();
+  const result = await httpsCallable<{ trackerId: string }, { tracker_id: string }>(
+    functions!, 'fetchCheesetracker',
+  )({ trackerId: apTrackerId });
+  return result.data.tracker_id;
+}
+
+export interface CheeseGame {
+  name: string;
+  tracker_status: string;
+  checks_done: number;
+  checks_total: number;
+}
+
+export async function fetchCheeseDetails(cheeseId: string): Promise<CheeseGame[]> {
+  assertFunctions();
+  const result = await httpsCallable<{ cheeseId: string }, { games: CheeseGame[] }>(
+    functions!, 'fetchCheeseDetails',
+  )({ cheeseId });
+  return result.data.games;
+}
+
+export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slotIndex: number, status: SlotStatus): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/status`), status);
 }
 
 // ── Admin: public slots ───────────────────────────────────────────────────────

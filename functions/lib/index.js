@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.kmkClaimTrial = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1219,5 +1219,47 @@ exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
     if (!committed)
         throw new https_1.HttpsError('failed-precondition', abortReason);
     return { success: true };
+});
+// ── fetchCheesetracker ────────────────────────────────────────────────────────
+// Proxies the POST to cheesetrackers.theincrediblewheelofchee.se, which does
+// not set CORS headers and therefore cannot be called directly from the browser.
+exports.fetchCheesetracker = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { trackerId } = request.data;
+    if (!trackerId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing trackerId.');
+    const url = `https://archipelago.gg/tracker/${trackerId}`;
+    const res = await fetch('https://cheesetrackers.theincrediblewheelofchee.se/api/tracker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+    });
+    if (!res.ok)
+        throw new https_1.HttpsError('internal', `Cheesetracker API error: ${res.status}`);
+    const data = await res.json();
+    return { tracker_id: data.tracker_id };
+});
+// ── fetchCheeseDetails ────────────────────────────────────────────────────────
+// Proxies the GET to cheesetrackers.theincrediblewheelofchee.se for full
+// tracker data so slot statuses can be auto-updated from game completion.
+exports.fetchCheeseDetails = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { cheeseId } = request.data;
+    if (!cheeseId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing cheeseId.');
+    const res = await fetch(`https://cheesetrackers.theincrediblewheelofchee.se/api/tracker/${cheeseId}`);
+    if (!res.ok)
+        throw new https_1.HttpsError('internal', `Cheesetracker API error: ${res.status}`);
+    const data = await res.json();
+    return {
+        games: (data.games ?? []).map(g => ({
+            name: g.name,
+            tracker_status: g.tracker_status,
+            checks_done: g.checks_done,
+            checks_total: g.checks_total,
+        })),
+    };
 });
 //# sourceMappingURL=index.js.map

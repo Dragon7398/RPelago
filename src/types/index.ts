@@ -57,6 +57,8 @@ export interface Tile {
   link2?: string;
   tracker?: string;
   tracker2?: string;
+  cheese?: string;
+  cheese2?: string;
   gold: number;
   xp: number;
   bonusXP: number;
@@ -229,6 +231,7 @@ export interface GMMission {
   hint:            number;
   link?:           string;
   tracker?:        string;
+  cheese?:         string;
   firstJoinAt:     number | null;
   createdAt:       number;
   deployedAt?:     number;

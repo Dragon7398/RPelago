@@ -3,9 +3,9 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, FEATS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
-import type { TileAdventurer } from '../../types';
+import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
-import { setTileTracker, setTileTracker2 } from '../../firebase/db';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus } from '../../firebase/db';
 import { fetchRoomStatus } from '../../lib/archipelagoApi';
 
 function AdvSlotList({ entry, players, mismatchedNames }: {
@@ -97,6 +97,30 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
       setMismatched(mismatched);
       if (status.tracker) {
         await (room === 1 ? setTileTracker(coord, status.tracker) : setTileTracker2(coord, status.tracker));
+        try {
+          const cheeseId = await fetchCheesetrackerId(status.tracker);
+          await (room === 1 ? setTileCheese(coord, cheeseId) : setTileCheese2(coord, cheeseId));
+          try {
+            const games = await fetchCheeseDetails(cheeseId);
+            const statusMap = new Map<string, SlotStatus>();
+            for (const g of games) {
+              const isGoal = g.tracker_status === 'goal_completed';
+              const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
+              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
+              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
+              if (s) statusMap.set(g.name, s);
+            }
+            for (const adv of roomAdvs) {
+              const slots = adv.slots ?? [];
+              for (let i = 0; i < slots.length; i++) {
+                const newStatus = statusMap.get(slots[i].name);
+                if (newStatus) await adminUpdateAdvSlotStatus(coord, adv.advId, i, newStatus);
+              }
+            }
+          } catch { /* cheese details fetch is best-effort */ }
+        } catch {
+          // cheese fetch is best-effort
+        }
       }
     } catch (err) {
       console.error('AP sync failed:', err);
@@ -125,6 +149,11 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
             {!isBifurcated && tile.tracker && (
               <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${tile.tracker}`} target="_blank" rel="noopener noreferrer" title="Open Archipelago tracker">
                 📊
+              </a>
+            )}
+            {!isBifurcated && tile.cheese && (
+              <a className="dash-tile-link" href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${tile.cheese}`} target="_blank" rel="noopener noreferrer" title="Open Cheesetracker">
+                🧀
               </a>
             )}
             {!isBifurcated && tile.link && (
@@ -164,10 +193,11 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
           {isBifurcated ? (
             ([1, 2] as const).map(roomNum => {
               const roomAdvs    = advs.filter(a => (a.room ?? 1) === roomNum);
-              const roomLink    = roomNum === 1 ? tile.link    : tile.link2;
-              const roomTracker = roomNum === 1 ? tile.tracker : tile.tracker2;
-              const roomSyncing = roomNum === 1 ? syncing1     : syncing2;
-              const roomMismatched = roomNum === 1 ? mismatched1 : mismatched2;
+              const roomLink       = roomNum === 1 ? tile.link    : tile.link2;
+              const roomTracker    = roomNum === 1 ? tile.tracker : tile.tracker2;
+              const roomCheese     = roomNum === 1 ? tile.cheese  : tile.cheese2;
+              const roomSyncing    = roomNum === 1 ? syncing1     : syncing2;
+              const roomMismatched = roomNum === 1 ? mismatched1  : mismatched2;
               return (
                 <div key={roomNum} className="dash-room-group">
                   <div className="dash-room-group-header">
@@ -179,6 +209,9 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                         )}
                         {roomTracker && (
                           <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${roomTracker}`} target="_blank" rel="noopener noreferrer" title={`Open tracker (Room ${roomNum})`}>📊</a>
+                        )}
+                        {roomCheese && (
+                          <a className="dash-tile-link" href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${roomCheese}`} target="_blank" rel="noopener noreferrer" title={`Open Cheesetracker (Room ${roomNum})`}>🧀</a>
                         )}
                         {roomLink && (
                           <button

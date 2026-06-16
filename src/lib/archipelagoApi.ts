@@ -16,3 +16,4 @@ export async function fetchRoomStatus(link: string): Promise<ArchipelagoRoomStat
   const data = await res.json();
   return { players: data.players ?? [], tracker: data.tracker ?? '' };
 }
+

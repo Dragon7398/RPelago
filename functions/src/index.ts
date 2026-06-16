@@ -1470,3 +1470,47 @@ export const kmkClaimTrial = onCall(async (request) => {
   if (!committed) throw new HttpsError('failed-precondition', abortReason);
   return { success: true };
 });
+
+// ── fetchCheesetracker ────────────────────────────────────────────────────────
+// Proxies the POST to cheesetrackers.theincrediblewheelofchee.se, which does
+// not set CORS headers and therefore cannot be called directly from the browser.
+export const fetchCheesetracker = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { trackerId } = request.data as { trackerId?: string };
+  if (!trackerId) throw new HttpsError('invalid-argument', 'Missing trackerId.');
+
+  const url = `https://archipelago.gg/tracker/${trackerId}`;
+  const res = await fetch('https://cheesetrackers.theincrediblewheelofchee.se/api/tracker', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new HttpsError('internal', `Cheesetracker API error: ${res.status}`);
+  const data = await res.json() as { tracker_id: string };
+  return { tracker_id: data.tracker_id };
+});
+
+// ── fetchCheeseDetails ────────────────────────────────────────────────────────
+// Proxies the GET to cheesetrackers.theincrediblewheelofchee.se for full
+// tracker data so slot statuses can be auto-updated from game completion.
+export const fetchCheeseDetails = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { cheeseId } = request.data as { cheeseId?: string };
+  if (!cheeseId) throw new HttpsError('invalid-argument', 'Missing cheeseId.');
+
+  const res = await fetch(`https://cheesetrackers.theincrediblewheelofchee.se/api/tracker/${cheeseId}`);
+  if (!res.ok) throw new HttpsError('internal', `Cheesetracker API error: ${res.status}`);
+  const data = await res.json() as {
+    games?: Array<{ name: string; tracker_status: string; checks_done: number; checks_total: number }>;
+  };
+  return {
+    games: (data.games ?? []).map(g => ({
+      name: g.name,
+      tracker_status: g.tracker_status,
+      checks_done: g.checks_done,
+      checks_total: g.checks_total,
+    })),
+  };
+});
