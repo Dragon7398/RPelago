@@ -18,6 +18,9 @@ import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 import KmkBoard from './components/kmk/KmkBoard';
 import { KmkProvider } from './contexts/KmkContext';
+import AgendaLauncher from './components/agenda/AgendaLauncher';
+import AgendaDrawer from './components/agenda/AgendaDrawer';
+import { deriveAgendaData } from './components/agenda/agendaHelpers';
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
   const [val, setVal] = useState(() => {
@@ -209,6 +212,7 @@ function AppContent() {
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [helpOpen,     setHelpOpen]     = useState(false);
   const [privacyOpen,  setPrivacyOpen]  = useState(() => window.location.hash === '#privacy');
+  const [agendaOpen,   setAgendaOpen]   = useState(false);
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
@@ -254,6 +258,18 @@ function AppContent() {
       {isAdmin && (
         <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">⚙ ADMIN</a>
       )}
+
+      {user && gameState && (
+        <AgendaLauncher
+          count={deriveAgendaData(gameState, user.id).activeCount}
+          onClick={() => setAgendaOpen(true)}
+        />
+      )}
+      <AgendaDrawer
+        open={agendaOpen && !!user}
+        onClose={() => setAgendaOpen(false)}
+        onTileClick={coord => { setAgendaOpen(false); setActiveTile(coord); }}
+      />
 
       <TileLightbox
         coord={activeTile}

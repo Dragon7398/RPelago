@@ -2691,6 +2691,9 @@ body.theme-parchment {
 
   --text-muted: oklch(38% 0.05 70);
   --text-dim:   oklch(52% 0.04 70);
+
+  --gm-accent:   oklch(44% 0.18 285);
+  --gm-accent-d: oklch(34% 0.16 285);
 }
 /* Kill the dark ambient glow and noise overlay on the light-mode theme */
 body.theme-parchment::before { background: none; }
@@ -2739,6 +2742,9 @@ body.theme-sakura {
 
   --text-muted: oklch(36% 0.05 12);
   --text-dim:   oklch(50% 0.04 12);
+
+  --gm-accent:   oklch(42% 0.18 285);
+  --gm-accent-d: oklch(32% 0.16 285);
 }
 body.theme-sakura::before { background: none; }
 body.theme-sakura::after  { opacity: 0; }
@@ -2785,6 +2791,9 @@ body.theme-mint {
 
   --text-muted: oklch(36% 0.05 150);
   --text-dim:   oklch(50% 0.04 150);
+
+  --gm-accent:   oklch(40% 0.18 285);
+  --gm-accent-d: oklch(30% 0.16 285);
 }
 body.theme-mint::before { background: none; }
 body.theme-mint::after  { opacity: 0; }
@@ -2832,6 +2841,9 @@ body.theme-lapis {
 
   --text-muted: oklch(35% 0.07 248);
   --text-dim:   oklch(50% 0.05 248);
+
+  --gm-accent:   oklch(40% 0.18 285);
+  --gm-accent-d: oklch(30% 0.16 285);
 }
 body.theme-lapis::before { background: none; }
 body.theme-lapis::after  { opacity: 0; }
@@ -3553,3 +3565,423 @@ body.theme-parchment .lb-trait-val-new,
 body.theme-sakura    .lb-trait-val-new,
 body.theme-mint      .lb-trait-val-new,
 body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }
+
+/* ══ AGENDA (QUEST LOG) ══════════════════════════════════════════════════════ */
+@keyframes agFade   { from { opacity:0; } to { opacity:1; } }
+@keyframes agDrawer { from { transform:translateX(100%); } to { transform:translateX(0); } }
+
+.ag-launcher {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.2rem;
+  z-index: 490;
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  border-radius: 50%;
+  font-size: 1.35rem;
+  cursor: pointer;
+  box-shadow: 0 4px 16px #000a, 0 0 16px oklch(from var(--gold) l c h / 0.15);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.ag-launcher:hover {
+  border-color: var(--gold);
+  box-shadow: 0 4px 20px #000c, 0 0 20px oklch(from var(--gold) l c h / 0.3);
+}
+
+/* Badge: bg uses --gold gradient, text uses --bg-deep.
+   On dark themes: bg-deep ≈ near-black → readable on bright gold.
+   On light themes: bg-deep ≈ near-white → readable on dark gold. */
+.ag-launcher-badge {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 5px;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 10px;
+  color: var(--bg-deep);
+  background: linear-gradient(to bottom, var(--gold), oklch(from var(--gold) calc(l - 0.10) c h));
+  border: 1.5px solid var(--bg-deep);
+  border-radius: 10px;
+  box-shadow: 0 1px 4px #000a;
+  pointer-events: none;
+}
+
+/* Scrim is always a dark overlay regardless of theme */
+.ag-scrim {
+  position: fixed; inset: 0;
+  z-index: 495;
+  background: oklch(5% 0.02 75 / 0.5);
+  backdrop-filter: blur(2px);
+  animation: agFade 0.2s ease;
+}
+
+.ag-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 420px; max-width: 84%;
+  overflow-y: auto;
+  background: linear-gradient(160deg, oklch(from var(--gold) l c h / 0.05), transparent 38%), var(--bg-mid);
+  border-left: 1px solid var(--border-glow);
+  box-shadow: -20px 0 50px #000a;
+  padding: 1.2rem 1.1rem 1.5rem;
+  animation: agDrawer 0.3s cubic-bezier(0.22,1,0.36,1);
+}
+
+.ag-drawer-header {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.ag-drawer-title {
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.92rem;
+  letter-spacing: 0.12em; color: var(--gold);
+}
+.ag-drawer-count {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.08em; color: var(--text-muted);
+}
+.ag-drawer-close {
+  margin-left: auto; background: none; border: none;
+  color: var(--gold-dim); font-size: 1.1rem;
+  cursor: pointer; font-family: 'Crimson Pro', serif; line-height: 1;
+  padding: 0;
+}
+.ag-drawer-close:hover { color: var(--gold); }
+
+/* Mission pinned card */
+.ag-mission-pinned {
+  border-left: 3px solid var(--gm-accent);
+  background: oklch(from var(--gm-accent) l c h / 0.12);
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.4rem;
+}
+.ag-mission-kicker {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.14em; color: var(--gm-accent);
+}
+.ag-mission-label {
+  font-family: 'Cinzel', serif; font-size: 0.74rem;
+  letter-spacing: 0.02em; color: var(--parchment);
+}
+.ag-mission-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.12em; padding: 0.14rem 0.5rem;
+  border-radius: 2px;
+  border: 1px solid var(--gm-accent-d);
+  color: var(--gm-accent);
+  background: oklch(from var(--gm-accent) l c h / 0.15);
+  white-space: nowrap; align-self: flex-start;
+}
+.ag-mission-reward {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.76rem; color: var(--gold-dim);
+  margin-bottom: 0.5rem;
+}
+.ag-mission-actions { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem; flex-wrap: wrap; }
+.ag-mission-view-btn {
+  cursor: pointer; background: none; border: 1px solid var(--gm-accent-d);
+  border-radius: 3px; padding: 0.2rem 0.5rem;
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.1em; color: var(--gm-accent);
+  transition: all 0.15s;
+}
+.ag-mission-view-btn:hover {
+  color: oklch(from var(--gm-accent) calc(l + 0.08) c h);
+  border-color: var(--gm-accent);
+}
+
+/* No-mission prompt */
+.ag-no-mission-block {
+  border: 1px dashed var(--gm-accent-d);
+  border-radius: 4px;
+  background: oklch(from var(--gm-accent) l c h / 0.08);
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.2rem;
+}
+.ag-no-mission-title {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.12em; color: var(--gm-accent); margin-bottom: 0.3rem;
+}
+.ag-no-mission-text {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.78rem; line-height: 1.5; color: var(--gold-dim);
+}
+
+/* Section divider */
+.ag-section-divider {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0.85rem 0 0.55rem;
+}
+.ag-section-label {
+  font-family: 'Cinzel', serif; font-size: 0.54rem;
+  letter-spacing: 0.14em; color: var(--gold-dim);
+}
+.ag-section-count {
+  font-family: 'Cinzel', serif; font-size: 0.48rem;
+  letter-spacing: 0.06em; color: var(--text-muted);
+}
+.ag-section-rule { flex: 1; height: 1px; background: var(--border); }
+
+/* Adventurer group */
+.ag-adv-group {
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg-card); overflow: hidden;
+}
+.ag-adv-header {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg-mid);
+  border-bottom: 1px solid var(--border);
+}
+/* Icon circle: intentionally a deep dark-purple tint to frame the emoji */
+.ag-adv-icon {
+  width: 28px; height: 28px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: oklch(from var(--gm-accent) calc(l - 0.32) c h / 0.8);
+  border: 1px solid oklch(from var(--gm-accent) calc(l - 0.18) c h / 0.6);
+  font-size: 0.9rem;
+}
+.ag-adv-name {
+  font-family: 'Cinzel', serif; font-size: 0.74rem;
+  letter-spacing: 0.04em; color: var(--parchment);
+}
+.ag-adv-cls {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.72rem; color: var(--gold-dim);
+}
+.ag-adv-tile-count {
+  margin-left: auto; font-family: 'Cinzel', serif;
+  font-size: 0.5rem; letter-spacing: 0.1em; color: var(--text-muted);
+}
+
+/* Tile row inside a group */
+.ag-tile-row { padding: 0.55rem 0.7rem; border-top: 1px solid oklch(from var(--border) l c h / 0.5); }
+.ag-tile-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  flex-wrap: wrap; margin-bottom: 0.4rem;
+}
+.ag-tile-type-icon { font-size: 0.88rem; flex-shrink: 0; }
+.ag-tile-name {
+  font-family: 'Cinzel', serif; font-weight: 600;
+  letter-spacing: 0.03em; font-size: 0.78rem;
+}
+.ag-tile-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.1em; padding: 0.14rem 0.45rem;
+  border-radius: 2px; border: 1px solid; white-space: nowrap;
+}
+/* Tile-type colour tokens — these inherit all per-theme overrides automatically */
+.ag-tile-name-battle { color: oklch(from var(--battle-fg) calc(l + 0.08) c h); }
+.ag-tile-name-puzzle { color: oklch(from var(--puzzle-fg) calc(l + 0.08) c h); }
+.ag-tile-name-town   { color: oklch(from var(--town-fg)   calc(l + 0.08) c h); }
+.ag-tile-name-elite  { color: oklch(from var(--elite-fg)  calc(l + 0.08) c h); }
+.ag-tile-name-boss   { color: oklch(from var(--boss-fg)   calc(l + 0.10) c h); }
+
+.ag-tile-badge-battle { color: var(--battle-fg); border-color: var(--battle-fg); background: var(--battle-bg-1); }
+.ag-tile-badge-puzzle { color: var(--puzzle-fg); border-color: var(--puzzle-fg); background: var(--puzzle-bg-1); }
+.ag-tile-badge-town   { color: var(--town-fg);   border-color: var(--town-fg);   background: var(--town-bg-1);   }
+.ag-tile-badge-elite  { color: var(--elite-fg);  border-color: var(--elite-fg);  background: var(--elite-bg-1);  }
+.ag-tile-badge-boss   { color: var(--boss-fg);   border-color: var(--boss-fg);   background: var(--boss-bg-1);   }
+/* Room badge uses a fixed teal — hue kept consistent across all themes */
+.ag-tile-room-badge {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.08em; color: oklch(72% 0.10 220);
+  border: 1px solid oklch(46% 0.10 220); border-radius: 2px;
+  padding: 0.1rem 0.4rem; background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+  white-space: nowrap;
+}
+.ag-coord-chip {
+  margin-left: auto; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: 0.6rem;
+  letter-spacing: 0.08em; color: var(--gold-dim);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.1rem 0.38rem; white-space: nowrap;
+  background: none; transition: all 0.15s;
+}
+.ag-coord-chip:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 8px oklch(from var(--gold) l c h / 0.2);
+}
+
+.ag-freed-note {
+  display: flex; align-items: center; gap: 0.4rem;
+  margin-bottom: 0.45rem;
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; color: var(--state-avail-fg);
+}
+
+.ag-trait-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.45rem; }
+.ag-trait-chip {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.06em; color: var(--gold-dim);
+  border: 1px solid var(--border); border-radius: 2px;
+  padding: 0.1rem 0.38rem;
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h);
+}
+
+/* Slot rows */
+.ag-slot-list { display: flex; flex-direction: column; gap: 0.25rem; }
+.ag-slot-row { display: flex; align-items: center; gap: 0.4rem; }
+.ag-slot-name {
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.04em; color: var(--gold-dim); white-space: nowrap;
+}
+.ag-slot-sep { color: var(--border); flex-shrink: 0; }
+.ag-slot-game {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ag-slot-status {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.08em; padding: 0.14rem 0.5rem;
+  border-radius: 2px; border: 1px solid; white-space: nowrap; margin-left: auto;
+}
+.ag-slot-no-game {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.28rem 0.45rem;
+  border: 1px dashed var(--border); border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+}
+.ag-slot-yaml-link {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; color: var(--gold);
+  text-decoration: underline; text-decoration-color: oklch(from var(--gold) calc(l - 0.28) c h);
+  text-underline-offset: 2px;
+}
+.ag-slot-yaml-link:hover { color: oklch(from var(--gold) calc(l + 0.06) c h); }
+
+/* Archipelago link */
+.ag-archi-link {
+  display: inline-flex; align-items: center; gap: 0.32rem;
+  margin-top: 0.45rem;
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.08em; color: oklch(72% 0.16 220);
+  border: 1px solid oklch(44% 0.12 220);
+  background: oklch(from var(--bg-card) calc(l - 0.06) c h / 0.6);
+  border-radius: 3px; padding: 0.22rem 0.55rem; text-decoration: none;
+  transition: all 0.15s;
+}
+.ag-archi-link:hover { background: oklch(from var(--bg-card) calc(l - 0.10) c h / 0.8); color: oklch(84% 0.16 220); }
+
+/* Empty states */
+.ag-empty-full { text-align: center; padding: 2.2rem 0.4rem 1rem; }
+.ag-empty-full-icon { font-size: 2.8rem; margin-bottom: 0.7rem; opacity: 0.92; }
+.ag-empty-full-title {
+  font-family: 'Cinzel', serif; font-size: 0.86rem;
+  letter-spacing: 0.06em; color: var(--gold); margin-bottom: 0.5rem;
+}
+.ag-empty-full-text {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.88rem; line-height: 1.55; color: var(--gold-dim);
+  margin: 0 auto 1.2rem;
+}
+.ag-empty-ctas { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+/* Deploy CTA: same gold-button treatment as other gold buttons in the app */
+.ag-cta-deploy {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  color: var(--bg-deep);
+  background: linear-gradient(to bottom, var(--gold), oklch(from var(--gold) calc(l - 0.10) c h));
+  border: 1px solid oklch(from var(--gold) calc(l + 0.06) c h); border-radius: 4px;
+  padding: 0.5rem 0.85rem; cursor: pointer;
+  box-shadow: 0 2px 10px oklch(from var(--gold) l c h / 0.25);
+}
+.ag-cta-missions {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  color: var(--gm-accent);
+  background: oklch(from var(--gm-accent) l c h / 0.12);
+  border: 1px solid var(--gm-accent-d);
+  border-radius: 4px; padding: 0.5rem 0.85rem; cursor: pointer;
+}
+.ag-empty-block {
+  text-align: center; border: 1px dashed var(--border); border-radius: 5px;
+  padding: 0.9rem 0.8rem;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+}
+.ag-empty-block-icon { font-size: 1.3rem; margin-bottom: 0.35rem; }
+.ag-empty-block-text {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.82rem; line-height: 1.45; color: var(--gold-dim);
+}
+
+/* Mission card overlay (inside drawer, always dark scrim) */
+.ag-mc-overlay {
+  position: absolute; inset: 0; z-index: 10;
+  background: oklch(5% 0.02 75 / 0.86);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: agFade 0.18s ease;
+}
+.ag-mc-card {
+  position: relative;
+  background: linear-gradient(160deg, oklch(from var(--gold) l c h / 0.06), transparent 40%), var(--bg-mid);
+  border: 1px solid var(--border-glow); border-radius: 10px;
+  padding: 1.5rem 1.4rem 1.2rem;
+  max-width: 290px; width: 100%;
+  text-align: center;
+}
+.ag-mc-close {
+  position: absolute; top: 0.6rem; right: 0.85rem;
+  background: none; border: none;
+  color: var(--gold-dim); font-size: 1.05rem;
+  cursor: pointer; font-family: 'Crimson Pro', serif; line-height: 1;
+}
+.ag-mc-close:hover { color: var(--gold); }
+.ag-mc-kicker {
+  font-family: 'Cinzel', serif; font-size: 0.5rem;
+  letter-spacing: 0.14em; color: var(--gm-accent); margin-bottom: 0.25rem;
+}
+.ag-mc-emoji { font-size: 2.4rem; line-height: 1; margin-bottom: 0.4rem; }
+.ag-mc-title {
+  font-family: 'Cinzel', serif; font-size: 0.94rem; font-weight: 700;
+  letter-spacing: 0.04em; color: var(--parchment); margin-bottom: 0.25rem;
+}
+.ag-mc-roster {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; color: var(--gold-dim); margin-bottom: 0.5rem;
+}
+.ag-mc-rule { width: 60px; height: 1px; background: linear-gradient(to right, transparent, var(--border-glow), transparent); margin: 0.65rem auto; }
+.ag-mc-slots-label {
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.14em; color: var(--gold-dim);
+  text-align: left; margin-bottom: 0.4rem;
+}
+.ag-mc-slot-row {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.3rem 0.5rem; margin-bottom: 0.25rem;
+  background: oklch(from var(--bg-card) calc(l - 0.02) c h);
+  border: 1px solid var(--border); border-radius: 2px; text-align: left;
+}
+.ag-mc-footer {
+  display: flex; justify-content: center; gap: 1.2rem; margin-top: 0.85rem;
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.06em;
+}
+
+/* Light-theme overrides ── Archipelago link needs darker text on light bg */
+body.theme-parchment .ag-archi-link,
+body.theme-sakura    .ag-archi-link,
+body.theme-mint      .ag-archi-link,
+body.theme-lapis     .ag-archi-link {
+  color: oklch(32% 0.18 220);
+  border-color: oklch(36% 0.14 220);
+}
+body.theme-parchment .ag-archi-link:hover,
+body.theme-sakura    .ag-archi-link:hover,
+body.theme-mint      .ag-archi-link:hover,
+body.theme-lapis     .ag-archi-link:hover { color: oklch(24% 0.20 220); }
+
+/* Room badge teal text on light bg */
+body.theme-parchment .ag-tile-room-badge,
+body.theme-sakura    .ag-tile-room-badge,
+body.theme-mint      .ag-tile-room-badge,
+body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-color: oklch(36% 0.12 220); }
+
+@media (max-width: 600px) {
+  .ag-drawer { width: 100%; max-width: 100%; }
+  .ag-launcher { bottom: 1rem; right: 1rem; }
+}
