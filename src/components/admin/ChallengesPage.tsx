@@ -168,6 +168,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                   }).join(' ');
                   let text = `New room generated:  ${title}!\n${tile.link}`;
                   if (tile.tracker) text += `\nhttps://archipelago.gg/tracker/${tile.tracker}`;
+                  if (tile.cheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${tile.cheese} (optional)`;
                   text += `\n${handles}`;
                   const pubSlots = tile.publicSlots ?? [];
                   if (pubSlots.length > 0) {
@@ -225,6 +226,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                               }).join(' ');
                               let text = `New room generated:  ${title}!\n${roomLink}`;
                               if (roomTracker) text += `\nhttps://archipelago.gg/tracker/${roomTracker}`;
+                              if (roomCheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${roomCheese} (optional)`;
                               text += `\n${handles}`;
                               const pubSlots = (tile.publicSlots ?? []).filter(s => !s.room || s.room === roomNum);
                               if (pubSlots.length > 0) {

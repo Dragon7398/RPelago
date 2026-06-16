@@ -583,6 +583,8 @@ interface GMMission {
   collect:      TriState;
   hint:         number;
   link?:        string;
+  tracker?:     string;
+  cheese?:      string;
   firstJoinAt:  number | null;
   createdAt:    number;
   deployedAt?:  number;
@@ -594,6 +596,27 @@ interface GMMission {
   entryCosts?:     { label: string; gold: number }[];
   pot?:            number;
   casinoStats?:    CasinoStats;
+}
+
+// ── Tile types (minimal, mirrors src/types/index.ts) ─────────────────────────
+
+interface TileSlot {
+  name:    string;
+  status?: SlotStatus;
+}
+
+interface TileAdv {
+  advId:  string;
+  room?:  1 | 2;
+  slots?: TileSlot[];
+}
+
+interface Tile {
+  state:        string;
+  adventurers?: Record<string, TileAdv>;
+  traits?:      Record<string, unknown>;
+  cheese?:      string;
+  cheese2?:     string;
 }
 
 // ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
@@ -1416,6 +1439,105 @@ export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () =
     if (gmShouldDeploy(m, now)) {
       await deployMission(id, m, now);
     }
+  }
+});
+
+// ── Scheduled tick: auto-sync slot statuses from Cheesetracker ───────────────
+
+export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
+  const db = getDatabase();
+
+  async function getCheeseGames(cheeseId: string): Promise<
+    Array<{ name: string; tracker_status: string; checks_done: number; checks_total: number }> | null
+  > {
+    const res = await fetch(`https://cheesetrackers.theincrediblewheelofchee.se/api/tracker/${cheeseId}`);
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      games?: Array<{ name: string; tracker_status: string; checks_done: number; checks_total: number }>;
+    };
+    return data.games ?? null;
+  }
+
+  function deriveStatus(g: { tracker_status: string; checks_done: number; checks_total: number }): SlotStatus | null {
+    const isGoal        = g.tracker_status === 'goal_completed';
+    const is100         = g.checks_total > 0 && g.checks_done === g.checks_total;
+    const isInProgress  = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
+    if (isGoal && is100) return 'Done';
+    if (isGoal)          return 'Goaled';
+    if (is100)           return '100%';
+    if (isInProgress)    return 'In-Progress';
+    return null;
+  }
+
+  function hasActiveSlots(slots: Array<{ status?: SlotStatus }>): boolean {
+    return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
+  }
+
+  const updates: Record<string, string> = {};
+
+  // ── Tiles ──────────────────────────────────────────────────────────────────
+  const tilesSnap = await db.ref('game/tiles').get();
+  if (tilesSnap.exists()) {
+    const tiles = tilesSnap.val() as Record<string, Tile>;
+    for (const [coord, tile] of Object.entries(tiles)) {
+      if (tile.state !== 'inprogress') continue;
+      const advs         = Object.values(tile.adventurers ?? {});
+      const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+
+      for (const roomNum of [1, 2] as const) {
+        if (roomNum === 2 && !isBifurcated) continue;
+        const cheeseId = roomNum === 1 ? tile.cheese : tile.cheese2;
+        if (!cheeseId) continue;
+        const roomAdvs  = isBifurcated ? advs.filter(a => (a.room ?? 1) === roomNum) : advs;
+        const roomSlots = roomAdvs.flatMap(a => a.slots ?? []);
+        if (!hasActiveSlots(roomSlots)) continue;
+        const games = await getCheeseGames(cheeseId);
+        if (!games) continue;
+        const statusMap = new Map(games.flatMap(g => {
+          const s = deriveStatus(g);
+          return s ? [[g.name, s] as [string, SlotStatus]] : [];
+        }));
+        for (const adv of roomAdvs) {
+          const slots = adv.slots ?? [];
+          for (let i = 0; i < slots.length; i++) {
+            const newStatus = statusMap.get(slots[i].name);
+            if (newStatus && slots[i].status !== newStatus) {
+              updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Missions ───────────────────────────────────────────────────────────────
+  const missionsSnap = await db.ref('game/missions').get();
+  if (missionsSnap.exists()) {
+    const missions = missionsSnap.val() as Record<string, GMMission>;
+    for (const [missionId, mission] of Object.entries(missions)) {
+      if (mission.state !== 'inprogress' || !mission.cheese) continue;
+      const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
+      if (!hasActiveSlots(allSlots)) continue;
+      const games = await getCheeseGames(mission.cheese);
+      if (!games) continue;
+      const statusMap = new Map(games.flatMap(g => {
+        const s = deriveStatus(g);
+        return s ? [[g.name, s] as [string, SlotStatus]] : [];
+      }));
+      for (const [pid, p] of Object.entries(mission.participants ?? {})) {
+        const slots = p.slots ?? [];
+        for (let i = 0; i < slots.length; i++) {
+          const newStatus = statusMap.get(slots[i].name);
+          if (newStatus && slots[i].status !== newStatus) {
+            updates[`game/missions/${missionId}/participants/${pid}/slots/${i}/status`] = newStatus;
+          }
+        }
+      }
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await db.ref().update(updates);
   }
 });
 

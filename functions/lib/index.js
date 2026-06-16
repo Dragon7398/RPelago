@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1171,6 +1171,104 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
         if (gmShouldDeploy(m, now)) {
             await deployMission(id, m, now);
         }
+    }
+});
+// ── Scheduled tick: auto-sync slot statuses from Cheesetracker ───────────────
+exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async () => {
+    const db = (0, database_2.getDatabase)();
+    async function getCheeseGames(cheeseId) {
+        const res = await fetch(`https://cheesetrackers.theincrediblewheelofchee.se/api/tracker/${cheeseId}`);
+        if (!res.ok)
+            return null;
+        const data = await res.json();
+        return data.games ?? null;
+    }
+    function deriveStatus(g) {
+        const isGoal = g.tracker_status === 'goal_completed';
+        const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
+        const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
+        if (isGoal && is100)
+            return 'Done';
+        if (isGoal)
+            return 'Goaled';
+        if (is100)
+            return '100%';
+        if (isInProgress)
+            return 'In-Progress';
+        return null;
+    }
+    function hasActiveSlots(slots) {
+        return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
+    }
+    const updates = {};
+    // ── Tiles ──────────────────────────────────────────────────────────────────
+    const tilesSnap = await db.ref('game/tiles').get();
+    if (tilesSnap.exists()) {
+        const tiles = tilesSnap.val();
+        for (const [coord, tile] of Object.entries(tiles)) {
+            if (tile.state !== 'inprogress')
+                continue;
+            const advs = Object.values(tile.adventurers ?? {});
+            const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+            for (const roomNum of [1, 2]) {
+                if (roomNum === 2 && !isBifurcated)
+                    continue;
+                const cheeseId = roomNum === 1 ? tile.cheese : tile.cheese2;
+                if (!cheeseId)
+                    continue;
+                const roomAdvs = isBifurcated ? advs.filter(a => (a.room ?? 1) === roomNum) : advs;
+                const roomSlots = roomAdvs.flatMap(a => a.slots ?? []);
+                if (!hasActiveSlots(roomSlots))
+                    continue;
+                const games = await getCheeseGames(cheeseId);
+                if (!games)
+                    continue;
+                const statusMap = new Map(games.flatMap(g => {
+                    const s = deriveStatus(g);
+                    return s ? [[g.name, s]] : [];
+                }));
+                for (const adv of roomAdvs) {
+                    const slots = adv.slots ?? [];
+                    for (let i = 0; i < slots.length; i++) {
+                        const newStatus = statusMap.get(slots[i].name);
+                        if (newStatus && slots[i].status !== newStatus) {
+                            updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // ── Missions ───────────────────────────────────────────────────────────────
+    const missionsSnap = await db.ref('game/missions').get();
+    if (missionsSnap.exists()) {
+        const missions = missionsSnap.val();
+        for (const [missionId, mission] of Object.entries(missions)) {
+            if (mission.state !== 'inprogress' || !mission.cheese)
+                continue;
+            const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
+            if (!hasActiveSlots(allSlots))
+                continue;
+            const games = await getCheeseGames(mission.cheese);
+            if (!games)
+                continue;
+            const statusMap = new Map(games.flatMap(g => {
+                const s = deriveStatus(g);
+                return s ? [[g.name, s]] : [];
+            }));
+            for (const [pid, p] of Object.entries(mission.participants ?? {})) {
+                const slots = p.slots ?? [];
+                for (let i = 0; i < slots.length; i++) {
+                    const newStatus = statusMap.get(slots[i].name);
+                    if (newStatus && slots[i].status !== newStatus) {
+                        updates[`game/missions/${missionId}/participants/${pid}/slots/${i}/status`] = newStatus;
+                    }
+                }
+            }
+        }
+    }
+    if (Object.keys(updates).length > 0) {
+        await db.ref().update(updates);
     }
 });
 // ── kmkClaimTrial ─────────────────────────────────────────────────────────────

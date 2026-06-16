@@ -383,6 +383,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
                   }).join(' ');
                   let text = `New room generated:  ${label}!\n${link}`;
                   if (mission.tracker) text += `\nhttps://archipelago.gg/tracker/${mission.tracker}`;
+                  if (mission.cheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese} (optional)`;
                   text += `\n${handles}`;
                   navigator.clipboard.writeText(text);
                 }}
