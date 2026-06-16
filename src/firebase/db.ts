@@ -527,6 +527,23 @@ export async function setMissionSlotLock(missionId: string, locked: boolean): Pr
   }
 }
 
+// ── Admin: Archipelago tracker ────────────────────────────────────────────────
+
+export async function setTileTracker(coord: string, tracker: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/tracker`), tracker);
+}
+
+export async function setTileTracker2(coord: string, tracker: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/tracker2`), tracker);
+}
+
+export async function setMissionTracker(missionId: string, tracker: string | null): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/missions/${missionId}/tracker`), tracker);
+}
+
 // ── Admin: public slots ───────────────────────────────────────────────────────
 export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
   const path = `game/tiles/${coord}/publicSlots`;

@@ -1,13 +1,17 @@
+import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, FEATS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
+import { setTileTracker, setTileTracker2 } from '../../firebase/db';
+import { fetchRoomStatus } from '../../lib/archipelagoApi';
 
-function AdvSlotList({ entry, players }: {
+function AdvSlotList({ entry, players, mismatchedNames }: {
   entry: TileAdventurer;
   players: Record<string, import('../../types').Player>;
+  mismatchedNames?: Set<string>;
 }) {
   const slots   = slotsFromEntry(entry);
   const featIds = getPlayerFeatIds(players[entry.owner]?.feats);
@@ -32,6 +36,9 @@ function AdvSlotList({ entry, players }: {
         <div className="dash-adv-slots">
           {slots.map((s, i) => (
             <div key={i} className="dash-adv-slot-row">
+              {mismatchedNames?.has(s.name) && (
+                <span className="ap-sync-warn" title="Slot name not found in Archipelago room">⚠</span>
+              )}
               <span className="dash-adv-slot-name">{s.name}</span>
               <span className="dash-adv-slot-sep">—</span>
               <span className="dash-adv-slot-game">{s.game}</span>
@@ -70,6 +77,33 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
   const info         = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
   const advs         = Object.values(tile.adventurers ?? {});
   const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+  const [syncing1, setSyncing1] = useState(false);
+  const [syncing2, setSyncing2] = useState(false);
+  const [mismatched1, setMismatched1] = useState<Set<string>>(new Set());
+  const [mismatched2, setMismatched2] = useState<Set<string>>(new Set());
+
+  const handleSync = async (room: 1 | 2) => {
+    const roomLink = room === 1 ? tile.link : tile.link2;
+    if (!roomLink) return;
+    const setSyncing = room === 1 ? setSyncing1 : setSyncing2;
+    const setMismatched = room === 1 ? setMismatched1 : setMismatched2;
+    const roomAdvs = isBifurcated ? advs.filter(a => (a.room ?? 1) === room) : advs;
+    setSyncing(true);
+    try {
+      const status = await fetchRoomStatus(roomLink);
+      const apNames = new Set(status.players.map(([name]: [string, string]) => name));
+      const allSlots = roomAdvs.flatMap(adv => adv.slots ?? []);
+      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNames.has(n)));
+      setMismatched(mismatched);
+      if (status.tracker) {
+        await (room === 1 ? setTileTracker(coord, status.tracker) : setTileTracker2(coord, status.tracker));
+      }
+    } catch (err) {
+      console.error('AP sync failed:', err);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="dash-tile-card">
@@ -83,12 +117,17 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
           </span>
         ) : (
           <>
-            {tile.link && (
+            {!isBifurcated && tile.link && (
               <a className="dash-tile-link" href={tile.link} target="_blank" rel="noopener noreferrer" title="Open Archipelago link">
                 🔗
               </a>
             )}
-            {tile.link && (
+            {!isBifurcated && tile.tracker && (
+              <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${tile.tracker}`} target="_blank" rel="noopener noreferrer" title="Open Archipelago tracker">
+                📊
+              </a>
+            )}
+            {!isBifurcated && tile.link && (
               <button
                 className="dash-copy-room-btn"
                 onClick={() => {
@@ -98,7 +137,9 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                     const p = players[adv.owner];
                     return '@' + (p?.discordHandle ?? p?.displayName ?? adv.ownerName);
                   }).join(' ');
-                  let text = `New room generated:  ${title}!\n${tile.link}\n${handles}`;
+                  let text = `New room generated:  ${title}!\n${tile.link}`;
+                  if (tile.tracker) text += `\nhttps://archipelago.gg/tracker/${tile.tracker}`;
+                  text += `\n${handles}`;
                   const pubSlots = tile.publicSlots ?? [];
                   if (pubSlots.length > 0) {
                     const slotLines = pubSlots.map(s =>
@@ -110,6 +151,11 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                 }}
               >Copy Room Text</button>
             )}
+            {!isBifurcated && tile.link && (
+              <button className="dash-copy-room-btn ap-sync-btn" onClick={() => handleSync(1)} disabled={syncing1}>
+                {syncing1 ? '…' : 'Sync'}
+              </button>
+            )}
           </>
         )}
       </div>
@@ -117,13 +163,58 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
         <div className="dash-tile-advs">
           {isBifurcated ? (
             ([1, 2] as const).map(roomNum => {
-              const roomAdvs = advs.filter(a => (a.room ?? 1) === roomNum);
+              const roomAdvs    = advs.filter(a => (a.room ?? 1) === roomNum);
+              const roomLink    = roomNum === 1 ? tile.link    : tile.link2;
+              const roomTracker = roomNum === 1 ? tile.tracker : tile.tracker2;
+              const roomSyncing = roomNum === 1 ? syncing1     : syncing2;
+              const roomMismatched = roomNum === 1 ? mismatched1 : mismatched2;
               return (
                 <div key={roomNum} className="dash-room-group">
-                  <div className="dash-room-group-header">Room {roomNum}</div>
+                  <div className="dash-room-group-header">
+                    <span>Room {roomNum}</span>
+                    {variant === 'inprogress' && (
+                      <span className="dash-room-header-controls">
+                        {roomLink && (
+                          <a className="dash-tile-link" href={roomLink} target="_blank" rel="noopener noreferrer" title={`Open Archipelago link (Room ${roomNum})`}>🔗</a>
+                        )}
+                        {roomTracker && (
+                          <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${roomTracker}`} target="_blank" rel="noopener noreferrer" title={`Open tracker (Room ${roomNum})`}>📊</a>
+                        )}
+                        {roomLink && (
+                          <button
+                            className="dash-copy-room-btn"
+                            onClick={() => {
+                              const base = tile.name ? `${coord} - ${tile.name}` : coord;
+                              const title = `${base} - Room ${roomNum}`;
+                              const handles = roomAdvs.map(adv => {
+                                const p = players[adv.owner];
+                                return '@' + (p?.discordHandle ?? p?.displayName ?? adv.ownerName);
+                              }).join(' ');
+                              let text = `New room generated:  ${title}!\n${roomLink}`;
+                              if (roomTracker) text += `\nhttps://archipelago.gg/tracker/${roomTracker}`;
+                              text += `\n${handles}`;
+                              const pubSlots = (tile.publicSlots ?? []).filter(s => !s.room || s.room === roomNum);
+                              if (pubSlots.length > 0) {
+                                const slotLines = pubSlots.map(s =>
+                                  `\`\`${s.name}\`\`: ${s.game}${s.details ? ` [${s.details}]` : ''}`
+                                ).join('\n');
+                                text += `\n\nThis world has the following Public slots.  These are available for anyone to play, whether they are on this tile or not:\n${slotLines}`;
+                              }
+                              navigator.clipboard.writeText(text);
+                            }}
+                          >Copy Room Text</button>
+                        )}
+                        {roomLink && (
+                          <button className="dash-copy-room-btn ap-sync-btn" onClick={() => handleSync(roomNum)} disabled={roomSyncing}>
+                            {roomSyncing ? '…' : 'Sync'}
+                          </button>
+                        )}
+                      </span>
+                    )}
+                  </div>
                   {roomAdvs.map(adv => (
                     <div key={adv.advId} className="dash-adv-kickable">
-                      <AdvSlotList entry={adv} players={players} />
+                      <AdvSlotList entry={adv} players={players} mismatchedNames={roomMismatched} />
                       <button
                         className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
                         title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
@@ -138,7 +229,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
           ) : (
             advs.map(adv => (
               <div key={adv.advId} className="dash-adv-kickable">
-                <AdvSlotList entry={adv} players={players} />
+                <AdvSlotList entry={adv} players={players} mismatchedNames={mismatched1} />
                 <button
                   className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
                   title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}

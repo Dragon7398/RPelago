@@ -1440,7 +1440,9 @@ header p {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
   color: oklch(68% 0.12 60); border-bottom: 1px solid oklch(30% 0.08 60 / 0.5);
   padding-bottom: 0.15rem; margin-bottom: 0.25rem; text-transform: uppercase;
+  display: flex; align-items: center; gap: 0.4rem;
 }
+.dash-room-header-controls { display: flex; align-items: center; gap: 0.3rem; margin-left: auto; }
 .dash-room-empty { font-size: 0.6rem; color: oklch(45% 0.05 200); padding: 0.15rem 0; font-style: italic; }
 .admin-room-group { margin-bottom: 0.5rem; }
 .admin-room-group-header {
@@ -1693,6 +1695,13 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   color: oklch(62% 0.10 220); transition: all 0.15s;
 }
 .dash-copy-room-btn:hover { border-color: oklch(55% 0.12 220); color: oklch(75% 0.12 220); }
+.ap-sync-btn { border-color: oklch(40% 0.10 145); color: oklch(62% 0.10 145); }
+.ap-sync-btn:hover { border-color: oklch(55% 0.12 145); color: oklch(75% 0.12 145); }
+.ap-sync-btn:disabled { opacity: 0.5; cursor: default; }
+.ap-sync-warn {
+  color: oklch(78% 0.16 55); font-size: 0.75rem; flex-shrink: 0;
+  margin-right: 0.15rem; line-height: 1;
+}
 .dash-mission-type-pill {
   font-family: 'Cinzel', serif; font-size: 0.46rem; letter-spacing: 0.14em;
   padding: 0.1rem 0.4rem; border-radius: 2px; flex-shrink: 0;

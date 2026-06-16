@@ -55,6 +55,8 @@ export interface Tile {
   tauntedAdvId?: string;
   link: string;
   link2?: string;
+  tracker?: string;
+  tracker2?: string;
   gold: number;
   xp: number;
   bonusXP: number;
@@ -226,6 +228,7 @@ export interface GMMission {
   collect:         TriState;
   hint:            number;
   link?:           string;
+  tracker?:        string;
   firstJoinAt:     number | null;
   createdAt:       number;
   deployedAt?:     number;

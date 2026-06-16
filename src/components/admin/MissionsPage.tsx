@@ -4,7 +4,8 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker } from '../../firebase/db';
+import { fetchRoomStatus } from '../../lib/archipelagoApi';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -16,13 +17,14 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, locked, isCasino, onKick,
+  missionId, playerId, participant, locked, isCasino, mismatchedNames, onKick,
 }: {
   missionId: string;
   playerId: string;
   participant: GMParticipant;
   locked: boolean;
   isCasino?: boolean;
+  mismatchedNames?: Set<string>;
   onKick: () => void;
 }) {
   const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
@@ -58,6 +60,9 @@ function MissionParticipantSlots({
 
       {slots.map((s, i) => (
         <div key={i} className="admin-slot-row">
+          {mismatchedNames?.has(s.name) && (
+            <span className="ap-sync-warn" title="Slot name not found in Archipelago room">⚠</span>
+          )}
           <input
             className="admin-slot-edit-input"
             key={`mn-${missionId}-${playerId}-${i}-${s.name}`}
@@ -169,6 +174,28 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const [hint,    setHint]    = useState(mission.hint);
   const [transitioning,  setTransitioning]  = useState(false);
   const [completionWarn, setCompletionWarn] = useState<{ unfinishedSlots: number } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [mismatchedNames, setMismatchedNames] = useState<Set<string>>(new Set());
+
+  const handleSync = async () => {
+    const roomLink = mission.link ?? link;
+    if (!roomLink) return;
+    setSyncing(true);
+    try {
+      const status = await fetchRoomStatus(roomLink);
+      const apNames = new Set(status.players.map(([name]: [string, string]) => name));
+      const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
+      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNames.has(n)));
+      setMismatchedNames(mismatched);
+      if (status.tracker) {
+        await setMissionTracker(mission.id, status.tracker);
+      }
+    } catch (err) {
+      console.error('AP sync failed:', err);
+    } finally {
+      setSyncing(false);
+    }
+  };
   const slotsLocked = mission.slotsLocked ?? false;
   const [now] = useState(() => Date.now());
 
@@ -225,6 +252,14 @@ function MissionCard({ mission }: { mission: GMMission }) {
         )}
         {mission.state === 'inprogress' && mission.link && (
           <a className="dash-tile-link" href={mission.link} target="_blank" rel="noopener noreferrer" title="Open room">🔗</a>
+        )}
+        {mission.tracker && (
+          <a className="dash-tile-link" href={`https://archipelago.gg/tracker/${mission.tracker}`} target="_blank" rel="noopener noreferrer" title="Open Archipelago tracker">📊</a>
+        )}
+        {(mission.link || link) && (
+          <button className="dash-copy-room-btn ap-sync-btn" onClick={handleSync} disabled={syncing}>
+            {syncing ? '…' : 'Sync'}
+          </button>
         )}
       </div>
 
@@ -319,7 +354,10 @@ function MissionCard({ mission }: { mission: GMMission }) {
                     const p = gameState?.players[pid];
                     return '@' + (p?.discordHandle ?? p?.displayName ?? pid);
                   }).join(' ');
-                  navigator.clipboard.writeText(`New room generated:  ${label}!\n${link}\n${handles}`);
+                  let text = `New room generated:  ${label}!\n${link}`;
+                  if (mission.tracker) text += `\nhttps://archipelago.gg/tracker/${mission.tracker}`;
+                  text += `\n${handles}`;
+                  navigator.clipboard.writeText(text);
                 }}
               >Copy Room Text</button>
             )}
@@ -379,6 +417,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
           participant={p}
           locked={slotsLocked}
           isCasino={mission.type === 'casino'}
+          mismatchedNames={mismatchedNames}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />
       )) : (
