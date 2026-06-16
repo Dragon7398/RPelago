@@ -866,7 +866,7 @@ header p {
 
 /* ══ ADMIN PANEL ══ */
 .admin-toggle {
-  position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 90;
+  position: fixed; top: 1.5rem; right: 1.5rem; z-index: 90;
   background: var(--bg-card); border: 1px solid var(--border-glow);
   color: var(--gold-dim); font-family: 'Cinzel', serif; font-size: 0.62rem;
   letter-spacing: 0.12em; padding: 0.5rem 1rem; border-radius: 3px;
