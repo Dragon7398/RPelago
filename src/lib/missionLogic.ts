@@ -180,7 +180,7 @@ export function hasUnfinishedSlots(participants: Record<string, GMParticipant>):
       continue;
     }
     for (const slot of p.slots) {
-      if (!slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
+      if (!slot || !slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
         count++;
         break;
       }
@@ -194,7 +194,7 @@ export function hasUnfinishedTileSlots(adv: { slots?: AdvSlot[] }[]): number {
   for (const a of adv) {
     if (!a.slots || a.slots.length === 0) continue;
     for (const slot of a.slots) {
-      if (!slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
+      if (!slot || !slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
         count++;
         break;
       }

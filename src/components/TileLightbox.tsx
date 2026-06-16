@@ -53,6 +53,10 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
     if (!user || !player) return;
     const adv = player.adventurers[advId];
     if (!adv) return;
+    if (advEntries.length >= (tile.required ?? 0)) {
+      addToast('This challenge is already full.', 'error');
+      return;
+    }
     const entry: TileAdventurer = {
       advId, name: `${adv.firstName} ${adv.lastName}`,
       cls: adv.cls as AdvClass, owner: user.id, ownerName: user.displayName,

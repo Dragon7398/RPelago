@@ -77,6 +77,8 @@ export default function AvailableState({
           Log in to send an Adventurer to this challenge.{' '}
           <a onClick={() => { onClose(); onLoginRequest(); }}>Enter RPelago →</a>
         </div>
+      ) : advEntries.length >= tile.required ? (
+        <div className="lb-no-adv">This challenge is full. Check back if a slot opens up!</div>
       ) : alreadySent ? (
         <div className="lb-no-adv">Your Adventurer is already assigned here. Recall them above if you change your mind.</div>
       ) : (
