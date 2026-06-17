@@ -1,7 +1,27 @@
+import { useState } from 'react';
 import { FEATS } from '../../lib/constants';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import { slotsFromEntry } from '../../lib/slotHelpers';
 import type { TileAdventurer, Player } from '../../types';
+
+export function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      className="copy-btn"
+      onClick={handleCopy}
+      title="Copy to clipboard"
+    >
+      {copied ? '✓' : '⧉'}
+    </button>
+  );
+}
 
 export function AdvStatusIcons({ advId, tile, inventory }: {
   advId: string;
@@ -84,8 +104,11 @@ export function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }:
       No game currently set for this challenge.{isOwner && (
         <>{' '}Please create a YAML for this challenge.
         In the RPelago thread, please send it with the following message:{' '}
-        <span className="lb-slot-prompt-msg">
-          Game YAML for {tile.name || coord} at RPelago-{coord}.
+        <span className="lb-slot-prompt-msg-wrap">
+          <span className="lb-slot-prompt-msg">
+            Game YAML for {tile.name || coord} at RPelago-{coord}.
+          </span>
+          <CopyButton text={`Game YAML for ${tile.name || coord} at RPelago-${coord}.`} />
         </span></>
       )}
     </div>

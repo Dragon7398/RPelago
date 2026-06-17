@@ -1229,11 +1229,25 @@ header p {
   font-size: 0.72rem; color: var(--text-muted);
   padding: 0.25rem 0.5rem 0.35rem 2.2rem; line-height: 1.5;
 }
+.lb-slot-prompt-msg-wrap {
+  display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.2rem;
+}
+.gm-slot-prompt-msg-wrap {
+  display: flex; align-items: center; gap: 0.35rem; margin-top: 0.3rem;
+}
 .lb-slot-prompt-msg {
   font-style: normal; color: var(--text);
   background: oklch(14% 0.04 75 / 0.6); border: 1px solid var(--border);
-  border-radius: 2px; padding: 0.1rem 0.3rem; display: inline-block; margin-top: 0.2rem;
+  border-radius: 2px; padding: 0.1rem 0.3rem; display: inline-block;
 }
+.copy-btn {
+  background: none; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-muted); cursor: pointer; font-size: 0.7rem;
+  line-height: 1; padding: 0.1rem 0.3rem;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
 /* ── Adventurer status notes (in-progress lightbox) ── */
 .lb-adv-note {
@@ -3169,7 +3183,7 @@ body.theme-tidepool {
 
 /* ── YAML slot prompt ── */
 .gm-slot-prompt { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: var(--gold-dim); padding: 0.25rem 0.5rem 0.3rem 1.6rem; line-height: 1.35; }
-.gm-slot-prompt-msg { display: block; margin-top: 0.3rem; font-style: normal; font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em; color: oklch(72% 0.12 195); background: oklch(from var(--bg-card) calc(l - 0.05) 0.03 195); border: 1px solid oklch(38% 0.10 195); border-radius: 2px; padding: 0.32rem 0.5rem; }
+.gm-slot-prompt-msg { font-style: normal; font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em; color: oklch(72% 0.12 195); background: oklch(from var(--bg-card) calc(l - 0.05) 0.03 195); border: 1px solid oklch(38% 0.10 195); border-radius: 2px; padding: 0.32rem 0.5rem; }
 
 /* ── Claimable slot claim section ── */
 .gm-claim-section { margin-top: 0.2rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }

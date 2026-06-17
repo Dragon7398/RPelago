@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
-import { AdvFeatIcons } from './AdvRow';
+import { AdvFeatIcons, CopyButton } from './AdvRow';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
 import { resolveNameColor } from './lbHelpers';
 import { handStakeFromSlots } from '../../lib/casinoSlots';
@@ -326,7 +326,10 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                 ) : isOwner ? (
                   <div className="gm-slot-prompt">
                     No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
-                    <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                    <span className="gm-slot-prompt-msg-wrap">
+                      <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                      <CopyButton text={`Game YAML for ${mLabel} at RPelago-D3.`} />
+                    </span>
                   </div>
                 ) : <div className="gm-slot-prompt">No game set yet.</div>
               ) : (mission.type === 'casino' && (p.slots as AdvSlot[]).every(s => !s.game)) ? (
@@ -334,7 +337,10 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                   {isOwner ? (
                     <div className="gm-slot-prompt">
                       No game set yet — submit a YAML to lock in your challenge. In the RPelago thread, send:
+                      <span className="gm-slot-prompt-msg-wrap">
                       <span className="gm-slot-prompt-msg">Game YAML for {mLabel} at RPelago-D3.</span>
+                      <CopyButton text={`Game YAML for ${mLabel} at RPelago-D3.`} />
+                    </span>
                     </div>
                   ) : <div className="gm-slot-prompt">No game set yet.</div>}
                   <div className="lb-adv-slots">
