@@ -1,3 +1,10 @@
+// When a player aliases a slot in AP, the cheese name field becomes
+// "alias text (RealSlotName)" — extract the parenthetical as the real key.
+export function extractApSlotName(name: string): string {
+  const m = name.match(/\(([^)]+)\)$/);
+  return m ? m[1].trim() : name;
+}
+
 export interface ArchipelagoRoomStatus {
   players: [string, string][];
   tracker: string;

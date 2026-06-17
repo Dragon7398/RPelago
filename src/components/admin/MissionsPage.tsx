@@ -5,7 +5,7 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
-import { fetchRoomStatus } from '../../lib/archipelagoApi';
+import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -200,7 +200,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
               const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
               const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
               const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
-              if (s) statusMap.set(g.name, s);
+              if (s) statusMap.set(extractApSlotName(g.name), s);
             }
             for (const [pid, p] of Object.entries(mission.participants ?? {})) {
               const slots = p.slots ?? [];

@@ -1173,6 +1173,10 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
         }
     }
 });
+function extractApSlotName(name) {
+    const m = name.match(/\(([^)]+)\)$/);
+    return m ? m[1].trim() : name;
+}
 // ── Scheduled tick: auto-sync slot statuses from Cheesetracker ───────────────
 exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async () => {
     const db = (0, database_2.getDatabase)();
@@ -1227,7 +1231,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                     continue;
                 const statusMap = new Map(games.flatMap(g => {
                     const s = deriveStatus(g);
-                    return s ? [[g.name, s]] : [];
+                    return s ? [[extractApSlotName(g.name), s]] : [];
                 }));
                 for (const adv of roomAdvs) {
                     const slots = adv.slots ?? [];
@@ -1265,7 +1269,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                 continue;
             const statusMap = new Map(games.flatMap(g => {
                 const s = deriveStatus(g);
-                return s ? [[g.name, s]] : [];
+                return s ? [[extractApSlotName(g.name), s]] : [];
             }));
             for (const [pid, p] of Object.entries(mission.participants ?? {})) {
                 const slots = p.slots ?? [];
