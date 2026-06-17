@@ -116,10 +116,14 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateAdvSlotStatus(coord, adv.advId, i, newStatus);
               }
-              if (slots.length > 0 && slots.every(s => {
-                const resolved = statusMap.get(s.name) ?? s.status;
-                return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
-              })) await freeAdventurer(adv.owner, adv.advId);
+              if (
+                slots.length > 0 &&
+                slots.every(s => {
+                  const resolved = statusMap.get(s.name) ?? s.status;
+                  return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                }) &&
+                players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
+              ) await freeAdventurer(adv.owner, adv.advId);
             }
           } catch { /* cheese details fetch is best-effort */ }
         } catch {

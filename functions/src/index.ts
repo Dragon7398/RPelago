@@ -1476,6 +1476,10 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
 
   const updates: Record<string, unknown> = {};
 
+  type RawAdv = { busy?: boolean; busyTile?: string | null };
+  const playersSnap = await db.ref('game/players').get();
+  const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {}) as Record<string, { adventurers?: Record<string, RawAdv> }>;
+
   // ── Tiles ──────────────────────────────────────────────────────────────────
   const tilesSnap = await db.ref('game/tiles').get();
   if (tilesSnap.exists()) {
@@ -1506,10 +1510,14 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
               updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
             }
           }
-          if (slots.length > 0 && slots.every(s => {
-            const resolved = statusMap.get(s.name) ?? s.status;
-            return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
-          })) {
+          if (
+            slots.length > 0 &&
+            slots.every(s => {
+              const resolved = statusMap.get(s.name) ?? s.status;
+              return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+            }) &&
+            rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
+          ) {
             updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`]     = false;
             updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
           }

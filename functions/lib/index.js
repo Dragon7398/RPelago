@@ -1201,6 +1201,8 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
     }
     const updates = {};
+    const playersSnap = await db.ref('game/players').get();
+    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {});
     // ── Tiles ──────────────────────────────────────────────────────────────────
     const tilesSnap = await db.ref('game/tiles').get();
     if (tilesSnap.exists()) {
@@ -1235,10 +1237,12 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                             updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
                         }
                     }
-                    if (slots.length > 0 && slots.every(s => {
-                        const resolved = statusMap.get(s.name) ?? s.status;
-                        return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
-                    })) {
+                    if (slots.length > 0 &&
+                        slots.every(s => {
+                            const resolved = statusMap.get(s.name) ?? s.status;
+                            return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                        }) &&
+                        rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
                         updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`] = false;
                         updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
                     }
