@@ -6,6 +6,7 @@ import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard }
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
 import { AdvFeatIcons } from './AdvRow';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
+import { resolveNameColor } from './lbHelpers';
 import { handStakeFromSlots } from '../../lib/casinoSlots';
 
 // ── Claimable slot row ────────────────────────────────────────────────────────
@@ -303,7 +304,7 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
           return (
             <div key={p.playerId} className={`lb-adv-entry${isOwner ? ' you' : ''}`}>
               <div className="lb-adv-row">
-                <span className="lb-adv-owner">
+                <span className="lb-adv-owner" style={{ color: resolveNameColor(players[p.playerId]?.nameColor) }}>
                   {p.playerName}
                   {isOwner && <span className="gm-you-tag">YOU</span>}
                   {players[p.playerId]?.discordHandle && (
