@@ -1236,9 +1236,9 @@ header p {
   display: flex; align-items: center; gap: 0.35rem; margin-top: 0.3rem;
 }
 .lb-slot-prompt-msg {
-  font-style: normal; color: var(--text);
-  background: oklch(14% 0.04 75 / 0.6); border: 1px solid var(--border);
-  border-radius: 2px; padding: 0.1rem 0.3rem; display: inline-block;
+  font-style: normal; font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
+  color: oklch(72% 0.12 195); background: oklch(from var(--bg-card) calc(l - 0.05) 0.03 195);
+  border: 1px solid oklch(38% 0.10 195); border-radius: 2px; padding: 0.32rem 0.5rem;
 }
 .copy-btn {
   background: none; border: 1px solid var(--border); border-radius: 3px;
@@ -3516,12 +3516,14 @@ body.theme-lapis     .lb-boss-neg-effect {
   border-bottom-color: oklch(45% 0.06 25 / 0.4);
 }
 
-/* 17. Slot prompt inline msg — near-black bg ────────────────────── */
+/* 17. Slot prompt inline msg — light theme overrides ───────────── */
 body.theme-parchment .lb-slot-prompt-msg,
 body.theme-sakura    .lb-slot-prompt-msg,
 body.theme-mint      .lb-slot-prompt-msg,
 body.theme-lapis     .lb-slot-prompt-msg {
-  background: oklch(from var(--bg-card) calc(l - 0.07) 0.02 75);
+  color:        oklch(38% 0.14 220);
+  border-color: oklch(46% 0.12 220);
+  background:   oklch(from var(--bg-card) calc(l - 0.05) 0.04 220);
 }
 
 /* 18. Various high-lightness text colors across lightbox elements ── */
