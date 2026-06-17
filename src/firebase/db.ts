@@ -587,6 +587,14 @@ export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slo
   await set(ref(db!, `game/tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/status`), status);
 }
 
+export async function freeAdventurer(ownerId: string, advId: string): Promise<void> {
+  assertDb();
+  await update(ref(db!), {
+    [`game/players/${ownerId}/adventurers/${advId}/busy`]:     false,
+    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
+  });
+}
+
 // ── Admin: public slots ───────────────────────────────────────────────────────
 export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
   const path = `game/tiles/${coord}/publicSlots`;

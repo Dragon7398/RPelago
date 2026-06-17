@@ -1235,6 +1235,13 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                             updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
                         }
                     }
+                    if (slots.length > 0 && slots.every(s => {
+                        const resolved = statusMap.get(s.name) ?? s.status;
+                        return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                    })) {
+                        updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`] = false;
+                        updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
+                    }
                 }
             }
         }

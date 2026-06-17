@@ -5,7 +5,7 @@ import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
-import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus } from '../../firebase/db';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus } from '../../lib/archipelagoApi';
 
 function AdvSlotList({ entry, players, mismatchedNames }: {
@@ -116,6 +116,10 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateAdvSlotStatus(coord, adv.advId, i, newStatus);
               }
+              if (slots.length > 0 && slots.every(s => {
+                const resolved = statusMap.get(s.name) ?? s.status;
+                return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+              })) await freeAdventurer(adv.owner, adv.advId);
             }
           } catch { /* cheese details fetch is best-effort */ }
         } catch {

@@ -607,6 +607,7 @@ interface TileSlot {
 
 interface TileAdv {
   advId:  string;
+  owner:  string;
   room?:  1 | 2;
   slots?: TileSlot[];
 }
@@ -1473,7 +1474,7 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
     return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
   }
 
-  const updates: Record<string, string> = {};
+  const updates: Record<string, unknown> = {};
 
   // ── Tiles ──────────────────────────────────────────────────────────────────
   const tilesSnap = await db.ref('game/tiles').get();
@@ -1504,6 +1505,13 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
             if (newStatus && slots[i].status !== newStatus) {
               updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
             }
+          }
+          if (slots.length > 0 && slots.every(s => {
+            const resolved = statusMap.get(s.name) ?? s.status;
+            return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+          })) {
+            updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`]     = false;
+            updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
           }
         }
       }
