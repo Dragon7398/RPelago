@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
+import { MISSION_DEFS } from '../../lib/constants';
 import { deriveAgendaData } from './agendaHelpers';
 import AgendaAdvGroup from './AgendaAdvGroup';
 import AgendaMissionCard from './AgendaMissionCard';
@@ -107,7 +108,7 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
             {hasMission ? (
               <div className="ag-mission-pinned">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '1rem' }}>🎰</span>
+                  <span style={{ fontSize: '1rem' }}>{MISSION_DEFS[mission!.type]?.icon ?? '🎰'}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
                     <span className="ag-mission-kicker">CURRENT MISSION</span>
                     <span className="ag-mission-label">{mission!.label}</span>

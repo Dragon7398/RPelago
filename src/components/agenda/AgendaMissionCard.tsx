@@ -1,3 +1,4 @@
+import { MISSION_DEFS } from '../../lib/constants';
 import type { AgendaMissionData, AgendaSlot } from './agendaHelpers';
 
 const STATUS_CLASS: Record<string, string> = {
@@ -47,7 +48,7 @@ export default function AgendaMissionCard({ mission, onClose }: Props) {
         <button className="ag-mc-close" onClick={onClose}>✕</button>
 
         <div className="ag-mc-kicker">GUILDMASTER MISSION</div>
-        <div className="ag-mc-emoji">🎰</div>
+        <div className="ag-mc-emoji">{MISSION_DEFS[mission.type]?.icon ?? '🎰'}</div>
         <div style={{ marginBottom: '0.5rem' }}>
           <span className="ag-mission-badge">{mission.typeLabel}</span>
         </div>
