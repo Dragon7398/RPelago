@@ -45,7 +45,7 @@ export default function SectionYaml() {
         <li>
           <strong>Game eligibility:</strong> Unsupported games are allowed if they are listed as
           allowed for Async or Sync on{' '}
-          <a href="https://docs.google.com/spreadsheets/d/14tVjBURZgqDlmFDrEB9WanuG_-7D_iduwwLNAkBABhM" target="_blank" rel="noopener noreferrer">Drago's list</a>.
+          <a href="https://docs.google.com/spreadsheets/d/1YPY8SFdzZ2EopDnY0FrtnTezKwkcSMRKr8urR4o5CgE" target="_blank" rel="noopener noreferrer">Drago's list</a>.
           Manuals and Keymaster's Keep are not allowed.
         </li>
         <li>
