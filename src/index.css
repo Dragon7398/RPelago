@@ -3882,6 +3882,27 @@ body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }
 }
 .ag-archi-link:hover { background: oklch(from var(--bg-card) calc(l - 0.10) c h / 0.8); color: oklch(84% 0.16 220); }
 
+/* Cheesetracker link */
+.ag-tracker-link {
+  display: inline-flex; align-items: center; gap: 0.32rem;
+  margin-top: 0.45rem;
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.08em; color: oklch(78% 0.18 75);
+  border: 1px solid oklch(56% 0.14 75 / 0.5);
+  background: oklch(from var(--bg-card) calc(l - 0.06) c h / 0.6);
+  border-radius: 3px; padding: 0.22rem 0.55rem; text-decoration: none;
+  transition: all 0.15s;
+}
+.ag-tracker-link:hover { background: oklch(from var(--bg-card) calc(l - 0.10) c h / 0.8); color: oklch(90% 0.18 75); }
+body.theme-parchment .ag-tracker-link,
+body.theme-sakura    .ag-tracker-link,
+body.theme-mint      .ag-tracker-link,
+body.theme-lapis     .ag-tracker-link { color: oklch(42% 0.16 75); border-color: oklch(46% 0.14 75); }
+body.theme-parchment .ag-tracker-link:hover,
+body.theme-sakura    .ag-tracker-link:hover,
+body.theme-mint      .ag-tracker-link:hover,
+body.theme-lapis     .ag-tracker-link:hover { color: oklch(30% 0.18 75); }
+
 /* Empty states */
 .ag-empty-full { text-align: center; padding: 2.2rem 0.4rem 1rem; }
 .ag-empty-full-icon { font-size: 2.8rem; margin-bottom: 0.7rem; opacity: 0.92; }

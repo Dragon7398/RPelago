@@ -14,6 +14,7 @@ export interface AgendaTile {
   name: string;
   typeKey: TileTypeKey;
   link: string;
+  cheese: string;
   roomLabel: string | null;
   traits: string[];
   slots: AgendaSlot[];
@@ -34,6 +35,7 @@ export interface AgendaMissionData {
   typeLabel: string;
   reward: string;
   link: string;
+  cheese: string;
   slots: AgendaSlot[];
   xp: number;
   gp: number;
@@ -71,14 +73,17 @@ function buildTile(
   tileName: string,
   tileLink: string,
   tileLink2: string | undefined,
+  tileCheese: string | undefined,
+  tileCheese2: string | undefined,
   tileTraits: Record<string, { value: number }> | undefined,
   freedEarly: boolean,
 ): AgendaTile {
   const room = tileAdv.room ?? null;
   const typeKey = typeKeyForCoord(coord);
 
-  // room-specific link for bifurcated tiles
+  // room-specific links for bifurcated tiles
   const link = (room === 2 && tileLink2) ? tileLink2 : tileLink;
+  const cheese = (room === 2 && tileCheese2) ? tileCheese2 : (tileCheese ?? '');
   const roomLabel = room === 1 ? 'ROOM 1' : room === 2 ? 'ROOM 2' : null;
 
   const traitNames = tileTraits
@@ -93,6 +98,7 @@ function buildTile(
     name: tileName,
     typeKey,
     link,
+    cheese,
     roomLabel,
     traits: traitNames,
     slots: slotsToAgenda(tileAdv.slots),
@@ -124,6 +130,7 @@ export function deriveAgendaData(gameState: GameState, userId: string): AgendaDa
         typeLabel: typeLabelMap[m.type],
         reward,
         link: m.link ?? '',
+        cheese: m.cheese ?? '',
         slots: slotsToAgenda(participant?.slots),
         xp: m.xp,
         gp: m.gp,
@@ -151,6 +158,8 @@ export function deriveAgendaData(gameState: GameState, userId: string): AgendaDa
           tile.name,
           tile.link,
           tile.link2,
+          tile.cheese,
+          tile.cheese2,
           tile.traits,
           false,
         ));
@@ -170,6 +179,8 @@ export function deriveAgendaData(gameState: GameState, userId: string): AgendaDa
         tile.name,
         tile.link,
         tile.link2,
+        tile.cheese,
+        tile.cheese2,
         tile.traits,
         true,
       ));

@@ -89,10 +89,19 @@ function TileRow({ tile, onTileClick }: { tile: AgendaTile; onTileClick: (coord:
         </div>
       )}
 
-      {tile.link && (
-        <a href={tile.link} target="_blank" rel="noreferrer" className="ag-archi-link">
-          ↗ ARCHIPELAGO
-        </a>
+      {(tile.link || tile.cheese) && (
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          {tile.link && (
+            <a href={tile.link} target="_blank" rel="noreferrer" className="ag-archi-link">
+              ↗ ARCHIPELAGO
+            </a>
+          )}
+          {tile.cheese && (
+            <a href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${tile.cheese}`} target="_blank" rel="noreferrer" className="ag-tracker-link">
+              🧀 TRACKER
+            </a>
+          )}
+        </div>
       )}
     </div>
   );

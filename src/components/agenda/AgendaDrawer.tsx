@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
 import { MISSION_DEFS } from '../../lib/constants';
 import { deriveAgendaData } from './agendaHelpers';
 import AgendaAdvGroup from './AgendaAdvGroup';
-import AgendaMissionCard from './AgendaMissionCard';
 import type { AgendaSlot } from './agendaHelpers';
 
 const STATUS_CLASS: Record<string, string> = {
@@ -43,10 +42,7 @@ interface Props {
 export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
   const { user } = useAuth();
   const { gameState } = useGameState();
-  const [missionCardOpen, setMissionCardOpen] = useState(false);
-
   const handleClose = useCallback(() => {
-    setMissionCardOpen(false);
     onClose();
   }, [onClose]);
 
@@ -114,8 +110,10 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
                     <span className="ag-mission-label">{mission!.label}</span>
                   </div>
                   <span className="ag-mission-badge">{mission!.typeLabel}</span>
+                  <button className="ag-coord-chip" onClick={() => { onTileClick('D3'); handleClose(); }}>
+                    [D3]
+                  </button>
                 </div>
-                <div className="ag-mission-reward">{mission!.reward}</div>
                 {mission!.slots.length > 0 && (
                   <div className="ag-slot-list" style={{ marginBottom: '0.5rem' }}>
                     {mission!.slots.map((slot, i) => (
@@ -123,16 +121,20 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
                     ))}
                   </div>
                 )}
-                <div className="ag-mission-actions">
-                  <button className="ag-mission-view-btn" onClick={() => setMissionCardOpen(true)}>
-                    [ MISSION ]
-                  </button>
-                  {mission!.link && (
-                    <a href={mission!.link} target="_blank" rel="noreferrer" className="ag-archi-link">
-                      ↗ ARCHIPELAGO
-                    </a>
-                  )}
-                </div>
+                {(mission!.link || mission!.cheese) && (
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    {mission!.link && (
+                      <a href={mission!.link} target="_blank" rel="noreferrer" className="ag-archi-link">
+                        ↗ ARCHIPELAGO
+                      </a>
+                    )}
+                    {mission!.cheese && (
+                      <a href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission!.cheese}`} target="_blank" rel="noreferrer" className="ag-tracker-link">
+                        🧀 TRACKER
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="ag-no-mission-block" style={{ marginBottom: '0.4rem' }}>
@@ -173,10 +175,6 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
           </div>
         )}
 
-        {/* Mission card overlay */}
-        {missionCardOpen && mission && (
-          <AgendaMissionCard mission={mission} onClose={() => setMissionCardOpen(false)} />
-        )}
       </div>
     </div>
   );
