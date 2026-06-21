@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { CopyButton } from '../lightbox/AdvRow';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
 import { MISSION_DEFS } from '../../lib/constants';
@@ -14,21 +15,34 @@ const STATUS_CLASS: Record<string, string> = {
   'Done':        'ss-Done',
 };
 
-function DrawerSlotRow({ slot }: { slot: AgendaSlot }) {
+function DrawerSlotRow({ slot, missionLabel }: { slot: AgendaSlot; missionLabel: string }) {
+  if (!slot.hasGame) {
+    const msg = `Game YAML for ${missionLabel} at RPelago-D3.`;
+    return (
+      <div className="ag-slot-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span className="ag-slot-name">{slot.name}</span>
+          <span className="ag-slot-sep">&mdash;</span>
+          <span className="ag-slot-game" style={{ color: 'oklch(54% 0.04 75)' }}>Not yet assigned</span>
+        </div>
+        <div className="gm-slot-prompt" style={{ padding: '0 0 0 0.1rem' }}>
+          Submit a YAML — in the RPelago thread, send:
+          <span className="gm-slot-prompt-msg-wrap">
+            <span className="gm-slot-prompt-msg">{msg}</span>
+            <CopyButton text={msg} />
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="ag-slot-row">
       <span className="ag-slot-name">{slot.name}</span>
       <span className="ag-slot-sep">&mdash;</span>
-      {slot.hasGame ? (
-        <>
-          <span className="ag-slot-game" title={slot.game}>{slot.game}</span>
-          <span className={`ag-slot-status ${STATUS_CLASS[slot.status] ?? 'ss-Unstarted'}`}>
-            {slot.status}
-          </span>
-        </>
-      ) : (
-        <span className="ag-slot-game" style={{ color: 'oklch(54% 0.04 75)' }}>Not yet assigned</span>
-      )}
+      <span className="ag-slot-game" title={slot.game}>{slot.game}</span>
+      <span className={`ag-slot-status ${STATUS_CLASS[slot.status] ?? 'ss-Unstarted'}`}>
+        {slot.status}
+      </span>
     </div>
   );
 }
@@ -117,7 +131,7 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
                 {mission!.slots.length > 0 && (
                   <div className="ag-slot-list" style={{ marginBottom: '0.5rem' }}>
                     {mission!.slots.map((slot, i) => (
-                      <DrawerSlotRow key={i} slot={slot} />
+                      <DrawerSlotRow key={i} slot={slot} missionLabel={mission!.label} />
                     ))}
                   </div>
                 )}

@@ -77,6 +77,13 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
   const info         = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
   const advs         = Object.values(tile.adventurers ?? {});
   const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+  const needsRoom    = variant === 'available'
+    ? (tile.required > 0 && advs.length >= tile.required)
+    : !tile.link;
+  const readyToComplete = variant === 'inprogress' && advs.length > 0 && advs.every(adv => {
+    const slots = adv.slots ?? [];
+    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+  });
   const [syncing1, setSyncing1] = useState(false);
   const [syncing2, setSyncing2] = useState(false);
   const [mismatched1, setMismatched1] = useState<Set<string>>(new Set());
@@ -143,6 +150,12 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
         <span className="dash-tile-icon">{info.icon}</span>
         <span className="dash-tile-name">{tile.name || coord}</span>
         <button className="dash-tile-coord-link" onClick={() => navigateToMap(coord)}>{coord}</button>
+        {needsRoom && (
+          <span className="dash-room-warn" title={variant === 'available' ? 'Challenge is full — create a room and transition to In Progress' : 'Challenge is In Progress but has no room URL'}>⚠</span>
+        )}
+        {readyToComplete && (
+          <span className="dash-complete-ready" title="All slots are Goaled/Done — ready to mark Complete">✓</span>
+        )}
         {variant === 'available' ? (
           <span className={`dash-tile-slots${tile.required > 0 && advs.length >= tile.required ? ' full' : ''}`}>
             {tile.required > 0 && advs.length >= tile.required ? '✓' : '○'} {advs.length}/{tile.required}

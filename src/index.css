@@ -873,6 +873,13 @@ header p {
   cursor: pointer; transition: all 0.15s;
 }
 .admin-toggle:hover { color: var(--gold); border-color: var(--gold); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.2); }
+.admin-toggle-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.3em; height: 1.3em; padding: 0 0.2em;
+  background: oklch(55% 0.20 25); color: oklch(97% 0.01 25);
+  border-radius: 5px; font-size: 0.58rem; letter-spacing: 0;
+  margin-left: 0.35rem; line-height: 1; font-family: 'Cinzel', serif;
+}
 
 .admin-overlay {
   position: fixed; inset: 0; background: oklch(5% 0.02 75 / 0.7); backdrop-filter: blur(3px);
@@ -1570,6 +1577,21 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-tab.active {
   background: oklch(16% 0.06 75 / 0.5); border-color: var(--border-glow);
   color: var(--gold);
+}
+.dash-tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.3em; height: 1.3em; padding: 0 0.2em;
+  background: oklch(55% 0.20 25); color: oklch(97% 0.01 25);
+  border-radius: 5px; font-size: 0.55rem; letter-spacing: 0;
+  margin-left: 0.3rem; line-height: 1; vertical-align: middle;
+}
+.dash-room-warn {
+  color: oklch(78% 0.18 35); font-size: 0.78rem; flex-shrink: 0;
+  cursor: default; line-height: 1;
+}
+.dash-complete-ready {
+  color: oklch(72% 0.18 145); font-size: 0.78rem; flex-shrink: 0;
+  cursor: default; line-height: 1;
 }
 
 /* Hamburger (mobile) */

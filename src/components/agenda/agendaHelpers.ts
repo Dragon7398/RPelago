@@ -1,6 +1,7 @@
 import type { GameState, AdvSlot, TileTypeKey, GMMissionType, AdvClass } from '../../types';
 import { TILE_TRAITS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
+import { normalizeSlots } from '../../lib/slotHelpers';
 
 export interface AgendaSlot {
   name: string;
@@ -52,9 +53,9 @@ export interface AgendaData {
 
 const OBLIGATION_STATUSES = new Set<string>(['100%', 'Goaled']);
 
-function slotsToAgenda(slots: AdvSlot[] | undefined): AgendaSlot[] {
-  if (!slots || slots.length === 0) return [];
-  return slots.map(s => ({
+function slotsToAgenda(slots: AdvSlot[] | Record<string, AdvSlot> | undefined): AgendaSlot[] {
+  const arr = normalizeSlots(slots);
+  return arr.map(s => ({
     name: s.name,
     game: s.game ?? '',
     status: s.status ?? 'Unstarted',
@@ -69,7 +70,7 @@ function hasObligations(slots: AdvSlot[] | undefined): boolean {
 
 function buildTile(
   coord: string,
-  tileAdv: { slots?: AdvSlot[]; room?: 1 | 2 },
+  tileAdv: { slots?: AdvSlot[] | Record<string, AdvSlot>; room?: 1 | 2 },
   tileName: string,
   tileLink: string,
   tileLink2: string | undefined,

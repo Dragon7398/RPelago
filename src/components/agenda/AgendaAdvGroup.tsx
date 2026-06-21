@@ -1,6 +1,7 @@
 import type { AgendaAdv, AgendaTile, AgendaSlot } from './agendaHelpers';
 import type { TileTypeKey } from '../../types';
 import { ADV_ICONS } from '../../lib/constants';
+import { CopyButton } from '../lightbox/AdvRow';
 
 const TILE_TYPE_META: Record<TileTypeKey, { icon: string; label: string; cssKey: string }> = {
   town_center: { icon: '🏰', label: 'TOWN',   cssKey: 'town'   },
@@ -20,20 +21,23 @@ const STATUS_CLASS: Record<string, string> = {
   'Done':        'ss-Done',
 };
 
-function SlotRow({ slot }: { slot: AgendaSlot }) {
+function SlotRow({ slot, tileName, tileCoord }: { slot: AgendaSlot; tileName: string; tileCoord: string }) {
   if (!slot.hasGame) {
+    const msg = `Game YAML for ${tileName || tileCoord} at RPelago-${tileCoord}.`;
     return (
-      <div className="ag-slot-no-game">
-        <span className="ag-slot-name">{slot.name}</span>
-        <span className="ag-slot-sep">&mdash;</span>
-        <a
-          href="https://archipelago.gg/games"
-          target="_blank"
-          rel="noreferrer"
-          className="ag-slot-yaml-link"
-        >
-          Create a YAML to begin
-        </a>
+      <div className="ag-slot-no-game" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span className="ag-slot-name">{slot.name}</span>
+          <span className="ag-slot-sep">&mdash;</span>
+          <span style={{ fontStyle: 'italic', fontSize: '0.65rem', color: 'oklch(54% 0.04 75)' }}>No game set</span>
+        </div>
+        <div className="gm-slot-prompt" style={{ padding: '0 0 0 0.1rem' }}>
+          Submit a YAML — in the RPelago thread, send:
+          <span className="gm-slot-prompt-msg-wrap">
+            <span className="gm-slot-prompt-msg">{msg}</span>
+            <CopyButton text={msg} />
+          </span>
+        </div>
       </div>
     );
   }
@@ -51,6 +55,7 @@ function SlotRow({ slot }: { slot: AgendaSlot }) {
 
 function TileRow({ tile, onTileClick }: { tile: AgendaTile; onTileClick: (coord: string) => void }) {
   const meta = TILE_TYPE_META[tile.typeKey] ?? TILE_TYPE_META.battle;
+  const yamlMsg = `Game YAML for ${tile.name || tile.coord} at RPelago-${tile.coord}.`;
 
   return (
     <div className="ag-tile-row">
@@ -83,9 +88,19 @@ function TileRow({ tile, onTileClick }: { tile: AgendaTile; onTileClick: (coord:
         </div>
       )}
 
-      {tile.slots.length > 0 && (
+      {tile.slots.length > 0 ? (
         <div className="ag-slot-list">
-          {tile.slots.map((slot, i) => <SlotRow key={i} slot={slot} />)}
+          {tile.slots.map((slot, i) => <SlotRow key={i} slot={slot} tileName={tile.name} tileCoord={tile.coord} />)}
+        </div>
+      ) : (
+        <div className="ag-slot-no-game" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+          <div className="gm-slot-prompt" style={{ padding: '0 0 0 0.1rem' }}>
+            Submit a YAML — in the RPelago thread, send:
+            <span className="gm-slot-prompt-msg-wrap">
+              <span className="gm-slot-prompt-msg">{yamlMsg}</span>
+              <CopyButton text={yamlMsg} />
+            </span>
+          </div>
         </div>
       )}
 

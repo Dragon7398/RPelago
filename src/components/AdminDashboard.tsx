@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
+import { currentMaxSlots } from '../lib/missionLogic';
 import ChallengesPage from './admin/ChallengesPage';
 import PlayersPage from './admin/PlayersPage';
 import ShopsPage from './admin/ShopsPage';
@@ -41,6 +42,36 @@ export default function AdminDashboard() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+
+  const challengeWarnCount = gameState ? Object.values(gameState.tiles).filter(tile => {
+    const advCount = Object.keys(tile.adventurers ?? {}).length;
+    if (tile.state === 'available') return tile.required > 0 && advCount >= tile.required;
+    if (tile.state === 'inprogress') {
+      if (!tile.link) return true;
+      const advs = Object.values(tile.adventurers ?? {});
+      return advs.length > 0 && advs.every(adv => {
+        const slots = adv.slots ?? [];
+        return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+      });
+    }
+    return false;
+  }).length : 0;
+
+  const missionWarnCount = gameState ? Object.values(gameState.missions ?? {}).filter(m => {
+    if (m.state === 'complete') return false;
+    const filled = Object.keys(m.participants ?? {}).length;
+    const max = currentMaxSlots(m, Date.now());
+    if (m.state === 'forming') return filled > 0 && max > 0 && filled >= max;
+    if (m.state === 'inprogress') {
+      if (!m.link) return true;
+      const parts = Object.values(m.participants ?? {});
+      return parts.length > 0 && parts.every(p => {
+        const slots = p.slots ?? [];
+        return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+      });
+    }
+    return false;
+  }).length : 0;
 
   useEffect(() => {
     const prev = document.title;
@@ -87,15 +118,19 @@ export default function AdminDashboard() {
       <header className="dash-header">
         <div className="dash-header-title">⚔ RPelago — Admin Dashboard</div>
         <nav className="dash-tabs">
-          {PAGES.map(p => (
-            <button
-              key={p.id}
-              className={`dash-tab${page === p.id ? ' active' : ''}`}
-              onClick={() => { setPage(p.id); setMapInitCoord(undefined); }}
-            >
-              {p.label}
-            </button>
-          ))}
+          {PAGES.map(p => {
+            const badge = p.id === 'challenges' ? challengeWarnCount : p.id === 'missions' ? missionWarnCount : 0;
+            return (
+              <button
+                key={p.id}
+                className={`dash-tab${page === p.id ? ' active' : ''}`}
+                onClick={() => { setPage(p.id); setMapInitCoord(undefined); }}
+              >
+                {p.label}
+                {badge > 0 && <span className="dash-tab-badge">{badge}</span>}
+              </button>
+            );
+          })}
         </nav>
         <div className="dash-header-nav" ref={menuRef}>
           <button

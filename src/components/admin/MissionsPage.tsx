@@ -227,6 +227,13 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const participants = Object.entries(mission.participants ?? {});
   const filled       = participants.length;
   const maxSlots     = currentMaxSlots(mission, now);
+  const needsRoom    = mission.state === 'forming'
+    ? (filled > 0 && maxSlots > 0 && filled >= maxSlots)
+    : !mission.link;
+  const readyToComplete = mission.state === 'inprogress' && participants.length > 0 && participants.every(([, p]) => {
+    const slots = p.slots ?? [];
+    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+  });
 
   const nextDecayMs = mission.state === 'forming' && mission.firstJoinAt != null
     ? mission.firstJoinAt + Math.ceil((now - mission.firstJoinAt) / (24 * 3600_000)) * (24 * 3600_000) - now
@@ -262,6 +269,12 @@ function MissionCard({ mission }: { mission: GMMission }) {
         <span className="dash-tile-name">{label}</span>
         {mission.type === 'casino' && (
           <span className="dash-mission-type-pill">🎲 CASINO</span>
+        )}
+        {needsRoom && (
+          <span className="dash-room-warn" title={mission.state === 'forming' ? 'Mission is full — will auto-deploy soon, prepare a room' : 'Mission is In Progress but has no room URL'}>⚠</span>
+        )}
+        {readyToComplete && (
+          <span className="dash-complete-ready" title="All slots are Goaled/Done — ready to mark Complete">✓</span>
         )}
         <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }}>{filled}/{maxSlots}</span>
         {/* Casino: spectate / test the card table */}

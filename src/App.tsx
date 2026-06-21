@@ -21,6 +21,7 @@ import { KmkProvider } from './contexts/KmkContext';
 import AgendaLauncher from './components/agenda/AgendaLauncher';
 import AgendaDrawer from './components/agenda/AgendaDrawer';
 import { deriveAgendaData } from './components/agenda/agendaHelpers';
+import { currentMaxSlots } from './lib/missionLogic';
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
   const [val, setVal] = useState(() => {
@@ -218,6 +219,39 @@ function AppContent() {
   const { gameState, loading } = useGameState();
   const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
 
+  const adminWarnCount = isAdmin && gameState ? (() => {
+    const tileWarn = Object.values(gameState.tiles).filter(tile => {
+      const advCount = Object.keys(tile.adventurers ?? {}).length;
+      if (tile.state === 'available') return tile.required > 0 && advCount >= tile.required;
+      if (tile.state === 'inprogress') {
+        if (!tile.link) return true;
+        const advs = Object.values(tile.adventurers ?? {});
+        return advs.length > 0 && advs.every(adv => {
+          const slots = adv.slots ?? [];
+          return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+        });
+      }
+      return false;
+    }).length;
+    const now = Date.now();
+    const missionWarn = Object.values(gameState.missions ?? {}).filter(m => {
+      if (m.state === 'complete') return false;
+      const filled = Object.keys(m.participants ?? {}).length;
+      const max = currentMaxSlots(m, now);
+      if (m.state === 'forming') return filled > 0 && max > 0 && filled >= max;
+      if (m.state === 'inprogress') {
+        if (!m.link) return true;
+        const parts = Object.values(m.participants ?? {});
+        return parts.length > 0 && parts.every(p => {
+          const slots = p.slots ?? [];
+          return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+        });
+      }
+      return false;
+    }).length;
+    return tileWarn + missionWarn;
+  })() : 0;
+
   if (window.location.hash === '#admin') return <AdminDashboard />;
 
   if (window.location.hash.startsWith('#keep/')) {
@@ -256,7 +290,9 @@ function AppContent() {
       <SettingsPanel />
 
       {isAdmin && (
-        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">⚙ ADMIN</a>
+        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">
+          ⚙ ADMIN{adminWarnCount > 0 && <span className="admin-toggle-badge">{adminWarnCount}</span>}
+        </a>
       )}
 
       {user && gameState && (
