@@ -860,6 +860,17 @@ export async function adminForceDeploy(missionId: string): Promise<void> {
   await httpsCallable(functions!, 'adminForceDeploy')({ missionId });
 }
 
+export async function syncPlayerProfile(
+  targetUid?: string,
+): Promise<{ tileCount: number; missionCount: number; gameCount: number }> {
+  assertFunctions();
+  const fn = httpsCallable<{ targetUid?: string }, { tileCount: number; missionCount: number; gameCount: number }>(
+    functions!, 'syncPlayerProfile',
+  );
+  const result = await fn({ targetUid });
+  return result.data;
+}
+
 // Completes a mission: awards XP/GP (with feat bonuses), writes CompletedChallenge
 // records, archives to missionsHistory, and clears participants' activeMission.
 // Returns { warned, unfinishedSlots } without acting when gating applies and

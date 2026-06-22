@@ -1493,6 +1493,14 @@ header p {
 .profile-feat-confirm { font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.12em; padding: 0.4rem 1rem; border-radius: 2px; cursor: pointer; background: oklch(18% 0.10 145 / 0.5); border: 1px solid oklch(48% 0.14 145); color: oklch(72% 0.14 145); transition: all 0.15s; width: 100%; }
 .profile-feat-confirm:hover:not(:disabled) { background: oklch(22% 0.12 145 / 0.6); border-color: oklch(60% 0.16 145); }
 .profile-feat-confirm:disabled { opacity: 0.35; cursor: not-allowed; }
+.profile-sync-btn {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.12em;
+  padding: 0.35rem 0.9rem; border-radius: 2px; cursor: pointer;
+  background: oklch(16% 0.06 215 / 0.5); border: 1px solid oklch(38% 0.10 215);
+  color: oklch(60% 0.10 215); transition: all 0.15s; width: 100%; margin-top: 0.75rem;
+}
+.profile-sync-btn:hover:not(:disabled) { background: oklch(22% 0.08 215 / 0.6); border-color: oklch(50% 0.12 215); color: oklch(68% 0.12 215); }
+.profile-sync-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Town shop items ─────────────────────────────────────────────────────────── */
 .lb-shop-item { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.55rem 0.7rem; background: oklch(16% 0.05 75 / 0.4); border: 1px solid oklch(30% 0.06 75); border-radius: 3px; margin-bottom: 0.5rem; }
@@ -1843,6 +1851,14 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   color: oklch(58% 0.14 25); transition: all 0.15s;
 }
 .dash-player-reset:hover { background: oklch(20% 0.10 25 / 0.5); color: oklch(68% 0.16 25); }
+.dash-player-sync {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
+  background: oklch(14% 0.06 215 / 0.4); border: 1px solid oklch(36% 0.10 215);
+  color: oklch(56% 0.12 215); transition: all 0.15s;
+}
+.dash-player-sync:hover:not(:disabled) { background: oklch(20% 0.08 215 / 0.5); color: oklch(66% 0.14 215); }
+.dash-player-sync:disabled { opacity: 0.35; cursor: not-allowed; }
 .dash-player-disable {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
   padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;

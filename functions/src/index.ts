@@ -74,6 +74,14 @@ const ELEMENTAL_ORB_TRAITS: Record<string, string[]> = {
 // Traits removable even while boss is in-progress (game already locked)
 const BOSS_SOFT_TRAITS = new Set(['camouflage', 'enduring']);
 
+// Firebase Admin SDK may return numeric-keyed data as a sparse JS array; for-of
+// on a sparse array yields undefined for holes.  Object.values skips holes
+// (and also handles plain objects), so use it unconditionally.
+function normalizeArray<T>(val: T[] | Record<string, T> | undefined | null): T[] {
+  if (!val) return [];
+  return Object.values(val) as T[];
+}
+
 interface DiscordTokenResponse {
   access_token: string;
 }
@@ -412,7 +420,7 @@ export const onTileComplete = onValueWritten(
     for (const adv of Object.values(adventurers)) {
       if (!byOwner.has(adv.owner)) byOwner.set(adv.owner, new Set());
       const games = byOwner.get(adv.owner)!;
-      for (const slot of adv.slots ?? []) {
+      for (const slot of normalizeArray(adv.slots)) {
         if (slot.game?.trim()) games.add(normalizeGameName(slot.game));
       }
     }
@@ -1333,6 +1341,98 @@ export const adminForceDeploy = onCall(async (request) => {
 });
 
 
+// ── syncPlayerProfile ─────────────────────────────────────────────────────────
+// Callable by the player themselves (or admin targeting any uid via targetUid).
+// Performs a full audit of completed tiles and missionsHistory to set the exact
+// tile count, mission count, and game list on the player's profile — replacing
+// incremental counts that may have been missed due to Cloud Function failures.
+
+export const syncPlayerProfile = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { targetUid } = request.data as { targetUid?: string };
+  const callerUid = request.auth.uid;
+  const db = getDatabase();
+
+  let uid = callerUid;
+  if (targetUid && targetUid !== callerUid) {
+    const metaSnap = await db.ref('game/meta/adminId').get();
+    if (!metaSnap.exists() || metaSnap.val() !== callerUid)
+      throw new HttpsError('permission-denied', 'Admin only.');
+    uid = targetUid;
+  }
+
+  const playerSnap = await db.ref(`game/players/${uid}`).get();
+  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+  const player = playerSnap.val() as PlayerRecord;
+
+  const [tilesSnap, historySnap] = await Promise.all([
+    db.ref('game/tiles').get(),
+    db.ref('game/missionsHistory').get(),
+  ]);
+
+  let tileCount = 0;
+  const gameNames = new Set<string>();
+
+  if (tilesSnap.exists()) {
+    const tiles = tilesSnap.val() as Record<string, { state: string; adventurers?: Record<string, AdvEntry> }>;
+    for (const tile of Object.values(tiles)) {
+      if (tile.state !== 'complete') continue;
+      let playerWasHere = false;
+      for (const adv of Object.values(tile.adventurers ?? {})) {
+        if (adv.owner !== uid) continue;
+        playerWasHere = true;
+        for (const slot of normalizeArray(adv.slots)) {
+          if (slot.game?.trim()) gameNames.add(normalizeGameName(slot.game));
+        }
+      }
+      if (playerWasHere) tileCount++;
+    }
+  }
+
+  let missionCount = 0;
+  if (historySnap.exists()) {
+    const missions = historySnap.val() as Record<string, GMMission>;
+    for (const mission of Object.values(missions)) {
+      if (mission.state !== 'complete') continue;
+      const participant = mission.participants?.[uid];
+      if (!participant) continue;
+      missionCount++;
+      for (const slot of normalizeArray(participant.slots as GMSlot[] | Record<string, GMSlot> | undefined)) {
+        if (slot.game?.trim()) gameNames.add(normalizeGameName(slot.game));
+      }
+    }
+  }
+
+  const base = `profiles/players/${uid}`;
+  const updates: Record<string, unknown> = {
+    [`${base}/id`]:            uid,
+    [`${base}/displayName`]:   player.displayName,
+    [`${base}/discordHandle`]: player.discordHandle ?? null,
+    [`${base}/avatarHash`]:    player.avatarHash    ?? null,
+    [`${base}/joinedAt`]:      player.joinedAt      ?? null,
+    [`${base}/events/rpelago_s1/xp`]:       player.xp ?? 0,
+    [`${base}/events/rpelago_s1/tiles`]:    tileCount,
+    [`${base}/events/rpelago_s1/missions`]: missionCount,
+  };
+
+  if (tileCount > 0 || missionCount > 0) {
+    updates[`${base}/firstEvent`] = 'rpelago_s1';
+  }
+
+  for (const g of gameNames) {
+    updates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+  }
+
+  if (player.discordHandle) {
+    updates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = uid;
+  }
+
+  await db.ref().update(updates);
+  return { tileCount, missionCount, gameCount: gameNames.size };
+});
+
+
 // ── onMissionComplete ─────────────────────────────────────────────────────────
 // Mirrors onTileComplete: fires when a completed mission is archived to
 // missionsHistory and updates participant profiles with XP snapshot, mission
@@ -1386,7 +1486,7 @@ export const onMissionComplete = onValueCreated(
       profileUpdates[`${base}/events/rpelago_s1/missions`] = ServerValue.increment(1);
 
       // Games — collect from this participant's slots, same encoding as onTileComplete.
-      for (const slot of participant.slots ?? []) {
+      for (const slot of normalizeArray(participant.slots)) {
         if (slot.game?.trim()) {
           profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
         }

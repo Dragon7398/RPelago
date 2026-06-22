@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
 import { db as firebaseDb } from '../firebase/config';
+import { syncPlayerProfile } from '../firebase/db';
 import type { AdvClass, PlayerFeats, CompletedChallenge } from '../types';
 
 interface Props {
@@ -59,6 +60,21 @@ export default function ProfileLightbox({ open, onClose }: Props) {
 
   const [pendingSelection, setPendingSelection] = useState<string | null>(null);
   const [featSaving, setFeatSaving] = useState(false);
+
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncProfile = async () => {
+    if (!user) return;
+    setSyncing(true);
+    try {
+      const { tileCount, missionCount, gameCount } = await syncPlayerProfile();
+      addToast(`Profile synced: ${tileCount} tile${tileCount !== 1 ? 's' : ''}, ${missionCount} mission${missionCount !== 1 ? 's' : ''}, ${gameCount} game${gameCount !== 1 ? 's' : ''}.`, 'success');
+    } catch {
+      addToast('Profile sync failed. Please try again.', 'error');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Per-adventurer rename state
   const [renames, setRenames] = useState<Record<string, { first: string; last: string }>>({});
@@ -348,6 +364,13 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                 </>
               )}
             </div>
+            <button
+              className="profile-sync-btn"
+              disabled={syncing}
+              onClick={handleSyncProfile}
+            >
+              {syncing ? 'SYNCING…' : 'SYNC PROFILE'}
+            </button>
           </>
         )}
       </div>

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -62,6 +62,14 @@ const ELEMENTAL_ORB_TRAITS = {
 };
 // Traits removable even while boss is in-progress (game already locked)
 const BOSS_SOFT_TRAITS = new Set(['camouflage', 'enduring']);
+// Firebase Admin SDK may return numeric-keyed data as a sparse JS array; for-of
+// on a sparse array yields undefined for holes.  Object.values skips holes
+// (and also handles plain objects), so use it unconditionally.
+function normalizeArray(val) {
+    if (!val)
+        return [];
+    return Object.values(val);
+}
 exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSecret], cors: ['https://rpelago.brisbe.org', 'http://localhost:5173'] }, async (req, res) => {
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'Method not allowed' });
@@ -346,7 +354,7 @@ exports.onTileComplete = (0, database_1.onValueWritten)('game/tiles/{coord}/stat
         if (!byOwner.has(adv.owner))
             byOwner.set(adv.owner, new Set());
         const games = byOwner.get(adv.owner);
-        for (const slot of adv.slots ?? []) {
+        for (const slot of normalizeArray(adv.slots)) {
             if (slot.game?.trim())
                 games.add(normalizeGameName(slot.game));
         }
@@ -1085,6 +1093,92 @@ exports.adminForceDeploy = (0, https_1.onCall)(async (request) => {
     await deployMission(missionId, mission, Date.now());
     return { success: true };
 });
+// ── syncPlayerProfile ─────────────────────────────────────────────────────────
+// Callable by the player themselves (or admin targeting any uid via targetUid).
+// Performs a full audit of completed tiles and missionsHistory to set the exact
+// tile count, mission count, and game list on the player's profile — replacing
+// incremental counts that may have been missed due to Cloud Function failures.
+exports.syncPlayerProfile = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { targetUid } = request.data;
+    const callerUid = request.auth.uid;
+    const db = (0, database_2.getDatabase)();
+    let uid = callerUid;
+    if (targetUid && targetUid !== callerUid) {
+        const metaSnap = await db.ref('game/meta/adminId').get();
+        if (!metaSnap.exists() || metaSnap.val() !== callerUid)
+            throw new https_1.HttpsError('permission-denied', 'Admin only.');
+        uid = targetUid;
+    }
+    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    const player = playerSnap.val();
+    const [tilesSnap, historySnap] = await Promise.all([
+        db.ref('game/tiles').get(),
+        db.ref('game/missionsHistory').get(),
+    ]);
+    let tileCount = 0;
+    const gameNames = new Set();
+    if (tilesSnap.exists()) {
+        const tiles = tilesSnap.val();
+        for (const tile of Object.values(tiles)) {
+            if (tile.state !== 'complete')
+                continue;
+            let playerWasHere = false;
+            for (const adv of Object.values(tile.adventurers ?? {})) {
+                if (adv.owner !== uid)
+                    continue;
+                playerWasHere = true;
+                for (const slot of normalizeArray(adv.slots)) {
+                    if (slot.game?.trim())
+                        gameNames.add(normalizeGameName(slot.game));
+                }
+            }
+            if (playerWasHere)
+                tileCount++;
+        }
+    }
+    let missionCount = 0;
+    if (historySnap.exists()) {
+        const missions = historySnap.val();
+        for (const mission of Object.values(missions)) {
+            if (mission.state !== 'complete')
+                continue;
+            const participant = mission.participants?.[uid];
+            if (!participant)
+                continue;
+            missionCount++;
+            for (const slot of normalizeArray(participant.slots)) {
+                if (slot.game?.trim())
+                    gameNames.add(normalizeGameName(slot.game));
+            }
+        }
+    }
+    const base = `profiles/players/${uid}`;
+    const updates = {
+        [`${base}/id`]: uid,
+        [`${base}/displayName`]: player.displayName,
+        [`${base}/discordHandle`]: player.discordHandle ?? null,
+        [`${base}/avatarHash`]: player.avatarHash ?? null,
+        [`${base}/joinedAt`]: player.joinedAt ?? null,
+        [`${base}/events/rpelago_s1/xp`]: player.xp ?? 0,
+        [`${base}/events/rpelago_s1/tiles`]: tileCount,
+        [`${base}/events/rpelago_s1/missions`]: missionCount,
+    };
+    if (tileCount > 0 || missionCount > 0) {
+        updates[`${base}/firstEvent`] = 'rpelago_s1';
+    }
+    for (const g of gameNames) {
+        updates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+    }
+    if (player.discordHandle) {
+        updates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = uid;
+    }
+    await db.ref().update(updates);
+    return { tileCount, missionCount, gameCount: gameNames.size };
+});
 // ── onMissionComplete ─────────────────────────────────────────────────────────
 // Mirrors onTileComplete: fires when a completed mission is archived to
 // missionsHistory and updates participant profiles with XP snapshot, mission
@@ -1122,7 +1216,7 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('game/missionsHistory
         // Missions — separate counter from tiles.
         profileUpdates[`${base}/events/rpelago_s1/missions`] = database_2.ServerValue.increment(1);
         // Games — collect from this participant's slots, same encoding as onTileComplete.
-        for (const slot of participant.slots ?? []) {
+        for (const slot of normalizeArray(participant.slots)) {
             if (slot.game?.trim()) {
                 profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
             }

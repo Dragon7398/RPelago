@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings, adventurerCountForLevel } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
-import { playerReset } from '../../../firebase/db';
+import { playerReset, syncPlayerProfile } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
 
 interface Props {
@@ -23,6 +23,7 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const [warningDraft, setWarningDraft]   = useState('');
   const [resetting, setResetting]         = useState(false);
   const [granting, setGranting]           = useState(false);
+  const [syncing, setSyncing]             = useState(false);
 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
@@ -207,6 +208,23 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           }}
         >
           {resetting ? 'Resetting…' : 'Player Reset'}
+        </button>
+        <button
+          className="dash-player-sync"
+          disabled={syncing}
+          onClick={async () => {
+            setSyncing(true);
+            try {
+              const { tileCount, missionCount, gameCount } = await syncPlayerProfile(player.id);
+              addToast(`${player.displayName}: synced ${tileCount} tile${tileCount !== 1 ? 's' : ''}, ${missionCount} mission${missionCount !== 1 ? 's' : ''}, ${gameCount} game${gameCount !== 1 ? 's' : ''}.`, 'success');
+            } catch {
+              addToast(`Failed to sync profile for ${player.displayName}.`, 'error');
+            } finally {
+              setSyncing(false);
+            }
+          }}
+        >
+          {syncing ? 'Syncing…' : 'Sync Profile'}
         </button>
         <button
           className="dash-warning-add-btn"
