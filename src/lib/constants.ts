@@ -90,7 +90,7 @@ export const TILE_TRAITS: readonly TraitDef[] = [
   { id: 'bifurcated',   name: 'Bifurcated',      hasValue: false, defaultValue: 0,
     description: 'This challenge will be split into two worlds that must both goal to complete this challenge.' },
   { id: 'camouflage',   name: 'Camouflage',      hasValue: false, defaultValue: 0,
-    description: 'Hints are turned off on this challenge until at least one slot has goaled.' },
+    description: "Hints are turned off on this challenge until at least one player's slots have fully goaled." },
   { id: 'confounding',  name: 'Confounding',     hasValue: false, defaultValue: 0,
     description: "An additional Simon Tatham's Portable Puzzle Collection slot will be added to this challenge as a Public slot." },
   { id: 'cursed',       name: 'Cursed',          hasValue: false, defaultValue: 0,
