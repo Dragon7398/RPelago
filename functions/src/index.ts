@@ -1760,11 +1760,12 @@ export const fetchCheeseDetails = onCall(async (request) => {
   const res = await fetch(`https://cheesetrackers.theincrediblewheelofchee.se/api/tracker/${cheeseId}`);
   if (!res.ok) throw new HttpsError('internal', `Cheesetracker API error: ${res.status}`);
   const data = await res.json() as {
-    games?: Array<{ name: string; tracker_status: string; checks_done: number; checks_total: number }>;
+    games?: Array<{ name: string; game: string; tracker_status: string; checks_done: number; checks_total: number }>;
   };
   return {
     games: (data.games ?? []).map(g => ({
       name: g.name,
+      game: g.game ?? '',
       tracker_status: g.tracker_status,
       checks_done: g.checks_done,
       checks_total: g.checks_total,

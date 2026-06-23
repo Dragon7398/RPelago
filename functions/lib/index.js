@@ -1476,6 +1476,7 @@ exports.fetchCheeseDetails = (0, https_1.onCall)(async (request) => {
     return {
         games: (data.games ?? []).map(g => ({
             name: g.name,
+            game: g.game ?? '',
             tracker_status: g.tracker_status,
             checks_done: g.checks_done,
             checks_total: g.checks_total,

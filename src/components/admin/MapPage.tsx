@@ -4,7 +4,9 @@ import { useToast } from '../../contexts/ToastContext';
 import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { hasUnfinishedTileSlots } from '../../lib/missionLogic';
-import type { TileState, TriState } from '../../types';
+import type { TileState, TriState, SlotStatus } from '../../types';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 import MapGridPanel        from './mapPage/MapGridPanel';
 import TraitEditor         from './mapPage/TraitEditor';
 import AdvSlotEditor       from './mapPage/AdvSlotEditor';
@@ -27,13 +29,17 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const [selectedCoord, setSelectedCoord] = useState<string | null>(initialCoord ?? null);
   const [localEdits, setLocalEdits] = useState<Record<string, string | number>>({});
   const [unfinishedSlotWarn, setUnfinishedSlotWarn] = useState<number | null>(null);
+  const [syncing1, setSyncing1] = useState(false);
+  const [syncing2, setSyncing2] = useState(false);
+  const [unassigned1, setUnassigned1] = useState<{ name: string; game: string }[]>([]);
+  const [unassigned2, setUnassigned2] = useState<{ name: string; game: string }[]>([]);
 
   if (!gameState) return null;
   const gs = gameState;
 
   const tile = selectedCoord ? gs.tiles[selectedCoord] : null;
 
-  const selectCoord = (coord: string) => { setSelectedCoord(coord); setLocalEdits({}); };
+  const selectCoord = (coord: string) => { setSelectedCoord(coord); setLocalEdits({}); setUnassigned1([]); setUnassigned2([]); };
 
   const doCompleteTile = async () => {
     if (!selectedCoord || !tile) return;
@@ -93,6 +99,71 @@ const handleRegenStats = async () => {
       addToast('Tile stats regenerated from seed.', 'info');
     } catch {
       addToast('Failed to regenerate stats. Please try again.', 'error');
+    }
+  };
+
+  const handleSync = async (room: 1 | 2) => {
+    if (!selectedCoord || !tile) return;
+    const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+    const roomLink = room === 1 ? tile.link : tile.link2;
+    if (!roomLink) return;
+    const setSyncing = room === 1 ? setSyncing1 : setSyncing2;
+    const roomAdvs = isBifurcated
+      ? Object.values(tile.adventurers ?? {}).filter(a => (a.room ?? 1) === room)
+      : Object.values(tile.adventurers ?? {});
+    setSyncing(true);
+    try {
+      const status = await fetchRoomStatus(roomLink);
+      if (status.tracker) {
+        await (room === 1 ? setTileTracker(selectedCoord, status.tracker) : setTileTracker2(selectedCoord, status.tracker));
+        try {
+          const cheeseId = await fetchCheesetrackerId(status.tracker);
+          await (room === 1 ? setTileCheese(selectedCoord, cheeseId) : setTileCheese2(selectedCoord, cheeseId));
+          try {
+            const games = await fetchCheeseDetails(cheeseId);
+            const statusMap = new Map<string, SlotStatus>();
+            for (const g of games) {
+              const isGoal = g.tracker_status === 'goal_completed';
+              const is100  = g.checks_total > 0 && g.checks_done === g.checks_total;
+              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
+              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
+              if (s) statusMap.set(extractApSlotName(g.name), s);
+            }
+            for (const adv of roomAdvs) {
+              const slots = adv.slots ?? [];
+              for (let i = 0; i < slots.length; i++) {
+                const newStatus = statusMap.get(slots[i].name);
+                if (newStatus) await adminUpdateAdvSlotStatus(selectedCoord, adv.advId, i, newStatus);
+              }
+              if (
+                slots.length > 0 &&
+                slots.every(s => {
+                  const resolved = statusMap.get(s.name) ?? s.status;
+                  return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                }) &&
+                gs.players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === selectedCoord
+              ) await freeAdventurer(adv.owner, adv.advId);
+            }
+            const allPubSlots = tile.publicSlots ?? [];
+            for (let i = 0; i < allPubSlots.length; i++) {
+              const ps = allPubSlots[i];
+              if (isBifurcated && ps.room && ps.room !== room) continue;
+              const newStatus = statusMap.get(ps.name);
+              if (newStatus) await adminUpdatePublicSlotStatus(selectedCoord, i, newStatus);
+            }
+            const assignedNames = new Set(roomAdvs.flatMap(a => (a.slots ?? []).map(s => s.name)));
+            const unassigned = games
+              .filter(g => !assignedNames.has(extractApSlotName(g.name)))
+              .map(g => ({ name: extractApSlotName(g.name), game: g.game }));
+            if (room === 1) setUnassigned1(unassigned);
+            else setUnassigned2(unassigned);
+          } catch { /* cheese details best-effort */ }
+        } catch { /* cheese id best-effort */ }
+      }
+    } catch (err) {
+      console.error('AP sync failed:', err);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -252,6 +323,11 @@ const handleRegenStats = async () => {
                         onChange={e => setLocalEdits(p => ({ ...p, link: e.target.value }))}
                         placeholder="https://…"
                       />
+                      {tile.state === 'inprogress' && tile.link && (
+                        <button className="dash-copy-room-btn ap-sync-btn" onClick={() => handleSync(1)} disabled={syncing1}>
+                          {syncing1 ? '…' : 'Sync'}
+                        </button>
+                      )}
                     </div>
 
                     {tile.traits?.['bifurcated'] !== undefined && (
@@ -263,6 +339,11 @@ const handleRegenStats = async () => {
                           onChange={e => setLocalEdits(p => ({ ...p, link2: e.target.value }))}
                           placeholder="https://…"
                         />
+                        {tile.state === 'inprogress' && tile.link2 && (
+                          <button className="dash-copy-room-btn ap-sync-btn" onClick={() => handleSync(2)} disabled={syncing2}>
+                            {syncing2 ? '…' : 'Sync'}
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -312,7 +393,17 @@ const handleRegenStats = async () => {
 
                 {!isTown && <TraitEditor key={selectedCoord} tile={tile} selectedCoord={selectedCoord} />}
 
-                <AdvSlotEditor       key={`adv-${selectedCoord}`}      tile={tile} selectedCoord={selectedCoord} />
+                <AdvSlotEditor
+                  key={`adv-${selectedCoord}`}
+                  tile={tile}
+                  selectedCoord={selectedCoord}
+                  unassigned1={unassigned1}
+                  unassigned2={unassigned2}
+                  onConsumeUnassigned={(room, name) => {
+                    const setter = room === 1 ? setUnassigned1 : setUnassigned2;
+                    setter(prev => prev.filter(s => s.name !== name));
+                  }}
+                />
                 <PublicSlotEditor    key={`pub-${selectedCoord}`}      tile={tile} selectedCoord={selectedCoord} />
                 <ClaimableBonusEditor key={`claim-${selectedCoord}`}   tile={tile} selectedCoord={selectedCoord} />
               </>

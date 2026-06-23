@@ -569,6 +569,7 @@ export async function fetchCheesetrackerId(apTrackerId: string): Promise<string>
 
 export interface CheeseGame {
   name: string;
+  game: string;
   tracker_status: string;
   checks_done: number;
   checks_total: number;

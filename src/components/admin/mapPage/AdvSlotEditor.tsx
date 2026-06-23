@@ -7,14 +7,20 @@ import type { Tile, AdvSlot, SlotStatus } from '../../../types';
 
 type SlotDraft = { name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number };
 
+interface UnassignedSlot { name: string; game: string }
+
 interface Props {
   tile: Tile;
   selectedCoord: string;
+  unassigned1?: UnassignedSlot[];
+  unassigned2?: UnassignedSlot[];
+  onConsumeUnassigned?: (room: 1 | 2, name: string) => void;
 }
 
-export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
+export default function AdvSlotEditor({ tile, selectedCoord, unassigned1, unassigned2, onConsumeUnassigned }: Props) {
   const { adminSetAdventurerSlots } = useGameState();
   const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
+  const [quickPick, setQuickPick] = useState<Record<string, string>>({});
   const locked = tile.slotsLocked ?? false;
 
   const entries      = Object.values(tile.adventurers ?? {});
@@ -38,6 +44,9 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
         const slots = normalizeSlots(entry.slots as any);
         const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus, bonusXP: 0, bonusGold: 0 };
         const save  = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord, entry.advId, next);
+        const advRoom: 1 | 2 = isBifurcated ? (entry.room ?? 1) : 1;
+        const pool = advRoom === 2 ? (unassigned2 ?? []) : (unassigned1 ?? []);
+        const pickedName = quickPick[entry.advId] ?? pool[0]?.name ?? '';
         return (
           <div key={entry.advId} className="admin-slot-adv">
             <div className="admin-slot-adv-header">
@@ -113,6 +122,31 @@ export default function AdvSlotEditor({ tile, selectedCoord }: Props) {
                 {!locked && <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>}
               </div>
             ))}
+            {!locked && pool.length > 0 && (
+              <div className="admin-slot-add-row admin-slot-quickadd-row">
+                <select
+                  className="admin-slot-status-select admin-slot-quickadd-select"
+                  value={pickedName}
+                  onChange={e => setQuickPick(p => ({ ...p, [entry.advId]: e.target.value }))}
+                >
+                  {pool.map(s => (
+                    <option key={s.name} value={s.name}>{s.name} — {s.game}</option>
+                  ))}
+                </select>
+                <button
+                  className="admin-slot-add-btn"
+                  disabled={!pickedName}
+                  onClick={() => {
+                    const picked = pool.find(s => s.name === pickedName);
+                    if (!picked) return;
+                    save([...slots, { name: picked.name, game: picked.game, status: 'Unstarted' }]);
+                    onConsumeUnassigned?.(advRoom, picked.name);
+                    const remaining = pool.filter(s => s.name !== picked.name);
+                    setQuickPick(p => ({ ...p, [entry.advId]: remaining[0]?.name ?? '' }));
+                  }}
+                >+ Add from Sync</button>
+              </div>
+            )}
             {!locked && <div className="admin-slot-add-row">
               <input className="admin-text-input" placeholder="Slot name" value={draft.name}
                 onChange={e => setSlotDrafts(p => ({ ...p, [entry.advId]: { ...draft, name: e.target.value } }))} />
