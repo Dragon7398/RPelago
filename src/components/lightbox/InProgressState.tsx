@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ADV_ICONS } from '../../lib/constants';
 import { normalizeSlots } from '../../lib/slotHelpers';
 import { resolveNameColor } from './lbHelpers';
-import { AdvStatusIcons, AdvSlotBlock } from './AdvRow';
+import { AdvStatusIcons, AdvSlotBlock, AdvFeatIcons } from './AdvRow';
 import PublicSlotsList from './PublicSlotsList';
 import ClaimableSlots from './ClaimableSlots';
 import { useGameState } from '../../contexts/GameStateContext';
@@ -119,6 +119,7 @@ export default function InProgressState({
                       <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
                     )}
                   </span>
+                  <AdvFeatIcons playerId={entry.owner} players={players} />
                   <AdvStatusIcons advId={entry.advId} tile={tile} inventory={players[entry.owner]?.inventory ?? {}} />
                   <span className="lb-adv-secondary">
                     <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
@@ -167,6 +168,7 @@ export default function InProgressState({
                       <span className="lb-adv-discord">@{players[entry.owner].discordHandle}</span>
                     )}
                   </span>
+                  <AdvFeatIcons playerId={entry.owner} players={players} />
                   <AdvStatusIcons advId={entry.advId} tile={tile} inventory={players[entry.owner]?.inventory ?? {}} />
                   <span className="lb-adv-secondary">
                     <span className="lb-adv-icon">{ADV_ICONS[entry.cls as AdvClass] ?? '⚔️'}</span>
