@@ -1317,7 +1317,11 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                 if (!cheeseId)
                     continue;
                 const roomAdvs = isBifurcated ? advs.filter(a => (a.room ?? 1) === roomNum) : advs;
-                const roomSlots = roomAdvs.flatMap(a => a.slots ?? []);
+                const allPubSlots = tile.publicSlots ?? [];
+                const roomPubSlots = isBifurcated
+                    ? allPubSlots.filter(s => !s.room || s.room === roomNum)
+                    : allPubSlots;
+                const roomSlots = [...roomAdvs.flatMap(a => a.slots ?? []), ...roomPubSlots];
                 if (!hasActiveSlots(roomSlots))
                     continue;
                 const games = await getCheeseGames(cheeseId);
@@ -1343,6 +1347,15 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
                         updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`] = false;
                         updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
+                    }
+                }
+                for (let i = 0; i < allPubSlots.length; i++) {
+                    const ps = allPubSlots[i];
+                    if (isBifurcated && ps.room && ps.room !== roomNum)
+                        continue;
+                    const newStatus = statusMap.get(ps.name);
+                    if (newStatus && ps.status !== newStatus) {
+                        updates[`game/tiles/${coord}/publicSlots/${i}/status`] = newStatus;
                     }
                 }
             }

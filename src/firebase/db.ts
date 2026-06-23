@@ -587,6 +587,11 @@ export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slo
   await set(ref(db!, `game/tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/status`), status);
 }
 
+export async function adminUpdatePublicSlotStatus(coord: string, slotIndex: number, status: SlotStatus): Promise<void> {
+  assertDb();
+  await set(ref(db!, `game/tiles/${coord}/publicSlots/${slotIndex}/status`), status);
+}
+
 export async function freeAdventurer(ownerId: string, advId: string): Promise<void> {
   assertDb();
   await update(ref(db!), {

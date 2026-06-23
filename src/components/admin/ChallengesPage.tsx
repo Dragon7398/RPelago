@@ -5,7 +5,7 @@ import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
-import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, freeAdventurer } from '../../firebase/db';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 
 function AdvSlotList({ entry, players, mismatchedNames }: {
@@ -131,6 +131,13 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                 }) &&
                 players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
               ) await freeAdventurer(adv.owner, adv.advId);
+            }
+            const allPubSlots = tile.publicSlots ?? [];
+            for (let i = 0; i < allPubSlots.length; i++) {
+              const ps = allPubSlots[i];
+              if (isBifurcated && ps.room && ps.room !== room) continue;
+              const newStatus = statusMap.get(ps.name);
+              if (newStatus) await adminUpdatePublicSlotStatus(coord, i, newStatus);
             }
           } catch { /* cheese details fetch is best-effort */ }
         } catch {
