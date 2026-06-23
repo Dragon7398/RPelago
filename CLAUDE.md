@@ -23,6 +23,10 @@ cd functions && npm run build   # tsc → functions/lib/
 firebase deploy --only functions
 ```
 
+## Styling
+
+When creating styling for new features, review the existing themes and ensure the style works for all themes, reusing or defining new theme-aware colors as necessary. This is particularly important for the color-blind friendly styles and the light-mode styles.
+
 ## Environment
 
 This project runs on Windows: use PowerShell-compatible syntax in all scripts and hooks (no Unix-only commands), and assume the `claude` CLI may not be on PATH.

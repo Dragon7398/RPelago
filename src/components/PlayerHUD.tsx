@@ -62,13 +62,21 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         <span>⚔ {user.displayName.toUpperCase()}</span>
         <span className="hud-level-badge">LV {level}</span>
         {pending && <span className="hud-feat-notify">!</span>}
-        {missionLabel && (
+        {missionLabel ? (
           <button
             className="hud-mission-chip"
             onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
             title={`Currently undertaking: ${missionLabel} — click to view`}
           >
             ⚜ {missionLabel}
+          </button>
+        ) : (
+          <button
+            className="hud-idle-chip"
+            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            title="No active mission — click to view Guildmaster Missions"
+          >
+            ⚜ Idle
           </button>
         )}
       </span>
