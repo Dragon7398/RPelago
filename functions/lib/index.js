@@ -495,12 +495,26 @@ const MISSION_DEFS = {
         potSeed: casinoEngine_1.CASINO_POT_SEED,
     },
 };
-const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+function toRoman(n) {
+    const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    const syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+    let result = '';
+    for (let i = 0; i < vals.length; i++) {
+        while (n >= vals[i]) {
+            result += syms[i];
+            n -= vals[i];
+        }
+    }
+    return result || String(n);
+}
 // ── Mission logic helpers ─────────────────────────────────────────────────────
+function gmDecayWindowMs(m) {
+    return m.type === 'casino' ? 36 * 3600_000 : 24 * 3600_000;
+}
 function gmCurrentMaxSlots(m, now) {
     if (m.firstJoinAt == null)
         return m.baseMax;
-    const steps = Math.floor((now - m.firstJoinAt) / (24 * 3600_000));
+    const steps = Math.floor((now - m.firstJoinAt) / gmDecayWindowMs(m));
     return Math.max(1, m.baseMax - steps);
 }
 function gmFilledCount(m) {
@@ -549,7 +563,7 @@ function gmFreshMission(type, series, now) {
     return result;
 }
 function gmMissionLabel(m) {
-    const roman = ROMAN_NUMERALS[m.series] ?? String(m.series);
+    const roman = toRoman(m.series);
     return `${m.label} · Cohort ${roman}`;
 }
 // ── Deploy routine ────────────────────────────────────────────────────────────
