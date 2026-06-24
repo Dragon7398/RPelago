@@ -22,10 +22,14 @@ export interface GMMissionCard {
   insufficientGold?: boolean;  // true when the player lacks the casino entry minimum
 }
 
+function decayWindowMs(m: GMMission): number {
+  return m.type === 'casino' ? 36 * 3600_000 : 24 * 3600_000;
+}
+
 export function currentMaxSlots(m: GMMission, now: number): number {
   if (m.state === 'inprogress') return filledCount(m);
   if (m.firstJoinAt == null) return m.baseMax;
-  const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / (24 * 3600_000));
+  const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / decayWindowMs(m));
   return Math.max(1, m.baseMax - steps);
 }
 
@@ -78,15 +82,18 @@ export function computeMissionCard(
     status = 'filling';
   }
 
+  const windowMs = decayWindowMs(m);
+  const windowHours = windowMs / 3600_000;
+
   const decaySteps = m.state === 'forming' && m.firstJoinAt != null
-    ? Math.floor(Math.max(0, now - m.firstJoinAt) / (24 * 3600_000))
+    ? Math.floor(Math.max(0, now - m.firstJoinAt) / windowMs)
     : 0;
 
   const elapsedMs = m.firstJoinAt != null ? Math.max(0, now - m.firstJoinAt) : 0;
-  const hoursIntoWindow = (elapsedMs % (24 * 3600_000)) / 3600_000;
+  const hoursIntoWindow = (elapsedMs % windowMs) / 3600_000;
 
-  const decayPct = status === 'filling' ? hoursIntoWindow / 24 : (status === 'open' ? 0 : 1);
-  const liveSec = (24 - hoursIntoWindow) * 3600;
+  const decayPct = status === 'filling' ? hoursIntoWindow / windowHours : (status === 'open' ? 0 : 1);
+  const liveSec = (windowHours - hoursIntoWindow) * 3600;
 
   const roman = toRoman(m.series);
   const seriesLabel = `COHORT ${roman}`;

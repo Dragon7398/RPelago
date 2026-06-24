@@ -321,6 +321,11 @@ export default function ChallengesPage({ navigateToMap }: { navigateToMap: (coor
     .filter(([, t]) => t.state === 'inprogress')
     .sort(([a], [b]) => a.localeCompare(b));
 
+  const hasActiveMission = Object.values(gameState.missions).some(
+    m => m.state === 'forming' || m.state === 'inprogress'
+  );
+  const mapResetBlocked = inProgressTiles.length > 0 || hasActiveMission;
+
   return (
     <div className="dash-page">
       <h2 className="dash-page-title">⚔ Challenges</h2>
@@ -370,6 +375,8 @@ export default function ChallengesPage({ navigateToMap }: { navigateToMap: (coor
       <div className="dash-danger">
         <button
           className="dash-danger-btn"
+          disabled={mapResetBlocked}
+          title={mapResetBlocked ? 'Cannot reset while challenges or missions are in progress' : undefined}
           onClick={() => {
             if (confirm('Reset the map? Player XP, gold, and Adventurers are preserved. This cannot be undone.'))
               adminMapReset();

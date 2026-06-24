@@ -697,9 +697,13 @@ const ROMAN_NUMERALS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'I
 
 // ── Mission logic helpers ─────────────────────────────────────────────────────
 
+function gmDecayWindowMs(m: GMMission): number {
+  return m.type === 'casino' ? 36 * 3600_000 : 24 * 3600_000;
+}
+
 function gmCurrentMaxSlots(m: GMMission, now: number): number {
   if (m.firstJoinAt == null) return m.baseMax;
-  const steps = Math.floor((now - m.firstJoinAt) / (24 * 3600_000));
+  const steps = Math.floor((now - m.firstJoinAt) / gmDecayWindowMs(m));
   return Math.max(1, m.baseMax - steps);
 }
 

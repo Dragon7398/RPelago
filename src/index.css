@@ -1692,7 +1692,8 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   background: oklch(14% 0.08 25 / 0.4); border: 1px solid oklch(40% 0.14 25);
   color: oklch(62% 0.16 25); transition: all 0.15s;
 }
-.dash-danger-btn:hover { background: oklch(20% 0.10 25 / 0.5); color: oklch(70% 0.18 25); }
+.dash-danger-btn:hover:not(:disabled) { background: oklch(20% 0.10 25 / 0.5); color: oklch(70% 0.18 25); }
+.dash-danger-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Challenges page ── */
 .dash-challenges-cols {
