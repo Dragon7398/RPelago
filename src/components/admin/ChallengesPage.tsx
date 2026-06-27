@@ -8,17 +8,48 @@ import { slotsFromEntry } from '../../lib/slotHelpers';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 
-function AdvSlotList({ entry, players, mismatchedNames }: {
+interface TileBadgeInfo {
+  cursed: boolean;
+  stunning: boolean;
+  taunt: boolean;
+  stunnedAdvId?: string;
+  tauntedAdvId?: string;
+}
+
+function AdvSlotList({ entry, players, mismatchedNames, tileBadges }: {
   entry: TileAdventurer;
   players: Record<string, import('../../types').Player>;
   mismatchedNames?: Set<string>;
+  tileBadges?: TileBadgeInfo;
 }) {
   const slots   = slotsFromEntry(entry);
   const featIds = getPlayerFeatIds(players[entry.owner]?.feats);
+  const hasRing = (players[entry.owner]?.inventory?.['ring_of_resistance'] ?? 0) > 0;
+
+  const badges: { label: string; cls: string }[] = [];
+  if (tileBadges) {
+    if (tileBadges.cursed) {
+      badges.push(hasRing
+        ? { label: 'Resist', cls: 'dtb-resist' }
+        : { label: 'Cursed', cls: 'dtb-cursed' });
+    }
+    if (tileBadges.stunning && tileBadges.stunnedAdvId === entry.advId) {
+      badges.push(hasRing
+        ? { label: 'Resist', cls: 'dtb-resist' }
+        : { label: 'Stunned', cls: 'dtb-stunned' });
+    }
+    if (tileBadges.taunt && tileBadges.tauntedAdvId === entry.advId) {
+      badges.push({ label: 'Taunt', cls: 'dtb-taunt' });
+    }
+  }
+
   return (
     <div className="dash-adv-entry">
       <span className="dash-player-tag">
         {entry.ownerName}
+        {badges.map((b, i) => (
+          <span key={i} className={`dash-trait-badge ${b.cls}`}>{b.label}</span>
+        ))}
         {featIds.length > 0 && (
           <span className="dash-feat-icons">
             {featIds.map(id => {
@@ -88,6 +119,14 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
   const [syncing2, setSyncing2] = useState(false);
   const [mismatched1, setMismatched1] = useState<Set<string>>(new Set());
   const [mismatched2, setMismatched2] = useState<Set<string>>(new Set());
+
+  const tileBadges: TileBadgeInfo | undefined = variant === 'inprogress' ? {
+    cursed:       tile.traits?.['cursed']   !== undefined,
+    stunning:     tile.traits?.['stunning'] !== undefined,
+    taunt:        tile.traits?.['taunt']    !== undefined,
+    stunnedAdvId: tile.stunnedAdvId,
+    tauntedAdvId: tile.tauntedAdvId,
+  } : undefined;
 
   const handleSync = async (room: 1 | 2) => {
     const roomLink = room === 1 ? tile.link : tile.link2;
@@ -277,7 +316,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                   </div>
                   {roomAdvs.map(adv => (
                     <div key={adv.advId} className="dash-adv-kickable">
-                      <AdvSlotList entry={adv} players={players} mismatchedNames={roomMismatched} />
+                      <AdvSlotList entry={adv} players={players} mismatchedNames={roomMismatched} tileBadges={tileBadges} />
                       <button
                         className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
                         title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}
@@ -292,7 +331,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
           ) : (
             advs.map(adv => (
               <div key={adv.advId} className="dash-adv-kickable">
-                <AdvSlotList entry={adv} players={players} mismatchedNames={mismatched1} />
+                <AdvSlotList entry={adv} players={players} mismatchedNames={mismatched1} tileBadges={tileBadges} />
                 <button
                   className={`dash-kick-btn${variant === 'inprogress' ? ' dash-kick-btn--takeover' : ''}`}
                   title={variant === 'inprogress' ? 'Kick Adventurer and open their slot for a replacement' : 'Remove Adventurer from this tile'}

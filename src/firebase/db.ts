@@ -931,6 +931,11 @@ export async function completeMission(
     let earnedGold: number;
 
     if (mission.type === 'casino') {
+      // Folded players (never played) receive nothing; just free them from the mission.
+      if (!participant.played) {
+        updates[`game/players/${pid}/activeMission`] = null;
+        continue;
+      }
       // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
       earnedXP = Math.round(mission.xp * xpMultiplier);
       // Gold: gambling winnings (goldSwing + pot share); no feat multiplier on gambling.

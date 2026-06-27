@@ -1151,11 +1151,12 @@ export const casinoFold = onCall(async (request) => {
   await mustCasinoSeat(db, missionId, uid);
 
   await db.ref().update({
-    [`game/missions/${missionId}/participants/${uid}/hand`]:     null,
-    [`game/missions/${missionId}/participants/${uid}/deck`]:     null,
-    [`game/missions/${missionId}/participants/${uid}/gameType`]: null,
-    [`game/missions/${missionId}/participants/${uid}/rerolled`]: null,
-    [`game/missions/${missionId}/participants/${uid}/startBy`]:  now + 3_600_000,
+    [`game/missions/${missionId}/participants/${uid}/hand`]:        null,
+    [`game/missions/${missionId}/participants/${uid}/deck`]:        null,
+    [`game/missions/${missionId}/participants/${uid}/gameType`]:    null,
+    [`game/missions/${missionId}/participants/${uid}/rerolled`]:    null,
+    [`game/missions/${missionId}/participants/${uid}/gambitPlayed`]: null,
+    [`game/missions/${missionId}/participants/${uid}/startBy`]:     now + 3_600_000,
   });
   return { startBy: now + 3_600_000 };
 });
