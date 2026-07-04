@@ -5,6 +5,7 @@
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
+export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
 
 export interface DeckCard {
   name:      string;
@@ -162,15 +163,50 @@ function computeCardDefs(): Omit<DeckCard, 'uid' | 'copyIndex'>[] {
 
 const CARD_DEFS = computeCardDefs();
 
-export function buildDeck(): DeckCard[] {
+export function buildDeck(excludeTypes: readonly CardTypeKey[] = []): DeckCard[] {
+  const excl = new Set(excludeTypes);
   const deck: DeckCard[] = [];
   let uid = 0;
   for (const def of CARD_DEFS) {
+    if (excl.has(def.type)) continue;
     for (let i = 0; i < def.copies; i++) {
       deck.push({ ...def, uid: uid++, copyIndex: i });
     }
   }
   return deck;
+}
+
+// ── Deck variants ────────────────────────────────────────────────────────────
+// Mirror of DECK_VARIANTS in src/lib/casinoData.ts.
+
+export interface DeckVariant {
+  key:          CasinoDeckChoice;
+  label:        string;
+  excludeTypes: CardTypeKey[];
+  gpBoost:      number;
+  blurb:        string;
+}
+
+export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
+  purist: {
+    key: 'purist', label: 'Purist',
+    excludeTypes: [], gpBoost: 0.10,
+    blurb: 'Every card stays in the deck. Rewarded for the flexibility: +10% GP on everything you win.',
+  },
+  unconsoled: {
+    key: 'unconsoled', label: 'Unconsoled',
+    excludeTypes: ['platform'], gpBoost: 0,
+    blurb: 'Pulls every Platform card from the deck — no NES, SNES, Game Boy or AP-original.',
+  },
+  indie: {
+    key: 'indie', label: 'Indie',
+    excludeTypes: ['franchise'], gpBoost: 0,
+    blurb: 'Pulls every Franchise card from the deck — no Zelda, Mario, Pokemon.',
+  },
+};
+
+export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
+  return seat.deckChoice ?? 'purist';
 }
 
 export function shuffle<T>(arr: readonly T[]): T[] {
@@ -217,6 +253,12 @@ export function makeDeck(): DrawableDeck {
 
 export function handStake(hand: readonly DeckCard[]): number {
   return hand.reduce((s, c) => s + c.value, 0);
+}
+
+// Mirror of applyDeckBoost in src/lib/casinoSlots.ts.
+export function applyDeckBoost(reward: number, choice: CasinoDeckChoice): number {
+  const boost = DECK_VARIANTS[choice].gpBoost;
+  return boost > 0 ? Math.round(reward * (1 + boost)) : reward;
 }
 
 // ── Gambit deck ──────────────────────────────────────────────────────────────

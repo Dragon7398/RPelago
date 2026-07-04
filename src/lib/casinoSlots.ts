@@ -2,7 +2,8 @@
 // The core integration mapping: each committed card becomes one slot with
 // blank name/game and the card's genre + gold value in the Details field.
 
-import type { AdvSlot } from '../types';
+import type { AdvSlot, CasinoDeckChoice } from '../types';
+import { DECK_VARIANTS } from './casinoData';
 
 // A card as it exists in a player's committed hand.
 // Subset of DeckCard; the uid is dropped once the hand is locked.
@@ -21,6 +22,13 @@ export function casinoSlotDetails(card: CasinoCard): string {
 // The total gold a seat is "playing for" — sum of all locked card values
 export function handStake(hand: readonly CasinoCard[]): number {
   return hand.reduce((sum, c) => sum + (c.value ?? 0), 0);
+}
+
+// Apply a deck variant's GP boost (currently only Purist, +10%) to a seat's
+// own reward. Rounds once, at the reward, before any spend is subtracted.
+export function applyDeckBoost(reward: number, choice: CasinoDeckChoice): number {
+  const boost = DECK_VARIANTS[choice].gpBoost;
+  return boost > 0 ? Math.round(reward * (1 + boost)) : reward;
 }
 
 // Parse the stake back out of already-written slot details lines.

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -776,6 +776,35 @@ async function mustCasinoSeat(db, missionId, uid) {
         throw new https_1.HttpsError('failed-precondition', 'You have already locked your result.');
     return { mission, seat };
 }
+// Append one audit-trail entry for a money-moving or outcome casino event.
+// Returns an [path, value] pair to merge into the caller's own update() call
+// so the log write stays atomic with whatever state change it's describing.
+function casinoLogWrite(db, missionId, entry) {
+    const key = db.ref(`game/missions/${missionId}/casinoLog`).push().key;
+    return [`game/missions/${missionId}/casinoLog/${key}`, { ts: Date.now(), ...entry }];
+}
+// Set (or change) which deck variant this seat draws from. Allowed any time the
+// seat isn't mid-round; frozen once a hand has been dealt until it's locked or folded.
+// Also remembers the choice on the player's own record as next cohort's default.
+exports.setCasinoDeckChoice = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const uid = request.auth.uid;
+    const { missionId, deckChoice } = request.data;
+    if (!missionId || !deckChoice)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId or deckChoice.');
+    if (!casinoEngine_1.DECK_VARIANTS[deckChoice])
+        throw new https_1.HttpsError('invalid-argument', 'Unknown deck.');
+    const db = (0, database_2.getDatabase)();
+    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    if (seat.hand && seat.hand.length > 0)
+        throw new https_1.HttpsError('failed-precondition', 'Finish or fold your current hand first.');
+    await db.ref().update({
+        [`game/missions/${missionId}/participants/${uid}/deckChoice`]: deckChoice,
+        [`game/players/${uid}/preferredDeckChoice`]: deckChoice,
+    });
+    return { deckChoice };
+});
 // Deal a fresh hand. Debits the ante from the player's gold, routes 40% to the pot,
 // deals 5 cards (poker) or 2 cards (blackjack) from a freshly shuffled deck.
 // Clears startBy — the player has started within their hour window.
@@ -826,11 +855,15 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
     });
     if (!committed)
         throw new https_1.HttpsError('failed-precondition', abortReason);
-    // Build deck, deal initial hand.
-    const deckArr = (0, casinoEngine_1.shuffle)((0, casinoEngine_1.buildDeck)());
+    // Build deck (respecting this seat's chosen deck variant), deal initial hand.
+    const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
+    const deckArr = (0, casinoEngine_1.shuffle)((0, casinoEngine_1.buildDeck)(casinoEngine_1.DECK_VARIANTS[choice].excludeTypes));
     const drawable = (0, casinoEngine_1.makeDrawableDeck)(deckArr);
     const hand = drawable.draw(drawCount);
     const remaining = drawable.toArray();
+    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+        uid, playerName: seat.playerName, event: 'deal', game, amount: ante, potAdd: potCut,
+    });
     await db.ref().update({
         [`game/missions/${missionId}/participants/${uid}/hand`]: hand,
         [`game/missions/${missionId}/participants/${uid}/deck`]: remaining,
@@ -838,6 +871,7 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
         [`game/missions/${missionId}/participants/${uid}/gameType`]: game,
         [`game/missions/${missionId}/participants/${uid}/rerolled`]: null, // clear from any previous session
         [`game/missions/${missionId}/pot`]: database_2.ServerValue.increment(potCut),
+        [logPath]: logEntry,
     });
     return { hand, deckRemaining: remaining.length, potAdd: potCut };
 });
@@ -885,11 +919,16 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         const fresh = drawable.draw(rejectUids.length);
         let fi = 0;
         const newHand = hand.map((card) => rejectSet.has(card.uid) ? fresh[fi++] : card);
+        const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+            uid, playerName: seat.playerName, event: 'reroll', game: seat.gameType,
+            amount: casinoEngine_1.CASINO_REROLL_COST, potAdd: potCut,
+        });
         await db.ref().update({
             [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
             [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
             [`game/missions/${missionId}/participants/${uid}/rerolled`]: true,
             [`game/missions/${missionId}/pot`]: database_2.ServerValue.increment(potCut),
+            [logPath]: logEntry,
         });
         return { hand: newHand, deckRemaining: drawable.remaining() };
     }
@@ -920,13 +959,18 @@ exports.casinoFold = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
-    await mustCasinoSeat(db, missionId, uid);
+    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+        uid, playerName: seat.playerName, event: 'fold', game: seat.gameType,
+    });
     await db.ref().update({
         [`game/missions/${missionId}/participants/${uid}/hand`]: null,
         [`game/missions/${missionId}/participants/${uid}/deck`]: null,
         [`game/missions/${missionId}/participants/${uid}/gameType`]: null,
         [`game/missions/${missionId}/participants/${uid}/rerolled`]: null,
+        [`game/missions/${missionId}/participants/${uid}/gambitPlayed`]: null,
         [`game/missions/${missionId}/participants/${uid}/startBy`]: now + 3_600_000,
+        [logPath]: logEntry,
     });
     return { startBy: now + 3_600_000 };
 });
@@ -980,6 +1024,11 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
             updates[`game/missions/${missionId}/participants/${uid}/casinoXp`] =
                 database_2.ServerValue.increment(gambitDef.xp);
         }
+        const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+            uid, playerName: seat.playerName, event: 'gambit', gambitDefId,
+            amount: gambitDef.goldCost, potAdd: result.potAdd,
+        });
+        updates[logPath] = logEntry;
     }
     await db.ref().update(updates);
     return { ok: true };
@@ -1015,14 +1064,19 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
         if (hand.length === 0)
             throw new https_1.HttpsError('invalid-argument', 'Cannot reject all cards.');
     }
-    const goldSwing = (0, casinoEngine_1.handStake)(hand);
+    const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
+    const goldSwing = (0, casinoEngine_1.applyDeckBoost)((0, casinoEngine_1.handStake)(hand), choice);
     const slots = (0, casinoEngine_1.cardsToSlots)(hand);
+    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+        uid, playerName: seat.playerName, event: 'lock', game: seat.gameType, goldSwing, deckChoice: choice,
+    });
     const updates = {
         [`game/missions/${missionId}/participants/${uid}/played`]: true,
         [`game/missions/${missionId}/participants/${uid}/goldSwing`]: goldSwing,
         [`game/missions/${missionId}/participants/${uid}/slots`]: slots,
         [`game/missions/${missionId}/participants/${uid}/hand`]: null,
         [`game/missions/${missionId}/participants/${uid}/deck`]: null,
+        [logPath]: logEntry,
     };
     await db.ref().update(updates);
     // Re-read mission to check deploy gate.

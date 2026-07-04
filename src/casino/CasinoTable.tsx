@@ -3,22 +3,24 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
-import type { GMMission, GMParticipant, CasinoStats } from '../types';
+import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
 import type { DeckCard } from '../lib/casinoData';
+import { DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor } from '../lib/casinoData';
 import { makeGambitDeck, type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
-import { handStake } from '../lib/casinoSlots';
+import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import { CASINO_START_STATS, CASINO_ANTE, CASINO_REROLL_COST } from '../lib/constants';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
 import { MissionSlots } from './MissionBar';
-import { handStakeFromSlots } from '../lib/casinoSlots';
+import { DeckPreview } from './DeckPreview';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Phase =
   | 'loading'
   | 'error'
+  | 'deckselect'
   | 'choose'
   | 'poker'
   | 'blackjack'
@@ -81,6 +83,8 @@ export function CasinoTable() {
   const [busy, setBusy]           = useState(false);
   const [now, setNow]             = useState(Date.now());
   const [potBump, setPotBump]     = useState(false);
+  const [preferredDeck, setPreferredDeck] = useState<CasinoDeckChoice>('purist');
+  const [previewDeck, setPreviewDeck]     = useState<CasinoDeckChoice | null>(null);
 
   const prevPot = useRef<number | null>(null);
 
@@ -117,6 +121,14 @@ export function CasinoTable() {
     });
   }, [db, missionId]);
 
+  // Player's remembered deck preference — seeds the picker's default highlight.
+  useEffect(() => {
+    if (!db || !uid) return;
+    return onValue(ref(db, `game/players/${uid}/preferredDeckChoice`), snap => {
+      setPreferredDeck((snap.val() as CasinoDeckChoice | null) ?? 'purist');
+    });
+  }, [db, uid]);
+
   // Extended seat type — includes server-side fields readable by the seat owner.
   type Seat = GMParticipant & { hand?: DeckCard[]; gameType?: Game; rerolled?: boolean };
 
@@ -135,7 +147,7 @@ export function CasinoTable() {
       return;
     }
     // Don't override active local phases already set by user interaction.
-    if (['poker', 'blackjack', 'folded', 'gambit'].includes(phase)) return;
+    if (['poker', 'blackjack', 'folded', 'gambit', 'deckselect'].includes(phase)) return;
 
     // Session recovery: gambit already resolved but not locked — skip straight to lock.
     if (seat?.gambitPlayed && !seat.played && seat.hand?.length) {
@@ -157,7 +169,8 @@ export function CasinoTable() {
       return;
     }
 
-    setPhase('choose');
+    // First time this cohort — pick a deck before the game choice.
+    setPhase(seat?.deckChoice == null ? 'deckselect' : 'choose');
   }, [uid, mission]); // intentionally omit `phase` to avoid loop
 
   // Callables
@@ -173,6 +186,18 @@ export function CasinoTable() {
   const doFlash = (msg: string) => { setFlash(msg); setTimeout(() => setFlash(''), 4000); };
 
   // ── Actions ───────────────────────────────────────────────────────────────
+
+  async function chooseDeck(choice: CasinoDeckChoice) {
+    setBusy(true);
+    try {
+      await call<object, unknown>('setCasinoDeckChoice')({ missionId, deckChoice: choice });
+      setPhase('choose');
+    } catch (e: any) {
+      doFlash(e?.message ?? 'Failed to set deck. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function chooseGame(game: Game) {
     setBusy(true);
@@ -288,6 +313,9 @@ export function CasinoTable() {
   const stats    = (mission?.casinoStats ?? CASINO_START_STATS) as CasinoStats;
   const allSeats = Object.values(mission?.participants ?? {}) as (GMParticipant & { hand?: DeckCard[] })[];
 
+  const seatDeckChoice   = uid ? (mission?.participants?.[uid]?.deckChoice ?? null) : null;
+  const effectiveDeckChoice: CasinoDeckChoice = seatDeckChoice ?? 'purist';
+
   const committedCards = useMemo(
     () => gameType === 'poker' ? hand.filter(c => !pReject.has(c.uid)) : hand.filter((_, i) => i !== hand.findIndex(c => c.uid === bDiscardUid)),
     [hand, pReject, bDiscardUid, gameType],
@@ -342,7 +370,14 @@ export function CasinoTable() {
           <span className="cz-kick">RPelago Casino</span>
           <h1>The Card Table</h1>
         </div>
-        <PotDisplay amount={pot} bump={potBump} />
+        <div className="cz-top-right">
+          {seatDeckChoice && (phase === 'choose' || phase === 'folded') && (
+            <button className="cz-btn ghost cz-deck-badge" onClick={() => setPhase('deckselect')} disabled={busy}>
+              Deck: {DECK_VARIANTS[seatDeckChoice].label}
+            </button>
+          )}
+          <PotDisplay amount={pot} bump={potBump} />
+        </div>
       </div>
 
       <div className="cz-room-tag">
@@ -356,7 +391,7 @@ export function CasinoTable() {
         {seatEntries.map(([id, p]) => {
           const isMe    = id === uid;
           const status  = seatStatus(p, isMe, now);
-          const stake   = p?.played ? handStakeFromSlots(p.slots) : undefined;
+          const stake   = p?.played ? (p.goldSwing ?? handStakeFromSlots(p.slots)) : undefined;
           const sbLeft  = p?.startBy ? p.startBy - now : 0;
           return (
             <Seat
@@ -387,6 +422,46 @@ export function CasinoTable() {
       <div className="cz-felt">
         <div className="cz-felt-rim" />
         <div className="cz-stage">
+
+          {/* DECKSELECT */}
+          {phase === 'deckselect' && (
+            <>
+              <div className="cz-stage-title">Choose your deck</div>
+              <div className="cz-stage-note">
+                This filters which cards you can draw for every hand you play at this table
+                this cohort. Change it again any time you aren't mid-hand via the Deck badge above.
+              </div>
+              <div className="cz-choices">
+                {DECK_VARIANT_ORDER.map(key => {
+                  const v = DECK_VARIANTS[key];
+                  const highlightKey = seatDeckChoice ?? preferredDeck;
+                  const isHighlighted = key === highlightKey;
+                  return (
+                    <div key={key} className="cz-choice">
+                      <button className="cz-choice-select" onClick={() => chooseDeck(key)} disabled={busy}>
+                        <div className="cz-choice-name">
+                          {v.label}
+                          {isHighlighted && (
+                            <span className="cz-choice-cost">{seatDeckChoice ? 'current' : 'last played'}</span>
+                          )}
+                        </div>
+                        <div className="cz-choice-desc">{v.blurb}</div>
+                        <div className="cz-choice-desc">{deckSizeFor(key)} of {deckSizeFor('purist')} cards in play</div>
+                      </button>
+                      <button
+                        type="button"
+                        className="cz-choice-preview"
+                        onClick={e => { e.stopPropagation(); setPreviewDeck(key); }}
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="cz-flash">{flash}</div>
+            </>
+          )}
 
           {/* CHOOSE */}
           {phase === 'choose' && (
@@ -430,7 +505,7 @@ export function CasinoTable() {
                   );
                 })}
               </div>
-              <PokerReadout cards={committedCards} spent={spent} />
+              <PokerReadout cards={committedCards} spent={spent} deckChoice={effectiveDeckChoice} />
               <div className="cz-actions">
                 <button className="cz-btn" onClick={doReroll} disabled={busy || pRedrawn || pReject.size === 0}>
                   Reroll {pReject.size > 0 ? `${pReject.size} ` : ''}({CASINO_REROLL_COST}g)
@@ -464,7 +539,11 @@ export function CasinoTable() {
                   );
                 })}
               </div>
-              <BlackjackGauge shownCards={hand.filter(c => c.uid !== bDiscardUid)} allCards={hand} />
+              <BlackjackGauge
+                shownCards={hand.filter(c => c.uid !== bDiscardUid)}
+                allCards={hand}
+                deckChoice={effectiveDeckChoice}
+              />
               <div className="cz-actions">
                 {!bStood ? (
                   <>
@@ -481,7 +560,7 @@ export function CasinoTable() {
                   >
                     {hand.length >= 6 && bDiscardUid === null
                       ? 'Drop one card to lock in'
-                      : `Lock in ${hand.filter(c => c.uid !== bDiscardUid).length} games · ${hand.filter(c => c.uid !== bDiscardUid).reduce((s, c) => s + c.value, 0)}g`}
+                      : `Lock in ${hand.filter(c => c.uid !== bDiscardUid).length} games · ${applyDeckBoost(hand.filter(c => c.uid !== bDiscardUid).reduce((s, c) => s + c.value, 0), effectiveDeckChoice)}g`}
                   </button>
                 )}
                 <button className="cz-btn danger" onClick={doFold} disabled={busy}>Fold</button>
@@ -510,7 +589,7 @@ export function CasinoTable() {
             <>
               <div className="cz-stage-title">Play a Gambit?</div>
               <div className="cz-stage-note">
-                You locked in {lockedHand.length} games worth {handStake(lockedHand)}g.
+                You locked in {lockedHand.length} games worth {applyDeckBoost(handStake(lockedHand), effectiveDeckChoice)}g.
                 Choose one of these to bend the room's odds for everyone — or play none and lock in.
               </div>
               <div className="cz-gambit-offer">
@@ -565,14 +644,15 @@ export function CasinoTable() {
               )}
               <div className="cz-results">
                 {Object.entries(mission.participants ?? {}).map(([id, p]) => {
-                  const stake = handStakeFromSlots((p as GMParticipant).slots);
+                  const part  = p as GMParticipant;
+                  const stake = part.goldSwing ?? handStakeFromSlots(part.slots);
                   const gambitDefId = undefined; // gambit info not tracked post-deploy
                   return (
                     <ResultRow
                       key={id}
-                      name={(p as GMParticipant).playerName}
+                      name={part.playerName}
                       isMe={id === uid}
-                      played={!!(p as GMParticipant).played}
+                      played={!!part.played}
                       stake={stake}
                       gambit={gambitDefId ? (GAMBIT_DEFS_BY_ID[gambitDefId] ?? null) : null}
                     />
@@ -593,8 +673,10 @@ export function CasinoTable() {
 
       {/* ── Locked slots panel ── */}
       {lockedHand.length > 0 && (
-        <MissionSlots hand={lockedHand} missionLabel={missionLabel} />
+        <MissionSlots hand={lockedHand} missionLabel={missionLabel} deckChoice={effectiveDeckChoice} />
       )}
+
+      {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
     </div>
   );
 }

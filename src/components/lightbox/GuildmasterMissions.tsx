@@ -383,7 +383,7 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
               )}
               {/* Casino: show locked stake once the seat has played */}
               {mission.type === 'casino' && p.played && (() => {
-                const stake = handStakeFromSlots(p.slots);
+                const stake = p.goldSwing ?? handStakeFromSlots(p.slots);
                 return stake > 0
                   ? <div className="gm-stake">{stake}g on the table</div>
                   : null;

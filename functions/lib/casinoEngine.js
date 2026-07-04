@@ -3,12 +3,14 @@
 // Keep in sync with: casinoData.ts, casinoEngine.ts, casinoGambits.ts, casinoSlots.ts
 // This file is compiled by functions/tsconfig.json (CommonJS, no Vite).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.CASINO_REROLL_COST = exports.CASINO_ANTE = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = exports.CASINO_POT_SEED = exports.CASINO_MIN_ENLIST_GOLD = void 0;
+exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_REROLL_COST = exports.CASINO_ANTE = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = exports.CASINO_POT_SEED = exports.CASINO_MIN_ENLIST_GOLD = void 0;
 exports.buildDeck = buildDeck;
+exports.deckChoiceOf = deckChoiceOf;
 exports.shuffle = shuffle;
 exports.makeDrawableDeck = makeDrawableDeck;
 exports.makeDeck = makeDeck;
 exports.handStake = handStake;
+exports.applyDeckBoost = applyDeckBoost;
 exports.buildGambitDeck = buildGambitDeck;
 exports.applyGambit = applyGambit;
 exports.rollCasinoOdds = rollCasinoOdds;
@@ -105,15 +107,38 @@ function computeCardDefs() {
     return [WILD_BASE, ...categories];
 }
 const CARD_DEFS = computeCardDefs();
-function buildDeck() {
+function buildDeck(excludeTypes = []) {
+    const excl = new Set(excludeTypes);
     const deck = [];
     let uid = 0;
     for (const def of CARD_DEFS) {
+        if (excl.has(def.type))
+            continue;
         for (let i = 0; i < def.copies; i++) {
             deck.push({ ...def, uid: uid++, copyIndex: i });
         }
     }
     return deck;
+}
+exports.DECK_VARIANTS = {
+    purist: {
+        key: 'purist', label: 'Purist',
+        excludeTypes: [], gpBoost: 0.10,
+        blurb: 'Every card stays in the deck. Rewarded for the flexibility: +10% GP on everything you win.',
+    },
+    unconsoled: {
+        key: 'unconsoled', label: 'Unconsoled',
+        excludeTypes: ['platform'], gpBoost: 0,
+        blurb: 'Pulls every Platform card from the deck — no NES, SNES, Game Boy or AP-original.',
+    },
+    indie: {
+        key: 'indie', label: 'Indie',
+        excludeTypes: ['franchise'], gpBoost: 0,
+        blurb: 'Pulls every Franchise card from the deck — no Zelda, Mario, Pokemon.',
+    },
+};
+function deckChoiceOf(seat) {
+    return seat.deckChoice ?? 'purist';
 }
 function shuffle(arr) {
     const a = arr.slice();
@@ -146,6 +171,11 @@ function makeDeck() {
 // ── Hand evaluation ──────────────────────────────────────────────────────────
 function handStake(hand) {
     return hand.reduce((s, c) => s + c.value, 0);
+}
+// Mirror of applyDeckBoost in src/lib/casinoSlots.ts.
+function applyDeckBoost(reward, choice) {
+    const boost = exports.DECK_VARIANTS[choice].gpBoost;
+    return boost > 0 ? Math.round(reward * (1 + boost)) : reward;
 }
 // ── Gambit deck ──────────────────────────────────────────────────────────────
 const GAMBIT_STATS = {

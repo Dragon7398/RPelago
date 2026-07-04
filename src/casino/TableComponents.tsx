@@ -1,8 +1,9 @@
 // Seat rail, pot chip, challenge panel, readout, gauge, and reveal row components.
 
 import type { DeckCard } from '../lib/casinoData';
-import type { CasinoStats } from '../types';
+import type { CasinoStats, CasinoDeckChoice } from '../types';
 import type { GambitDef } from '../lib/casinoGambits';
+import { applyDeckBoost } from '../lib/casinoSlots';
 
 // ── Pot display ───────────────────────────────────────────────────────────────
 
@@ -140,11 +141,13 @@ export function ChallengePanel({ stats, roll }: ChallengePanelProps) {
 
 // ── Poker readout ─────────────────────────────────────────────────────────────
 
-interface PokerReadoutProps { cards: DeckCard[]; spent: number; }
+interface PokerReadoutProps { cards: DeckCard[]; spent: number; deckChoice?: CasinoDeckChoice; }
 
-export function PokerReadout({ cards, spent }: PokerReadoutProps) {
-  const total = cards.reduce((s, c) => s + c.value, 0);
-  const net   = total - spent;
+export function PokerReadout({ cards, spent, deckChoice }: PokerReadoutProps) {
+  const raw     = cards.reduce((s, c) => s + c.value, 0);
+  const total   = deckChoice ? applyDeckBoost(raw, deckChoice) : raw;
+  const boosted = total !== raw;
+  const net     = total - spent;
   return (
     <div className="cz-readout">
       <div className="ro-block">
@@ -155,6 +158,7 @@ export function PokerReadout({ cards, spent }: PokerReadoutProps) {
       <div className="ro-block">
         <span className="ro-label">Reward</span>
         <span className="ro-val ro-total">{total}g</span>
+        {boosted && <span className="cz-ch-diff up">+10% Purist</span>}
       </div>
       <span className="ro-x">·</span>
       <div className="ro-block">
@@ -169,17 +173,19 @@ export function PokerReadout({ cards, spent }: PokerReadoutProps) {
 
 // ── Blackjack gauge ───────────────────────────────────────────────────────────
 
-interface BlackjackGaugeProps { shownCards: DeckCard[]; allCards: DeckCard[]; }
+interface BlackjackGaugeProps { shownCards: DeckCard[]; allCards: DeckCard[]; deckChoice?: CasinoDeckChoice; }
 
-export function BlackjackGauge({ shownCards, allCards }: BlackjackGaugeProps) {
-  const sorted    = [...allCards].sort((a, b) => b.value - a.value);
-  const potential = sorted.slice(0, Math.min(5, sorted.length)).reduce((s, c) => s + c.value, 0);
-  const keptSum   = shownCards.reduce((s, c) => s + c.value, 0);
-  const count     = shownCards.length;
-  const leaving   = Math.max(0, potential - keptSum);
-  const note      = leaving > 0 ? `leaving ${leaving}g behind` : 'keeping the maximum';
-  const pct       = potential > 0 ? Math.min(100, Math.round((keptSum / potential) * 100)) : 0;
-  const capped    = allCards.length >= 6;
+export function BlackjackGauge({ shownCards, allCards, deckChoice }: BlackjackGaugeProps) {
+  const sorted     = [...allCards].sort((a, b) => b.value - a.value);
+  const potential  = sorted.slice(0, Math.min(5, sorted.length)).reduce((s, c) => s + c.value, 0);
+  const keptSumRaw = shownCards.reduce((s, c) => s + c.value, 0);
+  const keptSum    = deckChoice ? applyDeckBoost(keptSumRaw, deckChoice) : keptSumRaw;
+  const boosted    = keptSum !== keptSumRaw;
+  const count      = shownCards.length;
+  const leaving    = Math.max(0, potential - keptSumRaw);
+  const note       = leaving > 0 ? `leaving ${leaving}g behind` : 'keeping the maximum';
+  const pct        = potential > 0 ? Math.min(100, Math.round((keptSumRaw / potential) * 100)) : 0;
+  const capped     = allCards.length >= 6;
 
   return (
     <div className="cz-gauge">
@@ -191,7 +197,10 @@ export function BlackjackGauge({ shownCards, allCards }: BlackjackGaugeProps) {
         <div className={`cz-gauge-fill ${leaving > 0 ? 'sharp' : 'safe'}`} style={{ width: `${pct}%` }} />
       </div>
       <div className="cz-gauge-nums">
-        <span className="cz-gauge-sum">{keptSum}g · {count} {count === 1 ? 'game' : 'games'}</span>
+        <span className="cz-gauge-sum">
+          {keptSum}g · {count} {count === 1 ? 'game' : 'games'}
+          {boosted && <span className="cz-ch-diff up"> +10% Purist</span>}
+        </span>
         <span className="cz-gauge-tgt">{note}</span>
       </div>
     </div>

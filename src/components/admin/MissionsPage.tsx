@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
-import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats } from '../../types';
-import { SLOT_STATUSES, toRoman } from '../../lib/constants';
+import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
+import { SLOT_STATUSES, toRoman, MISSION_DEFS } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
+import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -154,6 +155,62 @@ function MissionParticipantSlots({
             })}
           </span>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Casino audit log — verifies mission.pot against logged money events ───────
+
+function describeCasinoLogEntry(e: CasinoLogEntry): string {
+  switch (e.event) {
+    case 'deal':
+      return `${e.playerName} dealt ${e.game} — ${e.amount}g ante (${e.potAdd}g → pot)`;
+    case 'reroll':
+      return `${e.playerName} rerolled — ${e.amount}g (${e.potAdd}g → pot)`;
+    case 'gambit': {
+      const def = e.gambitDefId ? GAMBIT_DEFS_BY_ID[e.gambitDefId] : undefined;
+      const label = def ? `${def.deltaLabel} ${def.statLabel}` : 'a gambit';
+      return `${e.playerName} played ${label} — ${e.amount ?? 0}g cost, ${e.potAdd ?? 0}g → pot`;
+    }
+    case 'lock':
+      return `${e.playerName} locked in ${e.game ?? ''} — ${e.goldSwing ?? 0}g${e.deckChoice ? ` (${e.deckChoice})` : ''}`;
+    case 'fold':
+      return `${e.playerName} folded${e.game ? ` (${e.game})` : ''}`;
+    default:
+      return e.playerName;
+  }
+}
+
+function CasinoAuditLog({ mission }: { mission: GMMission }) {
+  const [open, setOpen] = useState(false);
+  const entries = Object.entries(mission.casinoLog ?? {}).sort((a, b) => a[1].ts - b[1].ts);
+  if (entries.length === 0) return null;
+
+  const loggedTotal = entries.reduce((s, [, e]) => s + (e.potAdd ?? 0), 0);
+  const seed        = MISSION_DEFS.casino?.potSeed ?? 0;
+  const expected    = seed + loggedTotal;
+  const actual      = mission.pot ?? 0;
+  const mismatch    = expected !== actual;
+
+  return (
+    <div className="casino-log-block">
+      <div className="casino-log-toggle" onClick={() => setOpen(o => !o)}>
+        <span>AUDIT LOG ({entries.length})</span>
+        <span>{open ? '▾' : '▸'}</span>
+      </div>
+      {open && (
+        <>
+          <div className={`casino-log-check${mismatch ? ' warn' : ' ok'}`}>
+            Pot check: {seed}g seed + {loggedTotal}g logged = {expected}g expected vs {actual}g actual
+            {mismatch ? ' ⚠ mismatch' : ' ✓'}
+          </div>
+          <div className="casino-log-list">
+            {entries.map(([id, e]) => (
+              <div key={id} className="casino-log-row">{describeCasinoLogEntry(e)}</div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -372,6 +429,9 @@ function MissionCard({ mission }: { mission: GMMission }) {
           </div>
         );
       })()}
+
+      {/* Casino: audit trail of every money-moving/outcome event, for pot verification */}
+      {mission.type === 'casino' && <CasinoAuditLog mission={mission} />}
 
       {/* Room link + settings — inprogress only */}
       {mission.state === 'inprogress' && (

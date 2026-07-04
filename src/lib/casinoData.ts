@@ -2,6 +2,8 @@
 // Ported from the prototype's casino/data.js.
 // This module is imported by both the browser client and Cloud Functions.
 
+import type { CasinoDeckChoice } from '../types';
+
 export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
 
 export interface CardTypeDef {
@@ -118,16 +120,61 @@ export const WILD_DEF: CardDef = {
 // All unique card definitions (wild first, then one per category)
 export const CARD_DEFS: readonly CardDef[] = [WILD_DEF, ...computeCategories()];
 
-// The full deck as a multiset: CARD_DEFS expanded by copies count (64 cards total)
-export function buildDeck(): DeckCard[] {
+// The full deck as a multiset: CARD_DEFS expanded by copies count (64 cards total).
+// Pass excludeTypes to strip whole categories out for a deck variant (see DECK_VARIANTS).
+export function buildDeck(excludeTypes: readonly CardTypeKey[] = []): DeckCard[] {
+  const excl = new Set(excludeTypes);
   const deck: DeckCard[] = [];
   let uid = 0;
   for (const def of CARD_DEFS) {
+    if (excl.has(def.type)) continue;
     for (let i = 0; i < def.copies; i++) {
       deck.push({ ...def, uid: uid++, copyIndex: i });
     }
   }
   return deck;
+}
+
+// ── Deck variants ────────────────────────────────────────────────────────────
+// A per-seat choice of which card types stay in that seat's draw deck.
+
+export interface DeckVariant {
+  key:          CasinoDeckChoice;
+  label:        string;
+  excludeTypes: CardTypeKey[];  // card types stripped entirely from this seat's deck
+  gpBoost:      number;         // flat fraction added to this seat's own reward at settlement
+  blurb:        string;
+}
+
+export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
+  purist: {
+    key: 'purist', label: 'Purist',
+    excludeTypes: [], gpBoost: 0.10,
+    blurb: 'Every card stays in the deck. Rewarded for the flexibility: +10% GP on everything you win.',
+  },
+  unconsoled: {
+    key: 'unconsoled', label: 'Unconsoled',
+    excludeTypes: ['platform'], gpBoost: 0,
+    blurb: 'Pulls every Platform card from the deck — no NES, SNES, Game Boy or AP-original.',
+  },
+  indie: {
+    key: 'indie', label: 'Indie',
+    excludeTypes: ['franchise'], gpBoost: 0,
+    blurb: 'Pulls every Franchise card from the deck — no Zelda, Mario, Pokemon.',
+  },
+};
+
+export const DECK_VARIANT_ORDER: CasinoDeckChoice[] = ['purist', 'unconsoled', 'indie'];
+
+// Participant records predate this feature — treat a missing value as Purist.
+export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
+  return seat.deckChoice ?? 'purist';
+}
+
+// How many cards a given deck variant plays with — for the picker's "N of 64" line.
+export function deckSizeFor(choice: CasinoDeckChoice): number {
+  const excl = new Set(DECK_VARIANTS[choice].excludeTypes);
+  return CARD_DEFS.reduce((s, d) => (excl.has(d.type) ? s : s + d.copies), 0);
 }
 
 export function shuffle<T>(arr: readonly T[]): T[] {

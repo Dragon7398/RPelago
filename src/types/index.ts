@@ -3,6 +3,7 @@ export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done
 export type TileTypeKey = 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
+export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
 
 export interface ShopItem {
   id: string;
@@ -101,6 +102,7 @@ export interface Player {
   inventory: Record<string, number>;         // itemId → quantity owned
   xpHistory?: number[];                      // archived XP totals from previous campaigns
   nameColor?: string;                        // color ID from NAME_COLORS palette
+  preferredDeckChoice?: CasinoDeckChoice;    // last casino deck picked; pre-fills the picker next cohort
   disabled?: boolean;
   feats?: PlayerFeats;
   warnings?: Record<string, PlayerWarning>;
@@ -200,6 +202,20 @@ export interface CasinoStats {
   xp:      number;  // XP floor; raised by penalty gambits
 }
 
+// One money-moving or outcome event in a casino mission's audit trail.
+export interface CasinoLogEntry {
+  ts:           number;
+  uid:          string;
+  playerName:   string;
+  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold';
+  game?:        'poker' | 'blackjack';
+  amount?:      number;           // gold the player paid for this event
+  potAdd?:      number;           // gold added to the shared pot from this event
+  goldSwing?:   number;           // final reward at 'lock' (post deck-boost)
+  deckChoice?:  CasinoDeckChoice; // at 'lock'
+  gambitDefId?: string;           // at 'gambit'
+}
+
 export interface GMParticipant {
   playerId:    string;
   playerName:  string;
@@ -214,6 +230,7 @@ export interface GMParticipant {
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
   gameType?:    'poker' | 'blackjack'; // which game was chosen (used for session recovery)
   rerolled?:    boolean;             // true once the poker reroll has been used this session
+  deckChoice?:  CasinoDeckChoice;    // which deck variant this seat is drawing from this cohort
 }
 
 export interface GMMission {
@@ -244,6 +261,7 @@ export interface GMMission {
   entryCosts?:     { label: string; gold: number }[]; // house-cut note on the mission card
   pot?:            number;                          // shared gold pot; seeded at cohort creation
   casinoStats?:    CasinoStats;                     // shared odds table modified by gambits
+  casinoLog?:      Record<string, CasinoLogEntry>;  // audit trail of money-moving/outcome events
 }
 
 export interface CompletedChallenge {

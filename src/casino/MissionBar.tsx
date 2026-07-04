@@ -1,18 +1,26 @@
 import type { DeckCard } from '../lib/casinoData';
+import type { CasinoDeckChoice } from '../types';
+import { applyDeckBoost } from '../lib/casinoSlots';
 
 interface MissionSlotsProps {
   hand: DeckCard[];
   missionLabel: string;
+  deckChoice?: CasinoDeckChoice;
 }
 
-export function MissionSlots({ hand, missionLabel }: MissionSlotsProps) {
+export function MissionSlots({ hand, missionLabel, deckChoice }: MissionSlotsProps) {
   if (hand.length === 0) return null;
-  const stake = hand.reduce((s, c) => s + c.value, 0);
+  const raw     = hand.reduce((s, c) => s + c.value, 0);
+  const stake   = deckChoice ? applyDeckBoost(raw, deckChoice) : raw;
+  const boosted = stake !== raw;
   return (
     <div className="cz-slots-panel">
       <div className="cz-slots-head">
         <span className="cz-slots-title">Your slots on {missionLabel}</span>
-        <span className="cz-slots-sub">{hand.length} {hand.length === 1 ? 'card' : 'cards'} locked · {stake}g on the table</span>
+        <span className="cz-slots-sub">
+          {hand.length} {hand.length === 1 ? 'card' : 'cards'} locked · {stake}g on the table
+          {boosted && ' (+10% Purist)'}
+        </span>
       </div>
       <div className="cz-slots-note">
         These write straight back to your seat on the mission — slot name and game left empty,
