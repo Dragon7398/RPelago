@@ -329,6 +329,11 @@ export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, b
 // Cost to reroll rejected cards in poker.
 export const CASINO_REROLL_COST = 20;
 
+// Season-end control: when true, admins can no longer seed brand-new mission cohorts
+// (existing forming/in-progress cohorts still play out normally). Flip back to false
+// when the next season kicks off.
+export const MISSIONS_CLOSED_FOR_SEASON = true;
+
 export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
   basic: {
     type:        'basic',

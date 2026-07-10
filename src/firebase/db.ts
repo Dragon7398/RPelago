@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus } from '../types';
 import { buildDefaultTileData, initializeGrid, computeTownShopIds, randomAdvClass, randomAdvName } from '../lib/tileGen';
-import { ALL_ORBS, DEFAULT_SHOPS } from '../lib/constants';
+import { ALL_ORBS, DEFAULT_SHOPS, MISSIONS_CLOSED_FOR_SEASON } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
@@ -106,6 +106,7 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
 // Seed mission cohorts for each type that has no active (forming/inprogress) cohort.
 // Safe to call on any existing game mid-season — only creates what is missing.
 export async function seedInitialMissions(): Promise<boolean> {
+  if (MISSIONS_CLOSED_FOR_SEASON) return false;
   assertDb();
   const d = db!;
   const snap = await get(ref(d, 'game/missions'));

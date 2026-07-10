@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
-import { SLOT_STATUSES, toRoman, MISSION_DEFS } from '../../lib/constants';
+import { SLOT_STATUSES, toRoman, MISSION_DEFS, MISSIONS_CLOSED_FOR_SEASON } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
@@ -571,9 +571,13 @@ export default function MissionsPage() {
             <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
               <span>No forming missions.</span>
               {active.length === 0 && (
-                <button className="dash-action-btn" disabled={seeding} onClick={handleSeed}>
-                  {seeding ? '…' : '⚜ Seed Initial Missions'}
-                </button>
+                MISSIONS_CLOSED_FOR_SEASON ? (
+                  <span className="dash-empty" style={{ padding: 0 }}>New missions are closed for this season.</span>
+                ) : (
+                  <button className="dash-action-btn" disabled={seeding} onClick={handleSeed}>
+                    {seeding ? '…' : '⚜ Seed Initial Missions'}
+                  </button>
+                )
               )}
             </div>
           ) : (
