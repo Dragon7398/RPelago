@@ -83,23 +83,13 @@ export async function initializeGameIfNeeded(uid?: string): Promise<void> {
 
   // Migration: seed mission cohorts for games created before the mission system,
   // or add casino cohort to games created before the casino mission was added.
-  const missionsSnap = await get(ref(d, 'game/missions'));
-  const existingMissions = missionsSnap.exists() ? (missionsSnap.val() as Record<string, GMMission>) : {};
-  const activeMissions = Object.values(existingMissions);
-  const needsBasic  = !activeMissions.some(m => m.type === 'basic'  && m.state !== 'complete');
-  const needsPatrol = !activeMissions.some(m => m.type === 'patrol' && m.state !== 'complete');
-  const needsCasino = !activeMissions.some(m => m.type === 'casino' && m.state !== 'complete');
-  if (needsBasic || needsPatrol || needsCasino) {
-    const now = Date.now();
-    const migrationUpdates: Record<string, unknown> = {};
-    if (needsBasic)  { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key }; }
-    if (needsPatrol) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key }; }
-    if (needsCasino) { const r = push(ref(d, 'game/missions')); migrationUpdates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key }; }
-    try {
-      await update(ref(d), migrationUpdates);
-    } catch (err) {
-      console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
-    }
+  // Delegates to seedInitialMissions(), which is a no-op once the season is
+  // closed — otherwise deleting (rather than completing) a forming cohort
+  // would cause this to recreate it on next load.
+  try {
+    await seedInitialMissions();
+  } catch (err) {
+    console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
   }
 }
 

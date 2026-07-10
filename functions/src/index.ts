@@ -665,6 +665,12 @@ interface MissionDef {
   potSeed?:        number;
 }
 
+// Season-end control: when true, deploying a mission does not spawn its next
+// cohort (mirrors MISSIONS_CLOSED_FOR_SEASON in src/lib/constants.ts — this
+// function tree is a server-side duplicate, so the flag must be kept in sync
+// by hand here). Flip back to false when the next season kicks off.
+const MISSIONS_CLOSED_FOR_SEASON = true;
+
 const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
   basic: {
     label:   'Basic Training',
@@ -784,17 +790,20 @@ function gmMissionLabel(m: GMMission): string {
 // ── Deploy routine ────────────────────────────────────────────────────────────
 
 async function deployMission(missionId: string, m: GMMission, now: number): Promise<void> {
-  const db     = getDatabase();
-  const newRef = db.ref('game/missions').push();
-  const newId  = newRef.key!;
-  const fresh  = gmFreshMission(m.type, m.series + 1, now);
-  const label  = gmMissionLabel(m);
+  const db    = getDatabase();
+  const label = gmMissionLabel(m);
 
   const updates: Record<string, unknown> = {
     [`game/missions/${missionId}/state`]:      'inprogress',
     [`game/missions/${missionId}/deployedAt`]: now,
-    [`game/missions/${newId}`]:                { ...fresh, id: newId },
   };
+
+  if (!MISSIONS_CLOSED_FOR_SEASON) {
+    const newRef = db.ref('game/missions').push();
+    const newId  = newRef.key!;
+    const fresh  = gmFreshMission(m.type, m.series + 1, now);
+    updates[`game/missions/${newId}`] = { ...fresh, id: newId };
+  }
 
   // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
   // and clear per-seat deck data (no longer needed once deployed).
