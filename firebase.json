@@ -12,5 +12,10 @@
     "codebase": "default",
     "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log"],
     "predeploy": ["npm run build --prefix functions"]
-  }]
+  }],
+  "emulators": {
+    "database": { "host": "127.0.0.1", "port": 9000 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
 }
