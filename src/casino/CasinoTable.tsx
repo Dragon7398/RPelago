@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
+import { setCurrentSeason, sRef, ownHandPath } from '../firebase/season';
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
 import type { DeckCard } from '../lib/casinoData';
 import { DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor } from '../lib/casinoData';
@@ -38,6 +39,10 @@ function getParams() {
   return {
     missionId:    q.get('missionId') ?? '',
     missionLabel: q.get('mission')   ?? 'A Night at the Casino',
+    // The table is a standalone Vite entry with no SeasonProvider, so the season
+    // is passed in by the landing. Falls back to config/activeSeasonId; the
+    // explicit param is what lets an alpha user open a table in a DRAFT season.
+    seasonId:     q.get('seasonId')  ?? '',
   };
 }
 
@@ -69,6 +74,9 @@ export function CasinoTable() {
 
   const [uid, setUid]             = useState<string | null>(null);
   const [mission, setMission]     = useState<GMMission | null>(null);
+  const [seasonReady, setSeasonReady] = useState(false);
+  // Read from seasonSecrets/, never from the mission — see the subscription below.
+  const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
   const [phase, setPhase]         = useState<Phase>('loading');
   const [hand, setHand]           = useState<DeckCard[]>([]);
   const [gameType, setGameType]   = useState<Game | null>(null);
@@ -103,10 +111,29 @@ export function CasinoTable() {
     });
   }, []);
 
+  // Resolve which season this table belongs to, and publish it to the path
+  // helpers. Everything below waits on this — sRef() throws until it has run.
+  useEffect(() => {
+    if (!db) return;
+    let cancelled = false;
+    (async () => {
+      let sid = params.seasonId;
+      if (!sid) {
+        const snap = await get(ref(db, 'config/activeSeasonId'));
+        sid = (snap.val() as string | null) ?? '';
+      }
+      if (cancelled) return;
+      if (!sid) { setPhase('error'); return; }
+      setCurrentSeason(sid);
+      setSeasonReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [params.seasonId]);
+
   // Mission subscription
   useEffect(() => {
-    if (!db || !missionId) return;
-    return onValue(ref(db, `game/missions/${missionId}`), snap => {
+    if (!db || !missionId || !seasonReady) return;
+    return onValue(sRef(db, `missions/${missionId}`), snap => {
       const m = snap.exists() ? (snap.val() as GMMission) : null;
       setMission(m);
       if (!m) { setPhase('error'); return; }
@@ -119,24 +146,43 @@ export function CasinoTable() {
       }
       prevPot.current = pot;
     });
-  }, [db, missionId]);
+  }, [db, missionId, seasonReady]);
+
+  // The player's OWN hand — the one secret a client may read.
+  //
+  // It lives in seasonSecrets/, NOT on the mission, because RTDB read rules
+  // cascade downward: the season tree is world-readable, so anything stored
+  // inside it is public. Keeping the hand (and the draw deck) on the mission is
+  // exactly what leaked them to every visitor under the old `game/` tree.
+  // See docs/season-architecture-plan.md.
+  useEffect(() => {
+    if (!db || !uid || !missionId || !seasonReady) return;
+    return onValue(ref(db, ownHandPath(missionId, uid)), snap => {
+      setSecretHand(snap.exists() ? (snap.val() as DeckCard[]) : null);
+    });
+  }, [db, uid, missionId, seasonReady]);
 
   // Player's remembered deck preference — seeds the picker's default highlight.
   useEffect(() => {
-    if (!db || !uid) return;
-    return onValue(ref(db, `game/players/${uid}/preferredDeckChoice`), snap => {
+    if (!db || !uid || !seasonReady) return;
+    return onValue(sRef(db, `players/${uid}/preferredDeckChoice`), snap => {
       setPreferredDeck((snap.val() as CasinoDeckChoice | null) ?? 'purist');
     });
-  }, [db, uid]);
+  }, [db, uid, seasonReady]);
 
-  // Extended seat type — includes server-side fields readable by the seat owner.
+  // Extended seat type. `hand` no longer lives on the participant record — it is
+  // merged in from the seasonSecrets subscription below.
   type Seat = GMParticipant & { hand?: DeckCard[]; gameType?: Game; rerolled?: boolean };
 
   // Derive phase from Firebase state (only when not in an active local game phase).
   // Also handles session recovery when the player reloads mid-hand.
   useEffect(() => {
     if (!uid || !mission) return;
-    const seat = mission.participants?.[uid] as Seat | undefined;
+    const rawSeat = mission.participants?.[uid] as Seat | undefined;
+    // Splice the secret hand back onto the public seat record.
+    const seat: Seat | undefined = rawSeat
+      ? { ...rawSeat, hand: secretHand ?? undefined }
+      : undefined;
 
     if (mission.state === 'inprogress' || mission.state === 'complete') {
       setPhase('deployed');
@@ -171,7 +217,13 @@ export function CasinoTable() {
 
     // First time this cohort — pick a deck before the game choice.
     setPhase(seat?.deckChoice == null ? 'deckselect' : 'choose');
-  }, [uid, mission]); // intentionally omit `phase` to avoid loop
+    // `secretHand` MUST be a dep: it arrives from its own seasonSecrets
+    // subscription, which can resolve after the mission does. Without it, a
+    // player reloading mid-hand would never have their hand restored.
+    // `phase` is deliberately omitted — including it would re-run this effect on
+    // every phase change and loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, mission, secretHand]);
 
   // Callables
   const call = useCallback(<T, R>(name: string) => {

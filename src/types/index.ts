@@ -130,10 +130,64 @@ export interface OrbDef {
 }
 
 export interface GameMeta {
-  adminId: string;
+  // NOTE: adminId moved to config/adminId (global, season-independent).
+  // kmkActiveListId is gone — KMK lists now carry their own `active` flag.
   initialized: boolean;
   seed: number;
-  kmkActiveListId?: string | null;
+}
+
+// ── Season config (global, at config/) ────────────────────────────────────────
+
+/** Which root UI a season renders. */
+export type SeasonShell  = 'map' | 'casino';
+
+/**
+ * draft    — unlaunched. NOT listed in the public config/seasonList; readable
+ *            and playtestable only by admin + alpha users.
+ * active   — live and public.
+ * closing  — public and still writable, but no new missions spawn. In-flight
+ *            missions play out to completion.
+ * archived — public, frozen. Read-only to everyone but admin.
+ */
+export type SeasonStatus = 'draft' | 'active' | 'closing' | 'archived';
+
+/** An entry in the PUBLIC config/seasonList (live + archived seasons only). */
+export interface SeasonListEntry {
+  label:  string;
+  shell:  SeasonShell;
+  status: Exclude<SeasonStatus, 'draft'>;
+  /** Casino tables kept open concurrently. Per-season so S2 can differ from S1.5. */
+  casinoOpenTables?: number;
+}
+
+/** An entry in the PRIVATE config/draftSeasons (admin + alpha only). */
+export interface DraftSeasonEntry {
+  label: string;
+  shell: SeasonShell;
+  casinoOpenTables?: number;
+}
+
+export interface SeasonConfig {
+  adminId:          string;
+  activeSeasonId:   string;
+  minClientVersion: number;
+  seasonList:       Record<string, SeasonListEntry>;
+  /** Only present for admin/alpha readers; undefined for normal players. */
+  draftSeasons?:    Record<string, DraftSeasonEntry>;
+  /** Only present for admin/alpha readers. */
+  alphaUsers?:      Record<string, boolean>;
+}
+
+/** The season the client is currently rendering, resolved from SeasonConfig. */
+export interface ResolvedSeason {
+  id:     string;
+  label:  string;
+  shell:  SeasonShell;
+  status: SeasonStatus;
+  /** True when viewing an unlaunched season (admin/alpha preview + playtest). */
+  isDraft: boolean;
+  /** False for archived seasons — the UI should render read-only. */
+  writable: boolean;
 }
 
 // ── Keymaster's Keep ──────────────────────────────────────────────────────────
@@ -160,6 +214,12 @@ export interface KmkList {
   name: string;
   createdAt: number;
   areas: Record<string, KmkArea>;
+  /**
+   * Lists come and go and MULTIPLE may be active at once, so activation is a
+   * property of each list rather than a single global pointer. (Replaces the
+   * old game/meta/kmkActiveListId.) KMK is global — not season-scoped.
+   */
+  active?: boolean;
 }
 
 export interface OrbAcquisition {

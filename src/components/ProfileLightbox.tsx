@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { get, ref } from 'firebase/database';
+import { get } from 'firebase/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
 import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
 import { db as firebaseDb } from '../firebase/config';
+import { sRef } from '../firebase/season';
 import { syncPlayerProfile } from '../firebase/db';
 import type { AdvClass, PlayerFeats, CompletedChallenge } from '../types';
 
@@ -47,7 +48,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
     if (pastChallenges !== null) return; // already loaded
 
     const uid = user.id;
-    get(ref(firebaseDb, `game/players/${uid}/completedChallenges`)).then(cSnap => {
+    get(sRef(firebaseDb, `players/${uid}/completedChallenges`)).then(cSnap => {
       const challenges: CompletedChallenge[] = cSnap.exists()
         ? Object.values(cSnap.val() as Record<string, CompletedChallenge>)
             .filter(c => c.xpAwarded !== 0 || c.goldAwarded !== 0)

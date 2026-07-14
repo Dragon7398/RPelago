@@ -4,7 +4,7 @@ import type { KmkList, KmkStatus } from '../types';
 import { firebaseReady, db as firebaseDb } from '../firebase/config';
 import {
   kmkImportList as dbKmkImportList,
-  kmkSetActiveList as dbKmkSetActiveList,
+  kmkSetListActive as dbKmkSetListActive,
   kmkSetAreaLocked as dbKmkSetAreaLocked,
   kmkAdminSetTaskStatus as dbKmkAdminSetTaskStatus,
   kmkAdminEditTaskPlayer as dbKmkAdminEditTaskPlayer,
@@ -17,12 +17,17 @@ import {
 
 interface KmkContextValue {
   lists: Record<string, KmkList>;
-  activeListId: string | null;
+  /**
+   * Ids of every list currently shown on the Trial Board. KMK lists come and go
+   * and SEVERAL may run at once, so this is derived from each list's `active`
+   * flag rather than a single global pointer.
+   */
+  activeListIds: string[];
   loading: boolean;
 
   // Admin actions
   importList: (name: string, rows: { area: string; trial: string; desc: string }[]) => Promise<string>;
-  setActiveList: (listId: string | null) => Promise<void>;
+  setListActive: (listId: string, active: boolean) => Promise<void>;
   setAreaLocked: (listId: string, areaId: string, locked: boolean) => Promise<void>;
   adminSetTaskStatus: (listId: string, areaId: string, taskId: string, status: KmkStatus) => Promise<void>;
   adminEditTaskPlayer: (listId: string, areaId: string, taskId: string, playerId: string, playerName: string) => Promise<void>;
@@ -38,33 +43,25 @@ interface KmkContextValue {
 const KmkContext = createContext<KmkContextValue | null>(null);
 
 export function KmkProvider({ children }: { children: ReactNode }) {
-  const [lists, setLists]             = useState<Record<string, KmkList>>({});
-  const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [loading, setLoading]         = useState(true);
+  const [lists, setLists]     = useState<Record<string, KmkList>>({});
+  const [loading, setLoading] = useState(true);
 
+  // KMK is GLOBAL — it is not season-scoped, and its events may be entirely
+  // unrelated to any RPelago season. One subscription, no season dependency.
   useEffect(() => {
     if (!firebaseReady || !firebaseDb) {
       setLoading(false);
       return;
     }
-
-    let listsReady  = false;
-    let activeReady = false;
-
-    const unsubLists = onValue(ref(firebaseDb, 'kmkEvents'), snap => {
+    return onValue(ref(firebaseDb, 'kmkEvents'), snap => {
       setLists(snap.exists() ? (snap.val() as Record<string, KmkList>) : {});
-      listsReady = true;
-      if (activeReady) setLoading(false);
+      setLoading(false);
     });
-
-    const unsubActive = onValue(ref(firebaseDb, 'game/meta/kmkActiveListId'), snap => {
-      setActiveListId(snap.exists() ? (snap.val() as string) : null);
-      activeReady = true;
-      if (listsReady) setLoading(false);
-    });
-
-    return () => { unsubLists(); unsubActive(); };
   }, []);
+
+  const activeListIds = Object.entries(lists)
+    .filter(([, list]) => list.active)
+    .map(([id]) => id);
 
   const importList = useCallback(async (
     name: string,
@@ -73,8 +70,8 @@ export function KmkProvider({ children }: { children: ReactNode }) {
     return await dbKmkImportList(name, rows);
   }, []);
 
-  const setActiveList = useCallback(async (listId: string | null) => {
-    await dbKmkSetActiveList(listId);
+  const setListActive = useCallback(async (listId: string, active: boolean) => {
+    await dbKmkSetListActive(listId, active);
   }, []);
 
   const setAreaLocked = useCallback(async (listId: string, areaId: string, locked: boolean) => {
@@ -115,8 +112,8 @@ export function KmkProvider({ children }: { children: ReactNode }) {
 
   return (
     <KmkContext.Provider value={{
-      lists, activeListId, loading,
-      importList, setActiveList, setAreaLocked,
+      lists, activeListIds, loading,
+      importList, setListActive, setAreaLocked,
       adminSetTaskStatus, adminEditTaskPlayer, deleteList,
       playerClaimTrial, playerMarkDone, playerResume, playerAbandon,
     }}>

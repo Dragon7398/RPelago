@@ -1,12 +1,15 @@
 import { useGameState } from '../../contexts/GameStateContext';
+import { useSeason } from '../../contexts/SeasonContext';
 import PlayerCard from './playersPage/PlayerCard';
 
 export default function PlayersPage() {
   const { gameState } = useGameState();
+  const { config } = useSeason();
   if (!gameState) return null;
 
   const players = Object.values(gameState.players ?? {});
-  const adminId = gameState.meta?.adminId;
+  // Admin is global now (config/adminId), not stored per-season.
+  const adminId = config?.adminId;
 
   return (
     <div className="dash-page">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
 import { TILE_TYPES, ALL_ORBS, rcFromCoord } from '../lib/constants';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
@@ -25,6 +26,9 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
   const { gameState, sendAdventurer, recallAdventurer, claimClaimableSlot } = useGameState();
   const { user } = useAuth();
   const { addToast } = useToast();
+  // Must sit with the other hooks, above any early return — this component
+  // returns early when the tile is missing.
+  const isAdmin = useIsAdmin();
   const [claimingSlotKey, setClaimingSlotKey] = useState<string | null>(null);
 
   const open = !!coord;
@@ -133,8 +137,6 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
   const stateBadgeText: Record<string, string> = {
     available: 'AVAILABLE', inprogress: 'IN PROGRESS', complete: 'COMPLETE',
   };
-
-  const isAdmin = !!user && user.id === gameState.meta?.adminId;
 
   return (
     <div className={`lightbox-overlay ${open ? 'open' : ''}`}

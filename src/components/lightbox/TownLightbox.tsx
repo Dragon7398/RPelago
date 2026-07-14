@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useIsAdmin } from '../../contexts/SeasonContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, ITEM_TRAIT_REFS, CENTER_COORD } from '../../lib/constants';
 import { renderTraitDesc } from './lbHelpers';
@@ -50,7 +51,7 @@ export default function TownLightbox({ coord, tile, info, open, onClose, onLogin
     }
   };
 
-  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+  const isAdmin = useIsAdmin();
 
   return (
     <div className={`lightbox-overlay ${open ? 'open' : ''}`}

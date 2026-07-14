@@ -1,9 +1,10 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
+import { sRef, sPath } from './season';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus } from '../types';
-import { buildDefaultTileData, initializeGrid, computeTownShopIds, randomAdvClass, randomAdvName } from '../lib/tileGen';
-import { ALL_ORBS, DEFAULT_SHOPS, MISSIONS_CLOSED_FOR_SEASON } from '../lib/constants';
+import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
+import { ALL_ORBS, MISSIONS_CLOSED_FOR_SEASON } from '../lib/constants';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
@@ -28,78 +29,29 @@ function defaultOrbConfig(): OrbConfig {
   };
 }
 
-// ── Initialize ────────────────────────────────────────────────────────────────
-export async function initializeGameIfNeeded(uid?: string): Promise<void> {
-  assertDb();
-  const d = db!;
-  const snap = await get(ref(d, 'game/meta'));
-  if (!snap.exists() || !snap.val()?.initialized) {
-    const seed      = Math.floor(Math.random() * 0x7FFFFFFF);
-    const orbConfig = defaultOrbConfig();
-    initializeGrid(seed);
-
-    // Phase 1: write meta so the calling user becomes admin and the game is marked initialized.
-    // game/meta allows any auth'd write when !initialized (DB rule).
-    await set(ref(d, 'game/meta'), { adminId: uid ?? '', initialized: true, seed });
-
-    // Phase 2: write the rest of the game data. The user is now admin (adminId === uid).
-    const now = Date.now();
-    const basicRef  = push(ref(d, 'game/missions'));
-    const patrolRef = push(ref(d, 'game/missions'));
-    const casinoRef = push(ref(d, 'game/missions'));
-    const initialMissions: Record<string, unknown> = {
-      [basicRef.key!]:  { ...freshMission('basic',  1, now), id: basicRef.key  },
-      [patrolRef.key!]: { ...freshMission('patrol', 1, now), id: patrolRef.key },
-      [casinoRef.key!]: { ...freshMission('casino', 1, now), id: casinoRef.key },
-    };
-    await update(ref(d), {
-      'game/tiles':     buildDefaultTileData(seed),
-      'game/players':   {},
-      'game/orbState':  {},
-      'game/orbConfig': orbConfig,
-      'game/shops':     { ...DEFAULT_SHOPS },
-      'game/missions':  initialMissions,
-    });
-    return;
-  }
-
-  // Migration: add shops and tile shopIds for games created before the shop system
-  const shopsSnap = await get(ref(d, 'game/shops'));
-  if (!shopsSnap.exists()) {
-    const seed = snap.val()?.seed as number | undefined;
-    const migrationUpdates: Record<string, unknown> = { 'game/shops': { ...DEFAULT_SHOPS } };
-    if (seed != null) {
-      for (const [coord, shopId] of Object.entries(computeTownShopIds(seed))) {
-        migrationUpdates[`game/tiles/${coord}/shopId`] = shopId;
-      }
-    }
-    // Migration requires admin access; silently skip if the current user isn't admin.
-    try {
-      await update(ref(d), migrationUpdates);
-    } catch {
-      // Non-admin users can't run the migration; admin will complete it on next load.
-    }
-  }
-
-  // Migration: seed mission cohorts for games created before the mission system,
-  // or add casino cohort to games created before the casino mission was added.
-  // Delegates to seedInitialMissions(), which is a no-op once the season is
-  // closed — otherwise deleting (rather than completing) a forming cohort
-  // would cause this to recreate it on next load.
-  try {
-    await seedInitialMissions();
-  } catch (err) {
-    console.warn('[RPelago] Mission seeding skipped (non-admin or rules error):', err);
-  }
-}
+// ── Season creation ───────────────────────────────────────────────────────────
+//
+// `initializeGameIfNeeded()` is GONE. It used to run on every client auth and
+// made the FIRST authenticated user the admin, via a DB rule that let anyone
+// write game/meta while !initialized. Both the function and that rule loophole
+// are removed: a season is now created explicitly by admin (see the migration
+// script), never by a client, and admin identity lives at config/adminId.
+//
+// See docs/season-architecture-plan.md → "Admin identity".
 
 // Seed mission cohorts for each type that has no active (forming/inprogress) cohort.
-// Safe to call on any existing game mid-season — only creates what is missing.
+// Safe to call on any existing season mid-flight — only creates what is missing.
+//
+// TODO(season-refactor): this still hardcodes basic+patrol+casino and reads the
+// MISSIONS_CLOSED_FOR_SEASON constant. Both become season config:
+// `config/seasonList/{id}/missionTypes` and the season `status` respectively —
+// and the casino becomes N concurrent single-game tables rather than one cohort.
+// See docs/casino-season-1_5-plan.md → "Table model".
 export async function seedInitialMissions(): Promise<boolean> {
   if (MISSIONS_CLOSED_FOR_SEASON) return false;
   assertDb();
   const d = db!;
-  const snap = await get(ref(d, 'game/missions'));
+  const snap = await get(sRef(d, 'missions'));
   const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
   const active = Object.values(existing);
 
@@ -113,16 +65,16 @@ export async function seedInitialMissions(): Promise<boolean> {
   const updates: Record<string, unknown> = {};
 
   if (!hasBasic) {
-    const r = push(ref(d, 'game/missions'));
-    updates[`game/missions/${r.key}`] = { ...freshMission('basic',  1, now), id: r.key };
+    const r = push(sRef(d, 'missions'));
+    updates[sPath(`missions/${r.key}`)] = { ...freshMission('basic',  1, now), id: r.key };
   }
   if (!hasPatrol) {
-    const r = push(ref(d, 'game/missions'));
-    updates[`game/missions/${r.key}`] = { ...freshMission('patrol', 1, now), id: r.key };
+    const r = push(sRef(d, 'missions'));
+    updates[sPath(`missions/${r.key}`)] = { ...freshMission('patrol', 1, now), id: r.key };
   }
   if (!hasCasino) {
-    const r = push(ref(d, 'game/missions'));
-    updates[`game/missions/${r.key}`] = { ...freshMission('casino', 1, now), id: r.key };
+    const r = push(sRef(d, 'missions'));
+    updates[sPath(`missions/${r.key}`)] = { ...freshMission('casino', 1, now), id: r.key };
   }
 
   await update(ref(d), updates);
@@ -135,14 +87,14 @@ export function subscribeToGame(
 ): () => void {
   assertDb();
   const d = db!;
-  return onValue(ref(d, 'game'), snap => {
+  return onValue(sRef(d), snap => {
     callback(snap.exists() ? (snap.val() as GameState) : null);
   });
 }
 
 // ── Tile mutations ────────────────────────────────────────────────────────────
 export async function setTileState(coord: string, state: TileState): Promise<void> {
-  await update(ref(db!, `game/tiles/${coord}`), { state, stunnedAdvId: null, tauntedAdvId: null });
+  await update(sRef(db!, `tiles/${coord}`), { state, stunnedAdvId: null, tauntedAdvId: null });
 }
 
 export async function setTileInProgress(
@@ -152,12 +104,12 @@ export async function setTileInProgress(
   roomAssignments?: Record<string, 1 | 2>,
   extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
-  const updates: Record<string, unknown> = { [`game/tiles/${coord}/state`]: 'inprogress' };
-  updates[`game/tiles/${coord}/stunnedAdvId`] = stunnedAdvId;
-  updates[`game/tiles/${coord}/tauntedAdvId`] = tauntedAdvId;
+  const updates: Record<string, unknown> = { [sPath(`tiles/${coord}/state`)]: 'inprogress' };
+  updates[sPath(`tiles/${coord}/stunnedAdvId`)] = stunnedAdvId;
+  updates[sPath(`tiles/${coord}/tauntedAdvId`)] = tauntedAdvId;
   if (roomAssignments) {
     for (const [advId, room] of Object.entries(roomAssignments)) {
-      updates[`game/tiles/${coord}/adventurers/${advId}/room`] = room;
+      updates[sPath(`tiles/${coord}/adventurers/${advId}/room`)] = room;
     }
   }
   if (extraUpdates) Object.assign(updates, extraUpdates);
@@ -165,12 +117,12 @@ export async function setTileInProgress(
 }
 
 export async function updateTileAdmin(coord: string, updates: Partial<Tile>): Promise<void> {
-  await update(ref(db!, `game/tiles/${coord}`), { ...updates, adminOverride: true });
+  await update(sRef(db!, `tiles/${coord}`), { ...updates, adminOverride: true });
 }
 
 export async function resetTileStats(coord: string, stats: Partial<Tile>): Promise<void> {
   assertDb();
-  await update(ref(db!, `game/tiles/${coord}`), { ...stats, adminOverride: false });
+  await update(sRef(db!, `tiles/${coord}`), { ...stats, adminOverride: false });
 }
 
 export async function setTilesAvailability(
@@ -184,14 +136,14 @@ export async function setTilesAvailability(
   assertDb();
   const updates: Record<string, unknown> = {};
   for (const [c, s] of Object.entries(stateUpdates)) {
-    updates[`game/tiles/${c}/state`] = s;
+    updates[sPath(`tiles/${c}/state`)] = s;
   }
   if (inProgressCoord != null) {
-    updates[`game/tiles/${inProgressCoord}/stunnedAdvId`] = stunnedAdvId ?? null;
-    updates[`game/tiles/${inProgressCoord}/tauntedAdvId`] = tauntedAdvId ?? null;
+    updates[sPath(`tiles/${inProgressCoord}/stunnedAdvId`)] = stunnedAdvId ?? null;
+    updates[sPath(`tiles/${inProgressCoord}/tauntedAdvId`)] = tauntedAdvId ?? null;
     if (roomAssignments) {
       for (const [advId, room] of Object.entries(roomAssignments)) {
-        updates[`game/tiles/${inProgressCoord}/adventurers/${advId}/room`] = room;
+        updates[sPath(`tiles/${inProgressCoord}/adventurers/${advId}/room`)] = room;
       }
     }
   }
@@ -201,17 +153,17 @@ export async function setTilesAvailability(
 
 export async function assignAdventurer(coord: string, entry: TileAdventurer): Promise<void> {
   await update(ref(db!), {
-    [`game/tiles/${coord}/adventurers/${entry.advId}`]:                entry,
-    [`game/players/${entry.owner}/adventurers/${entry.advId}/busy`]:    true,
-    [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
+    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
+    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
+    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
   });
 }
 
 export async function removeAdventurer(coord: string, advId: string, ownerId: string): Promise<void> {
   await update(ref(db!), {
-    [`game/tiles/${coord}/adventurers/${advId}`]:                    null,
-    [`game/players/${ownerId}/adventurers/${advId}/busy`]:    false,
-    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
+    [sPath(`tiles/${coord}/adventurers/${advId}`)]:                    null,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busy`)]:    false,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busyTile`)]: null,
   });
 }
 
@@ -224,23 +176,23 @@ export async function completeTile(
   awardedAmounts?: Record<string, { xp: number; gold: number }>,
 ): Promise<void> {
   const updates: Record<string, unknown> = {};
-  updates[`game/tiles/${coord}/state`] = 'complete';
+  updates[sPath(`tiles/${coord}/state`)] = 'complete';
 
   for (const { coord: nc, newState } of revealCoords) {
-    updates[`game/tiles/${nc}/state`] = newState;
+    updates[sPath(`tiles/${nc}/state`)] = newState;
   }
   for (const [playerId, player] of Object.entries(updatedPlayers)) {
-    updates[`game/players/${playerId}`] = player;
+    updates[sPath(`players/${playerId}`)] = player;
   }
   for (const [orbId, acquisition] of Object.entries(orbAcquisitions)) {
-    updates[`game/orbState/${orbId}`] = acquisition;
+    updates[sPath(`orbState/${orbId}`)] = acquisition;
   }
 
   if (awardedAmounts) {
     const now = Date.now();
     const name = tileName || coord;
     for (const [playerId, amounts] of Object.entries(awardedAmounts)) {
-      const entryKey = push(ref(db!, `game/players/${playerId}/completedChallenges`)).key!;
+      const entryKey = push(sRef(db!, `players/${playerId}/completedChallenges`)).key!;
       const entry = {
         coord,
         name,
@@ -251,12 +203,12 @@ export async function completeTile(
       // Merge into the existing player write rather than adding a separate child
       // path — Firebase RTDB rejects update() calls where one path is a prefix
       // of another (key-path conflict).
-      const playerWrite = updates[`game/players/${playerId}`] as Record<string, unknown>;
+      const playerWrite = updates[sPath(`players/${playerId}`)] as Record<string, unknown>;
       if (playerWrite) {
         const existing = (playerWrite.completedChallenges ?? {}) as Record<string, unknown>;
         playerWrite.completedChallenges = { ...existing, [entryKey]: entry };
       } else {
-        updates[`game/players/${playerId}/completedChallenges/${entryKey}`] = entry;
+        updates[sPath(`players/${playerId}/completedChallenges/${entryKey}`)] = entry;
       }
     }
   }
@@ -276,8 +228,8 @@ export async function completeTile(
 export async function backfillChallengeHistory(coord: string): Promise<number> {
   assertDb();
   const [tileSnap, playersSnap] = await Promise.all([
-    get(ref(db!, `game/tiles/${coord}`)),
-    get(ref(db!, 'game/players')),
+    get(sRef(db!, `tiles/${coord}`)),
+    get(sRef(db!, 'players')),
   ]);
   if (!tileSnap.exists()) throw new Error(`Tile ${coord} not found.`);
 
@@ -294,8 +246,8 @@ export async function backfillChallengeHistory(coord: string): Promise<number> {
   const updates: Record<string, unknown> = {};
   for (const ownerId of ownerIds) {
     if (!players[ownerId]) continue;
-    const entryKey = push(ref(db!, `game/players/${ownerId}/completedChallenges`)).key!;
-    updates[`game/players/${ownerId}/completedChallenges/${entryKey}`] = {
+    const entryKey = push(sRef(db!, `players/${ownerId}/completedChallenges`)).key!;
+    updates[sPath(`players/${ownerId}/completedChallenges/${entryKey}`)] = {
       coord,
       name,
       xpAwarded:   tile.xp   ?? 0,
@@ -311,7 +263,7 @@ export async function backfillChallengeHistory(coord: string): Promise<number> {
 // ── Player queries ────────────────────────────────────────────────────────────
 export async function playerExists(playerId: string): Promise<boolean> {
   assertDb();
-  const snap = await get(ref(db!, `game/players/${playerId}`));
+  const snap = await get(sRef(db!, `players/${playerId}`));
   return snap.exists();
 }
 
@@ -326,18 +278,18 @@ export async function updateAdventurer(
   assertDb();
   const fullName = `${updates.firstName} ${updates.lastName}`;
   const dbUpdates: Record<string, unknown> = {
-    [`game/players/${playerId}/adventurers/${advId}/firstName`]: updates.firstName,
-    [`game/players/${playerId}/adventurers/${advId}/lastName`]:  updates.lastName,
+    [sPath(`players/${playerId}/adventurers/${advId}/firstName`)]: updates.firstName,
+    [sPath(`players/${playerId}/adventurers/${advId}/lastName`)]:  updates.lastName,
   };
 
   // Scan all tiles so the name is updated wherever this adventurer appears,
   // not just the current busyTile (which can be stale after reassignment).
-  const tilesSnap = await get(ref(db!, 'game/tiles'));
+  const tilesSnap = await get(sRef(db!, 'tiles'));
   if (tilesSnap.exists()) {
     const tiles = tilesSnap.val() as Record<string, { adventurers?: Record<string, unknown> }>;
     for (const coord of Object.keys(tiles)) {
       if (tiles[coord].adventurers?.[advId] !== undefined) {
-        dbUpdates[`game/tiles/${coord}/adventurers/${advId}/name`] = fullName;
+        dbUpdates[sPath(`tiles/${coord}/adventurers/${advId}/name`)] = fullName;
       }
     }
   }
@@ -347,27 +299,27 @@ export async function updateAdventurer(
 
 // ── Orb mutations ─────────────────────────────────────────────────────────────
 export async function collectOrb(orbId: string, acquisition: OrbAcquisition): Promise<void> {
-  await set(ref(db!, `game/orbState/${orbId}`), acquisition);
+  await set(sRef(db!, `orbState/${orbId}`), acquisition);
 }
 
 export async function updateOrbConfig(updates: Partial<OrbConfig>): Promise<void> {
-  await update(ref(db!, 'game/orbConfig'), updates);
+  await update(sRef(db!, 'orbConfig'), updates);
 }
 
 export async function resetOrbs(): Promise<void> {
-  await set(ref(db!, 'game/orbState'), {});
+  await set(sRef(db!, 'orbState'), {});
 }
 
 // ── Shop ──────────────────────────────────────────────────────────────────────
 export async function updateShop(shopId: string, updates: Partial<Shop>): Promise<void> {
-  await update(ref(db!, `game/shops/${shopId}`), updates);
+  await update(sRef(db!, `shops/${shopId}`), updates);
 }
 
 export async function consumePlayerItem(playerId: string, itemId: string, newQty: number): Promise<void> {
   if (newQty <= 0) {
-    await remove(ref(db!, `game/players/${playerId}/inventory/${itemId}`));
+    await remove(sRef(db!, `players/${playerId}/inventory/${itemId}`));
   } else {
-    await set(ref(db!, `game/players/${playerId}/inventory/${itemId}`), newQty);
+    await set(sRef(db!, `players/${playerId}/inventory/${itemId}`), newQty);
   }
 }
 
@@ -378,9 +330,9 @@ export async function setAdventurerSlots(
   slots: AdvSlot[],
   freeAdventurer?: { ownerId: string },
 ): Promise<void> {
-  const slotsPath = `game/tiles/${coord}/adventurers/${advId}/slots`;
+  const slotsPath = sPath(`tiles/${coord}/adventurers/${advId}/slots`);
   if (freeAdventurer) {
-    const advBase = `game/players/${freeAdventurer.ownerId}/adventurers/${advId}`;
+    const advBase = sPath(`players/${freeAdventurer.ownerId}/adventurers/${advId}`);
     const updates: Record<string, unknown> = {
       [slotsPath]: slots.length > 0 ? slots : null,
       [`${advBase}/busy`]: false,
@@ -406,7 +358,7 @@ export async function adminKickAdventurer(
 
   let slotsToAdd: AdvSlot[] = [];
   if (convertToClaimableSlot) {
-    const taSnap = await get(ref(db!, `game/tiles/${coord}/adventurers/${advId}`));
+    const taSnap = await get(sRef(db!, `tiles/${coord}/adventurers/${advId}`));
     const ta = taSnap.exists() ? (taSnap.val() as TileAdventurer) : null;
     const rawSlots = normalizeSlots(ta?.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
     slotsToAdd = rawSlots.length > 0
@@ -415,20 +367,20 @@ export async function adminKickAdventurer(
   }
 
   const updates: Record<string, unknown> = {
-    [`game/tiles/${coord}/adventurers/${advId}`]:            null,
-    [`game/players/${ownerId}/adventurers/${advId}/busy`]:    false,
-    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
+    [sPath(`tiles/${coord}/adventurers/${advId}`)]:            null,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busy`)]:    false,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busyTile`)]: null,
   };
 
   if (convertToClaimableSlot) {
-    const newSlotRef = push(ref(db!, `game/tiles/${coord}/claimableSlots`));
-    updates[`game/tiles/${coord}/claimableSlots/${newSlotRef.key}`] = slotsToAdd;
+    const newSlotRef = push(sRef(db!, `tiles/${coord}/claimableSlots`));
+    updates[sPath(`tiles/${coord}/claimableSlots/${newSlotRef.key}`)] = slotsToAdd;
   }
 
   if (autoWarning) {
-    const warnRef = push(ref(db!, `game/players/${ownerId}/warnings`));
+    const warnRef = push(sRef(db!, `players/${ownerId}/warnings`));
     const warning: PlayerWarning = { timestamp: Date.now(), message: autoWarning, auto: true };
-    updates[`game/players/${ownerId}/warnings/${warnRef.key}`] = warning;
+    updates[sPath(`players/${ownerId}/warnings/${warnRef.key}`)] = warning;
   }
 
   await update(ref(db!), updates);
@@ -441,7 +393,7 @@ export async function setAdventurerStatusNote(
   text: string | null,
 ): Promise<void> {
   assertDb();
-  const path = `game/tiles/${coord}/adventurers/${advId}/statusNote`;
+  const path = sPath(`tiles/${coord}/adventurers/${advId}/statusNote`);
   if (!text) {
     await remove(ref(db!, path));
   } else {
@@ -454,15 +406,15 @@ export async function setAdventurerStatusNote(
 export async function addPlayerWarning(playerId: string, message: string): Promise<void> {
   assertDb();
   const warning: PlayerWarning = { timestamp: Date.now(), message };
-  await push(ref(db!, `game/players/${playerId}/warnings`), warning);
+  await push(sRef(db!, `players/${playerId}/warnings`), warning);
 }
 
 export async function deletePlayerWarning(playerId: string, warnKey: string): Promise<void> {
-  await remove(ref(db!, `game/players/${playerId}/warnings/${warnKey}`));
+  await remove(sRef(db!, `players/${playerId}/warnings/${warnKey}`));
 }
 
 export async function clearPlayerWarnings(playerId: string): Promise<void> {
-  await remove(ref(db!, `game/players/${playerId}/warnings`));
+  await remove(sRef(db!, `players/${playerId}/warnings`));
 }
 
 // ── Player: claim a claimable slot ───────────────────────────────────────────
@@ -473,10 +425,10 @@ export async function claimClaimableSlot(
 ): Promise<void> {
   assertDb();
   const updates: Record<string, unknown> = {
-    [`game/tiles/${coord}/claimableSlots/${slotKey}`]:                 null,
-    [`game/tiles/${coord}/adventurers/${entry.advId}`]:                entry,
-    [`game/players/${entry.owner}/adventurers/${entry.advId}/busy`]:    true,
-    [`game/players/${entry.owner}/adventurers/${entry.advId}/busyTile`]: coord,
+    [sPath(`tiles/${coord}/claimableSlots/${slotKey}`)]:                 null,
+    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
+    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
+    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
   };
   await update(ref(db!), updates);
 }
@@ -486,7 +438,7 @@ export async function updateTileTraits(
   coord: string,
   traits: Record<string, { value: number }> | null,
 ): Promise<void> {
-  await update(ref(db!), { [`game/tiles/${coord}/traits`]: traits });
+  await update(ref(db!), { [sPath(`tiles/${coord}/traits`)]: traits });
 }
 
 // ── Admin: claimable slot bonus ───────────────────────────────────────────────
@@ -496,25 +448,25 @@ export async function setClaimableSlotBonus(
   slotArr: AdvSlot[],
 ): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/claimableSlots/${slotKey}`), slotArr);
+  await set(sRef(db!, `tiles/${coord}/claimableSlots/${slotKey}`), slotArr);
 }
 
 // ── Admin: slot lock ─────────────────────────────────────────────────────────
 export async function setTileSlotLock(coord: string, locked: boolean): Promise<void> {
   assertDb();
   if (locked) {
-    await set(ref(db!, `game/tiles/${coord}/slotsLocked`), true);
+    await set(sRef(db!, `tiles/${coord}/slotsLocked`), true);
   } else {
-    await remove(ref(db!, `game/tiles/${coord}/slotsLocked`));
+    await remove(sRef(db!, `tiles/${coord}/slotsLocked`));
   }
 }
 
 export async function setMissionSlotLock(missionId: string, locked: boolean): Promise<void> {
   assertDb();
   if (locked) {
-    await set(ref(db!, `game/missions/${missionId}/slotsLocked`), true);
+    await set(sRef(db!, `missions/${missionId}/slotsLocked`), true);
   } else {
-    await remove(ref(db!, `game/missions/${missionId}/slotsLocked`));
+    await remove(sRef(db!, `missions/${missionId}/slotsLocked`));
   }
 }
 
@@ -522,32 +474,32 @@ export async function setMissionSlotLock(missionId: string, locked: boolean): Pr
 
 export async function setTileTracker(coord: string, tracker: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/tracker`), tracker);
+  await set(sRef(db!, `tiles/${coord}/tracker`), tracker);
 }
 
 export async function setTileTracker2(coord: string, tracker: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/tracker2`), tracker);
+  await set(sRef(db!, `tiles/${coord}/tracker2`), tracker);
 }
 
 export async function setTileCheese(coord: string, cheese: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/cheese`), cheese);
+  await set(sRef(db!, `tiles/${coord}/cheese`), cheese);
 }
 
 export async function setTileCheese2(coord: string, cheese: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/cheese2`), cheese);
+  await set(sRef(db!, `tiles/${coord}/cheese2`), cheese);
 }
 
 export async function setMissionTracker(missionId: string, tracker: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/missions/${missionId}/tracker`), tracker);
+  await set(sRef(db!, `missions/${missionId}/tracker`), tracker);
 }
 
 export async function setMissionCheese(missionId: string, cheese: string | null): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/missions/${missionId}/cheese`), cheese);
+  await set(sRef(db!, `missions/${missionId}/cheese`), cheese);
 }
 
 export async function fetchCheesetrackerId(apTrackerId: string): Promise<string> {
@@ -576,25 +528,25 @@ export async function fetchCheeseDetails(cheeseId: string): Promise<CheeseGame[]
 
 export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/status`), status);
+  await set(sRef(db!, `tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/status`), status);
 }
 
 export async function adminUpdatePublicSlotStatus(coord: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/tiles/${coord}/publicSlots/${slotIndex}/status`), status);
+  await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/status`), status);
 }
 
 export async function freeAdventurer(ownerId: string, advId: string): Promise<void> {
   assertDb();
   await update(ref(db!), {
-    [`game/players/${ownerId}/adventurers/${advId}/busy`]:     false,
-    [`game/players/${ownerId}/adventurers/${advId}/busyTile`]: null,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busy`)]:     false,
+    [sPath(`players/${ownerId}/adventurers/${advId}/busyTile`)]: null,
   });
 }
 
 // ── Admin: public slots ───────────────────────────────────────────────────────
 export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
-  const path = `game/tiles/${coord}/publicSlots`;
+  const path = sPath(`tiles/${coord}/publicSlots`);
   if (slots.length === 0) {
     await remove(ref(db!, path));
   } else {
@@ -609,44 +561,44 @@ export async function selectFeat(
   featId: string,
 ): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/players/${playerId}/feats/${slot}`), featId);
+  await set(sRef(db!, `players/${playerId}/feats/${slot}`), featId);
 }
 
 // ── Player name color ─────────────────────────────────────────────────────────
 export async function setPlayerNameColor(playerId: string, colorId: string | null): Promise<void> {
   if (!colorId || colorId === 'default') {
-    await remove(ref(db!, `game/players/${playerId}/nameColor`));
+    await remove(sRef(db!, `players/${playerId}/nameColor`));
   } else {
-    await set(ref(db!, `game/players/${playerId}/nameColor`), colorId);
+    await set(sRef(db!, `players/${playerId}/nameColor`), colorId);
   }
 }
 
 // ── Player disable / enable ───────────────────────────────────────────────────
 export async function setPlayerDisabled(playerId: string, disabled: boolean): Promise<void> {
   if (disabled) {
-    await set(ref(db!, `game/players/${playerId}/disabled`), true);
+    await set(sRef(db!, `players/${playerId}/disabled`), true);
   } else {
-    await remove(ref(db!, `game/players/${playerId}/disabled`));
+    await remove(sRef(db!, `players/${playerId}/disabled`));
   }
 }
 
 export async function isPlayerDisabled(playerId: string): Promise<boolean> {
   assertDb();
-  const snap = await get(ref(db!, `game/players/${playerId}/disabled`));
+  const snap = await get(sRef(db!, `players/${playerId}/disabled`));
   return snap.val() === true;
 }
 
 // ── Activity log ──────────────────────────────────────────────────────────────
 export async function logActivity(type: ActivityType, message: string, icon: string): Promise<void> {
   if (!db || !firebaseReady) return;
-  await push(ref(db, 'game/activityLog'), { timestamp: Date.now(), type, message, icon });
+  await push(sRef(db, 'activityLog'), { timestamp: Date.now(), type, message, icon });
 }
 
 export function subscribeToActivityLog(
   callback: (entries: ActivityEntry[]) => void,
 ): () => void {
   assertDb();
-  return onValue(ref(db!, 'game/activityLog'), snap => {
+  return onValue(sRef(db!, 'activityLog'), snap => {
     if (!snap.exists()) { callback([]); return; }
     const raw = snap.val() as Record<string, Omit<ActivityEntry, 'id'>>;
     const entries = Object.entries(raw)
@@ -658,15 +610,18 @@ export function subscribeToActivityLog(
 }
 
 // ── Admin: set admin ID ───────────────────────────────────────────────────────
+// Admin is GLOBAL now (config/adminId), not per-season — a season that doesn't
+// exist yet can't own an admin.
 export async function setAdminId(playerId: string): Promise<void> {
-  await update(ref(db!, 'game/meta'), { adminId: playerId });
+  assertDb();
+  await set(ref(db!, 'config/adminId'), playerId);
 }
 
-// ── Map reset: new seed + free adventurers, preserve players and adminId ──────
+// ── Map reset: new seed + free adventurers, preserve players ──────────────────
 export async function mapReset(): Promise<void> {
   assertDb();
   const d = db!;
-  const snap = await get(ref(d, 'game'));
+  const snap = await get(sRef(d));
   const current = snap.exists() ? (snap.val() as GameState) : null;
 
   const seed = Math.floor(Math.random() * 0x7FFFFFFF);
@@ -677,16 +632,17 @@ export async function mapReset(): Promise<void> {
   const orbConfig = current?.orbConfig ?? defaultOrbConfig();
 
   // Fresh tile layout with new shop assignments for this seed
-  updates['game/tiles'] = buildDefaultTileData(seed);
+  updates[sPath('tiles')] = buildDefaultTileData(seed);
 
   // Clear orb state and activity log
-  updates['game/orbState'] = null;
-  updates['game/activityLog'] = null;
+  updates[sPath('orbState')] = null;
+  updates[sPath('activityLog')] = null;
 
   // Preserve orb config and shops (admin may have customized both); update meta
-  updates['game/orbConfig'] = orbConfig;
-  // game/shops is intentionally NOT reset — admin customizations are preserved
-  updates['game/meta'] = { adminId: current?.meta?.adminId ?? '', initialized: true, seed };
+  updates[sPath('orbConfig')] = orbConfig;
+  // shops is intentionally NOT reset — admin customizations are preserved
+  // adminId is no longer here; it lives at the global config/adminId.
+  updates[sPath('meta')] = { initialized: true, seed };
 
   // Free all adventurers, preserve player stats
   for (const [playerId, player] of Object.entries(current?.players ?? {})) {
@@ -694,7 +650,7 @@ export async function mapReset(): Promise<void> {
     for (const [advId, adv] of Object.entries(player.adventurers ?? {})) {
       freedAdvs[advId] = { ...adv, busy: false, busyTile: null };
     }
-    updates[`game/players/${playerId}`] = { ...player, adventurers: freedAdvs };
+    updates[sPath(`players/${playerId}`)] = { ...player, adventurers: freedAdvs };
   }
 
   await update(ref(d), updates);
@@ -703,7 +659,7 @@ export async function mapReset(): Promise<void> {
 // ── Player reset: archive XP, wipe stats, trim to 1 adventurer ───────────────
 export async function playerReset(playerId: string): Promise<void> {
   assertDb();
-  const snap = await get(ref(db!, `game/players/${playerId}`));
+  const snap = await get(sRef(db!, `players/${playerId}`));
   if (!snap.exists()) return;
   const player = snap.val() as Player;
 
@@ -724,11 +680,11 @@ export async function playerReset(playerId: string): Promise<void> {
     if (!adv.busy || !adv.busyTile) continue;
     const coord = adv.busyTile;
 
-    const tileSnap = await get(ref(db!, `game/tiles/${coord}`));
+    const tileSnap = await get(sRef(db!, `tiles/${coord}`));
     if (!tileSnap.exists()) continue;
     const tile = tileSnap.val() as Tile;
 
-    updates[`game/tiles/${coord}/adventurers/${advId}`] = null;
+    updates[sPath(`tiles/${coord}/adventurers/${advId}`)] = null;
 
     if (tile.state === 'inprogress') {
       const rawSlots = normalizeSlots(
@@ -743,25 +699,25 @@ export async function playerReset(playerId: string): Promise<void> {
             ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
           }))
         : [{ name: '', game: '' }];
-      const newSlotRef = push(ref(db!, `game/tiles/${coord}/claimableSlots`));
-      updates[`game/tiles/${coord}/claimableSlots/${newSlotRef.key}`] = slotsToAdd;
+      const newSlotRef = push(sRef(db!, `tiles/${coord}/claimableSlots`));
+      updates[sPath(`tiles/${coord}/claimableSlots/${newSlotRef.key}`)] = slotsToAdd;
     }
   }
 
   // Handle active mission — decision E
   if (player.activeMission) {
-    const missionSnap = await get(ref(db!, `game/missions/${player.activeMission}`));
+    const missionSnap = await get(sRef(db!, `missions/${player.activeMission}`));
     if (missionSnap.exists()) {
       const mission = missionSnap.val() as GMMission;
 
       // Remove from participants
-      updates[`game/missions/${player.activeMission}/participants/${playerId}`] = null;
+      updates[sPath(`missions/${player.activeMission}/participants/${playerId}`)] = null;
 
       if (mission.state === 'forming') {
         // Check if this was the last participant; if so, reset firstJoinAt
         const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
         if (remaining.length === 0) {
-          updates[`game/missions/${player.activeMission}/firstJoinAt`] = null;
+          updates[sPath(`missions/${player.activeMission}/firstJoinAt`)] = null;
         }
       } else if (mission.state === 'inprogress') {
         // Full kick: create claimable slot + warning
@@ -773,11 +729,11 @@ export async function playerReset(playerId: string): Promise<void> {
               ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
             }))
           : [{ name: '', game: '' }];
-        const claimRef = push(ref(db!, `game/missions/${player.activeMission}/claimableSlots`));
-        updates[`game/missions/${player.activeMission}/claimableSlots/${claimRef.key}`] = slotsToAdd;
+        const claimRef = push(sRef(db!, `missions/${player.activeMission}/claimableSlots`));
+        updates[sPath(`missions/${player.activeMission}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
 
-        const warnRef = push(ref(db!, `game/players/${playerId}/warnings`));
-        updates[`game/players/${playerId}/warnings/${warnRef.key}`] = {
+        const warnRef = push(sRef(db!, `players/${playerId}/warnings`));
+        updates[sPath(`players/${playerId}/warnings/${warnRef.key}`)] = {
           timestamp: Date.now(),
           message: `Removed from ${mission.label} · Cohort ${mission.series} during player reset.`,
           auto: true,
@@ -786,7 +742,7 @@ export async function playerReset(playerId: string): Promise<void> {
     }
   }
 
-  updates[`game/players/${playerId}`] = {
+  updates[sPath(`players/${playerId}`)] = {
     ...player,
     xp:               0,
     gold:             0,
@@ -824,22 +780,22 @@ export async function setMissionParticipantStatusNote(missionId: string, note: s
 
 export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/missions/${missionId}/participants/${playerId}/slots`), slots);
+  await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots`), slots);
 }
 
 export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
+  await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
 }
 
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {
   assertDb();
-  await set(ref(db!, `game/missions/${missionId}/link`), link || null);
+  await set(sRef(db!, `missions/${missionId}/link`), link || null);
 }
 
 export async function adminSetMissionRoomSettings(missionId: string, release: TriState, collect: TriState, hint: number): Promise<void> {
   assertDb();
-  await update(ref(db!, `game/missions/${missionId}`), { release, collect, hint });
+  await update(sRef(db!, `missions/${missionId}`), { release, collect, hint });
 }
 
 export async function adminKickMissionParticipant(missionId: string, playerId: string): Promise<void> {
@@ -924,7 +880,7 @@ export async function completeMission(
     if (mission.type === 'casino') {
       // Folded players (never played) receive nothing; just free them from the mission.
       if (!participant.played) {
-        updates[`game/players/${pid}/activeMission`] = null;
+        updates[sPath(`players/${pid}/activeMission`)] = null;
         continue;
       }
       // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
@@ -946,16 +902,16 @@ export async function completeMission(
     const newLevel      = calcLevel(newXp);
     const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
 
-    updates[`game/players/${pid}/xp`]           = newXp;
-    updates[`game/players/${pid}/gold`]          = player.gold + earnedGold;
-    updates[`game/players/${pid}/adventurers`]   = updatedPlayer.adventurers;
-    updates[`game/players/${pid}/activeMission`] = null;
+    updates[sPath(`players/${pid}/xp`)]           = newXp;
+    updates[sPath(`players/${pid}/gold`)]          = player.gold + earnedGold;
+    updates[sPath(`players/${pid}/adventurers`)]   = updatedPlayer.adventurers;
+    updates[sPath(`players/${pid}/activeMission`)] = null;
     if (mission.type === 'basic') {
-      updates[`game/players/${pid}/basicTrainingDone`] = true;
+      updates[sPath(`players/${pid}/basicTrainingDone`)] = true;
     }
 
-    const entryKey = push(ref(db!, `game/players/${pid}/completedChallenges`)).key!;
-    updates[`game/players/${pid}/completedChallenges/${entryKey}`] = {
+    const entryKey = push(sRef(db!, `players/${pid}/completedChallenges`)).key!;
+    updates[sPath(`players/${pid}/completedChallenges/${entryKey}`)] = {
       coord:       'D3',
       name:        label,
       xpAwarded:   earnedXP,
@@ -964,8 +920,8 @@ export async function completeMission(
     };
   }
 
-  updates[`game/missionsHistory/${mission.id}`] = { ...mission, state: 'complete' };
-  updates[`game/missions/${mission.id}`]         = null;
+  updates[sPath(`missionsHistory/${mission.id}`)] = { ...mission, state: 'complete' };
+  updates[sPath(`missions/${mission.id}`)]         = null;
 
   await update(ref(db!), updates);
   await logActivity('mission_complete', `${label} has completed.`, '⚜');
@@ -1003,14 +959,19 @@ export async function kmkImportList(
     areas[areaId] = { name: areaName, order: areaOrder++, locked: true, tasks };
   }
 
-  await set(ref(d, `kmkEvents/${listId}`), { name, createdAt: Date.now(), areas });
+  await set(ref(d, `kmkEvents/${listId}`), { name, createdAt: Date.now(), active: false, areas });
   return listId;
 }
 
-// Sets (or clears) the active list shown on the player Trial Board.
-export async function kmkSetActiveList(listId: string | null): Promise<void> {
+// Show/hide a list on the player Trial Board.
+//
+// KMK is GLOBAL — not season-scoped — and its events may be unrelated to any
+// RPelago season. Lists come and go and SEVERAL may be active at once, so
+// activation is a flag on each list rather than a single pointer. (This replaces
+// the old game/meta/kmkActiveListId.)
+export async function kmkSetListActive(listId: string, active: boolean): Promise<void> {
   assertDb();
-  await update(ref(db!, 'game/meta'), { kmkActiveListId: listId });
+  await set(ref(db!, `kmkEvents/${listId}/active`), active);
 }
 
 export async function kmkSetAreaLocked(listId: string, areaId: string, locked: boolean): Promise<void> {
@@ -1101,7 +1062,7 @@ export async function grantMissingAdventurers(playerId: string, player: Player):
     const { firstName, lastName } = randomAdvName();
     const id = `${playerId}-adv-${Date.now()}-${i}`;
     existing[id] = { id, firstName, lastName, cls, busy: false, busyTile: null };
-    updates[`game/players/${playerId}/adventurers/${id}`] = existing[id];
+    updates[sPath(`players/${playerId}/adventurers/${id}`)] = existing[id];
   }
 
   await update(ref(db!), updates);

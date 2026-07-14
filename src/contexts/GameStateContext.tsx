@@ -4,8 +4,9 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref, remove } from 'firebase/database';
 import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
 import { firebaseReady, functions, auth as firebaseAuth, db as firebaseDb } from '../firebase/config';
+import { sPath } from '../firebase/season';
 import {
-  subscribeToGame, initializeGameIfNeeded,
+  subscribeToGame,
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
   completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
@@ -31,6 +32,7 @@ import {
   grantMissingAdventurers as dbGrantMissingAdventurers,
 } from '../firebase/db';
 import { useToast } from './ToastContext';
+import { useSeason } from './SeasonContext';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
 import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
@@ -102,12 +104,22 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   const currentUidRef = useRef<string | null>(null);
   const { addToast } = useToast();
 
-  // Subscribe to game state immediately — reads are open to all users.
+  // Which season we're rendering. Null until config resolves; every
+  // season-scoped read/write below waits on it.
+  const seasonId = useSeason().season?.id ?? null;
+
+  // Subscribe to the ACTIVE SEASON's state. Reads are open to all users, but we
+  // must wait for SeasonContext to resolve which season to read — the db.ts path
+  // helpers throw until setCurrentSeason() has run. Re-subscribes if the admin
+  // switches to preview a draft season.
   useEffect(() => {
     if (!firebaseReady) {
       setLoading(false);
       return;
     }
+    if (!seasonId) return;   // config still loading
+
+    setLoading(true);
     const unsubscribeGame = subscribeToGame(state => {
       if (state?.meta?.seed != null) initializeGrid(state.meta.seed);
       setGameState(state);
@@ -115,43 +127,35 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     });
     const unsubscribeLog = subscribeToActivityLog(setActivityLog);
     return () => { unsubscribeGame(); unsubscribeLog(); };
-  }, []);
+  }, [seasonId]);
 
-  // Initialize the game only after a user is authenticated. The initializing
-  // user's UID becomes adminId, preventing unauthenticated initialization.
-  // Also track current UID for the notification listener.
+  // Track the current uid for the notification listener. (Game/season creation
+  // is no longer client-triggered — see db.ts "Season creation".)
   useEffect(() => {
     if (!firebaseReady || !firebaseAuth) return;
-    const unsubscribeAuth = onAuthStateChanged(firebaseAuth, async fbUser => {
+    return onAuthStateChanged(firebaseAuth, fbUser => {
       currentUidRef.current = fbUser?.uid ?? null;
-      if (!fbUser) return;
-      try {
-        await initializeGameIfNeeded(fbUser.uid);
-      } catch (err) {
-        console.error('Game init failed:', err);
-      }
     });
-    return () => unsubscribeAuth();
   }, []);
 
-  // Subscribe to deployment notifications for the current user.
-  // Each push-keyed entry fires a toast and is deleted on read.
+  // Subscribe to deployment notifications for the current user, within the
+  // active season. Each push-keyed entry fires a toast and is deleted on read.
   useEffect(() => {
-    if (!firebaseReady || !firebaseDb) return;
+    if (!firebaseReady || !firebaseDb || !seasonId) return;
     let unsubscribe: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(firebaseAuth!, fbUser => {
       if (unsubscribe) { unsubscribe(); unsubscribe = null; }
       if (!fbUser) return;
-      const notifRef = ref(firebaseDb!, `game/notifications/${fbUser.uid}`);
-      unsubscribe = onValue(notifRef, snap => {
+      const base = `seasons/${seasonId}/notifications/${fbUser.uid}`;
+      unsubscribe = onValue(ref(firebaseDb!, base), snap => {
         if (!snap.exists()) return;
         const entries = snap.val() as Record<string, { type: string; label: string; ts: number }>;
         for (const [key, entry] of Object.entries(entries)) {
           if (entry.type === 'mission_deploy') {
             addToast(`⚜ ${entry.label} has deployed — you are committed!`, 'info');
           }
-          remove(ref(firebaseDb!, `game/notifications/${fbUser.uid}/${key}`));
+          remove(ref(firebaseDb!, `${base}/${key}`));
         }
       });
     });
@@ -161,7 +165,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       unsubscribeAuth();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [seasonId]);
 
   // ── Player actions ──────────────────────────────────────────────────────────
   const sendAdventurer = useCallback(async (coord: string, entry: TileAdventurer) => {
@@ -221,7 +225,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
             : [];
           if (existingSlots.length > 0) {
             slotRoomUpdates ??= {};
-            slotRoomUpdates[`game/tiles/${coord}/adventurers/${advId}/slots`] =
+            slotRoomUpdates[sPath(`tiles/${coord}/adventurers/${advId}/slots`)] =
               existingSlots.map(s => ({ ...s, room }));
           }
         }

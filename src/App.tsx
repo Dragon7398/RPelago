@@ -4,6 +4,7 @@ import { GameStateProvider } from './contexts/GameStateContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { useAuth } from './contexts/AuthContext';
 import { useGameState } from './contexts/GameStateContext';
+import { SeasonProvider, useIsAdmin } from './contexts/SeasonContext';
 import { firebaseReady } from './firebase/config';
 import Header from './components/Header';
 import PlayerHUD from './components/PlayerHUD';
@@ -217,7 +218,7 @@ function AppContent() {
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
-  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+  const isAdmin = useIsAdmin();
 
   const adminWarnCount = isAdmin && gameState ? (() => {
     const tileWarn = Object.values(gameState.tiles).filter(tile => {
@@ -339,12 +340,17 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <GameStateProvider>
-          <KmkProvider>
-            <FirebaseBanner />
-            <AppContent />
-          </KmkProvider>
-        </GameStateProvider>
+        {/* SeasonProvider must sit ABOVE GameStateProvider: it resolves which
+            season to read and publishes it to the db.ts path helpers, which
+            throw until it has. */}
+        <SeasonProvider>
+          <GameStateProvider>
+            <KmkProvider>
+              <FirebaseBanner />
+              <AppContent />
+            </KmkProvider>
+          </GameStateProvider>
+        </SeasonProvider>
       </ToastProvider>
     </AuthProvider>
   );

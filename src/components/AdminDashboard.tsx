@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
+import { useIsAdmin } from '../contexts/SeasonContext';
 import { currentMaxSlots } from '../lib/missionLogic';
 import ChallengesPage from './admin/ChallengesPage';
 import PlayersPage from './admin/PlayersPage';
@@ -23,7 +23,6 @@ const PAGES: { id: DashPage; label: string }[] = [
 ];
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
   const { gameState, loading } = useGameState();
   const [page, setPage]         = useState<DashPage>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -41,7 +40,7 @@ export default function AdminDashboard() {
   };
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+  const isAdmin = useIsAdmin();
 
   const challengeWarnCount = gameState ? Object.values(gameState.tiles).filter(tile => {
     const advCount = Object.keys(tile.adventurers ?? {}).length;
