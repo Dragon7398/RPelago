@@ -1,11 +1,20 @@
-import type { GambitDef } from '../lib/casinoGambits';
+import { type GambitDef, gambitCasinoGold } from '../lib/casinoGambits';
 
+const SIZE_LABELS: Record<GambitDef['size'], string> = {
+  small:  'Minor',
+  medium: 'Bold',
+  large:  'Grand',
+};
+
+// The casino table is always a casino season, so a penalty's inert XP is shown
+// as the gold it converts to (xp × CASINO_GAMBIT_XP_TO_GP), not as XP.
 function effectText(card: GambitDef): string {
   if (card.kind === 'bonus') {
     return card.goldCost ? `−${card.goldCost} gold` : 'No cost';
   }
   const bits: string[] = [];
-  if (card.xp)  bits.push(`+${card.xp} XP`);
+  const gold = gambitCasinoGold(card);
+  if (gold)     bits.push(`+${gold} gold`);
   if (card.pot) bits.push(`+${card.pot} pot`);
   return bits.join(' · ') || '—';
 }
@@ -38,7 +47,7 @@ export function GambitCardFace({ card, width, className, style }: GambitCardFace
       <div className="gm-frame" />
       <span className="gm-corner tl">✦</span>
       <span className="gm-corner br">✦</span>
-      <span className="gm-size">{card.size === 'big' ? 'Bold' : 'Minor'}</span>
+      <span className="gm-size">{SIZE_LABELS[card.size]}</span>
       <div className="gm-inner">
         <div className="gm-ribbon">{card.statFull}</div>
         <div className="gm-hero">

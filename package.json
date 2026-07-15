@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:rules": "firebase emulators:exec --only database --project demo-rpelago \"vitest run\"",
-    "test:rules:watch": "firebase emulators:exec --only database --project demo-rpelago \"vitest\""
+    "test:rules:watch": "firebase emulators:exec --only database --project demo-rpelago \"vitest\"",
+    "test:unit": "vitest run tests/casino"
   },
   "dependencies": {
     "firebase": "^12.12.1",

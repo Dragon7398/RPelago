@@ -2,7 +2,10 @@
 // Ported from the prototype's casino/data.js.
 // This module is imported by both the browser client and Cloud Functions.
 
-import type { CasinoDeckChoice } from '../types';
+import type { CasinoDeckChoice, CasinoGame } from '../types';
+
+// Re-exported so existing importers can keep pulling CasinoGame from casinoData.
+export type { CasinoGame };
 
 export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
 
@@ -188,3 +191,77 @@ export function shuffle<T>(arr: readonly T[]): T[] {
 
 // Total number of cards in a full deck
 export const DECK_TOTAL = CARD_DEFS.reduce((n, d) => n + d.copies, 0);
+
+// ── Casino game variants (canonical — carries to S2) ─────────────────────────
+// S1.5 retires S1's single in-table poker/blackjack selector: each table is
+// pinned to exactly ONE of these four games. Costs here are FINAL and become
+// S2's casino baseline. Mirror any change in functions/src/casinoEngine.ts.
+
+export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
+  'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
+];
+
+export interface CasinoGameDef {
+  key:        CasinoGame;
+  label:      string;
+  sittings:   1 | 2;      // Hold 'Em plays across two sittings; all others resolve in one.
+  hole:       number;     // cards dealt privately to the seat (Blackjack draws these one at a time).
+  community:  number;     // shared face-up cards (Hold 'Em only); 0 otherwise.
+  maxDraw:    number;     // hard cap on cards a seat may hold before it must trim to pickMax.
+  pickMax:    number;     // most cards a seat may commit (reward = Σ of committed values). Always ≤5.
+  reroll:     boolean;    // may the seat pay rerollCost to redraw?
+  ante:       number;     // gold to sit / first commitment.
+  rerollCost: number;     // 0 when reroll is false.
+  playOn:     number;     // Hold 'Em second-sitting cost; 0 otherwise.
+  // A "best possible" gauge (the reused Blackjack gauge, UI-only) is meaningful
+  // only when the seat picks a ≤pickMax subset from a pool LARGER than pickMax.
+  subsetSelect: boolean;
+}
+
+// Costs are FINAL (locked this season):
+//   Five Card Draw 60g (+30g reroll) · Seven Card Stud 75g · Hold 'Em 30g ante
+//   + 50g play-on (80g total) · Blackjack 40g.
+export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
+  five_card_draw: {
+    key: 'five_card_draw', label: 'Five Card Draw',
+    sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
+    reroll: true, ante: 60, rerollCost: 30, playOn: 0,
+    subsetSelect: false,   // hold 5, commit ≤5 — no larger pool to optimise.
+  },
+  seven_card_stud: {
+    key: 'seven_card_stud', label: 'Seven Card Stud',
+    sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
+    reroll: false, ante: 75, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // pick the best 5 of 7.
+  },
+  holdem: {
+    key: 'holdem', label: "Texas Hold 'Em",
+    sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
+    reroll: false, ante: 30, rerollCost: 0, playOn: 50,
+    subsetSelect: true,    // pick the best 5 of 2 hole + 5 community.
+  },
+  blackjack: {
+    key: 'blackjack', label: 'Blackjack',
+    sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
+    reroll: false, ante: 40, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
+  },
+};
+
+// The cheapest ante across all games — the gold a player must hold to sit at
+// SOME table. Supersedes the hardcoded CASINO_MIN_ENLIST_GOLD once the
+// multi-table flow lands. (= Hold 'Em's 30g ante.)
+export function minCasinoAnte(): number {
+  return Math.min(...CASINO_GAME_ORDER.map(g => CASINO_GAMES[g].ante));
+}
+
+// Total gold a seat spends in one table, given which optional costs it incurred.
+// spent = ante (+ reroll if used) (+ play-on if the seat played on after a
+// Hold 'Em reveal). Net swing = reward − seatSpend.
+export function seatSpend(game: CasinoGame, opts: { rerolled?: boolean; playedOn?: boolean } = {}): number {
+  const g = CASINO_GAMES[game];
+  let spent = g.ante;
+  if (opts.rerolled && g.reroll) spent += g.rerollCost;
+  if (opts.playedOn && g.playOn) spent += g.playOn;
+  return spent;
+}

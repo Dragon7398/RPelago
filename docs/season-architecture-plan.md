@@ -628,11 +628,17 @@ Casino-season launch happen close together. Ordered:
    hand from `seasonSecrets/`.
    **Still to do:** season/shell-aware player-record factory, and gating
    `profiles/` writes on status ≠ `draft` (both live in Cloud Functions → step 2).
-5. 🟡 **KMK decoupling — client done.** `KmkList.active` flag replaces
+5. ✅ **KMK decoupling — DONE.** `KmkList.active` flag replaces
    `kmkActiveListId` (deleted); `KmkContext` exposes `activeListIds` and the
-   admin UI toggles lists on/off. **Still to do:** repoint KMK rules at
-   `config/adminId`, a one-time migration setting `active` from the old pointer,
-   and moving KMK to its own route.
+   admin UI toggles lists on/off. The one-time migration (`kmk-migrate`, setting
+   `active` from the old pointer) ran in prod at Phase 1. KMK rules now key off
+   `config/adminId` (not `game/meta/adminId`), so KMK survives the eventual
+   `game/` deletion; proven by new positive/negative admin tests in
+   `database.rules.test.ts`. The `#keep/{listId}` route is hoisted to the
+   top-level `App()`, above the Season/GameState providers, so it renders under
+   any shell (map or casino) with no season dependency. **KMK now has zero
+   references into the game/season tree — its only tie to the rest of the system
+   is the shared `config/adminId`.**
 6. Build the Casino season (`rpelago_casino_1_5`) as `status:"draft"` while
    finishing it; **alpha users playtest it** (join/leave/complete missions).
 7. Create `seasons/rpelago_s2` as `status:"draft"` too; S2 content authoring
@@ -719,12 +725,16 @@ date-driven**: S1's last cohorts settle → archive/migrate → launch S1.5. The
 gold *floor* model was chosen partly because it removed the season-duration
 dependency that would otherwise have needed calendar math.
 
-Still open:
+**Weekly top-up cron anchor — resolved.** The "week" rolls over **Saturdays
+06:00 `America/Chicago`**. Implemented in `weeklyGoldTopUp`
+(`onSchedule({ schedule: '0 6 * * 6', timeZone: 'America/Chicago' })`), which
+tops any active-casino-season player below 100 GP up to 100 and logs each grant
+to the audit trail.
 
-1. **Weekly top-up cron anchor** — the only genuinely date-shaped decision left.
-   Which day/time/timezone does the "week" roll over on? (`onSchedule` needs a
-   concrete cron expression + timezone; without one it silently anchors to
-   deploy time in UTC.)
+**No architecture open questions remain.** The two prerequisites that are setup,
+not decisions — enabling the **Firebase Storage bucket** for casino YAML uploads,
+and the **KMK rules repoint** to `config/adminId` — are tracked as build tasks
+below, not blockers on starting the casino engine.
 
 ## Housekeeping uncovered during planning
 

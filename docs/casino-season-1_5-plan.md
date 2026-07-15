@@ -192,9 +192,22 @@ the server engine.
 - **Purist deck** = +10% to that seat's own reward, rounded once
   (`Math.round(reward * 1.10)`), before subtracting spend. Never touches the pot.
 - Pot splits **evenly among winning seats** at settle (`Math.floor(pot/winners)`).
-- **"Best possible" (maxValue)** — new display-only benchmark (Σ of the 5
-  highest committable cards from the pool). **Never affects reward or gold.**
-  Guard against wiring it into any server math.
+- **"Best possible" — a UI-only display aid, NOT an engine concept.** This is not
+  a new `maxValue` benchmark to add to the engine or persist on the mission — it
+  is the existing Blackjack gauge (`BlackjackGauge` in
+  `src/casino/TableComponents.tsx`), which shows "keeping Xg of Yg possible" where
+  `Y` = the top-5-by-value sum of the cards the seat can currently see
+  (`sorted.slice(0,5)`). It is computed on render, client-side only, and touches
+  no reward/pot/gold math and no server code — so there is nothing to "guard"
+  against wiring in.
+  - It is meaningful **only for games that pick a ≤5 subset from a pool larger
+    than 5**: Blackjack (keep ≤5 of a drawn pool), **Seven Card Stud** (≤5 of 7
+    dealt), and **Texas Hold 'Em** (≤5 of 2 hole + 5 community). For these two new
+    variants, **reuse the existing gauge** — generalize `BlackjackGauge` into a
+    shared subset-selection gauge; do not reinvent it.
+  - It is **meaningless for Five Card Draw** (you hold exactly 5 and commit ≤5;
+    the optimum is trivially "keep all 5"), which is why the existing
+    `PokerReadout` shows no such benchmark. Leave it that way.
 
 ### Texas Hold 'Em — the genuinely new flow
 
@@ -486,7 +499,8 @@ structure, copy/tone, theming hooks, and interaction rules.
    rules, admin identity. Prereq for everything.
 2. Canonical casino engine additions in `src/lib/casino*.ts` +
    `functions/src/casinoEngine.ts`: per-variant costs, Seven Card Stud, dynamic
-   pot seed, retuned odds, "best possible" display value. Unit-verify scoring.
+   pot seed, retuned odds. Unit-verify scoring. (No "best possible" work here —
+   it's a UI-only gauge handled with the table UI in step 5, see Scoring.)
 3. Texas Hold 'Em cohort sync + shared community-draw function (highest risk;
    do while engine context is fresh).
 4. Server-authoritative leave/forfeit + per-seat settle ledger + weekly gold
@@ -532,11 +546,10 @@ gap. The **S2 gold bulk-seed must run only after S1.5 fully settles.**
 
 ## Open questions (casino-specific)
 
-The casino design is **fully specified**. The profile-site handoff is written:
+The casino design is **fully specified** and there are **no open questions
+remaining**. The profile-site handoff is written:
 [profile-site-handoff.md](profile-site-handoff.md).
 
-One item remains:
-
-1. **Weekly top-up cron anchor** — which day/time/timezone the "week" rolls over
-   on. `onSchedule` needs a concrete cron expression + timezone; left
-   unspecified it silently anchors to deploy time in UTC.
+- ✅ **Weekly top-up cron anchor** — resolved: **Saturdays 06:00
+  `America/Chicago`**. Implemented in `weeklyGoldTopUp`
+  (`onSchedule({ schedule: '0 6 * * 6', timeZone: 'America/Chicago' })`).

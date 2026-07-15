@@ -1,9 +1,13 @@
+import type { DeckCard } from '../lib/casinoData';
+
 export type TileState = 'hidden' | 'available' | 'inprogress' | 'complete';
 export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
 export type TileTypeKey = 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
 export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
+// Which card game a casino table is pinned to (S1.5 multi-table model).
+export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack';
 
 export interface ShopItem {
   id: string;
@@ -267,9 +271,9 @@ export interface CasinoLogEntry {
   ts:           number;
   uid:          string;
   playerName:   string;
-  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold';
-  game?:        'poker' | 'blackjack';
-  amount?:      number;           // gold the player paid for this event
+  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon';
+  game?:        'poker' | 'blackjack' | 'holdem';
+  amount?:      number;           // gold the player paid for this event (negative = paid TO the player)
   potAdd?:      number;           // gold added to the shared pot from this event
   goldSwing?:   number;           // final reward at 'lock' (post deck-boost)
   deckChoice?:  CasinoDeckChoice; // at 'lock'
@@ -288,9 +292,12 @@ export interface GMParticipant {
   goldSwing?:   number;              // sum of committed card values; paid out at mission complete
   casinoXp?:    number;              // XP earned from gambits; merged into mission.xp at deploy
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
-  gameType?:    'poker' | 'blackjack'; // which game was chosen (used for session recovery)
+  gameType?:    'poker' | 'blackjack'; // legacy single-sitting selector; Hold 'Em uses mission.casinoGame
   rerolled?:    boolean;             // true once the poker reroll has been used this session
   deckChoice?:  CasinoDeckChoice;    // which deck variant this seat is drawing from this cohort
+  // Hold 'Em (two-sitting) only:
+  holeLocked?:  boolean;             // sitting 1: hole cards anted + locked in
+  playedOn?:    boolean;             // sitting 2: paid the play-on and selected the final hand
 }
 
 export interface GMMission {
@@ -322,6 +329,9 @@ export interface GMMission {
   pot?:            number;                          // shared gold pot; seeded at cohort creation
   casinoStats?:    CasinoStats;                     // shared odds table modified by gambits
   casinoLog?:      Record<string, CasinoLogEntry>;  // audit trail of money-moving/outcome events
+  casinoGame?:     CasinoGame;                      // which game this table is pinned to (multi-table)
+  community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards (post-reveal)
+  communityDrawnAt?: number;                        // Hold 'Em: when community was dealt; also the phase-2 gate
 }
 
 export interface CompletedChallenge {

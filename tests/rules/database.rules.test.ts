@@ -155,6 +155,18 @@ describe('Keymaster\'s Keep', () => {
     await assertFails(player().ref('kmkEvents/newList').set({ name: 'Mine', createdAt: 1 }));
   });
 
+  it('admin (config/adminId) can create a KMK list', async () => {
+    await assertSucceeds(admin().ref('kmkEvents/newList').set({ name: 'Admin List', createdAt: 1 }));
+  });
+
+  it('admin (config/adminId) can toggle a list active flag', async () => {
+    await assertSucceeds(admin().ref(`kmkEvents/${KMK_LIST}/active`).set(true));
+  });
+
+  it('a player cannot toggle a list active flag', async () => {
+    await assertFails(player().ref(`kmkEvents/${KMK_LIST}/active`).set(true));
+  });
+
   it('a player can advance their OWN claimed task (Pending → Verifying)', async () => {
     await assertSucceeds(
       player()

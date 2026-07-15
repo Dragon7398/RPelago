@@ -255,11 +255,6 @@ function AppContent() {
 
   if (window.location.hash === '#admin') return <AdminDashboard />;
 
-  if (window.location.hash.startsWith('#keep/')) {
-    const listId = window.location.hash.slice('#keep/'.length);
-    return <KmkBoard listId={listId} />;
-  }
-
   if (loading) return <LoadingScreen />;
 
   return (
@@ -337,6 +332,24 @@ function FirebaseBanner() {
 }
 
 export default function App() {
+  // Keymaster's Keep is GLOBAL and shell-independent — not season-scoped. It
+  // renders on its own route above the Season/GameState providers so it works
+  // under any season shell (map or casino) and even if the active season never
+  // resolves. KmkProvider subscribes straight to `kmkEvents/`; it needs neither.
+  if (window.location.hash.startsWith('#keep/')) {
+    const listId = window.location.hash.slice('#keep/'.length);
+    return (
+      <AuthProvider>
+        <ToastProvider>
+          <KmkProvider>
+            <FirebaseBanner />
+            <KmkBoard listId={listId} />
+          </KmkProvider>
+        </ToastProvider>
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <ToastProvider>
