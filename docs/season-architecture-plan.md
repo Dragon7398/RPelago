@@ -556,16 +556,33 @@ after S1.5 is verified live. Until then, rollback is: point
 
 ## Migration & rollout steps
 
-> **⚠️ NOTHING IS DEPLOYED YET, AND THE PIECES MUST SHIP TOGETHER.** The client
-> now reads `seasons/{id}/…`, which does not exist in production. Deploying the
-> frontend alone would break the live site. Cloud Functions still read/write
-> `game/…`, and `config/` has not been seeded. Steps 2–4 below (functions,
-> migration script, config seed) must all land before anything goes out.
+> **STATUS (2026-07-15): Phase 1 executed against PRODUCTION.** The data
+> migration has run: `config/`, `seasons/rpelago_s1/` (archived), the casino
+> draft skeleton, and KMK `active` flags all now exist in prod. **`game/` is
+> intact and the live site is unchanged** — it's still serving the old bundle,
+> which reads `game/`. Nothing player-visible has changed. The new rules,
+> functions, and frontend are **built but not yet deployed** (that's Phase 2).
 
-Progress: **step 0 ✅ · step 1 ✅ · step 2 ✅ · step 4 (client) ✅ · step 5 (client) ✅**
-— see status markers. Remaining before launch: **step 3** (migration + config
-seed script), the KMK rules repoint + route, and the casino gameplay redesign
-(multi-table, new variants — tracked separately in the casino plan).
+Progress: **all code ✅ (steps 0–2, 4, 5) · migration run in prod 🟢**.
+Remaining: **Phase 2 deploy** (rules + functions + frontend → read-only S1),
+the KMK rules repoint (cleanup, non-blocking), and the **casino gameplay build**
+(the real critical path — multi-table, new variants, landing UI; tracked in the
+casino plan).
+
+### Deploy phases (how the built code reaches production)
+
+- **Phase 1 — Prepare (data only): ✅ DONE in prod.** Ran the migration
+  commands via the Admin SDK. Additive/new nodes only; invisible to the live
+  old bundle.
+- **Phase 2 — Cut over to new code (deploy):** deploy rules + functions, then
+  the new frontend. Flips the live site to **read-only archived S1** (the
+  correct between-seasons state). Do when ready; safe regardless of casino build
+  status (the casino shell isn't rendered until `activeSeasonId` flips at
+  launch). Note this means an *extra* frontend deploy now vs. one at launch.
+- **Phase 3 — Launch S1.5:** after the casino gameplay is built + playtested +
+  the draft wiped: bump `CLIENT_VERSION`, deploy the casino frontend, then
+  `bulk-seed-players` + `launch-casino` (flips `activeSeasonId` → casino, bumps
+  `minClientVersion` to force stale reloads).
 
 Because S1 is ending (not running alongside S1.5), the migration and the
 Casino-season launch happen close together. Ordered:
@@ -590,11 +607,18 @@ Casino-season launch happen close together. Ordered:
    active casino seasons only) is added and **writes an audit entry per grant**.
    Client callables pass the resolved season (main app via `getCurrentSeason()`,
    casino table via its `?seasonId=` param).
-3. ⬜ One-time script (Admin SDK, **dry-run in the emulator first**, run once
-   after S1's last cohorts settle): copy `game/*` → `seasons/rpelago_s1/*`
-   verbatim, seed `config/` (adminId, activeSeasonId, seasonList, minClientVersion),
-   and set `seasonList/rpelago_s1 = { shell:"map", status:"archived" }`.
-   **`game/` is left intact.**
+3. ✅ **Migration/launch script written, emulator-verified, and the prepare
+   commands RUN IN PRODUCTION**
+   (`functions/scripts/season-migrate.mjs`, harness
+   `functions/scripts/verify-migrate.mjs` + `emulator-import.mjs`). Discrete
+   idempotent commands, `--dry-run` + `--force`, emulator or prod via env:
+   `archive-s1` (copy `game/*` → `seasons/rpelago_s1/*`, drop adminId from meta,
+   **leaves `game/` intact**), `seed-config` (adminId from `game/meta`,
+   activeSeasonId held at S1, S1 archived, casino+S2 as drafts, alphaUsers),
+   `create-casino-draft`, `kmk-migrate` (pointer → per-list `active`) — **all
+   four run in prod (2026-07-15)**. The launch-time commands
+   `bulk-seed-players` (200 GP + retroactive Coat: owned or ≥750 GP) and
+   `launch-casino` (flip active + bump minClientVersion) are held for Phase 3.
 4. 🟡 **Client season-awareness — DONE.** `src/firebase/season.ts` (path
    helpers + `resolveSeason`), `src/contexts/SeasonContext.tsx` (config
    subscription, global admin, alpha, draft preview, version gate),
