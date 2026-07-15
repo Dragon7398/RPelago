@@ -562,7 +562,10 @@ after S1.5 is verified live. Until then, rollback is: point
 > `game/…`, and `config/` has not been seeded. Steps 2–4 below (functions,
 > migration script, config seed) must all land before anything goes out.
 
-Progress: **step 0 ✅ · step 1 ✅ · step 4 (client) ✅** — see status markers.
+Progress: **step 0 ✅ · step 1 ✅ · step 2 ✅ · step 4 (client) ✅ · step 5 (client) ✅**
+— see status markers. Remaining before launch: **step 3** (migration + config
+seed script), the KMK rules repoint + route, and the casino gameplay redesign
+(multi-table, new variants — tracked separately in the casino plan).
 
 Because S1 is ending (not running alongside S1.5), the migration and the
 Casino-season launch happen close together. Ordered:
@@ -574,10 +577,19 @@ Casino-season launch happen close together. Ordered:
    (status-driven read), and `seasonSecrets/` (default-deny). The
    `!initialized` bootstrap loophole is **gone**. Proven by
    `tests/rules/seasons.rules.test.ts`.
-2. ⬜ Deploy Cloud Functions with dual triggers temporarily (old `game/...`
-   paths *and* new `seasons/{seasonId}/...` wildcarded paths). **Also: move
-   deck/hand writes to `seasonSecrets/` and take `seasonId` on every callable.**
-   The client already expects both.
+2. ✅ **Cloud Functions season-aware** (`functions/src/index.ts` +
+   `functions/src/seasonPaths.ts`). Since S1 already ended, no dual-trigger
+   period was needed — a clean cutover. Done: all 4 DB triggers wildcarded on
+   `{seasonId}`; every callable takes an optional `seasonId` (defaults to the
+   active season, validated by `resolveWriteSeason` so a client can't write a
+   season it shouldn't); deck/hand moved to `seasonSecrets/`; the player-record
+   factory in `exchangeDiscordCode` is shell-aware (casino → 200 GP, no RPG
+   record); `profiles/` writes no-op on draft seasons; `requireAdmin` reads
+   `config/adminId`; `tickGuildmasterMissions` + `tickSlotStatuses` fan out over
+   live + draft seasons; the **weekly gold floor top-up** (`weeklyGoldTopUp`,
+   active casino seasons only) is added and **writes an audit entry per grant**.
+   Client callables pass the resolved season (main app via `getCurrentSeason()`,
+   casino table via its `?seasonId=` param).
 3. ⬜ One-time script (Admin SDK, **dry-run in the emulator first**, run once
    after S1's last cohorts settle): copy `game/*` → `seasons/rpelago_s1/*`
    verbatim, seed `config/` (adminId, activeSeasonId, seasonList, minClientVersion),

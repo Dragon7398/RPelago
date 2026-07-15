@@ -1,7 +1,7 @@
 import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
-import { sRef, sPath } from './season';
+import { sRef, sPath, getCurrentSeason } from './season';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, MISSIONS_CLOSED_FOR_SEASON } from '../lib/constants';
@@ -763,19 +763,22 @@ function assertFunctions() {
   if (!functions || !firebaseReady) throw new Error('Firebase is not configured.');
 }
 
+// Callables take an optional seasonId; passing the current season (which may be
+// a draft under alpha preview) keeps writes on the season the client is viewing.
+// The server defaults to the active season when it's omitted.
 export async function enlistInMission(missionId: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'enlistInMission')({ missionId });
+  await httpsCallable(functions!, 'enlistInMission')({ missionId, seasonId: getCurrentSeason() });
 }
 
 export async function standDownFromMission(missionId: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'standDownFromMission')({ missionId });
+  await httpsCallable(functions!, 'standDownFromMission')({ missionId, seasonId: getCurrentSeason() });
 }
 
 export async function setMissionParticipantStatusNote(missionId: string, note: string | null): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note });
+  await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note, seasonId: getCurrentSeason() });
 }
 
 export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {
@@ -800,27 +803,27 @@ export async function adminSetMissionRoomSettings(missionId: string, release: Tr
 
 export async function adminKickMissionParticipant(missionId: string, playerId: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'adminKickMissionParticipant')({ missionId, playerId });
+  await httpsCallable(functions!, 'adminKickMissionParticipant')({ missionId, playerId, seasonId: getCurrentSeason() });
 }
 
 export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'claimMissionSlot')({ missionId, slotKey });
+  await httpsCallable(functions!, 'claimMissionSlot')({ missionId, slotKey, seasonId: getCurrentSeason() });
 }
 
 export async function adminForceDeploy(missionId: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'adminForceDeploy')({ missionId });
+  await httpsCallable(functions!, 'adminForceDeploy')({ missionId, seasonId: getCurrentSeason() });
 }
 
 export async function syncPlayerProfile(
   targetUid?: string,
 ): Promise<{ tileCount: number; missionCount: number; gameCount: number }> {
   assertFunctions();
-  const fn = httpsCallable<{ targetUid?: string }, { tileCount: number; missionCount: number; gameCount: number }>(
+  const fn = httpsCallable<{ targetUid?: string; seasonId?: string }, { tileCount: number; missionCount: number; gameCount: number }>(
     functions!, 'syncPlayerProfile',
   );
-  const result = await fn({ targetUid });
+  const result = await fn({ targetUid, seasonId: getCurrentSeason() });
   return result.data;
 }
 

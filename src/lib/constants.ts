@@ -329,6 +329,12 @@ export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, b
 // Cost to reroll rejected cards in poker.
 export const CASINO_REROLL_COST = 20;
 
+// Casino-season gold economy. Mirrored in functions/src/index.ts — keep in sync.
+// A fresh casino player starts at START_GOLD; the weekly top-up brings anyone
+// below GOLD_FLOOR up to it; S2 seed = max(final S1.5 balance, GOLD_FLOOR).
+export const CASINO_START_GOLD = 200;
+export const CASINO_GOLD_FLOOR = 100;
+
 // Season-end control: when true, admins can no longer seed brand-new mission cohorts
 // (existing forming/in-progress cohorts still play out normally). Flip back to false
 // when the next season kicks off.

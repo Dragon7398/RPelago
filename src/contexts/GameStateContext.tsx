@@ -178,8 +178,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   const purchaseOrb = useCallback(async (coord: string) => {
     if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopOrb')({ coord });
-  }, []);
+    await httpsCallable(functions, 'purchaseShopOrb')({ coord, seasonId });
+  }, [seasonId]);
 
   const renameAdventurer = useCallback(async (
     playerId: string, advId: string, firstName: string, lastName: string,
@@ -189,8 +189,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   const purchaseItem = useCallback(async (itemId: string, coord: string) => {
     if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopItem')({ itemId, coord });
-  }, []);
+    await httpsCallable(functions, 'purchaseShopItem')({ itemId, coord, seasonId });
+  }, [seasonId]);
 
   const selectFeat = useCallback(async (
     playerId: string,

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -9,6 +9,10 @@ const auth_1 = require("firebase-admin/auth");
 const database_2 = require("firebase-admin/database");
 const params_1 = require("firebase-functions/params");
 const casinoEngine_1 = require("./casinoEngine");
+const seasonPaths_1 = require("./seasonPaths");
+// Season gold economy (mirror of src/lib/constants.ts).
+const CASINO_START_GOLD = 200; // fresh casino player's starting balance
+const CASINO_GOLD_FLOOR = 100; // weekly top-up brings anyone below this up to it
 (0, app_1.initializeApp)();
 const discordClientSecret = (0, params_1.defineSecret)('DISCORD_CLIENT_SECRET');
 // ── Adventurer name/class pools (mirrors src/lib/constants.ts) ────────────────
@@ -138,42 +142,59 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
         if (discordUser.username) {
             await db.ref(`profiles/handleIndex/${discordUser.username.replace(/\./g, '_')}`).set(uid);
         }
-        // Create or update game/players via admin SDK (bypasses security rules).
-        // Blocking on this before returning the token guarantees the record exists
-        // the moment the client signs in — no client-side writes needed for setup.
-        const gamePlayerRef = db.ref(`game/players/${uid}`);
-        const [gameAdvSnap, gameJoinedSnap] = await Promise.all([
-            gamePlayerRef.child('adventurers').get(),
+        // Create or update the ACTIVE SEASON's player record via admin SDK
+        // (bypasses security rules). The record shape depends on the season's
+        // shell: a casino season has no adventurers/XP/feats, just gold; a map
+        // season gets the full RPG record. Blocking on this before returning the
+        // token guarantees the record exists the moment the client signs in.
+        const config = await (0, seasonPaths_1.getConfig)(db);
+        const seasonId = config.activeSeasonId;
+        const shell = (0, seasonPaths_1.seasonInfo)(config, seasonId)?.shell ?? 'map';
+        const gamePlayerRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`));
+        const [gameExistsSnap, gameJoinedSnap] = await Promise.all([
+            gamePlayerRef.child('id').get(),
             gamePlayerRef.child('joinedAt').get(),
         ]);
-        if (!gameAdvSnap.exists()) {
-            // New user — create the full player record server-side.
-            const advId = `${uid}_adv_1`;
-            const firstName = ADV_NAMES_FIRST[Math.floor(Math.random() * ADV_NAMES_FIRST.length)];
-            const lastName = ADV_NAMES_LAST[Math.floor(Math.random() * ADV_NAMES_LAST.length)];
-            const cls = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
-            await gamePlayerRef.set({
-                id: uid,
-                displayName,
-                xp: 0,
-                gold: 0,
-                adventurers: {
-                    [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null },
-                },
-                inventory: {},
-                joinedAt: Date.now(),
-                discordHandle: discordUser.username,
-                avatarHash: discordUser.avatar,
-            });
+        if (!gameExistsSnap.exists()) {
+            // New user this season — create the record for the season's shell.
+            if (shell === 'casino') {
+                await gamePlayerRef.set({
+                    id: uid,
+                    displayName,
+                    gold: CASINO_START_GOLD,
+                    joinedAt: Date.now(),
+                    discordHandle: discordUser.username,
+                    avatarHash: discordUser.avatar,
+                });
+            }
+            else {
+                const advId = `${uid}_adv_1`;
+                const firstName = ADV_NAMES_FIRST[Math.floor(Math.random() * ADV_NAMES_FIRST.length)];
+                const lastName = ADV_NAMES_LAST[Math.floor(Math.random() * ADV_NAMES_LAST.length)];
+                const cls = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
+                await gamePlayerRef.set({
+                    id: uid,
+                    displayName,
+                    xp: 0,
+                    gold: 0,
+                    adventurers: {
+                        [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null },
+                    },
+                    inventory: {},
+                    joinedAt: Date.now(),
+                    discordHandle: discordUser.username,
+                    avatarHash: discordUser.avatar,
+                });
+            }
         }
         else {
             // Returning user — refresh Discord identity fields.
             const gameUpdates = {
-                [`game/players/${uid}/discordHandle`]: discordUser.username,
-                [`game/players/${uid}/avatarHash`]: discordUser.avatar,
+                [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/discordHandle`)]: discordUser.username,
+                [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/avatarHash`)]: discordUser.avatar,
             };
             if (!gameJoinedSnap.exists()) {
-                gameUpdates[`game/players/${uid}/joinedAt`] = Date.now();
+                gameUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/joinedAt`)] = Date.now();
             }
             await db.ref().update(gameUpdates);
         }
@@ -202,18 +223,19 @@ const ORB_SHOP_COST = 1500;
 exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { itemId, coord } = request.data;
+    const { itemId, coord, seasonId: reqSeason } = request.data;
     if (!itemId || !coord)
         throw new https_1.HttpsError('invalid-argument', 'Missing itemId or coord.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
-    const tileSnap = await db.ref(`game/tiles/${coord}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const tileSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get();
     if (!tileSnap.exists())
         throw new https_1.HttpsError('not-found', 'Tile not found.');
     const shopId = tileSnap.val().shopId;
     if (!shopId)
         throw new https_1.HttpsError('failed-precondition', 'No shop at this tile.');
-    const shopSnap = await db.ref(`game/shops/${shopId}`).get();
+    const shopSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `shops/${shopId}`)).get();
     if (!shopSnap.exists())
         throw new https_1.HttpsError('not-found', 'Shop not found.');
     const shop = shopSnap.val();
@@ -222,12 +244,12 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     const cost = ITEM_COSTS[itemId];
     if (cost == null)
         throw new https_1.HttpsError('not-found', 'Unknown item.');
-    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const snapData = playerSnap.val();
     let abortReason = 'Purchase failed. Please try again.';
-    const { committed } = await db.ref(`game/players/${uid}`).transaction((current) => {
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
         const data = current ?? snapData;
         if (data.disabled) {
             abortReason = 'Account restricted.';
@@ -255,20 +277,21 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
 exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { coord } = request.data;
+    const { coord, seasonId: reqSeason } = request.data;
     if (!coord)
         throw new https_1.HttpsError('invalid-argument', 'Missing coord.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
-    const tileSnap = await db.ref(`game/tiles/${coord}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const tileSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get();
     if (!tileSnap.exists())
         throw new https_1.HttpsError('not-found', 'Tile not found.');
     const shopId = tileSnap.val().shopId;
     if (!shopId)
         throw new https_1.HttpsError('failed-precondition', 'No shop at this tile.');
     const [shopSnap, playerSnap] = await Promise.all([
-        db.ref(`game/shops/${shopId}`).get(),
-        db.ref(`game/players/${uid}`).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `shops/${shopId}`)).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get(),
     ]);
     if (!shopSnap.exists())
         throw new https_1.HttpsError('not-found', 'Shop not found.');
@@ -290,7 +313,7 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         buyerName: player.displayName,
     };
     // Atomically claim the orb so two concurrent purchases can't both succeed.
-    const { committed } = await db.ref(`game/orbState/${orbId}`).transaction(current => {
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `orbState/${orbId}`)).transaction(current => {
         if (current !== null)
             return; // abort — already claimed
         return acquisition;
@@ -300,7 +323,7 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     // Deduct gold via transaction so stale snapshot value can't cause incorrect set().
     const snapGold = player.gold;
     let goldAbortReason = 'Gold deduction failed.';
-    const { committed: goldCommitted } = await db.ref(`game/players/${uid}/gold`).transaction((current) => {
+    const { committed: goldCommitted } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}/gold`)).transaction((current) => {
         const gold = typeof current === 'number' ? current : snapGold;
         if (gold < ORB_SHOP_COST) {
             goldAbortReason = 'Not enough gold.';
@@ -310,7 +333,7 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     });
     if (!goldCommitted) {
         try {
-            await db.ref(`game/orbState/${orbId}`).remove();
+            await db.ref((0, seasonPaths_1.sp)(seasonId, `orbState/${orbId}`)).remove();
         }
         catch (e) {
             console.error(`[purchaseShopOrb] Rollback failed for orb ${orbId}, player ${uid}:`, e);
@@ -318,7 +341,7 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', goldAbortReason);
     }
     const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
-    await db.ref('game/activityLog').push().set({
+    await db.ref((0, seasonPaths_1.sp)(seasonId, 'activityLog')).push().set({
         timestamp: Date.now(),
         type: 'orb_purchased',
         message: `${player.displayName} purchased the ${orbLabel} Orb from ${shop.name ?? coord}.`,
@@ -329,20 +352,24 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
 function normalizeGameName(name) {
     return name.trim().replace(/\s+/g, ' ');
 }
-exports.onTileComplete = (0, database_1.onValueWritten)('game/tiles/{coord}/state', async (event) => {
+exports.onTileComplete = (0, database_1.onValueWritten)('seasons/{seasonId}/tiles/{coord}/state', async (event) => {
     const prevState = event.data.before.val();
     const newState = event.data.after.val();
     // Only act on the transition into 'complete'; ignore re-writes to an already-complete tile.
     if (newState !== 'complete' || prevState === 'complete')
         return;
+    const seasonId = event.params.seasonId;
     const coord = event.params.coord;
     const db = (0, database_2.getDatabase)();
+    // Never write real player history from a draft season being playtested.
+    if (await (0, seasonPaths_1.isDraftSeason)(seasonId, db))
+        return;
     // Read tile adventurers and all player records in parallel.
     // tile.adventurers at completion is the canonical claim list: players freed early
     // (slot completion) remain listed here; players who explicitly recalled do not.
     const [advSnap, playersSnap] = await Promise.all([
-        db.ref(`game/tiles/${coord}/adventurers`).get(),
-        db.ref('game/players').get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers`)).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get(),
     ]);
     if (!advSnap.exists())
         return;
@@ -378,16 +405,16 @@ exports.onTileComplete = (0, database_1.onValueWritten)('game/tiles/{coord}/stat
         profileUpdates[`${base}/joinedAt`] = player.joinedAt ?? null;
         // Only set firstEvent when it hasn't been claimed by an earlier event.
         if (!firstEventMap.get(playerId)) {
-            profileUpdates[`${base}/firstEvent`] = 'rpelago_s1';
+            profileUpdates[`${base}/firstEvent`] = seasonId;
         }
         // XP — reflect current value at the moment of tile completion.
-        profileUpdates[`${base}/events/rpelago_s1/xp`] = player.xp ?? 0;
+        profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
         // Tiles — ServerValue.increment avoids read-modify-write race conditions.
-        profileUpdates[`${base}/events/rpelago_s1/tiles`] = database_2.ServerValue.increment(1);
+        profileUpdates[`${base}/events/${seasonId}/tiles`] = database_2.ServerValue.increment(1);
         // Games — keyed record (encodedName → true) so each game write is atomic;
         // no pre-read needed and concurrent tile completions don't stomp each other.
         for (const g of games) {
-            profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+            profileUpdates[`${base}/events/${seasonId}/games/${encodeURIComponent(g)}`] = true;
         }
         // Handle index — lets the profile site resolve /p/<handle> to a UID.
         // Discord handles contain only letters, numbers, underscores, and periods;
@@ -404,18 +431,19 @@ exports.onTileComplete = (0, database_1.onValueWritten)('game/tiles/{coord}/stat
 // Removes boss traits when an elemental orb is first acquired, regardless of
 // which client or Cloud Function wrote the orb. Soft traits (camouflage,
 // enduring) are skipped if the boss is already in-progress (YAML locked).
-exports.onOrbAcquired = (0, database_1.onValueCreated)('game/orbState/{orbId}', async (event) => {
+exports.onOrbAcquired = (0, database_1.onValueCreated)('seasons/{seasonId}/orbState/{orbId}', async (event) => {
+    const seasonId = event.params.seasonId;
     const orbId = event.params.orbId;
     const traitIds = ELEMENTAL_ORB_TRAITS[orbId];
     if (!traitIds)
         return; // not an elemental orb
     const db = (0, database_2.getDatabase)();
-    const metaSnap = await db.ref('game/meta').get();
+    const metaSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'meta')).get();
     if (!metaSnap.exists())
         return;
     const seed = metaSnap.val().seed;
     const bossCoord = bossCoordFromSeed(seed);
-    const bossSnap = await db.ref(`game/tiles/${bossCoord}`).get();
+    const bossSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${bossCoord}`)).get();
     if (!bossSnap.exists())
         return;
     const boss = bossSnap.val();
@@ -434,13 +462,14 @@ exports.onOrbAcquired = (0, database_1.onValueCreated)('game/orbState/{orbId}', 
     }
     if (!changed)
         return;
-    await db.ref(`game/tiles/${bossCoord}/traits`).set(Object.keys(next).length > 0 ? next : null);
+    await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${bossCoord}/traits`)).set(Object.keys(next).length > 0 ? next : null);
 });
 // ── pruneActivityLog ──────────────────────────────────────────────────────────
 // Fires on every new activity log entry and trims the log to 25 entries.
-exports.pruneActivityLog = (0, database_1.onValueCreated)('game/activityLog/{entryId}', async () => {
+exports.pruneActivityLog = (0, database_1.onValueCreated)('seasons/{seasonId}/activityLog/{entryId}', async (event) => {
+    const seasonId = event.params.seasonId;
     const db = (0, database_2.getDatabase)();
-    const snap = await db.ref('game/activityLog').get();
+    const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'activityLog')).get();
     if (!snap.exists())
         return;
     const keys = Object.keys(snap.val()).sort();
@@ -449,7 +478,7 @@ exports.pruneActivityLog = (0, database_1.onValueCreated)('game/activityLog/{ent
         return;
     const updates = {};
     for (const k of keys.slice(0, keys.length - MAX))
-        updates[`game/activityLog/${k}`] = null;
+        updates[(0, seasonPaths_1.sp)(seasonId, `activityLog/${k}`)] = null;
     await db.ref().update(updates);
 });
 // Season-end control: when true, deploying a mission does not spawn its next
@@ -572,42 +601,46 @@ function gmMissionLabel(m) {
     return `${m.label} · Cohort ${roman}`;
 }
 // ── Deploy routine ────────────────────────────────────────────────────────────
-async function deployMission(missionId, m, now) {
+async function deployMission(seasonId, missionId, m, now) {
     const db = (0, database_2.getDatabase)();
     const label = gmMissionLabel(m);
     const updates = {
-        [`game/missions/${missionId}/state`]: 'inprogress',
-        [`game/missions/${missionId}/deployedAt`]: now,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/state`)]: 'inprogress',
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/deployedAt`)]: now,
     };
+    // TODO(casino-season): mission respawn becomes config-driven per season
+    // (config/seasonList/{id}/missionTypes) and the casino becomes N concurrent
+    // single-game tables. For now this preserves the pre-season single-cohort model.
     if (!MISSIONS_CLOSED_FOR_SEASON) {
-        const newRef = db.ref('game/missions').push();
+        const newRef = db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).push();
         const newId = newRef.key;
         const fresh = gmFreshMission(m.type, m.series + 1, now);
-        updates[`game/missions/${newId}`] = { ...fresh, id: newId };
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${newId}`)] = { ...fresh, id: newId };
     }
     // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
     // and clear per-seat deck data (no longer needed once deployed).
     if (m.type === 'casino' && m.casinoStats) {
         const { releaseOn, collectOn } = (0, casinoEngine_1.rollCasinoOdds)(m.casinoStats);
-        updates[`game/missions/${missionId}/release`] = releaseOn ? 'on' : 'off';
-        updates[`game/missions/${missionId}/collect`] = collectOn ? 'on' : 'off';
-        updates[`game/missions/${missionId}/hint`] = m.casinoStats.hint;
-        updates[`game/missions/${missionId}/xp`] = m.casinoStats.xp;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/release`)] = releaseOn ? 'on' : 'off';
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/hint`)] = m.casinoStats.hint;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/xp`)] = m.casinoStats.xp;
+        // Secrets live outside the season tree — clear the draw deck there.
         for (const uid of Object.keys(m.participants ?? {})) {
-            updates[`game/missions/${missionId}/participants/${uid}/deck`] = null;
+            updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)] = null;
         }
     }
     // Notify each enrolled participant via push-keyed notification
     for (const uid of Object.keys(m.participants ?? {})) {
-        const notifRef = db.ref(`game/notifications/${uid}`).push();
-        updates[`game/notifications/${uid}/${notifRef.key}`] = {
+        const notifRef = db.ref((0, seasonPaths_1.sp)(seasonId, `notifications/${uid}`)).push();
+        updates[(0, seasonPaths_1.sp)(seasonId, `notifications/${uid}/${notifRef.key}`)] = {
             type: 'mission_deploy',
             label,
             ts: now,
         };
     }
     await db.ref().update(updates);
-    await db.ref('game/activityLog').push().set({
+    await db.ref((0, seasonPaths_1.sp)(seasonId, 'activityLog')).push().set({
         timestamp: now,
         type: 'mission_deploy',
         message: `${label} has deployed.`,
@@ -618,15 +651,16 @@ async function deployMission(missionId, m, now) {
 exports.enlistInMission = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { missionId } = request.data;
+    const { missionId, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
     const [playerSnap, missionSnap] = await Promise.all([
-        db.ref(`game/players/${uid}`).get(),
-        db.ref(`game/missions/${missionId}`).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get(),
     ]);
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
@@ -653,30 +687,31 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
         ...(mission.type === 'casino' ? { startBy: now + 3_600_000 } : {}),
     };
     const updates = {
-        [`game/missions/${missionId}/participants/${uid}`]: participant,
-        [`game/players/${uid}/activeMission`]: missionId,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: participant,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: missionId,
     };
     if (mission.firstJoinAt == null) {
-        updates[`game/missions/${missionId}/firstJoinAt`] = now;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/firstJoinAt`)] = now;
     }
     await db.ref().update(updates);
     // Re-read updated mission to check if deploy fires
-    const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
+    const updatedSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     const updated = updatedSnap.val();
     if (gmShouldDeploy(updated, now)) {
-        await deployMission(missionId, updated, now);
+        await deployMission(seasonId, missionId, updated, now);
     }
     return { success: true };
 });
 exports.standDownFromMission = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { missionId } = request.data;
+    const { missionId, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
-    const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const missionSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     if (!missionSnap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = missionSnap.val();
@@ -685,12 +720,12 @@ exports.standDownFromMission = (0, https_1.onCall)(async (request) => {
     if (!(uid in (mission.participants ?? {})))
         throw new https_1.HttpsError('failed-precondition', 'not-a-participant');
     const updates = {
-        [`game/missions/${missionId}/participants/${uid}`]: null,
-        [`game/players/${uid}/activeMission`]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: null,
     };
     const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
     if (remaining.length === 0) {
-        updates[`game/missions/${missionId}/firstJoinAt`] = null;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/firstJoinAt`)] = null;
     }
     await db.ref().update(updates);
     return { success: true };
@@ -698,18 +733,19 @@ exports.standDownFromMission = (0, https_1.onCall)(async (request) => {
 exports.setMissionParticipantStatusNote = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { missionId, note } = request.data;
+    const { missionId, note, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
-    const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const missionSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     if (!missionSnap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = missionSnap.val();
     if (!(uid in (mission.participants ?? {})))
         throw new https_1.HttpsError('failed-precondition', 'Not a participant.');
-    const path = `game/missions/${missionId}/participants/${uid}/statusNote`;
+    const path = (0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/statusNote`);
     if (note == null) {
         await db.ref(path).remove();
     }
@@ -722,15 +758,16 @@ exports.setMissionParticipantStatusNote = (0, https_1.onCall)(async (request) =>
 exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { missionId, slotKey } = request.data;
+    const { missionId, slotKey, seasonId: reqSeason } = request.data;
     if (!missionId || !slotKey)
         throw new https_1.HttpsError('invalid-argument', 'Missing parameters.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
     const [playerSnap, missionSnap] = await Promise.all([
-        db.ref(`game/players/${uid}`).get(),
-        db.ref(`game/missions/${missionId}`).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get(),
     ]);
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
@@ -748,7 +785,7 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', 'already-a-participant');
     if (mission.type === 'basic' && player.basicTrainingDone)
         throw new https_1.HttpsError('failed-precondition', 'basic-training-used');
-    const slotSnap = await db.ref(`game/missions/${missionId}/claimableSlots/${slotKey}`).get();
+    const slotSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)).get();
     if (!slotSnap.exists())
         throw new https_1.HttpsError('not-found', 'Slot no longer available.');
     const inheritedSlots = slotSnap.val();
@@ -759,16 +796,24 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
         ...(inheritedSlots?.length ? { slots: inheritedSlots } : {}),
     };
     await db.ref().update({
-        [`game/missions/${missionId}/claimableSlots/${slotKey}`]: null,
-        [`game/missions/${missionId}/participants/${uid}`]: participant,
-        [`game/players/${uid}/activeMission`]: missionId,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: participant,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: missionId,
     });
     return { success: true };
 });
 // ── Casino callables ──────────────────────────────────────────────────────────
 // Shared guard: reads and validates that the caller is seated and hasn't locked yet.
-async function mustCasinoSeat(db, missionId, uid) {
-    const snap = await db.ref(`game/missions/${missionId}`).get();
+//
+// The seat's `deck` and `hand` are SECRETS and live in seasonSecrets/, not on
+// the participant record. We read them separately and splice them onto the
+// returned seat so all downstream `seat.hand` / `seat.deck` access is unchanged.
+async function mustCasinoSeat(db, seasonId, missionId, uid) {
+    const [snap, deckSnap, handSnap] = await Promise.all([
+        db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get(),
+        db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)).get(),
+        db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get(),
+    ]);
     if (!snap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = snap.val();
@@ -776,19 +821,24 @@ async function mustCasinoSeat(db, missionId, uid) {
         throw new https_1.HttpsError('failed-precondition', 'Not a casino mission.');
     if (mission.state !== 'forming')
         throw new https_1.HttpsError('failed-precondition', 'Casino is no longer forming.');
-    const seat = mission.participants?.[uid];
-    if (!seat)
+    const rawSeat = mission.participants?.[uid];
+    if (!rawSeat)
         throw new https_1.HttpsError('permission-denied', 'Not seated at this table.');
-    if (seat.played)
+    if (rawSeat.played)
         throw new https_1.HttpsError('failed-precondition', 'You have already locked your result.');
+    const seat = {
+        ...rawSeat,
+        deck: deckSnap.exists() ? deckSnap.val() : undefined,
+        hand: handSnap.exists() ? handSnap.val() : undefined,
+    };
     return { mission, seat };
 }
 // Append one audit-trail entry for a money-moving or outcome casino event.
 // Returns an [path, value] pair to merge into the caller's own update() call
 // so the log write stays atomic with whatever state change it's describing.
-function casinoLogWrite(db, missionId, entry) {
-    const key = db.ref(`game/missions/${missionId}/casinoLog`).push().key;
-    return [`game/missions/${missionId}/casinoLog/${key}`, { ts: Date.now(), ...entry }];
+function casinoLogWrite(db, seasonId, missionId, entry) {
+    const key = db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoLog`)).push().key;
+    return [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoLog/${key}`), { ts: Date.now(), ...entry }];
 }
 // Set (or change) which deck variant this seat draws from. Allowed any time the
 // seat isn't mid-round; frozen once a hand has been dealt until it's locked or folded.
@@ -797,18 +847,19 @@ exports.setCasinoDeckChoice = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, deckChoice } = request.data;
+    const { missionId, deckChoice, seasonId: reqSeason } = request.data;
     if (!missionId || !deckChoice)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId or deckChoice.');
     if (!casinoEngine_1.DECK_VARIANTS[deckChoice])
         throw new https_1.HttpsError('invalid-argument', 'Unknown deck.');
     const db = (0, database_2.getDatabase)();
-    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     if (seat.hand && seat.hand.length > 0)
         throw new https_1.HttpsError('failed-precondition', 'Finish or fold your current hand first.');
     await db.ref().update({
-        [`game/missions/${missionId}/participants/${uid}/deckChoice`]: deckChoice,
-        [`game/players/${uid}/preferredDeckChoice`]: deckChoice,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/deckChoice`)]: deckChoice,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/preferredDeckChoice`)]: deckChoice,
     });
     return { deckChoice };
 });
@@ -819,13 +870,14 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, game } = request.data;
+    const { missionId, game, seasonId: reqSeason } = request.data;
     if (!missionId || !game)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId or game.');
     if (game !== 'poker' && game !== 'blackjack')
         throw new https_1.HttpsError('invalid-argument', 'Invalid game.');
     const db = (0, database_2.getDatabase)();
-    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     // Prevent re-dealing if a hand is already in progress (they must fold first).
     if (seat.hand && seat.hand.length > 0)
         throw new https_1.HttpsError('failed-precondition', 'A hand is already in progress. Fold first to redeal.');
@@ -842,12 +894,12 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
     // real data (current ≠ null on the server), the conditional write fails and
     // Firebase retries the callback with the actual data — so the final commit
     // always uses the live server value.
-    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const snapData = playerSnap.val();
     let abortReason = 'Gold deduction failed.';
-    const { committed } = await db.ref(`game/players/${uid}`).transaction((current) => {
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
         const data = current ?? snapData;
         if (data.disabled) {
             abortReason = 'Account restricted.';
@@ -868,16 +920,17 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
     const drawable = (0, casinoEngine_1.makeDrawableDeck)(deckArr);
     const hand = drawable.draw(drawCount);
     const remaining = drawable.toArray();
-    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
         uid, playerName: seat.playerName, event: 'deal', game, amount: ante, potAdd: potCut,
     });
+    // hand & deck are SECRETS → seasonSecrets/. Everything else on the seat is public.
     await db.ref().update({
-        [`game/missions/${missionId}/participants/${uid}/hand`]: hand,
-        [`game/missions/${missionId}/participants/${uid}/deck`]: remaining,
-        [`game/missions/${missionId}/participants/${uid}/startBy`]: null,
-        [`game/missions/${missionId}/participants/${uid}/gameType`]: game,
-        [`game/missions/${missionId}/participants/${uid}/rerolled`]: null, // clear from any previous session
-        [`game/missions/${missionId}/pot`]: database_2.ServerValue.increment(potCut),
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: hand,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: remaining,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]: game,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: null, // clear from any previous session
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
         [logPath]: logEntry,
     });
     return { hand, deckRemaining: remaining.length, potAdd: potCut };
@@ -888,11 +941,12 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, action, rejectUids } = request.data;
+    const { missionId, action, rejectUids, seasonId: reqSeason } = request.data;
     if (!missionId || !action)
         throw new https_1.HttpsError('invalid-argument', 'Missing parameters.');
     const db = (0, database_2.getDatabase)();
-    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     const hand = seat.hand ?? [];
     const deck = seat.deck ?? [];
     if (hand.length === 0)
@@ -905,12 +959,12 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         if (deck.length < rejectUids.length)
             throw new https_1.HttpsError('failed-precondition', 'Not enough cards left in the deck to reroll.');
         const potCut = Math.floor(casinoEngine_1.CASINO_REROLL_COST * casinoEngine_1.CASINO_POT_CUT_PCT);
-        const rerollSnap = await db.ref(`game/players/${uid}`).get();
+        const rerollSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
         if (!rerollSnap.exists())
             throw new https_1.HttpsError('not-found', 'Player not found.');
         const rerollSnapData = rerollSnap.val();
         let abortReason = 'Gold deduction failed.';
-        const { committed } = await db.ref(`game/players/${uid}`).transaction((current) => {
+        const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
             const data = current ?? rerollSnapData;
             const gold = data.gold ?? 0;
             if (gold < casinoEngine_1.CASINO_REROLL_COST) {
@@ -926,15 +980,15 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         const fresh = drawable.draw(rejectUids.length);
         let fi = 0;
         const newHand = hand.map((card) => rejectSet.has(card.uid) ? fresh[fi++] : card);
-        const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+        const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
             uid, playerName: seat.playerName, event: 'reroll', game: seat.gameType,
             amount: casinoEngine_1.CASINO_REROLL_COST, potAdd: potCut,
         });
         await db.ref().update({
-            [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
-            [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
-            [`game/missions/${missionId}/participants/${uid}/rerolled`]: true,
-            [`game/missions/${missionId}/pot`]: database_2.ServerValue.increment(potCut),
+            [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: newHand,
+            [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: drawable.toArray(),
+            [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: true,
+            [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
             [logPath]: logEntry,
         });
         return { hand: newHand, deckRemaining: drawable.remaining() };
@@ -948,8 +1002,8 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         const card = drawable.drawOne();
         const newHand = [...hand, card];
         await db.ref().update({
-            [`game/missions/${missionId}/participants/${uid}/hand`]: newHand,
-            [`game/missions/${missionId}/participants/${uid}/deck`]: drawable.toArray(),
+            [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: newHand,
+            [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: drawable.toArray(),
         });
         return { hand: newHand, deckRemaining: drawable.remaining() };
     }
@@ -961,22 +1015,23 @@ exports.casinoFold = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId } = request.data;
+    const { missionId, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
-    const { seat } = await mustCasinoSeat(db, missionId, uid);
-    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
         uid, playerName: seat.playerName, event: 'fold', game: seat.gameType,
     });
     await db.ref().update({
-        [`game/missions/${missionId}/participants/${uid}/hand`]: null,
-        [`game/missions/${missionId}/participants/${uid}/deck`]: null,
-        [`game/missions/${missionId}/participants/${uid}/gameType`]: null,
-        [`game/missions/${missionId}/participants/${uid}/rerolled`]: null,
-        [`game/missions/${missionId}/participants/${uid}/gambitPlayed`]: null,
-        [`game/missions/${missionId}/participants/${uid}/startBy`]: now + 3_600_000,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gambitPlayed`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: now + 3_600_000,
         [logPath]: logEntry,
     });
     return { startBy: now + 3_600_000 };
@@ -987,17 +1042,18 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, gambitDefId } = request.data;
+    const { missionId, gambitDefId, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
-    const { mission, seat } = await mustCasinoSeat(db, missionId, uid);
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     if (seat.gambitPlayed)
         throw new https_1.HttpsError('failed-precondition', 'Gambit phase already resolved.');
     if (!seat.hand || seat.hand.length === 0)
         throw new https_1.HttpsError('failed-precondition', 'No committed hand.');
     const updates = {
-        [`game/missions/${missionId}/participants/${uid}/gambitPlayed`]: true,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gambitPlayed`)]: true,
     };
     if (gambitDefId) {
         const gambitDef = casinoEngine_1.GAMBIT_DEFS_BY_ID[gambitDefId];
@@ -1006,12 +1062,12 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
         const currentStats = mission.casinoStats ?? { ...casinoEngine_1.CASINO_START_STATS };
         const result = (0, casinoEngine_1.applyGambit)(currentStats, gambitDef);
         if (gambitDef.goldCost > 0) {
-            const gambitSnap = await db.ref(`game/players/${uid}`).get();
+            const gambitSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
             if (!gambitSnap.exists())
                 throw new https_1.HttpsError('not-found', 'Player not found.');
             const gambitSnapData = gambitSnap.val();
             let abortReason = 'Gold deduction failed.';
-            const { committed } = await db.ref(`game/players/${uid}`).transaction((current) => {
+            const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
                 const data = current ?? gambitSnapData;
                 const gold = data.gold ?? 0;
                 if (gold < gambitDef.goldCost) {
@@ -1023,15 +1079,15 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
             if (!committed)
                 throw new https_1.HttpsError('failed-precondition', abortReason);
         }
-        updates[`game/missions/${missionId}/casinoStats`] = result.stats;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoStats`)] = result.stats;
         if (result.potAdd > 0) {
-            updates[`game/missions/${missionId}/pot`] = database_2.ServerValue.increment(result.potAdd);
+            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)] = database_2.ServerValue.increment(result.potAdd);
         }
         if (gambitDef.xp > 0) {
-            updates[`game/missions/${missionId}/participants/${uid}/casinoXp`] =
+            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/casinoXp`)] =
                 database_2.ServerValue.increment(gambitDef.xp);
         }
-        const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+        const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
             uid, playerName: seat.playerName, event: 'gambit', gambitDefId,
             amount: gambitDef.goldCost, potAdd: result.potAdd,
         });
@@ -1047,12 +1103,13 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, discardUid, pokerRejectUids } = request.data;
+    const { missionId, discardUid, pokerRejectUids, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
-    const { seat } = await mustCasinoSeat(db, missionId, uid);
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     if (!seat.gambitPlayed)
         throw new https_1.HttpsError('failed-precondition', 'Resolve the gambit phase before locking.');
     let hand = seat.hand ?? [];
@@ -1074,30 +1131,31 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
     const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
     const goldSwing = (0, casinoEngine_1.applyDeckBoost)((0, casinoEngine_1.handStake)(hand), choice);
     const slots = (0, casinoEngine_1.cardsToSlots)(hand);
-    const [logPath, logEntry] = casinoLogWrite(db, missionId, {
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
         uid, playerName: seat.playerName, event: 'lock', game: seat.gameType, goldSwing, deckChoice: choice,
     });
     const updates = {
-        [`game/missions/${missionId}/participants/${uid}/played`]: true,
-        [`game/missions/${missionId}/participants/${uid}/goldSwing`]: goldSwing,
-        [`game/missions/${missionId}/participants/${uid}/slots`]: slots,
-        [`game/missions/${missionId}/participants/${uid}/hand`]: null,
-        [`game/missions/${missionId}/participants/${uid}/deck`]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/played`)]: true,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]: goldSwing,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/slots`)]: slots,
+        // Clear the secret hand/deck now that the seat is locked.
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
         [logPath]: logEntry,
     };
     await db.ref().update(updates);
     // Re-read mission to check deploy gate.
-    const updatedSnap = await db.ref(`game/missions/${missionId}`).get();
+    const updatedSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     const updated = updatedSnap.val();
     if (gmShouldDeploy(updated, now)) {
-        await deployMission(missionId, updated, now);
+        await deployMission(seasonId, missionId, updated, now);
     }
     return { goldSwing, slots };
 });
 // ── Admin callables ───────────────────────────────────────────────────────────
 async function requireAdmin(uid) {
     const db = (0, database_2.getDatabase)();
-    const snap = await db.ref('game/meta/adminId').get();
+    const snap = await db.ref('config/adminId').get();
     if (!snap.exists() || snap.val() !== uid)
         throw new https_1.HttpsError('permission-denied', 'Admin only.');
 }
@@ -1105,11 +1163,12 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     await requireAdmin(request.auth.uid);
-    const { missionId, playerId } = request.data;
+    const { missionId, playerId, seasonId: reqSeason } = request.data;
     if (!missionId || !playerId)
         throw new https_1.HttpsError('invalid-argument', 'Missing parameters.');
     const db = (0, database_2.getDatabase)();
-    const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(request.auth.uid, reqSeason, db);
+    const missionSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     if (!missionSnap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = missionSnap.val();
@@ -1119,11 +1178,11 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     if (!participant)
         throw new https_1.HttpsError('not-found', 'Participant not found.');
     const label = gmMissionLabel(mission);
-    const warnRef = db.ref(`game/players/${playerId}/warnings`).push();
+    const warnRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push();
     const updates = {
-        [`game/missions/${missionId}/participants/${playerId}`]: null,
-        [`game/players/${playerId}/activeMission`]: null,
-        [`game/players/${playerId}/warnings/${warnRef.key}`]: {
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/activeMission`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${warnRef.key}`)]: {
             timestamp: Date.now(),
             message: `Removed from ${label} by admin.`,
             auto: true,
@@ -1133,7 +1192,7 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
         // Reset the decay timer if this was the last participant.
         const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
         if (remaining.length === 0) {
-            updates[`game/missions/${missionId}/firstJoinAt`] = null;
+            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/firstJoinAt`)] = null;
         }
     }
     else {
@@ -1145,8 +1204,8 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
                 ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
             }))
             : [{ name: '', game: '' }];
-        const claimRef = db.ref(`game/missions/${missionId}/claimableSlots`).push();
-        updates[`game/missions/${missionId}/claimableSlots/${claimRef.key}`] = slotsToAdd;
+        const claimRef = db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots`)).push();
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
     }
     await db.ref().update(updates);
     return { success: true };
@@ -1155,17 +1214,18 @@ exports.adminForceDeploy = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     await requireAdmin(request.auth.uid);
-    const { missionId } = request.data;
+    const { missionId, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
-    const missionSnap = await db.ref(`game/missions/${missionId}`).get();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(request.auth.uid, reqSeason, db);
+    const missionSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
     if (!missionSnap.exists())
         throw new https_1.HttpsError('not-found', 'Mission not found.');
     const mission = missionSnap.val();
     if (mission.state !== 'forming')
         throw new https_1.HttpsError('failed-precondition', 'Mission is not forming.');
-    await deployMission(missionId, mission, Date.now());
+    await deployMission(seasonId, missionId, mission, Date.now());
     return { success: true };
 });
 // ── syncPlayerProfile ─────────────────────────────────────────────────────────
@@ -1176,23 +1236,28 @@ exports.adminForceDeploy = (0, https_1.onCall)(async (request) => {
 exports.syncPlayerProfile = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { targetUid } = request.data;
+    const { targetUid, seasonId: reqSeason } = request.data;
     const callerUid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
+    const config = await (0, seasonPaths_1.getConfig)(db);
+    const seasonId = reqSeason || config.activeSeasonId;
+    const isAdmin = config.adminId === callerUid;
     let uid = callerUid;
     if (targetUid && targetUid !== callerUid) {
-        const metaSnap = await db.ref('game/meta/adminId').get();
-        if (!metaSnap.exists() || metaSnap.val() !== callerUid)
+        if (!isAdmin)
             throw new https_1.HttpsError('permission-denied', 'Admin only.');
         uid = targetUid;
     }
-    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    // A non-admin may only sync their own profile for the active season.
+    if (!isAdmin && seasonId !== config.activeSeasonId)
+        throw new https_1.HttpsError('permission-denied', 'Season not available.');
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const player = playerSnap.val();
     const [tilesSnap, historySnap] = await Promise.all([
-        db.ref('game/tiles').get(),
-        db.ref('game/missionsHistory').get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, 'tiles')).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, 'missionsHistory')).get(),
     ]);
     let tileCount = 0;
     const gameNames = new Set();
@@ -1238,15 +1303,15 @@ exports.syncPlayerProfile = (0, https_1.onCall)(async (request) => {
         [`${base}/discordHandle`]: player.discordHandle ?? null,
         [`${base}/avatarHash`]: player.avatarHash ?? null,
         [`${base}/joinedAt`]: player.joinedAt ?? null,
-        [`${base}/events/rpelago_s1/xp`]: player.xp ?? 0,
-        [`${base}/events/rpelago_s1/tiles`]: tileCount,
-        [`${base}/events/rpelago_s1/missions`]: missionCount,
+        [`${base}/events/${seasonId}/xp`]: player.xp ?? 0,
+        [`${base}/events/${seasonId}/tiles`]: tileCount,
+        [`${base}/events/${seasonId}/missions`]: missionCount,
     };
     if (tileCount > 0 || missionCount > 0) {
-        updates[`${base}/firstEvent`] = 'rpelago_s1';
+        updates[`${base}/firstEvent`] = seasonId;
     }
     for (const g of gameNames) {
-        updates[`${base}/events/rpelago_s1/games/${encodeURIComponent(g)}`] = true;
+        updates[`${base}/events/${seasonId}/games/${encodeURIComponent(g)}`] = true;
     }
     if (player.discordHandle) {
         updates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = uid;
@@ -1258,15 +1323,19 @@ exports.syncPlayerProfile = (0, https_1.onCall)(async (request) => {
 // Mirrors onTileComplete: fires when a completed mission is archived to
 // missionsHistory and updates participant profiles with XP snapshot, mission
 // count, games from slots, and identity fields.
-exports.onMissionComplete = (0, database_1.onValueCreated)('game/missionsHistory/{missionId}', async (event) => {
+exports.onMissionComplete = (0, database_1.onValueCreated)('seasons/{seasonId}/missionsHistory/{missionId}', async (event) => {
     const mission = event.data.val();
     if (!mission || mission.state !== 'complete')
         return;
+    const seasonId = event.params.seasonId;
     const db = (0, database_2.getDatabase)();
+    // Never write real player history from a draft season being playtested.
+    if (await (0, seasonPaths_1.isDraftSeason)(seasonId, db))
+        return;
     const participantIds = Object.keys(mission.participants ?? {});
     if (participantIds.length === 0)
         return;
-    const playersSnap = await db.ref('game/players').get();
+    const playersSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get();
     const players = playersSnap.val();
     // Batch-read firstEvent for all participants to avoid overwriting an earlier claim.
     const firstEventSnaps = await Promise.all(participantIds.map(uid => db.ref(`profiles/players/${uid}/firstEvent`).get()));
@@ -1284,16 +1353,16 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('game/missionsHistory
         profileUpdates[`${base}/avatarHash`] = player.avatarHash ?? null;
         profileUpdates[`${base}/joinedAt`] = player.joinedAt ?? null;
         if (!firstEventMap.get(playerId)) {
-            profileUpdates[`${base}/firstEvent`] = 'rpelago_s1';
+            profileUpdates[`${base}/firstEvent`] = seasonId;
         }
         // XP — snapshot of the player's current total (already includes this mission's reward).
-        profileUpdates[`${base}/events/rpelago_s1/xp`] = player.xp ?? 0;
+        profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
         // Missions — separate counter from tiles.
-        profileUpdates[`${base}/events/rpelago_s1/missions`] = database_2.ServerValue.increment(1);
+        profileUpdates[`${base}/events/${seasonId}/missions`] = database_2.ServerValue.increment(1);
         // Games — collect from this participant's slots, same encoding as onTileComplete.
         for (const slot of normalizeArray(participant.slots)) {
             if (slot.game?.trim()) {
-                profileUpdates[`${base}/events/rpelago_s1/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
+                profileUpdates[`${base}/events/${seasonId}/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
             }
         }
         if (player.discordHandle) {
@@ -1308,37 +1377,85 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('game/missionsHistory
 exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes', async () => {
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
-    const snap = await db.ref('game/missions').get();
-    if (!snap.exists())
-        return;
-    const missions = snap.val();
-    // Casino pass: auto-stand-down any seated player whose startBy deadline has expired.
-    // This runs before the deploy pass so freed seats are visible to shouldDeploy.
-    const standDownUpdates = {};
-    for (const [id, m] of Object.entries(missions)) {
-        if (m.type !== 'casino' || m.state !== 'forming')
+    // Scheduled functions have no season param, so fan out over every live
+    // season plus drafts (so alphas can playtest mission deploy).
+    const seasons = await (0, seasonPaths_1.tickableSeasons)(db, true);
+    for (const { seasonId } of seasons) {
+        const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+        if (!snap.exists())
             continue;
-        let anyRemoved = false;
-        for (const [uid, p] of Object.entries(m.participants ?? {})) {
-            if (p.startBy && now > p.startBy && !p.played) {
-                standDownUpdates[`game/missions/${id}/participants/${uid}`] = null;
-                standDownUpdates[`game/players/${uid}/activeMission`] = null;
-                delete m.participants[uid];
-                anyRemoved = true;
+        const missions = snap.val();
+        // Casino pass: auto-stand-down any seated player whose startBy deadline has expired.
+        // This runs before the deploy pass so freed seats are visible to shouldDeploy.
+        const standDownUpdates = {};
+        for (const [id, m] of Object.entries(missions)) {
+            if (m.type !== 'casino' || m.state !== 'forming')
+                continue;
+            let anyRemoved = false;
+            for (const [uid, p] of Object.entries(m.participants ?? {})) {
+                if (p.startBy && now > p.startBy && !p.played) {
+                    standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `missions/${id}/participants/${uid}`)] = null;
+                    standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)] = null;
+                    delete m.participants[uid];
+                    anyRemoved = true;
+                }
+            }
+            if (anyRemoved && Object.keys(m.participants ?? {}).length === 0) {
+                standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `missions/${id}/firstJoinAt`)] = null;
+                m.firstJoinAt = null;
             }
         }
-        if (anyRemoved && Object.keys(m.participants ?? {}).length === 0) {
-            standDownUpdates[`game/missions/${id}/firstJoinAt`] = null;
-            m.firstJoinAt = null;
+        if (Object.keys(standDownUpdates).length > 0) {
+            await db.ref().update(standDownUpdates);
+        }
+        // Deploy pass: check all mission types.
+        for (const [id, m] of Object.entries(missions)) {
+            if (gmShouldDeploy(m, now)) {
+                await deployMission(seasonId, id, m, now);
+            }
         }
     }
-    if (Object.keys(standDownUpdates).length > 0) {
-        await db.ref().update(standDownUpdates);
-    }
-    // Deploy pass: check all mission types.
-    for (const [id, m] of Object.entries(missions)) {
-        if (gmShouldDeploy(m, now)) {
-            await deployMission(id, m, now);
+});
+// ── Scheduled: weekly gold floor top-up ──────────────────────────────────────
+//
+// Any player below CASINO_GOLD_FLOOR is set UP TO it (never additive, so the
+// economy doesn't inflate) — a safety net so a busted player can keep playing.
+// Runs on LIVE seasons only (active/closing), never drafts.
+//
+// The top-up is the ONLY place gold enters the economy from outside a table, so
+// each grant is written to the casino audit log — without it the audit can't
+// see gold being pumped in via the perpetual-floor free roll.
+//
+// Cron: Mondays 00:00 America/New_York. `timeZone` is required — without it
+// onSchedule anchors to UTC. (Adjust the day/time to taste.)
+exports.weeklyGoldTopUp = (0, scheduler_1.onSchedule)({ schedule: '0 0 * * 1', timeZone: 'America/New_York' }, async () => {
+    const db = (0, database_2.getDatabase)();
+    const now = Date.now();
+    // Live seasons only — a draft season's economy is throwaway.
+    const seasons = await (0, seasonPaths_1.tickableSeasons)(db, false);
+    for (const { seasonId, shell } of seasons) {
+        if (shell !== 'casino')
+            continue; // the floor is a casino-season mechanic
+        const playersSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get();
+        if (!playersSnap.exists())
+            continue;
+        const players = playersSnap.val();
+        const updates = {};
+        for (const [uid, p] of Object.entries(players)) {
+            const gold = p.gold ?? 0;
+            if (gold >= CASINO_GOLD_FLOOR)
+                continue;
+            const granted = CASINO_GOLD_FLOOR - gold;
+            updates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/gold`)] = CASINO_GOLD_FLOOR;
+            // Audit entry — the only visibility the admin has into outside gold inflow.
+            const logRef = db.ref((0, seasonPaths_1.sp)(seasonId, 'goldTopUpLog')).push();
+            updates[(0, seasonPaths_1.sp)(seasonId, `goldTopUpLog/${logRef.key}`)] = {
+                ts: now, uid, playerName: p.displayName ?? uid,
+                granted, resultingBalance: CASINO_GOLD_FLOOR,
+            };
+        }
+        if (Object.keys(updates).length > 0) {
+            await db.ref().update(updates);
         }
     }
 });
@@ -1374,91 +1491,95 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
     }
     const updates = {};
-    const playersSnap = await db.ref('game/players').get();
-    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {});
-    // ── Tiles ──────────────────────────────────────────────────────────────────
-    const tilesSnap = await db.ref('game/tiles').get();
-    if (tilesSnap.exists()) {
-        const tiles = tilesSnap.val();
-        for (const [coord, tile] of Object.entries(tiles)) {
-            if (tile.state !== 'inprogress')
-                continue;
-            const advs = Object.values(tile.adventurers ?? {});
-            const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
-            for (const roomNum of [1, 2]) {
-                if (roomNum === 2 && !isBifurcated)
+    // Fan out over live + draft seasons (scheduled functions have no season param).
+    const seasons = await (0, seasonPaths_1.tickableSeasons)(db, true);
+    for (const { seasonId } of seasons) {
+        const playersSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get();
+        const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {});
+        // ── Tiles ──────────────────────────────────────────────────────────────
+        const tilesSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'tiles')).get();
+        if (tilesSnap.exists()) {
+            const tiles = tilesSnap.val();
+            for (const [coord, tile] of Object.entries(tiles)) {
+                if (tile.state !== 'inprogress')
                     continue;
-                const cheeseId = roomNum === 1 ? tile.cheese : tile.cheese2;
-                if (!cheeseId)
+                const advs = Object.values(tile.adventurers ?? {});
+                const isBifurcated = tile.traits?.['bifurcated'] !== undefined;
+                for (const roomNum of [1, 2]) {
+                    if (roomNum === 2 && !isBifurcated)
+                        continue;
+                    const cheeseId = roomNum === 1 ? tile.cheese : tile.cheese2;
+                    if (!cheeseId)
+                        continue;
+                    const roomAdvs = isBifurcated ? advs.filter(a => (a.room ?? 1) === roomNum) : advs;
+                    const allPubSlots = tile.publicSlots ?? [];
+                    const roomPubSlots = isBifurcated
+                        ? allPubSlots.filter(s => !s.room || s.room === roomNum)
+                        : allPubSlots;
+                    const roomSlots = [...roomAdvs.flatMap(a => a.slots ?? []), ...roomPubSlots];
+                    if (!hasActiveSlots(roomSlots))
+                        continue;
+                    const games = await getCheeseGames(cheeseId);
+                    if (!games)
+                        continue;
+                    const statusMap = new Map(games.flatMap(g => {
+                        const s = deriveStatus(g);
+                        return s ? [[extractApSlotName(g.name), s]] : [];
+                    }));
+                    for (const adv of roomAdvs) {
+                        const slots = adv.slots ?? [];
+                        for (let i = 0; i < slots.length; i++) {
+                            const newStatus = statusMap.get(slots[i].name);
+                            if (newStatus && slots[i].status !== newStatus) {
+                                updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`)] = newStatus;
+                            }
+                        }
+                        if (slots.length > 0 &&
+                            slots.every(s => {
+                                const resolved = statusMap.get(s.name) ?? s.status;
+                                return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                            }) &&
+                            rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
+                            updates[(0, seasonPaths_1.sp)(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busy`)] = false;
+                            updates[(0, seasonPaths_1.sp)(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busyTile`)] = null;
+                        }
+                    }
+                    for (let i = 0; i < allPubSlots.length; i++) {
+                        const ps = allPubSlots[i];
+                        if (isBifurcated && ps.room && ps.room !== roomNum)
+                            continue;
+                        const newStatus = statusMap.get(ps.name);
+                        if (newStatus && ps.status !== newStatus) {
+                            updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}/status`)] = newStatus;
+                        }
+                    }
+                }
+            }
+        }
+        // ── Missions ─────────────────────────────────────────────────────────────
+        const missionsSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+        if (missionsSnap.exists()) {
+            const missions = missionsSnap.val();
+            for (const [missionId, mission] of Object.entries(missions)) {
+                if (mission.state !== 'inprogress' || !mission.cheese)
                     continue;
-                const roomAdvs = isBifurcated ? advs.filter(a => (a.room ?? 1) === roomNum) : advs;
-                const allPubSlots = tile.publicSlots ?? [];
-                const roomPubSlots = isBifurcated
-                    ? allPubSlots.filter(s => !s.room || s.room === roomNum)
-                    : allPubSlots;
-                const roomSlots = [...roomAdvs.flatMap(a => a.slots ?? []), ...roomPubSlots];
-                if (!hasActiveSlots(roomSlots))
+                const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
+                if (!hasActiveSlots(allSlots))
                     continue;
-                const games = await getCheeseGames(cheeseId);
+                const games = await getCheeseGames(mission.cheese);
                 if (!games)
                     continue;
                 const statusMap = new Map(games.flatMap(g => {
                     const s = deriveStatus(g);
                     return s ? [[extractApSlotName(g.name), s]] : [];
                 }));
-                for (const adv of roomAdvs) {
-                    const slots = adv.slots ?? [];
+                for (const [pid, p] of Object.entries(mission.participants ?? {})) {
+                    const slots = p.slots ?? [];
                     for (let i = 0; i < slots.length; i++) {
                         const newStatus = statusMap.get(slots[i].name);
                         if (newStatus && slots[i].status !== newStatus) {
-                            updates[`game/tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`] = newStatus;
+                            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}/status`)] = newStatus;
                         }
-                    }
-                    if (slots.length > 0 &&
-                        slots.every(s => {
-                            const resolved = statusMap.get(s.name) ?? s.status;
-                            return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
-                        }) &&
-                        rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
-                        updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busy`] = false;
-                        updates[`game/players/${adv.owner}/adventurers/${adv.advId}/busyTile`] = null;
-                    }
-                }
-                for (let i = 0; i < allPubSlots.length; i++) {
-                    const ps = allPubSlots[i];
-                    if (isBifurcated && ps.room && ps.room !== roomNum)
-                        continue;
-                    const newStatus = statusMap.get(ps.name);
-                    if (newStatus && ps.status !== newStatus) {
-                        updates[`game/tiles/${coord}/publicSlots/${i}/status`] = newStatus;
-                    }
-                }
-            }
-        }
-    }
-    // ── Missions ───────────────────────────────────────────────────────────────
-    const missionsSnap = await db.ref('game/missions').get();
-    if (missionsSnap.exists()) {
-        const missions = missionsSnap.val();
-        for (const [missionId, mission] of Object.entries(missions)) {
-            if (mission.state !== 'inprogress' || !mission.cheese)
-                continue;
-            const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
-            if (!hasActiveSlots(allSlots))
-                continue;
-            const games = await getCheeseGames(mission.cheese);
-            if (!games)
-                continue;
-            const statusMap = new Map(games.flatMap(g => {
-                const s = deriveStatus(g);
-                return s ? [[extractApSlotName(g.name), s]] : [];
-            }));
-            for (const [pid, p] of Object.entries(mission.participants ?? {})) {
-                const slots = p.slots ?? [];
-                for (let i = 0; i < slots.length; i++) {
-                    const newStatus = statusMap.get(slots[i].name);
-                    if (newStatus && slots[i].status !== newStatus) {
-                        updates[`game/missions/${missionId}/participants/${pid}/slots/${i}/status`] = newStatus;
                     }
                 }
             }
@@ -1479,8 +1600,10 @@ exports.kmkClaimTrial = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('invalid-argument', 'Missing listId, areaId, or taskId.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
-    // Player must exist and not be disabled.
-    const playerSnap = await db.ref(`game/players/${uid}`).get();
+    // KMK is global, but disabled-status and displayName come from the player's
+    // ACTIVE-season record.
+    const { activeSeasonId } = await (0, seasonPaths_1.getConfig)(db);
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(activeSeasonId, `players/${uid}`)).get();
     if (!playerSnap.exists())
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const player = playerSnap.val();

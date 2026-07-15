@@ -75,6 +75,7 @@ export function CasinoTable() {
   const [uid, setUid]             = useState<string | null>(null);
   const [mission, setMission]     = useState<GMMission | null>(null);
   const [seasonReady, setSeasonReady] = useState(false);
+  const [resolvedSeasonId, setResolvedSeasonId] = useState('');
   // Read from seasonSecrets/, never from the mission — see the subscription below.
   const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
   const [phase, setPhase]         = useState<Phase>('loading');
@@ -125,6 +126,7 @@ export function CasinoTable() {
       if (cancelled) return;
       if (!sid) { setPhase('error'); return; }
       setCurrentSeason(sid);
+      setResolvedSeasonId(sid);
       setSeasonReady(true);
     })();
     return () => { cancelled = true; };
@@ -225,15 +227,17 @@ export function CasinoTable() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, mission, secretHand]);
 
-  // Callables
+  // Callables. The resolved seasonId is injected into every payload so the
+  // server writes to the right season — essential when an alpha user is
+  // playtesting a table in a draft season.
   const call = useCallback(<T, R>(name: string) => {
     return async (data: T): Promise<R> => {
       if (!functions) throw new Error('Firebase not configured.');
-      const fn = httpsCallable<T, R>(functions, name);
-      const res = await fn(data);
+      const fn = httpsCallable<T & { seasonId: string }, R>(functions, name);
+      const res = await fn({ ...data, seasonId: resolvedSeasonId });
       return res.data;
     };
-  }, []);
+  }, [resolvedSeasonId]);
 
   const doFlash = (msg: string) => { setFlash(msg); setTimeout(() => setFlash(''), 4000); };
 
