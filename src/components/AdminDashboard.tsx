@@ -9,6 +9,7 @@ import OrbsPage from './admin/OrbsPage';
 import MapPage from './admin/MapPage';
 import MissionsPage from './admin/MissionsPage';
 import KmkPage from './admin/kmk/KmkPage';
+import SeasonSwitcher from './SeasonSwitcher';
 
 type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map' | 'missions' | 'kmk';
 
@@ -116,6 +117,7 @@ export default function AdminDashboard() {
     <div className="dash-root">
       <header className="dash-header">
         <div className="dash-header-title">⚔ RPelago — Admin Dashboard</div>
+        <SeasonSwitcher />
         <nav className="dash-tabs">
           {PAGES.map(p => {
             const badge = p.id === 'challenges' ? challengeWarnCount : p.id === 'missions' ? missionWarnCount : 0;

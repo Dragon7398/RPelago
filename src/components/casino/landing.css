@@ -12,9 +12,12 @@
   min-height: 100dvh;
 }
 
-/* soft ambient wash + faint noise behind everything */
+/* Soft ambient wash behind everything.
+   z-index MUST be negative: .rl-root is a stacking context (position:relative +
+   z-index:1) and the page content is statically positioned, so a positioned
+   backdrop at z-index 0 would paint OVER all of it (a full-viewport blackout). */
 .rl-ambient {
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: radial-gradient(ellipse 90% 60% at 50% 0%, oklch(from var(--gold) l c h / 0.06), transparent 60%), var(--bg-deep);
 }
 
@@ -76,7 +79,7 @@
   width: 2.5rem; height: 2.5rem; border-radius: 9px; cursor: pointer;
   display: grid; place-items: center; font-size: 1.05rem;
   background: var(--panel); border: 1px solid var(--line); color: var(--gold-dim);
-  transition: all 0.15s; font-family:'Cinzel',serif;
+  transition: all 0.15s; font-family:'Cinzel',serif; text-decoration: none;
 }
 .rl-navbtn:hover { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.15); }
 

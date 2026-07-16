@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
+import { useIsAdmin } from '../../contexts/SeasonContext';
+import SettingsPanel from '../SettingsPanel';
+import HelpModal from '../HelpModal';
 import { CASINO_GAMES, CASINO_GAME_ORDER, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD } from '../../lib/constants';
 import { currentMaxSlots } from '../../lib/missionLogic';
@@ -15,24 +18,6 @@ type View = 'lounge' | 'floor';
 function loadView(): View {
   try { const v = localStorage.getItem(VIEW_KEY); if (v === 'lounge' || v === 'floor') return v; } catch { /* ignore */ }
   return 'lounge';
-}
-
-// ── Theme handler (shared with the rest of the site via body.theme-*) ────────
-const THEMES: { id: string; label: string }[] = [
-  { id: 'gilded', label: 'Gilded Hearth' }, { id: 'moonlit', label: 'Moonlit Codex' },
-  { id: 'verdant', label: 'Verdant Hollow' }, { id: 'aether', label: 'Aether Bloom' },
-  { id: 'obsidian', label: 'Obsidian Contrast' }, { id: 'tidepool', label: 'Tidepool Atlas' },
-  { id: 'parchment', label: 'Parchment Day' }, { id: 'sakura', label: 'Sakura Scroll' },
-  { id: 'mint', label: 'Mint Library' }, { id: 'lapis', label: 'Dunes & Lapis' },
-];
-function applyTheme(id: string) {
-  const body = document.body;
-  THEMES.forEach(t => body.classList.remove(`theme-${t.id}`));
-  if (id !== 'gilded') body.classList.add(`theme-${id}`);
-  try { localStorage.setItem('realm_theme', id); } catch { /* ignore */ }
-}
-function loadTheme(): string {
-  try { return localStorage.getItem('realm_theme') ?? 'gilded'; } catch { return 'gilded'; }
 }
 
 const gameFamily = (g: CasinoGame): string => (g === 'blackjack' ? 'Blackjack' : 'Poker');
@@ -120,20 +105,6 @@ function Modal({ title, tag, onClose, children }: { title: string; tag: string; 
   );
 }
 
-function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [theme, setTheme] = useState(loadTheme);
-  return (
-    <Modal title="Settings" tag="The House Style" onClose={onClose}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-        {THEMES.map(t => (
-          <button key={t.id} className={`rl-btn${theme === t.id ? ' primary' : ''}`}
-            onClick={() => { setTheme(t.id); applyTheme(t.id); }}>{t.label}</button>
-        ))}
-      </div>
-    </Modal>
-  );
-}
-
 function GamesModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="The Games" tag="Tonight's Tables" onClose={onClose}>
@@ -178,16 +149,21 @@ function ProfileModal({ name, gold, net, onClose }: { name: string; gold: number
 export default function CasinoShell() {
   const { user } = useAuth();
   const { gameState, enlistInMission } = useGameState();
+  const isAdmin = useIsAdmin();
   const [view, setView] = useState<View>(loadView);
-  const [modal, setModal] = useState<null | 'profile' | 'settings' | 'games'>(null);
+  const [modal, setModal] = useState<null | 'profile' | 'games'>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   // The casino token layer (casino/themes.css) is scoped to `.casino-scope` so it
   // never repaints the map's themes. Apply it — and the player's saved theme — for
   // the duration of the casino landing, then release it on unmount.
-  useEffect(() => {
+  //
+  // useLayoutEffect, not useEffect: this must land BEFORE paint, or the first
+  // frame renders with every casino token (--felt, --panel, …) undefined.
+  // (Theme selection itself is owned by the shared SettingsPanel below.)
+  useLayoutEffect(() => {
     document.body.classList.add('casino-scope');
-    applyTheme(loadTheme());
     return () => { document.body.classList.remove('casino-scope'); };
   }, []);
 
@@ -249,10 +225,12 @@ export default function CasinoShell() {
               </button>
             ))}
           </div>
+          {/* Settings lives in the shared S1 panel (theme + font size), not a
+              casino-specific modal — see SettingsPanel at the foot of the page. */}
           <div className="rl-nav">
             <button className="rl-navbtn" title="The Games" onClick={() => setModal('games')}>♠</button>
             <button className="rl-navbtn" title="Profile" onClick={() => setModal('profile')}>☺</button>
-            <button className="rl-navbtn" title="Settings" onClick={() => setModal('settings')}>⚙</button>
+            <button className="rl-navbtn" title="Adventurer's Guide" onClick={() => setHelpOpen(true)}>?</button>
           </div>
         </div>
       </div>
@@ -284,9 +262,22 @@ export default function CasinoShell() {
             </div>}
       </div>
 
-      {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
-      {modal === 'games'    && <GamesModal    onClose={() => setModal(null)} />}
-      {modal === 'profile'  && <ProfileModal name={me?.displayName ?? ''} gold={gold} net={net} onClose={() => setModal(null)} />}
+      {/* Shared site settings (theme + font size + reduced motion). The font
+          scale drives html{font-size}, so it scales the casino too. */}
+      <SettingsPanel variant="casino" />
+
+      {/* Admin-only, in the same S1 treatment as the map so the two shells look
+          the same to the admin — and so previewing the casino always leaves a
+          route back to the dashboard (and the season switcher). */}
+      {isAdmin && (
+        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">⚙ ADMIN</a>
+      )}
+
+      {/* Shared guide, filtered to the sections a casino season actually has. */}
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} variant="casino" />
+
+      {modal === 'games'   && <GamesModal   onClose={() => setModal(null)} />}
+      {modal === 'profile' && <ProfileModal name={me?.displayName ?? ''} gold={gold} net={net} onClose={() => setModal(null)} />}
     </div>
   );
 }

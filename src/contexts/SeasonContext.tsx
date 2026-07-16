@@ -39,10 +39,17 @@ interface ConfigParts {
   alphaUsers?:       Record<string, boolean>;
 }
 
+// The previewed season is persisted: the admin dashboard opens in a NEW TAB, so
+// a React-state-only preview would be lost the moment you navigate to it.
+const PREVIEW_KEY = 'rpelago.season.preview';
+function loadPreview(): string | null {
+  try { return localStorage.getItem(PREVIEW_KEY); } catch { return null; }
+}
+
 export function SeasonProvider({ children }: { children: ReactNode }) {
   const [parts, setParts]         = useState<ConfigParts>({});
   const [uid, setUid]             = useState<string | null>(null);
-  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(loadPreview);
 
   // Track the signed-in uid so admin/alpha can be derived.
   useEffect(() => {
@@ -105,7 +112,17 @@ export function SeasonProvider({ children }: { children: ReactNode }) {
   const isAdmin = !!uid && !!config && config.adminId === uid;
   const isAlpha = !!uid && !!config?.alphaUsers?.[uid];
 
-  const season = config ? resolveSeason(config, previewingId) : null;
+  // Only admin/alpha may preview — a stale or hand-set value is ignored for
+  // everyone else (a normal player can't read draftSeasons anyway, so a draft
+  // preview would resolve to nothing and strand them).
+  const effectivePreview = (isAdmin || isAlpha) ? previewingId : null;
+
+  // Fall back to the live season if a preview can't resolve — e.g. a draft that
+  // has since launched or been deleted. Without this a stale localStorage value
+  // would resolve to null and hang the app on the loading screen.
+  const season = config
+    ? (resolveSeason(config, effectivePreview) ?? resolveSeason(config, null))
+    : null;
 
   // Publish the resolved season to the module-level path helpers DURING RENDER —
   // deliberately not in an effect.
@@ -138,6 +155,10 @@ export function SeasonProvider({ children }: { children: ReactNode }) {
 
   const previewSeason = useCallback((seasonId: string | null) => {
     setPreviewingId(seasonId);
+    try {
+      if (seasonId) localStorage.setItem(PREVIEW_KEY, seasonId);
+      else localStorage.removeItem(PREVIEW_KEY);
+    } catch { /* non-fatal — preview just won't persist */ }
   }, []);
 
   const available = config && (isAdmin || isAlpha) ? selectableSeasons(config) : [];
@@ -146,7 +167,7 @@ export function SeasonProvider({ children }: { children: ReactNode }) {
     <SeasonContext.Provider value={{
       config, season, loading,
       isAdmin, isAlpha,
-      available, previewSeason, previewingId,
+      available, previewSeason, previewingId: effectivePreview,
     }}>
       {children}
     </SeasonContext.Provider>

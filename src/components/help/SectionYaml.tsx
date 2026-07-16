@@ -12,7 +12,10 @@ function YamlVal({ base, bonus }: { base: number; bonus: number }) {
   );
 }
 
-export default function SectionYaml() {
+export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'casino' }) {
+  // A casino season has neither challenges nor feats, so the exemptions that
+  // can raise these limits on the map simply don't exist here.
+  const casino        = variant === 'casino';
   const { user }      = useAuth();
   const { gameState } = useGameState();
   const player        = user && gameState ? gameState.players[user.id] : null;
@@ -38,7 +41,7 @@ export default function SectionYaml() {
       </p>
       <ul className="help-list">
         <li>
-          Submit <strong>1 YAML per slot</strong>. Your YAML may include up to <strong>5 games</strong>;
+          Submit <strong>1 YAML per mission</strong>. Your YAML may include up to <strong>5 games</strong>;
           duplicates are allowed. If submitting multiple games, combine them into one file using{' '}
           <code>---</code> between entries — do not submit separate files.
         </li>
@@ -65,7 +68,8 @@ export default function SectionYaml() {
           [e.g. using BLJ to reach goal early in SM64].
         </li>
         <li>
-          <strong>YAML settings:</strong> Unless approved by special permission, a challenge, or a feat, you are limited to:
+          <strong>YAML settings:</strong> Unless approved by special permission
+          {casino ? '' : ', a challenge, or a feat'}, you are limited to:
           <ul className="help-list help-list-sub">
             <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''} per game</li>
             <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations per game</li>
