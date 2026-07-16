@@ -114,13 +114,31 @@ export async function seedInitialMissions(): Promise<boolean> {
 }
 
 // ── Subscribe to full game state ──────────────────────────────────────────────
+
+// Firebase omits empty nodes entirely, so a season's collections come back
+// ABSENT rather than as `{}` — an archived season whose missions have all
+// completed carries no `missions` node, and a casino season has no `tiles` /
+// `orbState` / `shops` at all. GameState declares them non-optional and
+// consumers iterate them directly (`Object.values(gameState.missions)`), so
+// normalise here rather than guarding at every call site.
+function normalizeGameState(raw: GameState): GameState {
+  return {
+    ...raw,
+    tiles:    raw.tiles    ?? {},
+    players:  raw.players  ?? {},
+    missions: raw.missions ?? {},
+    orbState: raw.orbState ?? {},
+    shops:    raw.shops    ?? {},
+  };
+}
+
 export function subscribeToGame(
   callback: (state: GameState | null) => void,
 ): () => void {
   assertDb();
   const d = db!;
   return onValue(sRef(d), snap => {
-    callback(snap.exists() ? (snap.val() as GameState) : null);
+    callback(snap.exists() ? normalizeGameState(snap.val() as GameState) : null);
   });
 }
 

@@ -16,8 +16,31 @@ import type { SeasonConfig, ResolvedSeason, SeasonStatus } from '../types';
 
 let currentSeasonId: string | null = null;
 
+/**
+ * Resolves the first time a season is published.
+ *
+ * Season-scoped work can be kicked off before SeasonContext has resolved config
+ * — notably AuthContext's post-sign-in checks, because Firebase restores the
+ * auth session well before `config` loads. Such callers `await whenSeasonReady()`
+ * instead of racing `getCurrentSeason()` and throwing.
+ *
+ * This is a MODULE-level promise rather than the SeasonContext value on purpose:
+ * React flushes child effects before parent ones, so a child gating on the
+ * `season` context value could still run before SeasonProvider's
+ * setCurrentSeason() effect has fired.
+ */
+let markSeasonReady: (() => void) | null = null;
+const seasonReadyPromise = new Promise<void>(resolve => { markSeasonReady = resolve; });
+
 export function setCurrentSeason(seasonId: string): void {
   currentSeasonId = seasonId;
+  markSeasonReady?.();
+  markSeasonReady = null;
+}
+
+/** Await this before any season-scoped read/write that may run pre-config. */
+export function whenSeasonReady(): Promise<void> {
+  return currentSeasonId ? Promise.resolve() : seasonReadyPromise;
 }
 
 export function getCurrentSeason(): string {

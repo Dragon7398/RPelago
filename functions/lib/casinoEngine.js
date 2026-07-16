@@ -3,17 +3,30 @@
 // Keep in sync with: casinoData.ts, casinoEngine.ts, casinoGambits.ts, casinoSlots.ts
 // This file is compiled by functions/tsconfig.json (CommonJS, no Vite).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_REROLL_COST = exports.CASINO_ANTE = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = exports.CASINO_POT_SEED = exports.CASINO_MIN_ENLIST_GOLD = void 0;
+exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_REROLL_COST = exports.CASINO_ANTE = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = exports.CASINO_POT_SEED = exports.CASINO_MIN_ENLIST_GOLD = void 0;
+exports.minCasinoAnte = minCasinoAnte;
+exports.seatSpend = seatSpend;
 exports.buildDeck = buildDeck;
 exports.deckChoiceOf = deckChoiceOf;
 exports.shuffle = shuffle;
 exports.makeDrawableDeck = makeDrawableDeck;
 exports.makeDeck = makeDeck;
 exports.handStake = handStake;
+exports.initialDealCount = initialDealCount;
+exports.selectCommitted = selectCommitted;
 exports.applyDeckBoost = applyDeckBoost;
+exports.gambitCasinoGold = gambitCasinoGold;
 exports.buildGambitDeck = buildGambitDeck;
 exports.applyGambit = applyGambit;
 exports.rollCasinoOdds = rollCasinoOdds;
+exports.rollSeatCount = rollSeatCount;
+exports.rollReleaseChance = rollReleaseChance;
+exports.rollCollectChance = rollCollectChance;
+exports.deriveHintCost = deriveHintCost;
+exports.computeInitialPot = computeInitialPot;
+exports.potContribution = potContribution;
+exports.rollTableSetup = rollTableSetup;
+exports.drawCommunity = drawCommunity;
 exports.cardsToSlots = cardsToSlots;
 // ── Casino mission constants ─────────────────────────────────────────────────
 // Mirror of CASINO_MIN_ENLIST_GOLD and CASINO_START_STATS in src/lib/constants.ts
@@ -26,6 +39,47 @@ exports.CASINO_ANTE = {
     blackjack: 30,
 };
 exports.CASINO_REROLL_COST = 20;
+exports.CASINO_GAME_ORDER = [
+    'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
+];
+exports.CASINO_GAMES = {
+    five_card_draw: {
+        key: 'five_card_draw', label: 'Five Card Draw',
+        sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
+        reroll: true, ante: 60, rerollCost: 30, playOn: 0,
+        subsetSelect: false,
+    },
+    seven_card_stud: {
+        key: 'seven_card_stud', label: 'Seven Card Stud',
+        sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
+        reroll: false, ante: 75, rerollCost: 0, playOn: 0,
+        subsetSelect: true,
+    },
+    holdem: {
+        key: 'holdem', label: "Texas Hold 'Em",
+        sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
+        reroll: false, ante: 30, rerollCost: 0, playOn: 50,
+        subsetSelect: true,
+    },
+    blackjack: {
+        key: 'blackjack', label: 'Blackjack',
+        sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
+        reroll: false, ante: 40, rerollCost: 0, playOn: 0,
+        subsetSelect: true,
+    },
+};
+function minCasinoAnte() {
+    return Math.min(...exports.CASINO_GAME_ORDER.map(g => exports.CASINO_GAMES[g].ante));
+}
+function seatSpend(game, opts = {}) {
+    const g = exports.CASINO_GAMES[game];
+    let spent = g.ante;
+    if (opts.rerolled && g.reroll)
+        spent += g.rerollCost;
+    if (opts.playedOn && g.playOn)
+        spent += g.playOn;
+    return spent;
+}
 // ── Card deck ────────────────────────────────────────────────────────────────
 const CARD_TYPE_COPIES = {
     wild: 5,
@@ -172,6 +226,24 @@ function makeDeck() {
 function handStake(hand) {
     return hand.reduce((s, c) => s + c.value, 0);
 }
+// ── Single-sitting play helpers (mirror of src/lib/casinoEngine.ts) ──────────
+function initialDealCount(game) {
+    return game === 'blackjack' ? 2 : exports.CASINO_GAMES[game].hole;
+}
+function selectCommitted(hand, keepUids, pickMax) {
+    let committed = hand.slice();
+    if (keepUids != null) {
+        const keep = new Set(keepUids);
+        committed = hand.filter(c => keep.has(c.uid));
+        if (committed.length !== keep.size)
+            return { ok: false, reason: 'Selected a card not in your hand.' };
+    }
+    if (committed.length === 0)
+        return { ok: false, reason: 'Keep at least one card.' };
+    if (committed.length > pickMax)
+        return { ok: false, reason: `Keep at most ${pickMax} cards.` };
+    return { ok: true, committed };
+}
 // Mirror of applyDeckBoost in src/lib/casinoSlots.ts.
 function applyDeckBoost(reward, choice) {
     const boost = exports.DECK_VARIANTS[choice].gpBoost;
@@ -183,19 +255,27 @@ const GAMBIT_STATS = {
     collect: { short: 'Collect', full: 'Collect Odds', betterWhen: 'up' },
     hint: { short: 'Hint', full: 'Hint Cost', betterWhen: 'down' },
 };
+// Mirror of the RAW gambit table in src/lib/casinoGambits.ts. Keep in sync
+// (order matters — defId is derived from array index).
 const GAMBIT_RAW = [
-    ['release', 2, 'small', 3, 0, 0, 0],
-    ['release', -2, 'small', 3, 0, 5, 15],
-    ['release', 5, 'big', 2, 15, 0, 0],
-    ['release', -5, 'big', 2, 0, 10, 30],
-    ['collect', 2, 'small', 3, 0, 0, 0],
-    ['collect', -2, 'small', 3, 0, 5, 15],
-    ['collect', 5, 'big', 2, 15, 0, 0],
-    ['collect', -5, 'big', 2, 0, 10, 30],
-    ['hint', -0.5, 'small', 3, 0, 0, 0],
-    ['hint', 0.5, 'small', 3, 0, 3, 15],
-    ['hint', -1, 'big', 2, 10, 0, 0],
-    ['hint', 1, 'big', 2, 0, 5, 30],
+    ['release', 3, 'small', 4, 0, 0, 0],
+    ['release', 5, 'medium', 3, 15, 0, 0],
+    ['release', 7, 'large', 2, 30, 0, 0],
+    ['release', -3, 'small', 4, 0, 10, 20],
+    ['release', -5, 'medium', 3, 0, 15, 30],
+    ['release', -7, 'large', 2, 0, 20, 40],
+    ['collect', 3, 'small', 4, 0, 0, 0],
+    ['collect', 5, 'medium', 3, 15, 0, 0],
+    ['collect', 7, 'large', 2, 30, 0, 0],
+    ['collect', -3, 'small', 4, 0, 10, 20],
+    ['collect', -5, 'medium', 3, 0, 15, 30],
+    ['collect', -7, 'large', 2, 0, 20, 40],
+    ['hint', -0.5, 'small', 4, 0, 0, 0],
+    ['hint', -1, 'medium', 3, 10, 0, 0],
+    ['hint', -1.5, 'large', 2, 20, 0, 0],
+    ['hint', 0.5, 'small', 4, 0, 5, 20],
+    ['hint', 1, 'medium', 3, 0, 10, 30],
+    ['hint', 1.5, 'large', 2, 0, 15, 40],
 ];
 function fmtDelta(d) {
     return (d > 0 ? '+' : '−') + Math.abs(d) + '%';
@@ -215,6 +295,12 @@ exports.GAMBIT_DEFS = GAMBIT_RAW.map((r, i) => {
     };
 });
 exports.GAMBIT_DEFS_BY_ID = Object.fromEntries(exports.GAMBIT_DEFS.map(d => [d.defId, d]));
+// Mirror of CASINO_GAMBIT_XP_TO_GP / gambitCasinoGold in src/lib/casinoGambits.ts.
+// In a casino season a penalty gambit's inert XP is paid to the player as gold.
+exports.CASINO_GAMBIT_XP_TO_GP = 2;
+function gambitCasinoGold(card) {
+    return card.xp * exports.CASINO_GAMBIT_XP_TO_GP;
+}
 function buildGambitDeck() {
     const deck = [];
     let uid = 0;
@@ -254,6 +340,67 @@ function rollCasinoOdds(stats) {
         releaseOn: Math.random() * 100 < stats.release,
         collectOn: Math.random() * 100 < stats.collect,
     };
+}
+// ── Table setup: rolled odds, dynamic pot (canonical — carries to S2) ─────────
+// Mirror of the table-setup block in src/lib/casinoEngine.ts. Table creation is
+// server-side, so this logic must match the client copy exactly. Keep in sync.
+exports.CASINO_XP_FLOOR = 50;
+function randInt(max, rng) {
+    return Math.min(max, Math.floor(rng() * (max + 1)));
+}
+function rollSeatCount(rng = Math.random) {
+    return 5 + randInt(3, rng);
+}
+function rollReleaseChance(rng = Math.random) {
+    return 40 + randInt(6, rng) * 5;
+}
+function rollCollectChance(rng = Math.random) {
+    return 25 + randInt(5, rng) * 5;
+}
+function deriveHintCost(release, collect) {
+    return Math.round(((release + collect) / 10) * 2) / 2;
+}
+function computeInitialPot(seats, release, collect, rng = Math.random) {
+    const base = 10 + seats * 10;
+    const span = Math.max(0, 150 - release - collect);
+    return base + randInt(span, rng);
+}
+function potContribution(fee) {
+    return Math.floor(fee * exports.CASINO_POT_CUT_PCT);
+}
+function rollTableSetup(rng = Math.random) {
+    const seats = rollSeatCount(rng);
+    const release = rollReleaseChance(rng);
+    const collect = rollCollectChance(rng);
+    const hint = deriveHintCost(release, collect);
+    const pot = computeInitialPot(seats, release, collect, rng);
+    return { seats, stats: { release, collect, hint, xp: exports.CASINO_XP_FLOOR }, pot };
+}
+// ── Texas Hold 'Em community draw (canonical — carries to S2) ─────────────────
+// Mirror of drawCommunity in src/lib/casinoEngine.ts. The 5 shared PUBLIC
+// community cards: full Purist deck, 1 truly random + one each of Broad / Narrow
+// / Franchise / Platform, all distinct. Keep in sync.
+const COMMUNITY_TYPES = ['broad', 'narrow', 'franchise', 'platform'];
+function shuffleWith(arr, rng) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+function drawCommunity(rng = Math.random) {
+    const deck = shuffleWith(buildDeck(), rng);
+    const chosen = [deck[0]];
+    const used = new Set([deck[0].uid]);
+    for (const t of COMMUNITY_TYPES) {
+        const card = deck.find(c => c.type === t && !used.has(c.uid));
+        if (!card)
+            throw new Error(`drawCommunity: no ${t} card available`);
+        chosen.push(card);
+        used.add(card.uid);
+    }
+    return chosen;
 }
 // ── Slot conversion ──────────────────────────────────────────────────────────
 function cardsToSlots(hand) {

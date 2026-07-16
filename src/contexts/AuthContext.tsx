@@ -4,11 +4,12 @@ import {
 } from 'react';
 import {
   onAuthStateChanged, signInWithCustomToken,
-  signOut as fbSignOut, type User,
+  signOut as fbSignOut,
 } from 'firebase/auth';
 import type { AuthUser } from '../types';
 import { auth as firebaseAuth, firebaseReady } from '../firebase/config';
 import { playerExists, isPlayerDisabled } from '../firebase/db';
+import { whenSeasonReady } from '../firebase/season';
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID as string;
 const REDIRECT_PATH     = '/auth/callback';
@@ -62,10 +63,10 @@ async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
 // Passive guard — the exchangeDiscordCode Cloud Function creates the record
 // server-side before returning the custom token. This just warns if something
 // went wrong with that step (e.g. a Cloud Function deployment issue).
-async function ensurePlayerRecord(fbUser: User): Promise<void> {
-  const exists = await playerExists(fbUser.uid);
+async function ensurePlayerRecord(uid: string): Promise<void> {
+  const exists = await playerExists(uid);
   if (!exists) {
-    console.warn(`[RPelago] Player record missing for ${fbUser.uid} — check exchangeDiscordCode logs.`);
+    console.warn(`[RPelago] Player record missing for ${uid} — check exchangeDiscordCode logs.`);
   }
 }
 
@@ -119,34 +120,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
     }
 
-    const unsubscribe = onAuthStateChanged(firebaseAuth, async fbUser => {
+    // Resolve identity only. The player-record checks below are season-scoped
+    // and must NOT run here: Firebase restores the session long before
+    // SeasonContext publishes the active season, so reading them here would
+    // throw (and, being caught, would silently skip the disabled check).
+    const unsubscribe = onAuthStateChanged(firebaseAuth, fbUser => {
       // Ignore the initial null tick while we're still exchanging the OAuth code
       if (exchangingRef.current && !fbUser) return;
       exchangingRef.current = false;
 
-      if (fbUser) {
-        const displayName = fbUser.displayName ?? 'Unknown';
-        try {
-          await ensurePlayerRecord(fbUser);
-          const disabled = await isPlayerDisabled(fbUser.uid);
-          if (disabled) {
-            await fbSignOut(firebaseAuth!);
-            setAuthError('Your account is currently restricted. Please ask the admin for assistance.');
-            setLoading(false);
-            return;
-          }
-        } catch (err) {
-          console.error('Auth setup failed:', err);
-        }
-        setUser({ id: fbUser.uid, displayName });
-      } else {
-        setUser(null);
-      }
+      setUser(fbUser ? { id: fbUser.uid, displayName: fbUser.displayName ?? 'Unknown' } : null);
       setLoading(false);
     });
 
     return unsubscribe;
   }, []);
+
+  // Post-sign-in checks against `seasons/{id}/players/{uid}` — deferred until
+  // SeasonContext has published the season. Kept out of the auth callback so
+  // sign-in is never blocked on config loading.
+  //
+  // On a season-less route (e.g. #keep/, which mounts no SeasonProvider) this
+  // simply never resolves and the checks are skipped — KMK is season-independent
+  // and doesn't need the season player record.
+  useEffect(() => {
+    if (!user || !firebaseReady || !firebaseAuth) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        await whenSeasonReady();
+        if (cancelled) return;
+
+        await ensurePlayerRecord(user.id);
+        if (cancelled) return;
+
+        if (await isPlayerDisabled(user.id)) {
+          // Set the message before signing out — signOut re-fires the auth
+          // callback, which cancels this effect before a later setState.
+          setAuthError('Your account is currently restricted. Please ask the admin for assistance.');
+          await fbSignOut(firebaseAuth!);
+        }
+      } catch (err) {
+        console.error('Auth setup failed:', err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [user]);
 
   const signIn = useCallback(() => {
     if (!DISCORD_CLIENT_ID) {

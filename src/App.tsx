@@ -4,7 +4,8 @@ import { GameStateProvider } from './contexts/GameStateContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { useAuth } from './contexts/AuthContext';
 import { useGameState } from './contexts/GameStateContext';
-import { SeasonProvider, useIsAdmin } from './contexts/SeasonContext';
+import { SeasonProvider, useIsAdmin, useSeason } from './contexts/SeasonContext';
+import CasinoShell from './components/casino/CasinoShell';
 import { firebaseReady } from './firebase/config';
 import Header from './components/Header';
 import PlayerHUD from './components/PlayerHUD';
@@ -219,9 +220,10 @@ function AppContent() {
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
   const isAdmin = useIsAdmin();
+  const { season } = useSeason();
 
   const adminWarnCount = isAdmin && gameState ? (() => {
-    const tileWarn = Object.values(gameState.tiles).filter(tile => {
+    const tileWarn = Object.values(gameState.tiles ?? {}).filter(tile => {
       const advCount = Object.keys(tile.adventurers ?? {}).length;
       if (tile.state === 'available') return tile.required > 0 && advCount >= tile.required;
       if (tile.state === 'inprogress') {
@@ -256,6 +258,10 @@ function AppContent() {
   if (window.location.hash === '#admin') return <AdminDashboard />;
 
   if (loading) return <LoadingScreen />;
+
+  // Config-driven shell: a casino season renders the casino landing instead of
+  // the map/tile app. Map seasons (S1, S2) fall through to the existing UI.
+  if (season?.shell === 'casino') return <CasinoShell />;
 
   return (
     <div className="page-content">

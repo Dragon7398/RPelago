@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -10,7 +10,8 @@ const database_2 = require("firebase-admin/database");
 const params_1 = require("firebase-functions/params");
 const casinoEngine_1 = require("./casinoEngine");
 const seasonPaths_1 = require("./seasonPaths");
-// Season gold economy (mirror of src/lib/constants.ts).
+// Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR in
+// src/lib/constants.ts (dual-copy, like ITEM_COSTS and the casino engine).
 const CASINO_START_GOLD = 200; // fresh casino player's starting balance
 const CASINO_GOLD_FLOOR = 100; // weekly top-up brings anyone below this up to it
 (0, app_1.initializeApp)();
@@ -481,11 +482,8 @@ exports.pruneActivityLog = (0, database_1.onValueCreated)('seasons/{seasonId}/ac
         updates[(0, seasonPaths_1.sp)(seasonId, `activityLog/${k}`)] = null;
     await db.ref().update(updates);
 });
-// Season-end control: when true, deploying a mission does not spawn its next
-// cohort (mirrors MISSIONS_CLOSED_FOR_SEASON in src/lib/constants.ts — this
-// function tree is a server-side duplicate, so the flag must be kept in sync
-// by hand here). Flip back to false when the next season kicks off.
-const MISSIONS_CLOSED_FOR_SEASON = true;
+// Season-end control is now data-driven: cohort respawn is gated on the season's
+// `status` (see gmSpawnAllowed) rather than a hand-flipped constant.
 const MISSION_DEFS = {
     basic: {
         label: 'Basic Training',
@@ -600,6 +598,67 @@ function gmMissionLabel(m) {
     const roman = toRoman(m.series);
     return `${m.label} · Cohort ${roman}`;
 }
+// ── Casino multi-table model (mirror of src/lib/missionLogic.ts) ─────────────
+// Keep in sync with casinoEntryCosts / pickNextCasinoGame / freshCasinoTable.
+function gmCasinoEntryCosts(game) {
+    const g = casinoEngine_1.CASINO_GAMES[game];
+    const costs = [{ label: 'Ante', gold: g.ante }];
+    if (g.reroll)
+        costs.push({ label: 'Reroll', gold: g.rerollCost });
+    if (g.playOn)
+        costs.push({ label: 'Play-on', gold: g.playOn });
+    return costs;
+}
+// Random game among the type(s) with the fewest currently-forming tables, so no
+// game can be starved (which would make the all-four-games Coat unearnable).
+function gmPickNextCasinoGame(missions, rng = Math.random) {
+    const counts = {
+        five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
+    };
+    for (const m of Object.values(missions ?? {})) {
+        if (m.type === 'casino' && m.state === 'forming' && m.casinoGame)
+            counts[m.casinoGame]++;
+    }
+    const min = Math.min(...casinoEngine_1.CASINO_GAME_ORDER.map(g => counts[g]));
+    const candidates = casinoEngine_1.CASINO_GAME_ORDER.filter(g => counts[g] === min);
+    return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
+}
+function gmFreshCasinoTable(game, series, now, rng = Math.random) {
+    const setup = (0, casinoEngine_1.rollTableSetup)(rng);
+    return {
+        type: 'casino',
+        casinoGame: game,
+        series,
+        label: casinoEngine_1.CASINO_GAMES[game].label,
+        state: 'forming',
+        baseMax: setup.seats,
+        xp: setup.stats.xp,
+        gp: 0,
+        release: 'special',
+        collect: 'special',
+        hint: setup.stats.hint,
+        firstJoinAt: null,
+        createdAt: now,
+        participants: {},
+        variableReward: true,
+        tableUrl: '/casino/table',
+        entryCosts: gmCasinoEntryCosts(game),
+        pot: setup.pot,
+        casinoStats: setup.stats,
+    };
+}
+// Next per-game cohort number — a persisted counter, transaction-incremented so
+// concurrent table spawns never hand out duplicate cohort numbers.
+async function gmNextCasinoSeries(db, seasonId, game) {
+    const res = await db.ref((0, seasonPaths_1.sp)(seasonId, `casinoSeries/${game}`)).transaction((cur) => (cur ?? 0) + 1);
+    return res.snapshot.val() ?? 1;
+}
+// New mission cohorts spawn only while the season is draft or active (not while
+// closing or archived — that's how a season winds down).
+async function gmSpawnAllowed(db, seasonId) {
+    const info = (0, seasonPaths_1.seasonInfo)(await (0, seasonPaths_1.getConfig)(db), seasonId);
+    return info != null && (info.status === 'active' || info.status === 'draft');
+}
 // ── Deploy routine ────────────────────────────────────────────────────────────
 async function deployMission(seasonId, missionId, m, now) {
     const db = (0, database_2.getDatabase)();
@@ -608,14 +667,23 @@ async function deployMission(seasonId, missionId, m, now) {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/state`)]: 'inprogress',
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/deployedAt`)]: now,
     };
-    // TODO(casino-season): mission respawn becomes config-driven per season
-    // (config/seasonList/{id}/missionTypes) and the casino becomes N concurrent
-    // single-game tables. For now this preserves the pre-season single-cohort model.
-    if (!MISSIONS_CLOSED_FOR_SEASON) {
+    // Spawn a replacement cohort on deploy — unless the season is winding down
+    // (closing/archived). A casino table spawns a min-count replacement table
+    // (holding the open-table count); other mission types spawn a same-type cohort.
+    if (await gmSpawnAllowed(db, seasonId)) {
         const newRef = db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).push();
         const newId = newRef.key;
-        const fresh = gmFreshMission(m.type, m.series + 1, now);
-        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${newId}`)] = { ...fresh, id: newId };
+        if (m.type === 'casino') {
+            const msnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+            const missions = msnap.val() ?? {};
+            delete missions[missionId]; // the deploying table is leaving 'forming'
+            const game = gmPickNextCasinoGame(missions);
+            const series = await gmNextCasinoSeries(db, seasonId, game);
+            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${newId}`)] = { ...gmFreshCasinoTable(game, series, now), id: newId };
+        }
+        else {
+            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${newId}`)] = { ...gmFreshMission(m.type, m.series + 1, now), id: newId };
+        }
     }
     // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
     // and clear per-seat deck data (no longer needed once deployed).
@@ -870,20 +938,25 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, game, seasonId: reqSeason } = request.data;
-    if (!missionId || !game)
-        throw new https_1.HttpsError('invalid-argument', 'Missing missionId or game.');
-    if (game !== 'poker' && game !== 'blackjack')
-        throw new https_1.HttpsError('invalid-argument', 'Invalid game.');
+    const { missionId, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
     const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    // The game is fixed by the table (multi-table model). Hold 'Em has its own
+    // two-sitting callables (dealHoldemHole / holdemPlayOn).
+    const game = mission.casinoGame;
+    if (!game)
+        throw new https_1.HttpsError('failed-precondition', 'This table has no game assigned.');
+    if (game === 'holdem')
+        throw new https_1.HttpsError('failed-precondition', "Use the Hold 'Em table flow for this game.");
     // Prevent re-dealing if a hand is already in progress (they must fold first).
     if (seat.hand && seat.hand.length > 0)
         throw new https_1.HttpsError('failed-precondition', 'A hand is already in progress. Fold first to redeal.');
-    const ante = casinoEngine_1.CASINO_ANTE[game];
-    const potCut = Math.floor(ante * casinoEngine_1.CASINO_POT_CUT_PCT);
-    const drawCount = game === 'poker' ? 5 : 2;
+    const ante = casinoEngine_1.CASINO_GAMES[game].ante; // per-variant cost model
+    const potCut = (0, casinoEngine_1.potContribution)(ante);
+    const drawCount = (0, casinoEngine_1.initialDealCount)(game); // FCD 5 · Stud 7 · Blackjack 2
     // Pre-read the player record to catch a genuinely missing record early.
     // The Admin SDK transaction callback always receives null on its first
     // invocation for any path (regardless of whether data exists), because the
@@ -928,7 +1001,6 @@ exports.dealCasinoHand = (0, https_1.onCall)(async (request) => {
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: hand,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: remaining,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: null,
-        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]: game,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: null, // clear from any previous session
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
         [logPath]: logEntry,
@@ -946,19 +1018,26 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('invalid-argument', 'Missing parameters.');
     const db = (0, database_2.getDatabase)();
     const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const game = mission.casinoGame;
+    if (!game || game === 'holdem')
+        throw new https_1.HttpsError('failed-precondition', 'This table has no reroll/hit action.');
+    const cfg = casinoEngine_1.CASINO_GAMES[game];
     const hand = seat.hand ?? [];
     const deck = seat.deck ?? [];
     if (hand.length === 0)
         throw new https_1.HttpsError('failed-precondition', 'No hand in progress.');
     if (action === 'reroll') {
+        if (!cfg.reroll)
+            throw new https_1.HttpsError('failed-precondition', 'This game has no reroll.');
         if (!rejectUids || rejectUids.length === 0)
             throw new https_1.HttpsError('invalid-argument', 'No cards selected to reroll.');
         if (seat.rerolled)
             throw new https_1.HttpsError('failed-precondition', 'You may only reroll once per hand.');
         if (deck.length < rejectUids.length)
             throw new https_1.HttpsError('failed-precondition', 'Not enough cards left in the deck to reroll.');
-        const potCut = Math.floor(casinoEngine_1.CASINO_REROLL_COST * casinoEngine_1.CASINO_POT_CUT_PCT);
+        const rerollCost = cfg.rerollCost;
+        const potCut = (0, casinoEngine_1.potContribution)(rerollCost);
         const rerollSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
         if (!rerollSnap.exists())
             throw new https_1.HttpsError('not-found', 'Player not found.');
@@ -967,11 +1046,11 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
             const data = current ?? rerollSnapData;
             const gold = data.gold ?? 0;
-            if (gold < casinoEngine_1.CASINO_REROLL_COST) {
+            if (gold < rerollCost) {
                 abortReason = 'Not enough gold to reroll.';
                 return undefined;
             }
-            return { ...data, gold: gold - casinoEngine_1.CASINO_REROLL_COST };
+            return { ...data, gold: gold - rerollCost };
         });
         if (!committed)
             throw new https_1.HttpsError('failed-precondition', abortReason);
@@ -981,8 +1060,8 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         let fi = 0;
         const newHand = hand.map((card) => rejectSet.has(card.uid) ? fresh[fi++] : card);
         const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-            uid, playerName: seat.playerName, event: 'reroll', game: seat.gameType,
-            amount: casinoEngine_1.CASINO_REROLL_COST, potAdd: potCut,
+            uid, playerName: seat.playerName, event: 'reroll', game,
+            amount: rerollCost, potAdd: potCut,
         });
         await db.ref().update({
             [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: newHand,
@@ -994,8 +1073,10 @@ exports.casinoDraw = (0, https_1.onCall)(async (request) => {
         return { hand: newHand, deckRemaining: drawable.remaining() };
     }
     if (action === 'hit') {
-        if (hand.length >= 6)
-            throw new https_1.HttpsError('failed-precondition', 'Maximum 6 cards reached.');
+        if (game !== 'blackjack')
+            throw new https_1.HttpsError('failed-precondition', 'This game has no hit.');
+        if (hand.length >= cfg.maxDraw)
+            throw new https_1.HttpsError('failed-precondition', `Maximum ${cfg.maxDraw} cards reached.`);
         if (deck.length === 0)
             throw new https_1.HttpsError('failed-precondition', 'Deck is empty.');
         const drawable = (0, casinoEngine_1.makeDrawableDeck)(deck);
@@ -1021,14 +1102,13 @@ exports.casinoFold = (0, https_1.onCall)(async (request) => {
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
     const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-        uid, playerName: seat.playerName, event: 'fold', game: seat.gameType,
+        uid, playerName: seat.playerName, event: 'fold', game: mission.casinoGame,
     });
     await db.ref().update({
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
-        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gambitPlayed`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: now + 3_600_000,
@@ -1046,7 +1126,7 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
-    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { seasonId, shell } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
     const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     if (seat.gambitPlayed)
         throw new https_1.HttpsError('failed-precondition', 'Gambit phase already resolved.');
@@ -1062,6 +1142,7 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
         const currentStats = mission.casinoStats ?? { ...casinoEngine_1.CASINO_START_STATS };
         const result = (0, casinoEngine_1.applyGambit)(currentStats, gambitDef);
         if (gambitDef.goldCost > 0) {
+            // Bonus gambit — the player PAYS gold to improve the room's shared odds.
             const gambitSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
             if (!gambitSnap.exists())
                 throw new https_1.HttpsError('not-found', 'Player not found.');
@@ -1079,17 +1160,31 @@ exports.playCasinoGambit = (0, https_1.onCall)(async (request) => {
             if (!committed)
                 throw new https_1.HttpsError('failed-precondition', abortReason);
         }
-        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoStats`)] = result.stats;
+        // Penalty gambit reward: in a CASINO season the (inert) XP is paid to the
+        // player as gold (xp × rate) and the XP is NOT accrued; in a map season the
+        // XP is awarded normally. Bonuses have xp 0, so neither branch fires.
+        const casinoGold = shell === 'casino' ? (0, casinoEngine_1.gambitCasinoGold)(gambitDef) : 0;
+        let logAmount = gambitDef.goldCost; // + = paid by player
+        if (gambitDef.xp > 0) {
+            if (shell === 'casino') {
+                updates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/gold`)] = database_2.ServerValue.increment(casinoGold);
+                logAmount = -casinoGold; // − = paid TO the player (gold entering the economy)
+            }
+            else {
+                updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/casinoXp`)] =
+                    database_2.ServerValue.increment(gambitDef.xp);
+            }
+        }
+        // In a casino season the gambit XP is converted to gold, so don't let it
+        // accrue into the (inert) shared xp floor.
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoStats`)] =
+            shell === 'casino' ? { ...result.stats, xp: currentStats.xp } : result.stats;
         if (result.potAdd > 0) {
             updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)] = database_2.ServerValue.increment(result.potAdd);
         }
-        if (gambitDef.xp > 0) {
-            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/casinoXp`)] =
-                database_2.ServerValue.increment(gambitDef.xp);
-        }
         const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
             uid, playerName: seat.playerName, event: 'gambit', gambitDefId,
-            amount: gambitDef.goldCost, potAdd: result.potAdd,
+            amount: logAmount, potAdd: result.potAdd,
         });
         updates[logPath] = logEntry;
     }
@@ -1103,36 +1198,29 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const uid = request.auth.uid;
-    const { missionId, discardUid, pokerRejectUids, seasonId: reqSeason } = request.data;
+    const { missionId, keepUids, seasonId: reqSeason } = request.data;
     if (!missionId)
         throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
     const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
     if (!seat.gambitPlayed)
         throw new https_1.HttpsError('failed-precondition', 'Resolve the gambit phase before locking.');
-    let hand = seat.hand ?? [];
-    if (hand.length === 0)
+    const rawHand = seat.hand ?? [];
+    if (rawHand.length === 0)
         throw new https_1.HttpsError('failed-precondition', 'No hand to lock.');
-    if (hand.length > 5 && discardUid == null)
-        throw new https_1.HttpsError('failed-precondition', 'A 6-card hand requires one discard before locking.');
-    if (discardUid != null) {
-        hand = hand.filter((c) => c.uid !== discardUid);
-        if (hand.length === seat.hand.length)
-            throw new https_1.HttpsError('invalid-argument', 'discardUid not found in hand.');
-    }
-    if (pokerRejectUids && pokerRejectUids.length > 0) {
-        const rejectSet = new Set(pokerRejectUids);
-        hand = hand.filter((c) => !rejectSet.has(c.uid));
-        if (hand.length === 0)
-            throw new https_1.HttpsError('invalid-argument', 'Cannot reject all cards.');
-    }
+    // Validate the committed selection against the game's pickMax (≤5 everywhere).
+    const pickMax = mission.casinoGame ? casinoEngine_1.CASINO_GAMES[mission.casinoGame].pickMax : 5;
+    const sel = (0, casinoEngine_1.selectCommitted)(rawHand, keepUids, pickMax);
+    if (!sel.ok)
+        throw new https_1.HttpsError('invalid-argument', sel.reason);
+    const hand = sel.committed;
     const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
     const goldSwing = (0, casinoEngine_1.applyDeckBoost)((0, casinoEngine_1.handStake)(hand), choice);
     const slots = (0, casinoEngine_1.cardsToSlots)(hand);
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-        uid, playerName: seat.playerName, event: 'lock', game: seat.gameType, goldSwing, deckChoice: choice,
+        uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
     });
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/played`)]: true,
@@ -1151,6 +1239,213 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
         await deployMission(seasonId, missionId, updated, now);
     }
     return { goldSwing, slots };
+});
+// ── Texas Hold 'Em (two-sitting) ──────────────────────────────────────────────
+// Hold 'Em is the only casino game played across two sittings, both within
+// `forming`. Sitting 1: ante + 2 hole cards, locked. Once the table is full
+// (against its decayed max) and every seat has locked its holes, 5 shared
+// community cards are dealt. Sitting 2: each seat either PLAYS ON (pays the
+// play-on, picks ≤5 of hole+community, then the normal gambit → lock flow) or
+// FOLDS (forfeits the ante; the seat is emptied and never reopened). If every
+// seat folds, the table resets to its opening state but keeps its pot.
+const HOLDEM_ANTE = casinoEngine_1.CASINO_GAMES.holdem.ante; // 30
+const HOLDEM_PLAY_ON = casinoEngine_1.CASINO_GAMES.holdem.playOn; // 50
+function assertHoldem(mission) {
+    if (mission.casinoGame !== 'holdem')
+        throw new https_1.HttpsError('failed-precondition', "This table is not Texas Hold 'Em.");
+}
+// Deal the 5 shared community cards iff the table is at its decayed max and every
+// seat has locked its holes. A transaction on communityDrawnAt claims the draw,
+// so concurrent hole-locks (or a tick) can only deal the community once.
+async function maybeDrawCommunity(db, seasonId, missionId, now) {
+    const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
+    if (!snap.exists())
+        return;
+    const m = snap.val();
+    if (m.type !== 'casino' || m.casinoGame !== 'holdem')
+        return;
+    if (m.state !== 'forming' || m.community || m.communityDrawnAt)
+        return;
+    const parts = Object.values(m.participants ?? {});
+    if (parts.length === 0)
+        return;
+    if (gmFilledCount(m) < gmCurrentMaxSlots(m, now))
+        return; // not full (after decay)
+    if (!parts.every(p => p.holeLocked === true))
+        return; // some hole not yet locked
+    // Claim the draw atomically — first writer wins, others abort.
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/communityDrawnAt`)).transaction((current) => (current ? undefined : now));
+    if (!committed)
+        return;
+    await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/community`)).set((0, casinoEngine_1.drawCommunity)());
+}
+// Sitting 1 — ante and lock two hole cards, then run the community-draw gate.
+exports.dealHoldemHole = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const uid = request.auth.uid;
+    const { missionId, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
+    const db = (0, database_2.getDatabase)();
+    const now = Date.now();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    assertHoldem(mission);
+    if (seat.holeLocked)
+        throw new https_1.HttpsError('failed-precondition', 'Your hole cards are already locked.');
+    const potCut = (0, casinoEngine_1.potContribution)(HOLDEM_ANTE);
+    // Debit the ante (mirrors dealCasinoHand's transaction pattern).
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    const snapData = playerSnap.val();
+    let abortReason = 'Gold deduction failed.';
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
+        const data = current ?? snapData;
+        if (data.disabled) {
+            abortReason = 'Account restricted.';
+            return undefined;
+        }
+        const gold = data.gold ?? 0;
+        if (gold < HOLDEM_ANTE) {
+            abortReason = 'Not enough gold for the ante.';
+            return undefined;
+        }
+        return { ...data, gold: gold - HOLDEM_ANTE };
+    });
+    if (!committed)
+        throw new https_1.HttpsError('failed-precondition', abortReason);
+    // Deal 2 hole cards from this seat's chosen deck variant (a SECRET).
+    const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
+    const hole = (0, casinoEngine_1.makeDrawableDeck)((0, casinoEngine_1.shuffle)((0, casinoEngine_1.buildDeck)(casinoEngine_1.DECK_VARIANTS[choice].excludeTypes))).draw(2);
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+        uid, playerName: seat.playerName, event: 'deal', game: 'holdem', amount: HOLDEM_ANTE, potAdd: potCut,
+    });
+    await db.ref().update({
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: hole,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/holeLocked`)]: true,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
+        [logPath]: logEntry,
+    });
+    await maybeDrawCommunity(db, seasonId, missionId, now);
+    return { hole };
+});
+// Sitting 2 — play on: pay the play-on, choose ≤5 of the 2 hole + 5 community
+// cards as the final hand, then proceed to the normal gambit → lock flow.
+exports.holdemPlayOn = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const uid = request.auth.uid;
+    const { missionId, selectedUids, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
+    if (!Array.isArray(selectedUids) || selectedUids.length === 0)
+        throw new https_1.HttpsError('invalid-argument', 'Select at least one card.');
+    if (selectedUids.length > 5)
+        throw new https_1.HttpsError('invalid-argument', 'You may keep at most 5 cards.');
+    if (new Set(selectedUids).size !== selectedUids.length)
+        throw new https_1.HttpsError('invalid-argument', 'Duplicate card selected.');
+    const db = (0, database_2.getDatabase)();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    assertHoldem(mission);
+    if (!mission.community || !mission.communityDrawnAt)
+        throw new https_1.HttpsError('failed-precondition', 'The community cards have not been dealt yet.');
+    if (!seat.holeLocked)
+        throw new https_1.HttpsError('failed-precondition', 'Lock your hole cards first.');
+    if (seat.playedOn)
+        throw new https_1.HttpsError('failed-precondition', 'You have already played on.');
+    // Selectable pool = this seat's 2 hole cards (secret) + the 5 shared community.
+    const pool = [...(seat.hand ?? []), ...mission.community];
+    const byUid = new Map(pool.map(c => [c.uid, c]));
+    const chosen = [];
+    for (const u of selectedUids) {
+        const card = byUid.get(u);
+        if (!card)
+            throw new https_1.HttpsError('invalid-argument', 'Selected a card not in your hand or the community.');
+        chosen.push(card);
+    }
+    const potCut = (0, casinoEngine_1.potContribution)(HOLDEM_PLAY_ON);
+    // Debit the play-on.
+    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
+    if (!playerSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Player not found.');
+    const snapData = playerSnap.val();
+    let abortReason = 'Gold deduction failed.';
+    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
+        const data = current ?? snapData;
+        const gold = data.gold ?? 0;
+        if (gold < HOLDEM_PLAY_ON) {
+            abortReason = 'Not enough gold for the play-on.';
+            return undefined;
+        }
+        return { ...data, gold: gold - HOLDEM_PLAY_ON };
+    });
+    if (!committed)
+        throw new https_1.HttpsError('failed-precondition', abortReason);
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+        uid, playerName: seat.playerName, event: 'playon', game: 'holdem', amount: HOLDEM_PLAY_ON, potAdd: potCut,
+    });
+    // Write the chosen final hand as the seat's SECRET hand; the normal gambit →
+    // lock flow (playCasinoGambit, then lockCasinoResult) takes it from here.
+    await db.ref().update({
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: chosen,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/playedOn`)]: true,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
+        [logPath]: logEntry,
+    });
+    return { hand: chosen };
+});
+// Sitting 2 — fold after the reveal. Forfeits the ante (already paid; no refund).
+// The seat is EMPTIED and not reopened. If this empties the table, it resets
+// (participants cleared, decay reset, community cleared) but KEEPS its pot.
+exports.holdemFold = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const uid = request.auth.uid;
+    const { missionId, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
+    const db = (0, database_2.getDatabase)();
+    const now = Date.now();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+    assertHoldem(mission);
+    if (!mission.community)
+        throw new https_1.HttpsError('failed-precondition', 'You can only fold after the community reveal.');
+    if (!seat.holeLocked)
+        throw new https_1.HttpsError('failed-precondition', 'Nothing to fold — no hole cards locked.');
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+        uid, playerName: seat.playerName, event: 'fold', game: 'holdem',
+    });
+    // Remove the seat and free the player's activeMission immediately; clear secrets.
+    const updates = {
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: null,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: null,
+        [logPath]: logEntry,
+    };
+    // All-fold reset: if this empties the table, return it to its opening state —
+    // clear participants/community, un-decay — but KEEP the pot.
+    const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
+    if (remaining.length === 0) {
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/community`)] = null;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/communityDrawnAt`)] = null;
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/firstJoinAt`)] = null;
+    }
+    await db.ref().update(updates);
+    // A fold lowers the fill count; the remaining played seats may now be
+    // deployable against the decayed max.
+    if (remaining.length > 0) {
+        const updatedSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
+        const updated = updatedSnap.val();
+        if (gmShouldDeploy(updated, now))
+            await deployMission(seasonId, missionId, updated, now);
+    }
+    return { folded: true, tableReset: remaining.length === 0 };
 });
 // ── Admin callables ───────────────────────────────────────────────────────────
 async function requireAdmin(uid) {
@@ -1355,10 +1650,19 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('seasons/{seasonId}/m
         if (!firstEventMap.get(playerId)) {
             profileUpdates[`${base}/firstEvent`] = seasonId;
         }
-        // XP — snapshot of the player's current total (already includes this mission's reward).
-        profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
-        // Missions — separate counter from tiles.
-        profileUpdates[`${base}/events/${seasonId}/missions`] = database_2.ServerValue.increment(1);
+        if (mission.type === 'casino') {
+            // Casino season records gold + handsPlayed (this season's "missions
+            // completed"). A folded seat never reaches here (removed at fold), so
+            // every archived casino participant played. See profile-site-handoff.
+            profileUpdates[`${base}/events/${seasonId}/gold`] = player.gold ?? 0;
+            profileUpdates[`${base}/events/${seasonId}/handsPlayed`] = database_2.ServerValue.increment(1);
+        }
+        else {
+            // XP — snapshot of the player's current total (already includes this mission's reward).
+            profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
+            // Missions — separate counter from tiles.
+            profileUpdates[`${base}/events/${seasonId}/missions`] = database_2.ServerValue.increment(1);
+        }
         // Games — collect from this participant's slots, same encoding as onTileComplete.
         for (const slot of normalizeArray(participant.slots)) {
             if (slot.game?.trim()) {
@@ -1408,6 +1712,14 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
         if (Object.keys(standDownUpdates).length > 0) {
             await db.ref().update(standDownUpdates);
         }
+        // Hold 'Em pass: deal the shared community once a table is full (against its
+        // decayed max) with every seat hole-locked, in case decay — not a hole-lock —
+        // was what closed the gap. maybeDrawCommunity re-reads and is idempotent.
+        for (const [id, m] of Object.entries(missions)) {
+            if (m.type === 'casino' && m.casinoGame === 'holdem' && m.state === 'forming' && !m.community) {
+                await maybeDrawCommunity(db, seasonId, id, now);
+            }
+        }
         // Deploy pass: check all mission types.
         for (const [id, m] of Object.entries(missions)) {
             if (gmShouldDeploy(m, now)) {
@@ -1426,9 +1738,9 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
 // each grant is written to the casino audit log — without it the audit can't
 // see gold being pumped in via the perpetual-floor free roll.
 //
-// Cron: Mondays 00:00 America/New_York. `timeZone` is required — without it
-// onSchedule anchors to UTC. (Adjust the day/time to taste.)
-exports.weeklyGoldTopUp = (0, scheduler_1.onSchedule)({ schedule: '0 0 * * 1', timeZone: 'America/New_York' }, async () => {
+// Cron: Saturdays 06:00 America/Chicago. `timeZone` is required — without it
+// onSchedule anchors to UTC.
+exports.weeklyGoldTopUp = (0, scheduler_1.onSchedule)({ schedule: '0 6 * * 6', timeZone: 'America/Chicago' }, async () => {
     const db = (0, database_2.getDatabase)();
     const now = Date.now();
     // Live seasons only — a draft season's economy is throwaway.

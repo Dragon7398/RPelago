@@ -4,7 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { firebaseReady, db as firebaseDb, auth as firebaseAuth } from '../firebase/config';
 import { setCurrentSeason, resolveSeason, selectableSeasons } from '../firebase/season';
 import { CLIENT_VERSION } from '../lib/version';
-import type { SeasonConfig, ResolvedSeason, SeasonStatus } from '../types';
+import type { SeasonConfig, ResolvedSeason, SeasonStatus, SeasonListEntry, DraftSeasonEntry } from '../types';
 
 interface SeasonContextValue {
   config:  SeasonConfig | null;
@@ -25,11 +25,22 @@ interface SeasonContextValue {
 
 const SeasonContext = createContext<SeasonContextValue | null>(null);
 
+/**
+ * Config is assembled from its individual children rather than one read of the
+ * whole `config` node — see the subscription below for why. `undefined` means
+ * "that read hasn't come back yet"; `null` / `{}` means "came back empty".
+ */
+interface ConfigParts {
+  adminId?:          string | null;
+  activeSeasonId?:   string | null;
+  minClientVersion?: number;
+  seasonList?:       Record<string, SeasonListEntry>;
+  draftSeasons?:     Record<string, DraftSeasonEntry>;
+  alphaUsers?:       Record<string, boolean>;
+}
+
 export function SeasonProvider({ children }: { children: ReactNode }) {
-  const [config, setConfig]       = useState<SeasonConfig | null>(null);
-  // Nothing to wait for when Firebase isn't configured — start settled rather
-  // than setting state from inside the effect body.
-  const [loading, setLoading]     = useState(firebaseReady && !!firebaseDb);
+  const [parts, setParts]         = useState<ConfigParts>({});
   const [uid, setUid]             = useState<string | null>(null);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
 
@@ -39,27 +50,74 @@ export function SeasonProvider({ children }: { children: ReactNode }) {
     return onAuthStateChanged(firebaseAuth, u => setUid(u?.uid ?? null));
   }, []);
 
-  // Subscribe to global config. Note draftSeasons/alphaUsers simply come back
-  // absent for normal players — the rules deny them, so a player cannot even
-  // discover that an unlaunched season exists.
+  // Subscribe to global config — one child at a time, NOT the whole `config`
+  // node.
+  //
+  // RTDB read rules cascade DOWNWARD and are evaluated at the node you actually
+  // read: you may only read a node if `.read` is true AT it or ABOVE it. Child
+  // grants never permit reading the parent. `config` deliberately has no `.read`
+  // of its own — one there would cascade down and expose draftSeasons /
+  // alphaUsers, which is exactly what the season architecture forbids — so
+  // reading `config` outright is denied for everyone and must never be tried.
+  //
+  // The public children are readable by all; the private two are readable only
+  // by admin/alpha, so their reads are best-effort: a denial is the EXPECTED
+  // outcome for a normal player and just means "no drafts visible".
   useEffect(() => {
     if (!firebaseReady || !firebaseDb) return;
-    return onValue(ref(firebaseDb, 'config'), snap => {
-      setConfig(snap.exists() ? (snap.val() as SeasonConfig) : null);
-      setLoading(false);
-    });
+    const d = firebaseDb;
+    const patch = (p: ConfigParts) => setParts(prev => ({ ...prev, ...p }));
+
+    // A denied/failed PUBLIC read would otherwise hang the app on the loading
+    // screen forever, so surface it loudly and settle the part as empty.
+    const publicErr = (key: string) => (err: Error) => {
+      console.error(`[RPelago] Could not read config/${key} — the app cannot resolve a season.`, err);
+      patch({ [key]: null } as ConfigParts);
+    };
+
+    const subs = [
+      onValue(ref(d, 'config/adminId'),          s => patch({ adminId: s.val() ?? null }),          publicErr('adminId')),
+      onValue(ref(d, 'config/activeSeasonId'),   s => patch({ activeSeasonId: s.val() ?? null }),   publicErr('activeSeasonId')),
+      onValue(ref(d, 'config/minClientVersion'), s => patch({ minClientVersion: s.val() ?? 0 }),    publicErr('minClientVersion')),
+      onValue(ref(d, 'config/seasonList'),       s => patch({ seasonList: s.val() ?? {} }),         publicErr('seasonList')),
+      // Private — denial is normal and silent.
+      onValue(ref(d, 'config/draftSeasons'), s => patch({ draftSeasons: s.val() ?? {} }), () => patch({ draftSeasons: {} })),
+      onValue(ref(d, 'config/alphaUsers'),   s => patch({ alphaUsers:   s.val() ?? {} }), () => patch({ alphaUsers:   {} })),
+    ];
+    return () => subs.forEach(unsub => unsub());
   }, []);
+
+  // Settled once the two reads resolveSeason actually needs have come back.
+  const loading = firebaseReady && !!firebaseDb
+    && (parts.activeSeasonId === undefined || parts.seasonList === undefined);
+
+  const config: SeasonConfig | null = (!loading && parts.activeSeasonId && parts.seasonList)
+    ? {
+        adminId:          parts.adminId ?? '',
+        activeSeasonId:   parts.activeSeasonId,
+        minClientVersion: parts.minClientVersion ?? 0,
+        seasonList:       parts.seasonList,
+        draftSeasons:     parts.draftSeasons,
+        alphaUsers:       parts.alphaUsers,
+      }
+    : null;
 
   const isAdmin = !!uid && !!config && config.adminId === uid;
   const isAlpha = !!uid && !!config?.alphaUsers?.[uid];
 
   const season = config ? resolveSeason(config, previewingId) : null;
 
-  // Publish the resolved season to the module-level path helpers BEFORE any
-  // subscription or write happens. db.ts throws if this hasn't run.
-  useEffect(() => {
-    if (season) setCurrentSeason(season.id);
-  }, [season?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Publish the resolved season to the module-level path helpers DURING RENDER —
+  // deliberately not in an effect.
+  //
+  // db.ts's path helpers throw until this has run, and React flushes CHILD
+  // effects before PARENT ones: a descendant (GameStateProvider's
+  // subscribeToGame, AuthContext's player checks) would otherwise fire its
+  // season-scoped effect before this provider's effect had published the season.
+  // A parent's render body always runs before its children render, so this is
+  // the only placement that actually holds the guarantee. setCurrentSeason is
+  // idempotent, so StrictMode's double-render is harmless.
+  if (season) setCurrentSeason(season.id);
 
   // ── Version gate ───────────────────────────────────────────────────────────
   // The frontend (Netlify), rules, and functions deploy independently, so a

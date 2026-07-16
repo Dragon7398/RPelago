@@ -23,6 +23,39 @@ afterAll(async () => { await testEnv.cleanup(); });
 beforeEach(async () => { await seed(testEnv); });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// config — the client's access pattern.
+//
+// `config` has NO `.read` of its own on purpose: one there would cascade down
+// and expose draftSeasons/alphaUsers. The consequence is that reading the whole
+// `config` node is denied FOR EVERYONE — child grants never permit a parent
+// read — so SeasonContext must subscribe to each public child individually.
+// These tests pin that contract; reverting to a whole-node read hangs the app.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('config — must be read child-by-child, never as a whole node', () => {
+  it('nobody can read the whole config node — not even the admin', async () => {
+    await assertFails(anon().ref('config').get());
+    await assertFails(player().ref('config').get());
+    await assertFails(admin().ref('config').get());
+  });
+
+  it('the public children ARE readable by anyone (what the client actually reads)', async () => {
+    for (const key of ['adminId', 'activeSeasonId', 'minClientVersion', 'seasonList']) {
+      await assertSucceeds(anon().ref(`config/${key}`).get());
+      await assertSucceeds(player().ref(`config/${key}`).get());
+    }
+  });
+
+  it('the private children stay admin/alpha-only', async () => {
+    for (const key of ['draftSeasons', 'alphaUsers']) {
+      await assertFails(anon().ref(`config/${key}`).get());
+      await assertFails(player().ref(`config/${key}`).get());
+      await assertSucceeds(admin().ref(`config/${key}`).get());
+      await assertSucceeds(alpha().ref(`config/${key}`).get());
+    }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 🔒 THE FIX — casino secrets live OUTSIDE the world-readable season tree.
 //
 // The legacy `game/` tree leaked the draw deck and every hand to anyone,

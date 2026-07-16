@@ -1,0 +1,189 @@
+/* RPelago Casino — landing styles (recreated from the design bundle).
+   Themed through casino/themes.css tokens (--gold, --panel, --felt, …).
+   Everything is scoped under .rl-root. */
+
+.rl-root {
+  --line: var(--border);
+  --line-glow: var(--border-glow);
+  position: relative; z-index: 1;
+  max-width: 1180px; margin: 0 auto; padding: 0 1rem 5rem;
+  display: flex; flex-direction: column; gap: 1.4rem;
+  color: var(--parchment);
+  min-height: 100dvh;
+}
+
+/* soft ambient wash + faint noise behind everything */
+.rl-ambient {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(ellipse 90% 60% at 50% 0%, oklch(from var(--gold) l c h / 0.06), transparent 60%), var(--bg-deep);
+}
+
+/* ══ Top bar ══ */
+.rl-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; padding-top: 1.6rem;
+}
+@media (max-width: 560px){ .rl-top { padding-top: 1.2rem; } }
+
+.rl-brand { display: flex; flex-direction: column; line-height: 1; }
+.rl-brand .rl-kick { font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.34em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-brand h1 {
+  font-family:'Cinzel',serif; font-weight: 800; font-size: clamp(1.3rem, 3.2vw, 1.85rem);
+  color: var(--gold); letter-spacing: 0.05em; margin: 0.15rem 0 0;
+  text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.35);
+}
+.rl-brand .rl-sub { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.9rem; margin-top: 0.1rem; }
+.rl-top-right { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+
+/* ── View toggle (Lounge / Floor) ── */
+.rl-viewtoggle {
+  display: inline-flex; padding: 0.22rem; gap: 0.15rem;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h / 0.8);
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.rl-vt {
+  font-family:'Cinzel',serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.42rem 0.9rem; border-radius: 999px; cursor: pointer;
+  background: transparent; border: none; color: var(--gold-dim); transition: all 0.15s;
+}
+.rl-vt:hover { color: var(--gold); }
+.rl-vt.on { color: var(--bg-deep); background: var(--gold); font-weight: 700; box-shadow: 0 1px 6px oklch(from var(--gold) l c h / 0.35); }
+
+/* ── Gold balance ── */
+.rl-gold {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: radial-gradient(ellipse at 50% 0%, oklch(from var(--gold) l c h / 0.16), var(--panel));
+  border: 1px solid var(--line-glow); border-radius: 999px; padding: 0.45rem 1.1rem 0.45rem 0.55rem;
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 6px 18px #0007;
+}
+.rl-gold-ico {
+  width: 2rem; height: 2rem; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 1rem;
+  background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(54% 0.12 66));
+  box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), 0 1px 2px #0007;
+}
+.rl-gold-info { display: flex; flex-direction: column; line-height: 1.02; }
+.rl-gold-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-gold-amt { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.35rem; color: var(--gold); }
+.rl-gold-amt small { font-size: 0.55em; color: var(--gold-dim); font-weight: 600; }
+.rl-gold-net { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; margin-left: 0.2rem; }
+.rl-gold-net.pos { color: var(--pos); }
+.rl-gold-net.neg { color: var(--neg); }
+
+/* ── nav icon buttons ── */
+.rl-nav { display: flex; gap: 0.4rem; }
+.rl-navbtn {
+  width: 2.5rem; height: 2.5rem; border-radius: 9px; cursor: pointer;
+  display: grid; place-items: center; font-size: 1.05rem;
+  background: var(--panel); border: 1px solid var(--line); color: var(--gold-dim);
+  transition: all 0.15s; font-family:'Cinzel',serif;
+}
+.rl-navbtn:hover { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.15); }
+
+/* ══ Section header ══ */
+.rl-sec { display: flex; flex-direction: column; gap: 0.9rem; }
+.rl-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+.rl-sec-title { font-family:'Cinzel',serif; font-size: 0.92rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+.rl-sec-note { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+
+/* seat pips */
+.rl-pips { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+.rl-pip {
+  width: 1.5rem; height: 1.5rem; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-family:'Cinzel',serif; font-weight: 700;
+  font-size: 0.62rem; color: oklch(18% 0.03 70);
+  background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75)));
+}
+.rl-pip.you { box-shadow: 0 0 0 2px var(--gold), 0 0 10px oklch(from var(--gold) l c h / 0.4); }
+.rl-pip.unplayed { opacity: 0.55; }
+.rl-pip.empty { background: none; border: 1.5px dashed var(--line-glow); color: transparent; }
+
+/* ══ Table card grid ══ */
+.rl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.1rem; }
+.rl-grid.rl-grid-tight { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 0.9rem; }
+.rl-tcard {
+  position: relative; text-align: left;
+  border-radius: 12px; border: 1px solid var(--line); overflow: hidden;
+  background: linear-gradient(162deg, oklch(from var(--bg-card) l c h / 0.95), oklch(from var(--bg-card) calc(l - 0.03) c h / 0.95));
+  display: flex; flex-direction: column;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.rl-tcard:hover { border-color: var(--line-glow); transform: translateY(-3px); box-shadow: 0 14px 30px #0008; }
+.rl-tcard.seated-here { border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+.rl-tcard.locked { opacity: 0.62; }
+.rl-tcard.locked:hover { transform: none; border-color: var(--line); box-shadow: none; }
+.rl-tcard-felt {
+  padding: 0.9rem 1.1rem; position: relative;
+  background: radial-gradient(ellipse 80% 100% at 30% 0%, oklch(from var(--felt) calc(l + 0.07) c h), var(--felt) 75%);
+  border-bottom: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.4);
+}
+.rl-tcard-tag { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-tcard-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-top: 0.1rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.rl-tcard-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.86rem; margin-top: 0.1rem; }
+.rl-tcard-body { padding: 0.9rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; flex: 1; }
+.rl-tcard-stats { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+.rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-top: auto; }
+
+.rl-mini { display: flex; flex-direction: column; line-height: 1.1; }
+.rl-mini-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-mini-val { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.95rem; color: var(--parchment); }
+.rl-mini-val.gold { color: var(--gold); }
+
+.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; }
+.rl-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.15rem; }
+.rl-pot .u { font-size: 0.6rem; color: var(--gold-dim); }
+
+.rl-entry { display: flex; gap: 0.5rem; flex-wrap: wrap; font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.04em; color: var(--gold-dim); }
+.rl-entry b { color: var(--parchment); }
+
+.rl-badge { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.16rem 0.5rem; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.rl-badge.ready { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.16); }
+.rl-badge.open { color: var(--gold-dim); border-color: var(--line); }
+.rl-badge.seated { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.55); background: oklch(from var(--gold) l c h / 0.14); }
+
+.rl-time { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--gold-dim); }
+
+/* current-seat placeholder line (full phase panel lands in a later slice) */
+.rl-seatline {
+  border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.5);
+  background: radial-gradient(ellipse 80% 70% at 50% 0%, oklch(from var(--felt) calc(l + 0.06) c h) 0%, var(--felt) 72%), var(--felt);
+  box-shadow: inset 0 0 60px #0007, 0 18px 46px #000a;
+  border-radius: 14px; padding: 1.5rem 1.4rem; text-align: center;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.rl-seatline .rl-ct-kick { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.26em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-seatline .rl-ct-name { font-family:'Cinzel',serif; font-weight: 700; font-size: clamp(1.1rem, 2.6vw, 1.4rem); color: var(--gold); letter-spacing: 0.03em; }
+
+/* ══ Buttons (mirror the casino table's .cz-btn) ══ */
+.rl-btn {
+  font-family:'Cinzel',serif; font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+  padding: 0.55rem 1rem; border-radius: 6px; white-space: nowrap;
+  background: oklch(from var(--bg-card) l c h / 0.85); border: 1px solid var(--line); color: var(--gold-dim);
+  transition: all 0.15s;
+}
+.rl-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--line-glow); }
+.rl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rl-btn.primary { color: var(--bg-deep); background: var(--gold); border-color: var(--gold); font-weight: 700; }
+.rl-btn.primary:hover:not(:disabled) { color: var(--bg-deep); box-shadow: 0 0 16px oklch(from var(--gold) l c h / 0.4); }
+
+/* ══ Modal shell (content fleshed out in a later slice) ══ */
+.rl-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 1.2rem;
+  background: oklch(8% 0.01 70 / 0.72); backdrop-filter: blur(4px); animation: rlFadeIn 0.2s ease; }
+@keyframes rlFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.rl-modal {
+  width: min(460px, 96vw); max-height: 88vh; overflow-y: auto; position: relative;
+  background: linear-gradient(180deg, var(--bg-card), oklch(from var(--bg-card) calc(l - 0.02) c h));
+  border: 1px solid var(--line-glow); border-radius: 14px; padding: 1.6rem 1.5rem;
+  box-shadow: 0 30px 70px #000c;
+}
+.rl-modal-close { position: absolute; top: 0.9rem; right: 0.9rem; width: 2rem; height: 2rem; border-radius: 50%;
+  background: oklch(from var(--bg-card) l c h / 0.8); border: 1px solid var(--line); color: var(--gold-dim); cursor: pointer; font-size: 0.9rem; }
+.rl-modal-close:hover { color: var(--gold); border-color: var(--line-glow); }
+.rl-modal-name { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.5rem; letter-spacing: 0.03em; color: var(--parchment); }
+.rl-modal-tag { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); margin: 0.2rem 0 1.2rem; }
+
+.rl-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-tcard, .rl-overlay { animation: none !important; transition: none !important; }
+}
