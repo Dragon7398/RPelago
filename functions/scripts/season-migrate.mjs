@@ -35,7 +35,7 @@ import { getDatabase } from 'firebase-admin/database';
 
 // ── Editable constants ────────────────────────────────────────────────────────
 const S1     = 'rpelago_s1';
-const CASINO = 'rpelago_casino_1_5';
+const CASINO = 'casino_s1';
 const S2     = 'rpelago_s2';
 
 const CASINO_START_GOLD    = 200;   // mirror of src/lib/constants.ts

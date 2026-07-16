@@ -5,7 +5,7 @@ XP/level/adventurers/feats. Players join casino tables (missions), play a card
 game to commit slots, watch the room run its Archipelago games, and settle up
 for gold — then repeat. The RPG layer returns in S2.
 
-- Season id: **`rpelago_casino_1_5`**  ·  shell: **`casino`**  ·  status flow:
+- Season id: **`casino_s1`**  ·  shell: **`casino`**  ·  status flow:
   `draft → active → closing → archived`.
 - Season architecture (per-season path layout, config-driven shell, admin
   identity, rules) is specified in [season-architecture-plan.md](season-architecture-plan.md);
@@ -327,9 +327,11 @@ Rendered when `activeSeasonId`'s shell is `casino` (see architecture plan's
   `pruneActivityLog`).
 - **Slot Fill (Manifest):** post-lock step; Mission Manifest grid on top with
   **Attach config (.yaml)** that parses each world's `name`+`game` in-browser
-  and prefills slots in order; list rows below with category badge, optional
-  slot name, required free-text game (`<datalist>` autocomplete). Submit
-  disabled until every card has a game.
+  (via the reusable `parseApYaml`; weighted game → `Randomized`) and prefills
+  slots in order; list rows below with category badge, optional slot name,
+  required free-text game (`<datalist>` autocomplete). Surfaces broken-file and
+  wrong-world-count warnings (see YAML section). Submit disabled until every card
+  has a game.
 
 Phase (`Seated → In progress → Settled`) maps to mission state
 (`forming → inprogress → complete`). Existing `activeMission` on the player
@@ -416,10 +418,33 @@ goes to a **Firebase Storage bucket** (not currently set up — needs enabling).
 - **Size cap:** ≤64KB, enforced in the Storage rule (`request.resource.size`),
   not just client-side.
 - **Content type:** accept text/YAML only; reject anything else at the rule.
-- Client still parses the YAML **in-browser** to prefill the Manifest slots
-  (name + game per world; inline or weighted mapping — highest weight wins;
-  multi-world files split on `---`). The upload is for *your* later
-  download/clean/process-locally workflow, not for server-side parsing.
+- Client parses the YAML **in-browser** to prefill the Manifest slots via the
+  **reusable `src/lib/apYaml.ts` parser** (`parseApYaml`), which is deliberately
+  *not* casino-specific — S2 challenges/missions reuse it. It extracts `name` +
+  `game` per world, splits multi-world files on `---`, and is tolerant of the
+  messy formatting (incl. **duplicate keys**) real AP YAMLs carry: a broken
+  document is skipped and reported, never fatal to the file. The upload is for
+  *your* later download/clean/process-locally workflow, not for server-side
+  parsing.
+
+  > **Weighted game selection → `Randomized` (not highest-weight-wins).** When a
+  > world's `game` is a weighted map, the parser resolves it to a single game
+  > only if exactly **one** option has weight > 0; with **two or more** viable
+  > options (or none) it sets the game name to the sentinel `RANDOMIZED_GAME`
+  > (`"Randomized"`) and flags `randomized: true` + `candidates: [...]`. We can't
+  > know which game AP will pick, and in a casino season a randomized pick can be
+  > the difference between a valid and invalid YAML — so it must be surfaced, not
+  > guessed. Detect via the `randomized` flag, not by string-matching the name.
+
+- **Machine validity is intentionally minimal — everything else is manual.** Many
+  validity rules need human judgment or an actual AP generation (e.g. how many
+  checks a YAML produces), which is out of scope for the site. The site only
+  flags files that look **outright broken** (parse errors / missing `game`, from
+  `parseApYaml`'s `errors`) and a **wrong world count** (`checkWorldCount`):
+  exact match to the seat's locked-card count for the casino; a 1–5 range for a
+  typical non-casino challenge/mission. These are **warnings**, not hard blocks —
+  the operator hand-verifies every file. Submit is gated only on every card
+  having a game filled in.
 
 YAML is inert text (never executed on our side) — the concern is storage
 hygiene and access scoping, not code execution.
@@ -458,7 +483,7 @@ always achievable.
 Confirmed shape — deliberately minimal, reusing what S1 already writes:
 
 ```
-profiles/players/{uid}/events/rpelago_casino_1_5/
+profiles/players/{uid}/events/casino_s1/
   gold:        <final gold balance at season end>
   handsPlayed: <count of tables successfully completed>
   games:       { <encodedGameName>: true, ... }   # same map S1 writes

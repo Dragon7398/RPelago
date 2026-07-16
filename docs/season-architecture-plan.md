@@ -59,7 +59,7 @@ Replace the single `game/` root with:
 
 ```
 seasons/
-  {seasonId}/              "rpelago_s1", "rpelago_casino_1_5", "rpelago_s2"
+  {seasonId}/              "rpelago_s1", "casino_s1", "rpelago_s2"
     meta/                  (same shape as today's game/meta)
     tiles/                 (map seasons only — omitted for the casino season)
     players/
@@ -72,11 +72,11 @@ seasons/
     notifications/
   config/                      # PUBLIC unless noted
     adminId: "<uid>"                       # global admin, was game/meta/adminId
-    activeSeasonId: "rpelago_casino_1_5"   # what the public site renders
+    activeSeasonId: "casino_s1"   # what the public site renders
     minClientVersion: <n>                  # version gate (forced reload)
     seasonList: {                          # PUBLIC — live/archived seasons ONLY
       rpelago_s1:          { label, shell: "map",    status: "archived" },
-      rpelago_casino_1_5:  { label, shell: "casino", status: "active"   },
+      casino_s1:  { label, shell: "casino", status: "active"   },
     }
     draftSeasons: {          # PRIVATE — admin + alpha read only
       rpelago_s2:          { label, shell: "map" },
@@ -95,7 +95,7 @@ profiles/                  # unchanged — already season-agnostic, already
 
 `seasonId` replaces the hardcoded `'rpelago_s1'` string and becomes a real,
 enumerable value. Confirmed ids for the first three seasons:
-`rpelago_s1` (archived), `rpelago_casino_1_5` (the interim Casino season),
+`rpelago_s1` (archived), `casino_s1` (the interim Casino season),
 `rpelago_s2`.
 
 Each season entry carries a **`shell`** (`"map" | "casino"`) that tells the
@@ -175,7 +175,7 @@ deploy.
 | `archived` | yes | public | **no** — frozen, admin only |
 
 Concrete state at Casino-season launch: `rpelago_s1` → `archived`,
-`rpelago_casino_1_5` → `active`, `rpelago_s2` → draft (unlisted). Launching S2
+`casino_s1` → `active`, `rpelago_s2` → draft (unlisted). Launching S2
 later is one write: add its `seasonList` entry and flip `activeSeasonId`.
 
 **The `!initialized` bootstrap loophole is gone** in the new tree — there is no
@@ -384,7 +384,7 @@ the gold specifics):
 | Data | Carries? | Notes |
 |---|---|---|
 | Player identity, Discord link, display name | Yes | `profiles/`, unchanged |
-| Cross-season history / games played / first-event badge | Yes | `profiles/players/{uid}/events/{seasonId}/...`; S1.5 event key = `rpelago_casino_1_5` |
+| Cross-season history / games played / first-event badge | Yes | `profiles/players/{uid}/events/{seasonId}/...`; S1.5 event key = `casino_s1` |
 | **Gold** | **Yes, S1.5 → S2** | Everyone starts S1.5 at **200 GP**. S2 seed = **`max(final S1.5 balance, 100)`**. S1 gold does **not** carry into S1.5. |
 | Coat of Many Colors (name-color unlock) | **Yes, from S1** | Granted retroactively to anyone who bought one **or** finished S1 with **≥750 GP** (could have afforded it). Also earnable free in S1.5 by completing all four casino game types. Carries into S2. |
 | Feats, inventory, adventurers, XP/level | No (and absent in S1.5) | S1.5 has no RPG layer at all; S2 reintroduces feats/adventurers fresh. |
@@ -446,7 +446,7 @@ becomes **season-aware**, keyed off the active season's `shell`.
 **Fresh player record — casino shell (S1.5):**
 
 ```
-seasons/rpelago_casino_1_5/players/{uid}
+seasons/casino_s1/players/{uid}
   id, displayName, discordHandle, avatarHash, joinedAt
   gold: 200
   xp:   0                  # kept at 0; harmless, keeps the record uniform
@@ -639,16 +639,16 @@ Casino-season launch happen close together. Ordered:
    any shell (map or casino) with no season dependency. **KMK now has zero
    references into the game/season tree — its only tie to the rest of the system
    is the shared `config/adminId`.**
-6. Build the Casino season (`rpelago_casino_1_5`) as `status:"draft"` while
+6. Build the Casino season (`casino_s1`) as `status:"draft"` while
    finishing it; **alpha users playtest it** (join/leave/complete missions).
 7. Create `seasons/rpelago_s2` as `status:"draft"` too; S2 content authoring
    starts here directly as a proper draft season.
-8. **Wipe draft playtest data** from `rpelago_casino_1_5` (manual Firebase
+8. **Wipe draft playtest data** from `casino_s1` (manual Firebase
    wipe of the season node), then **bulk-seed S1.5 player records** from
    archived S1 players (200 GP + retroactive Coat grant). Order matters — seed
    *after* the wipe.
 9. Launch: ship the frontend with the **version gate**, then flip
-   `config/activeSeasonId = "rpelago_casino_1_5"` and its status to `active`.
+   `config/activeSeasonId = "casino_s1"` and its status to `active`.
    Old bundles force-reload. S1 remains archived/read-only; S2 stays
    draft/hidden.
 10. **Later, only after S1.5 is verified live:** remove the old `game/...`

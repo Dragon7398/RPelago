@@ -77,8 +77,8 @@ async function main() {
   assert(conf?.adminId === ADMIN, 'config.adminId from game/meta');
   assert(conf?.activeSeasonId === 'rpelago_s1', 'active season held at S1 (pre-launch)');
   assert(conf?.seasonList?.rpelago_s1?.status === 'archived', 'S1 listed archived');
-  assert(conf?.seasonList?.rpelago_casino_1_5 === undefined, 'casino NOT in public list yet');
-  assert(!!conf?.draftSeasons?.rpelago_casino_1_5, 'casino is a draft season');
+  assert(conf?.seasonList?.casino_s1 === undefined, 'casino NOT in public list yet');
+  assert(!!conf?.draftSeasons?.casino_s1, 'casino is a draft season');
   assert(!!conf?.draftSeasons?.rpelago_s2, 'S2 is a draft season');
 
   assert(kmk?.listA?.active === true,  'previously-active KMK list → active:true');
@@ -89,7 +89,7 @@ async function main() {
   run('launch-casino');
 
   console.log('\n── after launch ──');
-  const players = (await db.ref('seasons/rpelago_casino_1_5/players').get()).val();
+  const players = (await db.ref('seasons/casino_s1/players').get()).val();
   const conf2   = (await db.ref('config').get()).val();
 
   assert(players?.p_coat?.gold === 200, 'seeded player starts at 200 GP');
@@ -99,10 +99,10 @@ async function main() {
   assert(players?.p_coat?.nameColor === 'crimson', 'nameColor carried over');
   assert(players?.p_coat?.xp === undefined, 'casino record has no XP');
 
-  assert(conf2?.activeSeasonId === 'rpelago_casino_1_5', 'launch: active season → casino');
-  assert(conf2?.seasonList?.rpelago_casino_1_5?.status === 'active', 'launch: casino listed active');
-  assert(conf2?.seasonList?.rpelago_casino_1_5?.casinoOpenTables === 6, 'launch: casinoOpenTables carried');
-  assert(conf2?.draftSeasons?.rpelago_casino_1_5 === undefined, 'launch: casino removed from drafts');
+  assert(conf2?.activeSeasonId === 'casino_s1', 'launch: active season → casino');
+  assert(conf2?.seasonList?.casino_s1?.status === 'active', 'launch: casino listed active');
+  assert(conf2?.seasonList?.casino_s1?.casinoOpenTables === 6, 'launch: casinoOpenTables carried');
+  assert(conf2?.draftSeasons?.casino_s1 === undefined, 'launch: casino removed from drafts');
   assert(conf2?.minClientVersion === 2, 'launch: minClientVersion bumped');
 
   // Idempotency spot-check.

@@ -10,12 +10,13 @@
     "preview": "vite preview",
     "test:rules": "firebase emulators:exec --only database --project demo-rpelago \"vitest run\"",
     "test:rules:watch": "firebase emulators:exec --only database --project demo-rpelago \"vitest\"",
-    "test:unit": "vitest run tests/casino"
+    "test:unit": "vitest run tests/casino tests/lib"
   },
   "dependencies": {
     "firebase": "^12.12.1",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -24,7 +24,7 @@ export const KMK_TASK        = 'task1';
 
 // Seasons
 export const S1      = 'rpelago_s1';          // archived → public, read-only
-export const CASINO  = 'rpelago_casino_1_5';  // active   → public, live
+export const CASINO  = 'casino_s1';  // active   → public, live
 export const S2      = 'rpelago_s2';          // DRAFT    → admin/alpha only
 
 export async function makeTestEnv(projectId: string): Promise<RulesTestEnvironment> {
