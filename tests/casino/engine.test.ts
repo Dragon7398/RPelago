@@ -9,7 +9,7 @@ import {
   evaluatePoker, evaluateBlackjack,
   rollSeatCount, rollReleaseChance, rollCollectChance,
   deriveHintCost, computeInitialPot, potContribution, rollTableSetup,
-  drawCommunity,
+  drawCommunity, initialDealCount, selectCommitted,
   CASINO_XP_FLOOR, CASINO_POT_CUT_PCT,
   type DeckCard,
 } from '../../src/lib/casinoEngine';
@@ -18,6 +18,10 @@ import { applyDeckBoost as clientApplyDeckBoost } from '../../src/lib/casinoSlot
 import {
   GAMBIT_DEFS, makeGambitDeck, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
 } from '../../src/lib/casinoGambits';
+import {
+  casinoEntryCosts, pickNextCasinoGame, freshCasinoTable, casinoPotShares,
+} from '../../src/lib/missionLogic';
+import type { GMMission } from '../../src/types';
 
 // Server mirror — must stay in lockstep with the client copy.
 import * as server from '../../functions/src/casinoEngine';
@@ -252,6 +256,41 @@ describe('shared gambit deck draws 3 unique and depletes', () => {
   });
 });
 
+// ── Single-sitting play helpers ───────────────────────────────────────────────
+describe('initialDealCount', () => {
+  it('deals the whole pool up front, except Blackjack (2, then hits)', () => {
+    expect(initialDealCount('five_card_draw')).toBe(5);
+    expect(initialDealCount('seven_card_stud')).toBe(7);
+    expect(initialDealCount('blackjack')).toBe(2);
+  });
+});
+
+describe('selectCommitted', () => {
+  const hand = [card(15), card(30), card(25), card(40), card(50), card(20), card(35)]; // 7 cards
+  it('commits the whole hand when no subset is given and it fits pickMax', () => {
+    const five = hand.slice(0, 5);
+    const r = selectCommitted(five, null, 5);
+    expect(r.ok && r.committed.length).toBe(5);
+  });
+
+  it('rejects a full hand larger than pickMax with no selection (forces a pick)', () => {
+    const r = selectCommitted(hand, null, 5); // 7 > 5
+    expect(r).toEqual({ ok: false, reason: 'Keep at most 5 cards.' });
+  });
+
+  it('keeps exactly the chosen subset', () => {
+    const keep = [hand[0].uid, hand[2].uid, hand[4].uid];
+    const r = selectCommitted(hand, keep, 5);
+    expect(r.ok && r.committed.map(c => c.uid)).toEqual(keep);
+  });
+
+  it('rejects a selection referencing a card not in hand, an empty keep, or too many', () => {
+    expect(selectCommitted(hand, [9999], 5)).toMatchObject({ ok: false });
+    expect(selectCommitted(hand, [], 5)).toMatchObject({ ok: false });
+    expect(selectCommitted(hand, hand.map(c => c.uid).slice(0, 6), 5)).toEqual({ ok: false, reason: 'Keep at most 5 cards.' });
+  });
+});
+
 // ── Hold 'Em community draw ───────────────────────────────────────────────────
 describe('drawCommunity', () => {
   it('returns 5 distinct cards: 1 random + one each of the four typed categories', () => {
@@ -272,6 +311,89 @@ describe('drawCommunity', () => {
   });
 });
 
+// ── Casino multi-table model ──────────────────────────────────────────────────
+const formingTable = (game: CasinoGame): GMMission =>
+  ({ type: 'casino', state: 'forming', casinoGame: game } as GMMission);
+
+describe('casinoEntryCosts', () => {
+  it('derives the house-cut note from each game\'s cost model', () => {
+    expect(casinoEntryCosts('five_card_draw')).toEqual([{ label: 'Ante', gold: 60 }, { label: 'Reroll', gold: 30 }]);
+    expect(casinoEntryCosts('seven_card_stud')).toEqual([{ label: 'Ante', gold: 75 }]);
+    expect(casinoEntryCosts('holdem')).toEqual([{ label: 'Ante', gold: 30 }, { label: 'Play-on', gold: 50 }]);
+    expect(casinoEntryCosts('blackjack')).toEqual([{ label: 'Ante', gold: 40 }]);
+  });
+});
+
+describe('pickNextCasinoGame', () => {
+  it('returns a game with the fewest forming tables (guaranteed when one is at zero)', () => {
+    // three games represented, blackjack absent → blackjack is the sole minimum.
+    const missions: Record<string, GMMission> = {
+      a: formingTable('five_card_draw'), b: formingTable('five_card_draw'),
+      c: formingTable('seven_card_stud'), d: formingTable('holdem'),
+    };
+    for (let i = 0; i < 20; i++) expect(pickNextCasinoGame(missions)).toBe('blackjack');
+  });
+
+  it('only counts FORMING casino tables', () => {
+    const missions: Record<string, GMMission> = {
+      a: { type: 'casino', state: 'inprogress', casinoGame: 'blackjack' } as GMMission,
+      b: { type: 'casino', state: 'complete',   casinoGame: 'holdem'    } as GMMission,
+    };
+    // both non-forming → all counts 0 → any of the four is valid
+    for (let i = 0; i < 20; i++) expect(['five_card_draw', 'seven_card_stud', 'holdem', 'blackjack']).toContain(pickNextCasinoGame(missions));
+  });
+
+  it('seeding 6 tables yields a 2/2/1/1 spread regardless of tiebreak', () => {
+    const working: Record<string, GMMission> = {};
+    for (let i = 0; i < 6; i++) {
+      const g = pickNextCasinoGame(working);
+      working[`t${i}`] = formingTable(g);
+    }
+    const counts: Record<string, number> = {};
+    for (const m of Object.values(working)) counts[m.casinoGame!] = (counts[m.casinoGame!] ?? 0) + 1;
+    expect(Object.values(counts).sort()).toEqual([1, 1, 2, 2]);
+  });
+});
+
+describe('casinoPotShares', () => {
+  it('splits evenly and pays out the whole pot (remainder to one seat)', () => {
+    const shares = casinoPotShares(100, ['a', 'b', 'c'], () => 0); // base 33, rem 1
+    const vals = ['a', 'b', 'c'].map(id => shares.get(id)!);
+    expect(vals.reduce((s, v) => s + v, 0)).toBe(100);      // nothing leaks
+    expect(vals.filter(v => v === 33).length).toBe(2);
+    expect(vals.filter(v => v === 34).length).toBe(1);
+  });
+
+  it('divides evenly when there is no remainder', () => {
+    const shares = casinoPotShares(90, ['a', 'b', 'c']);
+    expect([...shares.values()]).toEqual([30, 30, 30]);
+  });
+
+  it('handles empty winners and a zero pot without leaking', () => {
+    expect(casinoPotShares(50, []).size).toBe(0);
+    expect([...casinoPotShares(0, ['a', 'b']).values()]).toEqual([0, 0]);
+  });
+});
+
+describe('freshCasinoTable', () => {
+  it('builds a forming casino table pinned to the game, with rolled seats/odds/pot', () => {
+    const t = freshCasinoTable('holdem', 3, 1000, mulberry32(42));
+    expect(t.type).toBe('casino');
+    expect(t.casinoGame).toBe('holdem');
+    expect(t.series).toBe(3);
+    expect(t.label).toBe("Texas Hold 'Em");
+    expect(t.state).toBe('forming');
+    expect(t.release).toBe('special');
+    expect(t.collect).toBe('special');
+    expect(t.baseMax).toBeGreaterThanOrEqual(5);
+    expect(t.baseMax).toBeLessThanOrEqual(8);
+    expect(t.entryCosts).toEqual([{ label: 'Ante', gold: 30 }, { label: 'Play-on', gold: 50 }]);
+    expect(t.pot).toBeGreaterThanOrEqual(10 + t.baseMax * 10);
+    expect(t.casinoStats!.xp).toBe(50);
+    expect(t.hint).toBe(t.casinoStats!.hint);
+  });
+});
+
 // ── Client / server engine parity (the sync guard) ───────────────────────────
 describe('client and server casino engines stay in sync', () => {
   it('CASINO_GAMES is identical on both sides', () => {
@@ -289,6 +411,15 @@ describe('client and server casino engines stay in sync', () => {
         expect(server.seatSpend(g, f)).toBe(seatSpend(g, f));
       }
     }
+  });
+
+  it('initialDealCount / selectCommitted match on both sides', () => {
+    for (const g of CASINO_GAME_ORDER as CasinoGame[]) {
+      expect(server.initialDealCount(g)).toBe(initialDealCount(g));
+    }
+    const h = [card(15), card(30), card(25), card(40), card(50), card(20)];
+    expect(server.selectCommitted(h, null, 5)).toEqual(selectCommitted(h, null, 5));
+    expect(server.selectCommitted(h, [h[0].uid, h[1].uid], 5)).toEqual(selectCommitted(h, [h[0].uid, h[1].uid], 5));
   });
 
   it('deriveHintCost / potContribution match across the whole domain', () => {

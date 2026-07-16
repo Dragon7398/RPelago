@@ -335,6 +335,12 @@ export const CASINO_REROLL_COST = 20;
 export const CASINO_START_GOLD = 200;
 export const CASINO_GOLD_FLOOR = 100;
 
+// How many casino tables are open (forming) at once in a casino season. A
+// per-season override lives at config/seasonList/{seasonId}/casinoOpenTables;
+// this is the default. Each table is pinned to one game type; a replacement
+// spawns (least-represented game) whenever a table deploys, holding the count.
+export const CASINO_OPEN_TABLES = 6;
+
 // Season-end control: when true, admins can no longer seed brand-new mission cohorts
 // (existing forming/in-progress cohorts still play out normally). Flip back to false
 // when the next season kicks off.

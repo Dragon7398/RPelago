@@ -115,6 +115,9 @@ export interface Player {
   joinedAt?: number;
   activeMission?:     string | null;
   basicTrainingDone?: boolean;
+  // Casino: which game types this player has successfully completed a table of.
+  // When all four are true, the Coat of Many Colors is granted (name-color unlock).
+  casinoGamesCompleted?: Partial<Record<CasinoGame, boolean>>;
 }
 
 export interface OrbConfig {
@@ -272,7 +275,7 @@ export interface CasinoLogEntry {
   uid:          string;
   playerName:   string;
   event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon';
-  game?:        'poker' | 'blackjack' | 'holdem';
+  game?:        CasinoGame;
   amount?:      number;           // gold the player paid for this event (negative = paid TO the player)
   potAdd?:      number;           // gold added to the shared pot from this event
   goldSwing?:   number;           // final reward at 'lock' (post deck-boost)

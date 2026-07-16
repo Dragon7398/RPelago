@@ -7,9 +7,10 @@ import { getDatabase, ServerValue } from 'firebase-admin/database';
 import { defineSecret } from 'firebase-functions/params';
 import {
   type DeckCard, type CasinoStats, type GambitDef, type CasinoDeckChoice, type CasinoGame,
-  CASINO_MIN_ENLIST_GOLD, CASINO_POT_SEED, CASINO_POT_CUT_PCT,
-  CASINO_START_STATS, CASINO_ANTE, CASINO_REROLL_COST,
-  CASINO_GAMES, potContribution, drawCommunity,
+  CASINO_MIN_ENLIST_GOLD, CASINO_POT_SEED,
+  CASINO_START_STATS,
+  CASINO_GAMES, CASINO_GAME_ORDER, potContribution, drawCommunity, rollTableSetup,
+  initialDealCount, selectCommitted, gambitCasinoGold,
   GAMBIT_DEFS_BY_ID, DECK_VARIANTS,
   buildDeck, shuffle, makeDrawableDeck,
   handStake, applyGambit, rollCasinoOdds, cardsToSlots,
@@ -413,6 +414,7 @@ interface PlayerRecord {
   avatarHash?:   string | null;
   joinedAt?:     number;
   xp?:           number;
+  gold?:         number;
 }
 
 function normalizeGameName(name: string): string {
@@ -599,7 +601,7 @@ interface CasinoLogEntry {
   uid:          string;
   playerName:   string;
   event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon';
-  game?:        'poker' | 'blackjack' | 'holdem';
+  game?:        CasinoGame;
   amount?:      number;
   potAdd?:      number;
   goldSwing?:   number;
@@ -704,11 +706,8 @@ interface MissionDef {
   potSeed?:        number;
 }
 
-// Season-end control: when true, deploying a mission does not spawn its next
-// cohort (mirrors MISSIONS_CLOSED_FOR_SEASON in src/lib/constants.ts — this
-// function tree is a server-side duplicate, so the flag must be kept in sync
-// by hand here). Flip back to false when the next season kicks off.
-const MISSIONS_CLOSED_FOR_SEASON = true;
+// Season-end control is now data-driven: cohort respawn is gated on the season's
+// `status` (see gmSpawnAllowed) rather than a hand-flipped constant.
 
 const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
   basic: {
@@ -824,6 +823,73 @@ function gmMissionLabel(m: GMMission): string {
   return `${m.label} · Cohort ${roman}`;
 }
 
+// ── Casino multi-table model (mirror of src/lib/missionLogic.ts) ─────────────
+// Keep in sync with casinoEntryCosts / pickNextCasinoGame / freshCasinoTable.
+
+function gmCasinoEntryCosts(game: CasinoGame): { label: string; gold: number }[] {
+  const g = CASINO_GAMES[game];
+  const costs: { label: string; gold: number }[] = [{ label: 'Ante', gold: g.ante }];
+  if (g.reroll) costs.push({ label: 'Reroll',  gold: g.rerollCost });
+  if (g.playOn) costs.push({ label: 'Play-on', gold: g.playOn });
+  return costs;
+}
+
+// Random game among the type(s) with the fewest currently-forming tables, so no
+// game can be starved (which would make the all-four-games Coat unearnable).
+function gmPickNextCasinoGame(
+  missions: Record<string, GMMission> | undefined,
+  rng: () => number = Math.random,
+): CasinoGame {
+  const counts: Record<CasinoGame, number> = {
+    five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
+  };
+  for (const m of Object.values(missions ?? {})) {
+    if (m.type === 'casino' && m.state === 'forming' && m.casinoGame) counts[m.casinoGame]++;
+  }
+  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts[g]));
+  const candidates = CASINO_GAME_ORDER.filter(g => counts[g] === min);
+  return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
+}
+
+function gmFreshCasinoTable(game: CasinoGame, series: number, now: number, rng: () => number = Math.random): Omit<GMMission, 'id'> {
+  const setup = rollTableSetup(rng);
+  return {
+    type:           'casino',
+    casinoGame:     game,
+    series,
+    label:          CASINO_GAMES[game].label,
+    state:          'forming',
+    baseMax:        setup.seats,
+    xp:             setup.stats.xp,
+    gp:             0,
+    release:        'special',
+    collect:        'special',
+    hint:           setup.stats.hint,
+    firstJoinAt:    null,
+    createdAt:      now,
+    participants:   {},
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts:     gmCasinoEntryCosts(game),
+    pot:            setup.pot,
+    casinoStats:    setup.stats,
+  };
+}
+
+// Next per-game cohort number — a persisted counter, transaction-incremented so
+// concurrent table spawns never hand out duplicate cohort numbers.
+async function gmNextCasinoSeries(db: ReturnType<typeof getDatabase>, seasonId: string, game: CasinoGame): Promise<number> {
+  const res = await db.ref(sp(seasonId, `casinoSeries/${game}`)).transaction((cur: number | null) => (cur ?? 0) + 1);
+  return (res.snapshot.val() as number) ?? 1;
+}
+
+// New mission cohorts spawn only while the season is draft or active (not while
+// closing or archived — that's how a season winds down).
+async function gmSpawnAllowed(db: ReturnType<typeof getDatabase>, seasonId: string): Promise<boolean> {
+  const info = seasonInfo(await getConfig(db), seasonId);
+  return info != null && (info.status === 'active' || info.status === 'draft');
+}
+
 
 
 // ── Deploy routine ────────────────────────────────────────────────────────────
@@ -837,14 +903,22 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
     [sp(seasonId, `missions/${missionId}/deployedAt`)]: now,
   };
 
-  // TODO(casino-season): mission respawn becomes config-driven per season
-  // (config/seasonList/{id}/missionTypes) and the casino becomes N concurrent
-  // single-game tables. For now this preserves the pre-season single-cohort model.
-  if (!MISSIONS_CLOSED_FOR_SEASON) {
+  // Spawn a replacement cohort on deploy — unless the season is winding down
+  // (closing/archived). A casino table spawns a min-count replacement table
+  // (holding the open-table count); other mission types spawn a same-type cohort.
+  if (await gmSpawnAllowed(db, seasonId)) {
     const newRef = db.ref(sp(seasonId, 'missions')).push();
     const newId  = newRef.key!;
-    const fresh  = gmFreshMission(m.type, m.series + 1, now);
-    updates[sp(seasonId, `missions/${newId}`)] = { ...fresh, id: newId };
+    if (m.type === 'casino') {
+      const msnap    = await db.ref(sp(seasonId, 'missions')).get();
+      const missions = (msnap.val() as Record<string, GMMission>) ?? {};
+      delete missions[missionId];   // the deploying table is leaving 'forming'
+      const game   = gmPickNextCasinoGame(missions);
+      const series = await gmNextCasinoSeries(db, seasonId, game);
+      updates[sp(seasonId, `missions/${newId}`)] = { ...gmFreshCasinoTable(game, series, now), id: newId };
+    } else {
+      updates[sp(seasonId, `missions/${newId}`)] = { ...gmFreshMission(m.type, m.series + 1, now), id: newId };
+    }
   }
 
   // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
@@ -1128,25 +1202,27 @@ export const setCasinoDeckChoice = onCall(async (request) => {
 export const dealCasinoHand = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
-  const { missionId, game, seasonId: reqSeason } = request.data as { missionId?: string; game?: 'poker' | 'blackjack'; seasonId?: string };
-  if (!missionId || !game) throw new HttpsError('invalid-argument', 'Missing missionId or game.');
-  if (game !== 'poker' && game !== 'blackjack') throw new HttpsError('invalid-argument', 'Invalid game.');
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
 
   const db = getDatabase();
   const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
   const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
 
-  // Hold 'Em uses its own two-sitting callables (dealHoldemHole / holdemPlayOn).
-  if (mission.casinoGame === 'holdem')
+  // The game is fixed by the table (multi-table model). Hold 'Em has its own
+  // two-sitting callables (dealHoldemHole / holdemPlayOn).
+  const game = mission.casinoGame;
+  if (!game) throw new HttpsError('failed-precondition', 'This table has no game assigned.');
+  if (game === 'holdem')
     throw new HttpsError('failed-precondition', "Use the Hold 'Em table flow for this game.");
 
   // Prevent re-dealing if a hand is already in progress (they must fold first).
   if (seat.hand && seat.hand.length > 0)
     throw new HttpsError('failed-precondition', 'A hand is already in progress. Fold first to redeal.');
 
-  const ante    = CASINO_ANTE[game];
-  const potCut  = Math.floor(ante * CASINO_POT_CUT_PCT);
-  const drawCount = game === 'poker' ? 5 : 2;
+  const ante      = CASINO_GAMES[game].ante;      // per-variant cost model
+  const potCut    = potContribution(ante);
+  const drawCount = initialDealCount(game);        // FCD 5 · Stud 7 · Blackjack 2
 
   // Pre-read the player record to catch a genuinely missing record early.
   // The Admin SDK transaction callback always receives null on its first
@@ -1190,7 +1266,6 @@ export const dealCasinoHand = onCall(async (request) => {
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: hand,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: remaining,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]:  null,
-    [sp(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]: game,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]: null,  // clear from any previous session
     [sp(seasonId, `missions/${missionId}/pot`)]: ServerValue.increment(potCut),
     [logPath]: logEntry,
@@ -1214,13 +1289,19 @@ export const casinoDraw = onCall(async (request) => {
 
   const db = getDatabase();
   const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
-  const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+  const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
 
+  const game = mission.casinoGame;
+  if (!game || game === 'holdem')
+    throw new HttpsError('failed-precondition', 'This table has no reroll/hit action.');
+  const cfg  = CASINO_GAMES[game];
   const hand = seat.hand ?? [];
   const deck = seat.deck ?? [];
   if (hand.length === 0) throw new HttpsError('failed-precondition', 'No hand in progress.');
 
   if (action === 'reroll') {
+    if (!cfg.reroll)
+      throw new HttpsError('failed-precondition', 'This game has no reroll.');
     if (!rejectUids || rejectUids.length === 0)
       throw new HttpsError('invalid-argument', 'No cards selected to reroll.');
     if (seat.rerolled)
@@ -1228,7 +1309,8 @@ export const casinoDraw = onCall(async (request) => {
     if (deck.length < rejectUids.length)
       throw new HttpsError('failed-precondition', 'Not enough cards left in the deck to reroll.');
 
-    const potCut = Math.floor(CASINO_REROLL_COST * CASINO_POT_CUT_PCT);
+    const rerollCost = cfg.rerollCost;
+    const potCut     = potContribution(rerollCost);
     const rerollSnap = await db.ref(sp(seasonId, `players/${uid}`)).get();
     if (!rerollSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
     const rerollSnapData = rerollSnap.val() as { gold?: number };
@@ -1237,8 +1319,8 @@ export const casinoDraw = onCall(async (request) => {
       (current: { gold?: number } | null) => {
         const data = current ?? rerollSnapData;
         const gold = data.gold ?? 0;
-        if (gold < CASINO_REROLL_COST) { abortReason = 'Not enough gold to reroll.'; return undefined; }
-        return { ...data, gold: gold - CASINO_REROLL_COST };
+        if (gold < rerollCost) { abortReason = 'Not enough gold to reroll.'; return undefined; }
+        return { ...data, gold: gold - rerollCost };
       },
     );
     if (!committed) throw new HttpsError('failed-precondition', abortReason);
@@ -1250,8 +1332,8 @@ export const casinoDraw = onCall(async (request) => {
     const newHand = hand.map((card: DeckCard) => rejectSet.has(card.uid) ? fresh[fi++] : card);
 
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-      uid, playerName: seat.playerName, event: 'reroll', game: seat.gameType,
-      amount: CASINO_REROLL_COST, potAdd: potCut,
+      uid, playerName: seat.playerName, event: 'reroll', game,
+      amount: rerollCost, potAdd: potCut,
     });
 
     await db.ref().update({
@@ -1265,7 +1347,9 @@ export const casinoDraw = onCall(async (request) => {
   }
 
   if (action === 'hit') {
-    if (hand.length >= 6) throw new HttpsError('failed-precondition', 'Maximum 6 cards reached.');
+    if (game !== 'blackjack')
+      throw new HttpsError('failed-precondition', 'This game has no hit.');
+    if (hand.length >= cfg.maxDraw) throw new HttpsError('failed-precondition', `Maximum ${cfg.maxDraw} cards reached.`);
     if (deck.length === 0) throw new HttpsError('failed-precondition', 'Deck is empty.');
     const drawable = makeDrawableDeck(deck);
     const card     = drawable.drawOne();
@@ -1291,16 +1375,15 @@ export const casinoFold = onCall(async (request) => {
   const db  = getDatabase();
   const now = Date.now();
   const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
-  const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+  const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
 
   const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-    uid, playerName: seat.playerName, event: 'fold', game: seat.gameType,
+    uid, playerName: seat.playerName, event: 'fold', game: mission.casinoGame,
   });
 
   await db.ref().update({
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]:        null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:        null,
-    [sp(seasonId, `missions/${missionId}/participants/${uid}/gameType`)]:    null,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/rerolled`)]:    null,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/gambitPlayed`)]: null,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]:     now + 3_600_000,
@@ -1318,7 +1401,7 @@ export const playCasinoGambit = onCall(async (request) => {
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
 
   const db = getDatabase();
-  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(uid, reqSeason, db);
   const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
 
   if (seat.gambitPlayed) throw new HttpsError('failed-precondition', 'Gambit phase already resolved.');
@@ -1336,6 +1419,7 @@ export const playCasinoGambit = onCall(async (request) => {
     const result = applyGambit(currentStats, gambitDef);
 
     if (gambitDef.goldCost > 0) {
+      // Bonus gambit — the player PAYS gold to improve the room's shared odds.
       const gambitSnap = await db.ref(sp(seasonId, `players/${uid}`)).get();
       if (!gambitSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
       const gambitSnapData = gambitSnap.val() as { gold?: number };
@@ -1351,18 +1435,32 @@ export const playCasinoGambit = onCall(async (request) => {
       if (!committed) throw new HttpsError('failed-precondition', abortReason);
     }
 
-    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = result.stats;
+    // Penalty gambit reward: in a CASINO season the (inert) XP is paid to the
+    // player as gold (xp × rate) and the XP is NOT accrued; in a map season the
+    // XP is awarded normally. Bonuses have xp 0, so neither branch fires.
+    const casinoGold = shell === 'casino' ? gambitCasinoGold(gambitDef) : 0;
+    let logAmount = gambitDef.goldCost;                 // + = paid by player
+    if (gambitDef.xp > 0) {
+      if (shell === 'casino') {
+        updates[sp(seasonId, `players/${uid}/gold`)] = ServerValue.increment(casinoGold);
+        logAmount = -casinoGold;                        // − = paid TO the player (gold entering the economy)
+      } else {
+        updates[sp(seasonId, `missions/${missionId}/participants/${uid}/casinoXp`)] =
+          ServerValue.increment(gambitDef.xp);
+      }
+    }
+
+    // In a casino season the gambit XP is converted to gold, so don't let it
+    // accrue into the (inert) shared xp floor.
+    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] =
+      shell === 'casino' ? { ...result.stats, xp: currentStats.xp } : result.stats;
     if (result.potAdd > 0) {
       updates[sp(seasonId, `missions/${missionId}/pot`)] = ServerValue.increment(result.potAdd);
-    }
-    if (gambitDef.xp > 0) {
-      updates[sp(seasonId, `missions/${missionId}/participants/${uid}/casinoXp`)] =
-        ServerValue.increment(gambitDef.xp);
     }
 
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
       uid, playerName: seat.playerName, event: 'gambit', gambitDefId,
-      amount: gambitDef.goldCost, potAdd: result.potAdd,
+      amount: logAmount, potAdd: result.potAdd,
     });
     updates[logPath] = logEntry;
   }
@@ -1377,10 +1475,9 @@ export const playCasinoGambit = onCall(async (request) => {
 export const lockCasinoResult = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
-  const { missionId, discardUid, pokerRejectUids, seasonId: reqSeason } = request.data as {
+  const { missionId, keepUids, seasonId: reqSeason } = request.data as {
     missionId?: string;
-    discardUid?: number | null;       // optional blackjack 6-card discard
-    pokerRejectUids?: number[] | null; // poker cards marked rejected but not rerolled
+    keepUids?: number[] | null;   // cards to commit (≤ pickMax); omit to commit the whole hand
     seasonId?: string;
   };
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
@@ -1388,33 +1485,26 @@ export const lockCasinoResult = onCall(async (request) => {
   const db  = getDatabase();
   const now = Date.now();
   const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
-  const { seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+  const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
 
   if (!seat.gambitPlayed)
     throw new HttpsError('failed-precondition', 'Resolve the gambit phase before locking.');
 
-  let hand = seat.hand ?? [];
-  if (hand.length === 0) throw new HttpsError('failed-precondition', 'No hand to lock.');
-  if (hand.length > 5 && discardUid == null)
-    throw new HttpsError('failed-precondition', 'A 6-card hand requires one discard before locking.');
-  if (discardUid != null) {
-    hand = hand.filter((c: DeckCard) => c.uid !== discardUid);
-    if (hand.length === seat.hand!.length)
-      throw new HttpsError('invalid-argument', 'discardUid not found in hand.');
-  }
-  if (pokerRejectUids && pokerRejectUids.length > 0) {
-    const rejectSet = new Set(pokerRejectUids);
-    hand = hand.filter((c: DeckCard) => !rejectSet.has(c.uid));
-    if (hand.length === 0)
-      throw new HttpsError('invalid-argument', 'Cannot reject all cards.');
-  }
+  const rawHand = seat.hand ?? [];
+  if (rawHand.length === 0) throw new HttpsError('failed-precondition', 'No hand to lock.');
+
+  // Validate the committed selection against the game's pickMax (≤5 everywhere).
+  const pickMax = mission.casinoGame ? CASINO_GAMES[mission.casinoGame].pickMax : 5;
+  const sel = selectCommitted(rawHand, keepUids, pickMax);
+  if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
+  const hand = sel.committed;
 
   const choice    = deckChoiceOf(seat);
   const goldSwing = applyDeckBoost(handStake(hand), choice);
   const slots     = cardsToSlots(hand);
 
   const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-    uid, playerName: seat.playerName, event: 'lock', game: seat.gameType, goldSwing, deckChoice: choice,
+    uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
   });
 
   const updates: Record<string, unknown> = {
@@ -1887,11 +1977,18 @@ export const onMissionComplete = onValueCreated(
         profileUpdates[`${base}/firstEvent`] = seasonId;
       }
 
-      // XP — snapshot of the player's current total (already includes this mission's reward).
-      profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
-
-      // Missions — separate counter from tiles.
-      profileUpdates[`${base}/events/${seasonId}/missions`] = ServerValue.increment(1);
+      if (mission.type === 'casino') {
+        // Casino season records gold + handsPlayed (this season's "missions
+        // completed"). A folded seat never reaches here (removed at fold), so
+        // every archived casino participant played. See profile-site-handoff.
+        profileUpdates[`${base}/events/${seasonId}/gold`]        = player.gold ?? 0;
+        profileUpdates[`${base}/events/${seasonId}/handsPlayed`] = ServerValue.increment(1);
+      } else {
+        // XP — snapshot of the player's current total (already includes this mission's reward).
+        profileUpdates[`${base}/events/${seasonId}/xp`] = player.xp ?? 0;
+        // Missions — separate counter from tiles.
+        profileUpdates[`${base}/events/${seasonId}/missions`] = ServerValue.increment(1);
+      }
 
       // Games — collect from this participant's slots, same encoding as onTileComplete.
       for (const slot of normalizeArray(participant.slots)) {

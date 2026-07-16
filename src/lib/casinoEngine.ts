@@ -2,10 +2,38 @@
 // Ported from the prototype's casino/engine.js (AI player logic omitted).
 // Imported by both the browser client (table UI) and Cloud Functions.
 
-import { type DeckCard, buildDeck, shuffle } from './casinoData';
+import { type DeckCard, buildDeck, shuffle, CASINO_GAMES, type CasinoGame } from './casinoData';
 import type { CasinoStats } from '../types';
 
 export type { DeckCard };
+
+// ── Single-sitting play helpers (canonical — carries to S2) ───────────────────
+// Blackjack starts with 2 cards and hits from there; the other single-sitting
+// games deal their whole pool up front. Mirror in functions/src/casinoEngine.ts.
+export function initialDealCount(game: CasinoGame): number {
+  return game === 'blackjack' ? 2 : CASINO_GAMES[game].hole;
+}
+
+export type CommitResult = { ok: true; committed: DeckCard[] } | { ok: false; reason: string };
+
+// Validate the cards a seat commits from its hand. keepUids (when provided)
+// selects a subset — used by Seven Card Stud (≤5 of 7), Five Card Draw (reject
+// some), and Blackjack (drop at 6). Enforces 1..pickMax kept cards, each present.
+export function selectCommitted(
+  hand: readonly DeckCard[],
+  keepUids: number[] | undefined | null,
+  pickMax: number,
+): CommitResult {
+  let committed = hand.slice();
+  if (keepUids != null) {
+    const keep = new Set(keepUids);
+    committed = hand.filter(c => keep.has(c.uid));
+    if (committed.length !== keep.size) return { ok: false, reason: 'Selected a card not in your hand.' };
+  }
+  if (committed.length === 0)      return { ok: false, reason: 'Keep at least one card.' };
+  if (committed.length > pickMax)  return { ok: false, reason: `Keep at most ${pickMax} cards.` };
+  return { ok: true, committed };
+}
 
 // ── Poker ─────────────────────────────────────────────────────────────────────
 // Reward = sum of committed card values. No combo multiplier — more / rarer

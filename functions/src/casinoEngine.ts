@@ -319,6 +319,29 @@ export function handStake(hand: readonly DeckCard[]): number {
   return hand.reduce((s, c) => s + c.value, 0);
 }
 
+// ── Single-sitting play helpers (mirror of src/lib/casinoEngine.ts) ──────────
+export function initialDealCount(game: CasinoGame): number {
+  return game === 'blackjack' ? 2 : CASINO_GAMES[game].hole;
+}
+
+export type CommitResult = { ok: true; committed: DeckCard[] } | { ok: false; reason: string };
+
+export function selectCommitted(
+  hand: readonly DeckCard[],
+  keepUids: number[] | undefined | null,
+  pickMax: number,
+): CommitResult {
+  let committed = hand.slice();
+  if (keepUids != null) {
+    const keep = new Set(keepUids);
+    committed = hand.filter(c => keep.has(c.uid));
+    if (committed.length !== keep.size) return { ok: false, reason: 'Selected a card not in your hand.' };
+  }
+  if (committed.length === 0)      return { ok: false, reason: 'Keep at least one card.' };
+  if (committed.length > pickMax)  return { ok: false, reason: `Keep at most ${pickMax} cards.` };
+  return { ok: true, committed };
+}
+
 // Mirror of applyDeckBoost in src/lib/casinoSlots.ts.
 export function applyDeckBoost(reward: number, choice: CasinoDeckChoice): number {
   const boost = DECK_VARIANTS[choice].gpBoost;

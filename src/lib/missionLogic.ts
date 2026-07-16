@@ -1,5 +1,7 @@
-import type { GMMission, GMMissionType, GMParticipant, AdvSlot } from '../types';
+import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } from '../types';
 import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, CASINO_ANTE, toRoman } from './constants';
+import { CASINO_GAMES, CASINO_GAME_ORDER } from './casinoData';
+import { rollTableSetup } from './casinoEngine';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -168,6 +170,93 @@ export function freshMission(
     ...(def.potSeed != null ? { pot:           def.potSeed            } : {}),
     ...(type === 'casino'  ? { casinoStats:    { ...CASINO_START_STATS } } : {}),
   };
+}
+
+// ── Casino multi-table model (canonical) ─────────────────────────────────────
+// A casino season runs several single-game tables at once (see CASINO_OPEN_TABLES).
+// Each table is a mission of type 'casino' pinned to one `casinoGame`. Mirror any
+// change in functions/src/index.ts (gm* variants).
+
+// The house-cut note shown on a table card, derived from the game's cost model.
+export function casinoEntryCosts(game: CasinoGame): { label: string; gold: number }[] {
+  const g = CASINO_GAMES[game];
+  const costs: { label: string; gold: number }[] = [{ label: 'Ante', gold: g.ante }];
+  if (g.reroll) costs.push({ label: 'Reroll',  gold: g.rerollCost });
+  if (g.playOn) costs.push({ label: 'Play-on', gold: g.playOn });
+  return costs;
+}
+
+// Pick the game type for the next table to open: at random among the type(s)
+// with the FEWEST currently-forming tables. A type that hits zero is the sole
+// minimum and is guaranteed next, so no game can be starved (which would make
+// the all-four-games Coat unearnable). Only `forming` tables count.
+export function pickNextCasinoGame(
+  missions: Record<string, GMMission> | undefined,
+  rng: () => number = Math.random,
+): CasinoGame {
+  const counts: Record<CasinoGame, number> = {
+    five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
+  };
+  for (const m of Object.values(missions ?? {})) {
+    if (m.type === 'casino' && m.state === 'forming' && m.casinoGame) counts[m.casinoGame]++;
+  }
+  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts[g]));
+  const candidates = CASINO_GAME_ORDER.filter(g => counts[g] === min);
+  return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
+}
+
+// Build a fresh casino table pinned to one game, with seats / odds / pot rolled
+// at creation (rollTableSetup). Release/Collect are 'special' — rolled against
+// the odds table at deploy. `series` is the per-game cohort number.
+export function freshCasinoTable(
+  game: CasinoGame,
+  series: number,
+  now: number,
+  rng: () => number = Math.random,
+): Omit<GMMission, 'id'> {
+  const setup = rollTableSetup(rng);
+  return {
+    type:           'casino',
+    casinoGame:     game,
+    series,
+    label:          CASINO_GAMES[game].label,
+    state:          'forming',
+    baseMax:        setup.seats,
+    xp:             setup.stats.xp,
+    gp:             0,
+    release:        'special',
+    collect:        'special',
+    hint:           setup.stats.hint,
+    firstJoinAt:    null,
+    createdAt:      now,
+    participants:   {},
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts:     casinoEntryCosts(game),
+    pot:            setup.pot,
+    casinoStats:    setup.stats,
+  };
+}
+
+// Split a casino pot evenly among the winning (played) seats at settle. The
+// floor-division remainder (0..winners−1 gold) goes to one seat chosen at random
+// so the whole pot is always paid out and never leaks. Empty winners → no split.
+export function casinoPotShares(
+  pot: number,
+  winnerIds: string[],
+  rng: () => number = Math.random,
+): Map<string, number> {
+  const shares = new Map<string, number>();
+  const n = winnerIds.length;
+  if (n === 0 || pot <= 0) {
+    for (const id of winnerIds) shares.set(id, 0);
+    return shares;
+  }
+  const base = Math.floor(pot / n);
+  const rem  = pot - base * n;
+  const remIdx = Math.min(n - 1, Math.floor(rng() * n));
+  winnerIds.forEach((id, i) => shares.set(id, base + (i === remIdx ? rem : 0)));
+  return shares;
 }
 
 export function fmtClock(totalSec: number): string {

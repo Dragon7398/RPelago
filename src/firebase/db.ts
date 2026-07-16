@@ -2,11 +2,12 @@ import { ref, set, update, get, onValue, remove, push } from 'firebase/database'
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus, CasinoGame } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
-import { ALL_ORBS, MISSIONS_CLOSED_FOR_SEASON } from '../lib/constants';
+import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
+import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoPotShares, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 
 function assertDb() {
@@ -42,27 +43,62 @@ function defaultOrbConfig(): OrbConfig {
 // Seed mission cohorts for each type that has no active (forming/inprogress) cohort.
 // Safe to call on any existing season mid-flight — only creates what is missing.
 //
-// TODO(season-refactor): this still hardcodes basic+patrol+casino and reads the
-// MISSIONS_CLOSED_FOR_SEASON constant. Both become season config:
-// `config/seasonList/{id}/missionTypes` and the season `status` respectively —
-// and the casino becomes N concurrent single-game tables rather than one cohort.
-// See docs/casino-season-1_5-plan.md → "Table model".
+// Bootstraps a season's initial mission cohorts. Behavior is season-driven:
+//   · casino shell → opens up to casinoOpenTables single-game tables, each
+//     pinned to a game via the least-represented spawn policy.
+//   · map shell    → the legacy basic + patrol cohorts.
+// No-op while the season is closing or archived (wind-down). Idempotent: only
+// fills up to the target, so re-running never over-seeds. See
+// docs/casino-season-1_5-plan.md → "Table model".
 export async function seedInitialMissions(): Promise<boolean> {
-  if (MISSIONS_CLOSED_FOR_SEASON) return false;
   assertDb();
   const d = db!;
-  const snap = await get(sRef(d, 'missions'));
-  const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
-  const active = Object.values(existing);
+  const seasonId = getCurrentSeason();
 
+  const [listSnap, draftSnap] = await Promise.all([
+    get(ref(d, `config/seasonList/${seasonId}`)),
+    get(ref(d, `config/draftSeasons/${seasonId}`)),
+  ]);
+  const listed = listSnap.exists()  ? (listSnap.val()  as { shell?: string; status?: string; casinoOpenTables?: number }) : null;
+  const draft  = draftSnap.exists() ? (draftSnap.val() as { shell?: string; casinoOpenTables?: number }) : null;
+  const shell  = listed?.shell ?? draft?.shell ?? 'map';
+  const status = listed?.status ?? (draft ? 'draft' : 'archived');
+  if (status === 'closing' || status === 'archived') return false;  // winding down — no new cohorts
+
+  const snap     = await get(sRef(d, 'missions'));
+  const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
+  const active   = Object.values(existing);
+  const now      = Date.now();
+  const updates: Record<string, unknown> = {};
+
+  if (shell === 'casino') {
+    const target  = listed?.casinoOpenTables ?? draft?.casinoOpenTables ?? CASINO_OPEN_TABLES;
+    const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
+    if (forming >= target) return false;
+
+    // Continue per-game cohort numbering from the persisted counters.
+    const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
+    const seriesSnap = await get(sRef(d, 'casinoSeries'));
+    if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
+
+    const working: Record<string, GMMission> = { ...existing };
+    for (let i = forming; i < target; i++) {
+      const game = pickNextCasinoGame(working);            // least-represented, sees tables added so far
+      series[game] = (series[game] ?? 0) + 1;
+      const r = push(sRef(d, 'missions'));
+      const table = { ...freshCasinoTable(game, series[game], now), id: r.key! } as GMMission;
+      updates[sPath(`missions/${r.key}`)] = table;
+      working[r.key!] = table;
+    }
+    for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
+    await update(ref(d), updates);
+    return true;
+  }
+
+  // Map shell — legacy single-cohort bootstrap for basic + patrol.
   const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
   const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
-  const hasCasino = active.some(m => m.type === 'casino' && m.state !== 'complete');
-
-  if (hasBasic && hasPatrol && hasCasino) return false;
-
-  const now = Date.now();
-  const updates: Record<string, unknown> = {};
+  if (hasBasic && hasPatrol) return false;
 
   if (!hasBasic) {
     const r = push(sRef(d, 'missions'));
@@ -71,10 +107,6 @@ export async function seedInitialMissions(): Promise<boolean> {
   if (!hasPatrol) {
     const r = push(sRef(d, 'missions'));
     updates[sPath(`missions/${r.key}`)] = { ...freshMission('patrol', 1, now), id: r.key };
-  }
-  if (!hasCasino) {
-    const r = push(sRef(d, 'missions'));
-    updates[sPath(`missions/${r.key}`)] = { ...freshMission('casino', 1, now), id: r.key };
   }
 
   await update(ref(d), updates);
@@ -850,18 +882,12 @@ export async function completeMission(
 
   // For casino missions, pre-compute each played player's pot share.
   // Gold comes from goldSwing (card values) + equal pot split; no feat multiplier on gambling winnings.
-  const casinoPotShares = new Map<string, number>();
+  let potShares = new Map<string, number>();
   if (mission.type === 'casino') {
-    const playedEntries = Object.entries(mission.participants ?? {})
-      .filter(([, p]) => p.played);
-    const pot   = (mission as unknown as { pot?: number }).pot ?? 0;
-    const count = playedEntries.length;
-    const base  = count > 0 ? Math.floor(pot / count) : 0;
-    const rem   = count > 0 ? pot - base * count : pot;
-    const remIdx = count > 0 ? Math.floor(Math.random() * count) : -1;
-    playedEntries.forEach(([pid], i) => {
-      casinoPotShares.set(pid, base + (i === remIdx ? rem : 0));
-    });
+    const winnerIds = Object.entries(mission.participants ?? {})
+      .filter(([, p]) => p.played)
+      .map(([pid]) => pid);
+    potShares = casinoPotShares(mission.pot ?? 0, winnerIds);
   }
 
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
@@ -889,8 +915,19 @@ export async function completeMission(
       // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
       earnedXP = Math.round(mission.xp * xpMultiplier);
       // Gold: gambling winnings (goldSwing + pot share); no feat multiplier on gambling.
-      const goldSwing = (participant as unknown as { goldSwing?: number }).goldSwing ?? 0;
-      earnedGold = goldSwing + (casinoPotShares.get(pid) ?? 0);
+      earnedGold = (participant.goldSwing ?? 0) + (potShares.get(pid) ?? 0);
+
+      // Coat earn path: mark this game type completed; grant the Coat once the
+      // player has successfully completed a table of all four game types.
+      if (mission.casinoGame) {
+        updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
+        const completed = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
+        const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
+        const hasCoat    = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
+        if (hasAllFour && !hasCoat) {
+          updates[sPath(`players/${pid}/inventory/coat_of_many_colors`)] = 1;
+        }
+      }
     } else {
       earnedXP   = Math.round(mission.xp * xpMultiplier);
       earnedGold = Math.round(mission.gp * goldMultiplier);
