@@ -252,7 +252,9 @@ Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSl
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
 
-**Entry costs are per-variant and live in `CASINO_GAMES` (`casinoData.ts`)**, not in `constants.ts` — each game carries its own `ante` / `rerollCost` / `playOn`, summed for a seat by `seatSpend(game, { rerolled, playedOn })`. `CASINO_START_STATS`, `CASINO_MIN_ENLIST_GOLD`, `CASINO_START_GOLD`, `CASINO_GOLD_FLOOR`, and `CASINO_OPEN_TABLES` are in `constants.ts`. (`CASINO_ANTE` / `CASINO_REROLL_COST` are the old family-keyed model, still referenced only by the not-yet-rebuilt `CasinoTable.tsx`.)
+**Entry costs are per-variant and live in `CASINO_GAMES` (`casinoData.ts`)**, not in `constants.ts` — each game carries its own `ante` / `rerollCost` / `playOn`, summed for a seat by `seatSpend(game, { rerolled, playedOn })`. `CASINO_START_STATS`, `CASINO_MIN_ENLIST_GOLD`, `CASINO_START_GOLD`, `CASINO_GOLD_FLOOR`, and `CASINO_OPEN_TABLES` are in `constants.ts`. (`CASINO_ANTE` / `CASINO_REROLL_COST`, the old family-keyed model, are now dead — defined in `constants.ts` but referenced nowhere; remove once nothing imports them.)
+
+> **Odds drift baselines against the table's OWN roll.** Each table rolls its own release/collect at creation (`rollTableSetup`), so `mission.casinoStats` is meaningless to diff against a fixed 60/30. `freshCasinoTable` / `gmFreshCasinoTable` bank a frozen `casinoOpenStats` copy of that roll; `ChallengePanel` diffs against it (via the `open` prop) and hides the XP/Reward row in a casino season (`showXp={shell !== 'casino'}`, since gambit XP is paid out as gold there). Both builders — client and functions — must set `casinoOpenStats`.
 
 The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
 
@@ -315,7 +317,7 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/components/casino/PhasePanel.tsx` | Current-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger) |
 | `src/components/casino/OddsTrio.tsx` | Rolled Release/Collect/Hint display, shared by table cards and the phase panel |
 | `src/components/casino/useLastSettled.ts` | Finds the player's most recent settled table in `missionsHistory` (the Ledger's subject) |
-| `src/casino/CasinoTable.tsx` | Casino table root component; owns phase state machine and Firebase subscription. **Still on the pre-multi-table contract — see the rebuild map in docs/casino-season-1_5-plan.md** |
+| `src/casino/CasinoTable.tsx` | Casino table root component; owns the phase state machine (`deckselect → ante → play\|(holdwait→holdplay) → gambit → locked → deployed`) and Firebase subscription. Game is read from `mission.casinoGame`; costs from `CASINO_GAMES`/`seatSpend`. |
 | `src/casino/CardFace.tsx` | Single playing card render |
 | `src/casino/GambitCardFace.tsx` | Gambit card render |
 | `src/casino/TableComponents.tsx` | PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow |

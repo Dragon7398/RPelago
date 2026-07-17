@@ -30,7 +30,7 @@ exports.drawCommunity = drawCommunity;
 exports.cardsToSlots = cardsToSlots;
 // ── Casino mission constants ─────────────────────────────────────────────────
 // Mirror of CASINO_MIN_ENLIST_GOLD and CASINO_START_STATS in src/lib/constants.ts
-exports.CASINO_MIN_ENLIST_GOLD = 30;
+exports.CASINO_MIN_ENLIST_GOLD = 90; // = the cheapest ante (Hold 'Em)
 exports.CASINO_POT_SEED = 50;
 exports.CASINO_POT_CUT_PCT = 0.40;
 exports.CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 };
@@ -42,29 +42,30 @@ exports.CASINO_REROLL_COST = 20;
 exports.CASINO_GAME_ORDER = [
     'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
+// Entry costs are the S1 values ×3 (cards/pot/stake are ×2) — see the client copy.
 exports.CASINO_GAMES = {
     five_card_draw: {
         key: 'five_card_draw', label: 'Five Card Draw',
         sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
-        reroll: true, ante: 60, rerollCost: 30, playOn: 0,
+        reroll: true, ante: 180, rerollCost: 90, playOn: 0,
         subsetSelect: false,
     },
     seven_card_stud: {
         key: 'seven_card_stud', label: 'Seven Card Stud',
         sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
-        reroll: false, ante: 75, rerollCost: 0, playOn: 0,
+        reroll: false, ante: 225, rerollCost: 0, playOn: 0,
         subsetSelect: true,
     },
     holdem: {
         key: 'holdem', label: "Texas Hold 'Em",
         sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
-        reroll: false, ante: 30, rerollCost: 0, playOn: 50,
+        reroll: false, ante: 90, rerollCost: 0, playOn: 150,
         subsetSelect: true,
     },
     blackjack: {
         key: 'blackjack', label: 'Blackjack',
         sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
-        reroll: false, ante: 40, rerollCost: 0, playOn: 0,
+        reroll: false, ante: 120, rerollCost: 0, playOn: 0,
         subsetSelect: true,
     },
 };
@@ -88,11 +89,12 @@ const CARD_TYPE_COPIES = {
     franchise: 1,
     narrow: 1,
 };
+// Mirror of CARD_TYPES ranges in src/lib/casinoData.ts (S1 values ×2).
 const CARD_TYPE_RANGES = {
-    broad: [15, 30],
-    platform: [20, 35],
-    franchise: [25, 40],
-    narrow: [25, 50],
+    broad: [30, 60],
+    platform: [40, 70],
+    franchise: [50, 80],
+    narrow: [50, 100],
 };
 const RAW = [
     ['2D platformer', 'broad', 57],
@@ -136,7 +138,7 @@ const CARD_NOTES = {
 };
 const WILD_BASE = {
     name: 'Wild', type: 'wild', count: null,
-    value: 10, copies: 5, blurb: 'Choose any game you like.',
+    value: 20, copies: 5, blurb: 'Choose any game you like.',
 };
 function computeCardDefs() {
     const bounds = {};
@@ -360,10 +362,15 @@ function rollCollectChance(rng = Math.random) {
 function deriveHintCost(release, collect) {
     return Math.round(((release + collect) / 10) * 2) / 2;
 }
+// Mirror of computeInitialPot in src/lib/casinoEngine.ts — base 4×seats²
+// (squared so bigger tables pay each seat slightly MORE, not less), a doubled
+// random difficulty span, plus a flat 2×(120−R−C) premium (120 is the max
+// possible R+C, so it never goes negative). ~3g per point of difficulty.
 function computeInitialPot(seats, release, collect, rng = Math.random) {
-    const base = 10 + seats * 10;
+    const base = 4 * seats * seats;
     const span = Math.max(0, 150 - release - collect);
-    return base + randInt(span, rng);
+    const flat = 2 * Math.max(0, 120 - release - collect);
+    return base + randInt(span * 2, rng) + flat;
 }
 function potContribution(fee) {
     return Math.floor(fee * exports.CASINO_POT_CUT_PCT);

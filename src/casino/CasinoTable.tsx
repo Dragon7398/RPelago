@@ -5,11 +5,13 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath } from '../firebase/season';
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
-import type { DeckCard } from '../lib/casinoData';
-import { DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor } from '../lib/casinoData';
+import type { DeckCard, CasinoGame } from '../lib/casinoData';
+import {
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, seatSpend,
+} from '../lib/casinoData';
 import { makeGambitDeck, type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
-import { CASINO_START_STATS, CASINO_ANTE, CASINO_REROLL_COST } from '../lib/constants';
+import { CASINO_START_STATS } from '../lib/constants';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -18,19 +20,40 @@ import { DeckPreview } from './DeckPreview';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// The game is NOT chosen here any more — each table is pinned to one game via
+// `mission.casinoGame` (the multi-table model). What used to be the `choose`
+// phase is now `ante`: read the table you sat at, then pay in.
 type Phase =
   | 'loading'
   | 'error'
   | 'deckselect'
-  | 'choose'
-  | 'poker'
-  | 'blackjack'
+  | 'ante'
+  | 'play'      // single sitting in progress: Five Card Draw · Seven Card Stud · Blackjack
+  | 'holdwait'  // Hold 'Em sitting 1 done — waiting on the shared community reveal
+  | 'holdplay'  // Hold 'Em sitting 2 — build the best five, or fold
   | 'folded'
   | 'gambit'
   | 'locked'
   | 'deployed';
 
-type Game = 'poker' | 'blackjack';
+// Phases owned by local interaction. The Firebase-derived effect must not yank
+// the player out of one of these mid-hand. `holdwait` is deliberately NOT here:
+// it exists precisely to be pushed forward by the server's community reveal.
+const LOCAL_PHASES: Phase[] = ['deckselect', 'play', 'holdplay', 'folded', 'gambit'];
+
+const GAME_BLURB: Record<CasinoGame, string> = {
+  five_card_draw:
+    'Five cards, one hand. Mark any you would rather not play and reroll them once — ' +
+    'you commit to whatever you are holding when you are done.',
+  seven_card_stud:
+    'Seven cards, dealt at once. Drop the two you least want to play and commit the best five.',
+  holdem:
+    'Two hole cards now. Once every seat is in, five shared cards are revealed — then pay the ' +
+    'play-on to build your best five out of all seven, or fold and walk away from your ante.',
+  blackjack:
+    'Push your luck. Draw from two cards up to six — every card is another game you commit to. ' +
+    'Keep at most five.',
+};
 
 // ── URL params ────────────────────────────────────────────────────────────────
 
@@ -52,8 +75,8 @@ function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: num
   if (!p) return 'empty' as const;
   if (p.played) return 'locked' as const;
   if (isMe) return 'playing' as const;
+  if (p.holeLocked) return 'playing' as const;   // Hold 'Em: in, waiting on the reveal
   if (p.startBy && now > p.startBy - 900_000) return 'deadline' as const; // warn in last 15 min
-  if (p.gameType) return 'playing' as const;
   return 'waiting' as const;
 }
 
@@ -66,6 +89,16 @@ function fmtCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }
 
+// Which gambit each seat played, read back off the PUBLIC audit log. The seat
+// record doesn't keep it, but casinoLog does — so the reveal can name it.
+function gambitsBySeat(m: GMMission | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of Object.values(m?.casinoLog ?? {})) {
+    if (e.event === 'gambit' && e.gambitDefId) out[e.uid] = e.gambitDefId;
+  }
+  return out;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CasinoTable() {
@@ -76,16 +109,19 @@ export function CasinoTable() {
   const [mission, setMission]     = useState<GMMission | null>(null);
   const [seasonReady, setSeasonReady] = useState(false);
   const [resolvedSeasonId, setResolvedSeasonId] = useState('');
+  const [shell, setShell]         = useState<'map' | 'casino'>('casino');
   // Read from seasonSecrets/, never from the mission — see the subscription below.
   const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
   const [phase, setPhase]         = useState<Phase>('loading');
   const [hand, setHand]           = useState<DeckCard[]>([]);
-  const [gameType, setGameType]   = useState<Game | null>(null);
+  // Two DIFFERENT selection models, one per game family:
+  //  · `reject` — Five Card Draw only: cards to REROLL (they are replaced, not dropped).
+  //  · `keep`   — the subsetSelect games: the cards to COMMIT, capped at pickMax.
+  const [reject, setReject]       = useState<Set<number>>(new Set());
+  const [keep, setKeep]           = useState<Set<number>>(new Set());
+  const [rerolled, setRerolled]   = useState(false);
+  const [stood, setStood]         = useState(false);
   const [spent, setSpent]         = useState(0);
-  const [pReject, setPReject]     = useState<Set<number>>(new Set());
-  const [pRedrawn, setPRedrawn]   = useState(false);
-  const [bStood, setBStood]       = useState(false);
-  const [bDiscardUid, setBDiscardUid] = useState<number | null>(null);
   const [gOffer, setGOffer]       = useState<GambitCard[]>([]);
   const [gPick, setGPick]         = useState<string | null>(null);
   const [flash, setFlash]         = useState('');
@@ -114,6 +150,8 @@ export function CasinoTable() {
 
   // Resolve which season this table belongs to, and publish it to the path
   // helpers. Everything below waits on this — sRef() throws until it has run.
+  // The shell comes with it: a casino season's XP is inert (gambit XP is paid
+  // out as gold instead), so the challenge panel must not advertise XP there.
   useEffect(() => {
     if (!db) return;
     let cancelled = false;
@@ -125,6 +163,18 @@ export function CasinoTable() {
       }
       if (cancelled) return;
       if (!sid) { setPhase('error'); return; }
+
+      // Drafts are readable only by admin/alpha — exactly who can open a draft
+      // table — so a failed read here just means "not a draft"; default to casino.
+      const listed = await get(ref(db, `config/seasonList/${sid}/shell`));
+      let sh = listed.val() as 'map' | 'casino' | null;
+      if (!sh) {
+        const draft = await get(ref(db, `config/draftSeasons/${sid}/shell`)).catch(() => null);
+        sh = (draft?.val() as 'map' | 'casino' | null) ?? 'casino';
+      }
+      if (cancelled) return;
+
+      setShell(sh);
       setCurrentSeason(sid);
       setResolvedSeasonId(sid);
       setSeasonReady(true);
@@ -141,14 +191,14 @@ export function CasinoTable() {
       if (!m) { setPhase('error'); return; }
 
       // Detect pot bump for animation
-      const pot = (m as any).pot as number ?? 0;
+      const pot = m.pot ?? 0;
       if (prevPot.current !== null && pot > prevPot.current) {
         setPotBump(true);
         setTimeout(() => setPotBump(false), 520);
       }
       prevPot.current = pot;
     });
-  }, [db, missionId, seasonReady]);
+  }, [missionId, seasonReady]);
 
   // The player's OWN hand — the one secret a client may read.
   //
@@ -162,7 +212,7 @@ export function CasinoTable() {
     return onValue(ref(db, ownHandPath(missionId, uid)), snap => {
       setSecretHand(snap.exists() ? (snap.val() as DeckCard[]) : null);
     });
-  }, [db, uid, missionId, seasonReady]);
+  }, [uid, missionId, seasonReady]);
 
   // Player's remembered deck preference — seeds the picker's default highlight.
   useEffect(() => {
@@ -170,62 +220,77 @@ export function CasinoTable() {
     return onValue(sRef(db, `players/${uid}/preferredDeckChoice`), snap => {
       setPreferredDeck((snap.val() as CasinoDeckChoice | null) ?? 'purist');
     });
-  }, [db, uid, seasonReady]);
+  }, [uid, seasonReady]);
 
-  // Extended seat type. `hand` no longer lives on the participant record — it is
-  // merged in from the seasonSecrets subscription below.
-  type Seat = GMParticipant & { hand?: DeckCard[]; gameType?: Game; rerolled?: boolean };
+  const game = mission?.casinoGame ?? null;
+  const cfg  = game ? CASINO_GAMES[game] : null;
 
-  // Derive phase from Firebase state (only when not in an active local game phase).
+  // Derive phase from Firebase state (only when not in an active local phase).
   // Also handles session recovery when the player reloads mid-hand.
   useEffect(() => {
-    if (!uid || !mission) return;
-    const rawSeat = mission.participants?.[uid] as Seat | undefined;
-    // Splice the secret hand back onto the public seat record.
-    const seat: Seat | undefined = rawSeat
-      ? { ...rawSeat, hand: secretHand ?? undefined }
-      : undefined;
+    if (!uid || !mission || !game || !cfg) return;
+    const seat = mission.participants?.[uid];
 
-    if (mission.state === 'inprogress' || mission.state === 'complete') {
-      setPhase('deployed');
-      return;
-    }
-    if (seat?.played) {
-      setPhase('locked');
-      return;
-    }
-    // Don't override active local phases already set by user interaction.
-    if (['poker', 'blackjack', 'folded', 'gambit', 'deckselect'].includes(phase)) return;
+    if (mission.state === 'inprogress' || mission.state === 'complete') { setPhase('deployed'); return; }
+    if (seat?.played) { setPhase('locked'); return; }
+    if (LOCAL_PHASES.includes(phase)) return;
 
-    // Session recovery: gambit already resolved but not locked — skip straight to lock.
-    if (seat?.gambitPlayed && !seat.played && seat.hand?.length) {
-      setHand(seat.hand);
-      setGameType(seat.gameType ?? null);
-      setGOffer([]);  // empty = gambit already done, lock button goes directly to lockCasinoResult
-      if (seat.gameType) setSpent(CASINO_ANTE[seat.gameType] + (seat.rerolled ? CASINO_REROLL_COST : 0));
+    // Recovery: gambit already resolved but not locked — an empty offer means the
+    // lock button goes straight to lockCasinoResult without re-playing a gambit.
+    if (seat?.gambitPlayed && secretHand?.length) {
+      setHand(secretHand);
+      setKeep(new Set(secretHand.map(c => c.uid)));
+      setGOffer([]);
       setPhase('gambit');
       return;
     }
 
-    // Session recovery: hand in progress (poker/blackjack) after page reload.
-    if (seat?.hand?.length && seat.gameType && !seat.gambitPlayed) {
-      setHand(seat.hand);
-      setGameType(seat.gameType);
-      setSpent(CASINO_ANTE[seat.gameType] + (seat.rerolled ? CASINO_REROLL_COST : 0));
-      setPRedrawn(seat.rerolled ?? false);
-      setPhase(seat.gameType);
+    if (game === 'holdem') {
+      // Sitting 2 already paid for: the server narrowed the secret hand to the
+      // cards chosen, so the only thing left is the gambit → lock flow.
+      if (seat?.playedOn && secretHand?.length) {
+        setHand(secretHand);
+        setKeep(new Set(secretHand.map(c => c.uid)));
+        setSpent(seatSpend('holdem', { playedOn: true }));
+        setGOffer(makeGambitDeck().drawOffer(3));
+        setGPick(null);
+        setPhase('gambit');
+        return;
+      }
+      if (seat?.holeLocked) {
+        setSpent(seatSpend('holdem'));
+        if (mission.community?.length && secretHand?.length) {
+          // The reveal has landed — open sitting 2 with the whole pool selected.
+          const pool = [...secretHand, ...mission.community];
+          setHand(pool);
+          setKeep(new Set(pool.map(c => c.uid)));
+          setPhase('holdplay');
+        } else {
+          setPhase('holdwait');
+        }
+        return;
+      }
+    } else if (secretHand?.length) {
+      // Recovery: a single-sitting hand in progress after a page reload.
+      setHand(secretHand);
+      setKeep(new Set(secretHand.map(c => c.uid)));
+      setReject(new Set());
+      setRerolled(seat?.rerolled ?? false);
+      setStood(secretHand.length >= cfg.maxDraw);
+      setSpent(seatSpend(game, { rerolled: seat?.rerolled }));
+      setPhase('play');
       return;
     }
 
-    // First time this cohort — pick a deck before the game choice.
-    setPhase(seat?.deckChoice == null ? 'deckselect' : 'choose');
+    // Nothing dealt yet — pick a deck the first time, otherwise sit and ante in.
+    setPhase(seat?.deckChoice == null ? 'deckselect' : 'ante');
     // `secretHand` MUST be a dep: it arrives from its own seasonSecrets
     // subscription, which can resolve after the mission does. Without it, a
     // player reloading mid-hand would never have their hand restored.
     // `phase` is deliberately omitted — including it would re-run this effect on
     // every phase change and loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, mission, secretHand]);
+  }, [uid, mission, secretHand, game, cfg]);
 
   // Callables. The resolved seasonId is injected into every payload so the
   // server writes to the right season — essential when an alpha user is
@@ -241,165 +306,153 @@ export function CasinoTable() {
 
   const doFlash = (msg: string) => { setFlash(msg); setTimeout(() => setFlash(''), 4000); };
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
-  async function chooseDeck(choice: CasinoDeckChoice) {
+  // Every action shares the same shape: block double-clicks, surface the server's
+  // own message on failure (it is the authority on gold, seat state and timing).
+  async function run(fn: () => Promise<void>, fallback: string) {
     setBusy(true);
-    try {
-      await call<object, unknown>('setCasinoDeckChoice')({ missionId, deckChoice: choice });
-      setPhase('choose');
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Failed to set deck. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function chooseGame(game: Game) {
-    setBusy(true);
-    try {
-      const res = await call<object, { hand: DeckCard[]; potAdd: number }>('dealCasinoHand')({ missionId, game });
-      setHand(res.hand);
-      setGameType(game);
-      setSpent(CASINO_ANTE[game]);
-      setPReject(new Set());
-      setPRedrawn(false);
-      setBStood(false);
-      setBDiscardUid(null);
-      setPhase(game);
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Failed to deal. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doReroll() {
-    if (pReject.size === 0) { doFlash('Mark games to reroll first.'); return; }
-    if (pRedrawn)           { doFlash('You may only reroll once.'); return; }
-    setBusy(true);
-    try {
-      const res = await call<object, { hand: DeckCard[] }>('casinoDraw')({
-        missionId, action: 'reroll', rejectUids: [...pReject],
-      });
-      setHand(res.hand);
-      setSpent(s => s + CASINO_REROLL_COST);
-      setPReject(new Set());
-      setPRedrawn(true);
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Reroll failed. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doHit() {
-    if (hand.length >= 6) { doFlash('Maximum 6 cards reached.'); return; }
-    setBusy(true);
-    try {
-      const res = await call<object, { hand: DeckCard[] }>('casinoDraw')({ missionId, action: 'hit' });
-      setHand(res.hand);
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Draw failed. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function commitToGambit() {
-    const offer = makeGambitDeck().drawOffer(3);
-    setGOffer(offer);
-    setGPick(null);
-    setPhase('gambit');
-  }
-
-  async function doFold() {
-    setBusy(true);
-    try {
-      await call<object, unknown>('casinoFold')({ missionId });
-      setHand([]);
-      setGameType(null);
-      setSpent(0);
-      setPReject(new Set());
-      setPRedrawn(false);
-      setBStood(false);
-      setBDiscardUid(null);
-      setPhase('folded');
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Fold failed. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function rejoin() {
-    setPhase('choose');
-    setFlash('');
-  }
-
-  async function doLock() {
-    setBusy(true);
-    try {
-      // Skip the gambit callable if it was already resolved before a page reload.
-      const seatGambitPlayed =
-        uid ? (mission?.participants?.[uid] as { gambitPlayed?: boolean } | undefined)?.gambitPlayed === true : false;
-
-      if (!seatGambitPlayed) {
-        await call<object, unknown>('playCasinoGambit')({
-          missionId,
-          gambitDefId: gPick ?? null,
-        });
-      }
-      // The server takes the cards to COMMIT (`keepUids`), not the ones to drop.
-      // It re-derives the take from them, so sending the old discard-shaped
-      // payload silently committed the whole hand.
-      await call<object, { goldSwing: number }>('lockCasinoResult')({
-        missionId,
-        keepUids: committedCards.map(c => c.uid),
-      });
-      setPhase('locked');
-    } catch (e: any) {
-      doFlash(e?.message ?? 'Lock failed. Please try again.');
-    } finally {
-      setBusy(false);
-    }
+    try { await fn(); }
+    catch (e) { doFlash((e as { message?: string })?.message ?? fallback); }
+    finally { setBusy(false); }
   }
 
   // ── Derived state ────────────────────────────────────────────────────────
 
-  const pot      = (mission as any)?.pot as number ?? 0;
+  const pot      = mission?.pot ?? 0;
   const stats    = (mission?.casinoStats ?? CASINO_START_STATS) as CasinoStats;
-  const allSeats = Object.values(mission?.participants ?? {}) as (GMParticipant & { hand?: DeckCard[] })[];
+  const allSeats = Object.values(mission?.participants ?? {});
 
   const seatDeckChoice   = uid ? (mission?.participants?.[uid]?.deckChoice ?? null) : null;
   const effectiveDeckChoice: CasinoDeckChoice = seatDeckChoice ?? 'purist';
 
-  const committedCards = useMemo(
-    () => gameType === 'poker' ? hand.filter(c => !pReject.has(c.uid)) : hand.filter((_, i) => i !== hand.findIndex(c => c.uid === bDiscardUid)),
-    [hand, pReject, bDiscardUid, gameType],
-  );
+  // Five Card Draw has no larger pool to optimise (5 dealt, 5 committed), so its
+  // marks mean "reroll", not "drop": the whole hand is always what gets committed.
+  const committedCards = useMemo(() => {
+    if (!cfg) return [];
+    return cfg.subsetSelect ? hand.filter(c => keep.has(c.uid)) : hand;
+  }, [hand, keep, cfg]);
 
-  const lockedHand = useMemo<DeckCard[]>(() => {
-    if (phase === 'gambit' || phase === 'locked' || phase === 'deployed') {
-      return gameType === 'poker'
-        ? hand.filter(c => !pReject.has(c.uid))
-        : hand.filter(c => c.uid !== bDiscardUid);
-    }
-    return [];
-  }, [phase, hand, pReject, bDiscardUid, gameType]);
+  const overPick = cfg ? committedCards.length > cfg.pickMax : false;
+  const canCommit = committedCards.length > 0 && !overPick;
 
   // Fill empty seats up to baseMax
-  const baseMax   = mission?.baseMax ?? 6;
-  const seatEntries: [string, (GMParticipant & { hand?: DeckCard[] }) | null][] = [];
-  for (const [id, p] of Object.entries(mission?.participants ?? {})) {
-    seatEntries.push([id, p as GMParticipant & { hand?: DeckCard[] }]);
-  }
+  const baseMax = mission?.baseMax ?? 6;
+  const seatEntries: [string, GMParticipant | null][] =
+    Object.entries(mission?.participants ?? {});
   while (seatEntries.length < baseMax) seatEntries.push([`__empty_${seatEntries.length}`, null]);
 
-  // ── Render helpers ───────────────────────────────────────────────────────
+  const lockedHand = ['gambit', 'locked'].includes(phase) ? committedCards : [];
+  const seatGambits = useMemo(() => gambitsBySeat(mission), [mission]);
 
-  const HAND_W  = 108;
-  const GAMB_W  = 130;
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const chooseDeck = (choice: CasinoDeckChoice) => run(async () => {
+    await call<object, unknown>('setCasinoDeckChoice')({ missionId, deckChoice: choice });
+    setPhase('ante');
+  }, 'Failed to set deck. Try again.');
+
+  // Sit in. The table dictates the game, so this takes no game argument — Hold 'Em
+  // buys 2 hole cards and waits; everything else deals its whole pool at once.
+  const doAnte = () => run(async () => {
+    if (!game || !cfg) return;
+    if (game === 'holdem') {
+      await call<object, { hole: DeckCard[] }>('dealHoldemHole')({ missionId });
+      setSpent(seatSpend('holdem'));
+      setPhase('holdwait');
+      return;
+    }
+    const res = await call<object, { hand: DeckCard[] }>('dealCasinoHand')({ missionId });
+    setHand(res.hand);
+    setKeep(new Set(res.hand.map(c => c.uid)));   // start holding everything; drop down to pickMax
+    setReject(new Set());
+    setRerolled(false);
+    setStood(false);
+    setSpent(seatSpend(game));
+    setPhase('play');
+  }, 'Failed to deal. Try again.');
+
+  const doReroll = () => run(async () => {
+    if (!game) return;
+    const res = await call<object, { hand: DeckCard[] }>('casinoDraw')({
+      missionId, action: 'reroll', rejectUids: [...reject],
+    });
+    setHand(res.hand);
+    setKeep(new Set(res.hand.map(c => c.uid)));
+    setReject(new Set());
+    setRerolled(true);
+    setSpent(seatSpend(game, { rerolled: true }));
+  }, 'Reroll failed. Try again.');
+
+  const doHit = () => run(async () => {
+    const res = await call<object, { hand: DeckCard[] }>('casinoDraw')({ missionId, action: 'hit' });
+    setHand(res.hand);
+    setKeep(new Set(res.hand.map(c => c.uid)));   // a drawn card is committed until dropped
+    if (cfg && res.hand.length >= cfg.maxDraw) setStood(true);   // nothing left to draw
+  }, 'Draw failed. Try again.');
+
+  // Hold 'Em sitting 2: pay the play-on and hand the server the ≤5 cards to build
+  // from. It writes them back as the seat's hand, and the normal gambit → lock
+  // flow takes over from there.
+  const doPlayOn = () => run(async () => {
+    const res = await call<object, { hand: DeckCard[] }>('holdemPlayOn')({
+      missionId, selectedUids: [...keep],
+    });
+    setHand(res.hand);
+    setKeep(new Set(res.hand.map(c => c.uid)));
+    setSpent(seatSpend('holdem', { playedOn: true }));
+    toGambit();
+  }, 'Play-on failed. Try again.');
+
+  // Folding after a Hold 'Em reveal EMPTIES the seat for good — it isn't the
+  // single-sitting fold, which leaves you seated and free to redeal.
+  const doHoldemFold = () => run(async () => {
+    await call<object, unknown>('holdemFold')({ missionId });
+    setHand([]);
+    setKeep(new Set());
+    setPhase('folded');
+  }, 'Fold failed. Try again.');
+
+  const doFold = () => run(async () => {
+    await call<object, unknown>('casinoFold')({ missionId });
+    setHand([]);
+    setKeep(new Set());
+    setReject(new Set());
+    setRerolled(false);
+    setStood(false);
+    setSpent(0);
+    setPhase('folded');
+  }, 'Fold failed. Try again.');
+
+  function toGambit() {
+    setGOffer(makeGambitDeck().drawOffer(3));
+    setGPick(null);
+    setPhase('gambit');
+  }
+
+  const doLock = () => run(async () => {
+    // Skip the gambit callable if it was already resolved before a page reload.
+    const seatGambitPlayed = uid ? mission?.participants?.[uid]?.gambitPlayed === true : false;
+    if (!seatGambitPlayed) {
+      await call<object, unknown>('playCasinoGambit')({ missionId, gambitDefId: gPick ?? null });
+    }
+    // The server takes the cards to COMMIT (`keepUids`), not the ones to drop.
+    // It re-derives the take from them, and reads a missing list as "commit the
+    // whole hand" — so a discard-shaped payload here silently overpays the seat.
+    await call<object, { goldSwing: number }>('lockCasinoResult')({
+      missionId, keepUids: committedCards.map(c => c.uid),
+    });
+    setPhase('locked');
+  }, 'Lock failed. Please try again.');
+
+  const toggle = (set: Set<number>, uidKey: number) => {
+    const next = new Set(set);
+    if (next.has(uidKey)) next.delete(uidKey); else next.add(uidKey);
+    return next;
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  const HAND_W = 108;
+  const GAMB_W = 130;
 
   if (phase === 'loading') {
     return (
@@ -409,16 +462,24 @@ export function CasinoTable() {
     );
   }
 
-  if (phase === 'error' || !mission || !uid) {
+  if (phase === 'error' || !mission || !uid || !game || !cfg) {
     return (
       <div className="cz-root">
         <div className="cz-center">
-          {!uid ? 'You must be signed in to play.' : 'Mission not found or unavailable.'}
+          {!uid
+            ? 'You must be signed in to play.'
+            : mission && !mission.casinoGame
+              ? 'This table has no game assigned.'
+              : 'Mission not found or unavailable.'}
           <button className="cz-btn" onClick={() => window.close()}>Close</button>
         </div>
       </div>
     );
   }
+
+  const reveal = mission.release !== 'special' && mission.collect !== 'special'
+    ? { releaseOn: mission.release === 'on', collectOn: mission.collect === 'on' }
+    : null;
 
   return (
     <div className="cz-root">
@@ -426,10 +487,10 @@ export function CasinoTable() {
       <div className="cz-top">
         <div className="cz-brand">
           <span className="cz-kick">RPelago Casino</span>
-          <h1>The Card Table</h1>
+          <h1>{cfg.label} <span className="cz-kick">· Table {mission.series}</span></h1>
         </div>
         <div className="cz-top-right">
-          {seatDeckChoice && (phase === 'choose' || phase === 'folded') && (
+          {seatDeckChoice && (phase === 'ante' || phase === 'folded') && (
             <button className="cz-btn ghost cz-deck-badge" onClick={() => setPhase('deckselect')} disabled={busy}>
               Deck: {DECK_VARIANTS[seatDeckChoice].label}
             </button>
@@ -440,17 +501,17 @@ export function CasinoTable() {
 
       <div className="cz-room-tag">
         {mission.state === 'forming'
-          ? `${allSeats.filter(p => p?.played).length}/${baseMax} seats played · ${Math.round(40)}% of every ante feeds the pot · non-folded players split it`
+          ? `${allSeats.filter(p => p?.played).length}/${baseMax} seats played · 40% of every entry feeds the pot · non-folded players split it`
           : 'This table has concluded.'}
       </div>
 
       {/* ── Seat rail ── */}
       <div className="cz-rail">
         {seatEntries.map(([id, p]) => {
-          const isMe    = id === uid;
-          const status  = seatStatus(p, isMe, now);
-          const stake   = p?.played ? (p.goldSwing ?? handStakeFromSlots(p.slots)) : undefined;
-          const sbLeft  = p?.startBy ? p.startBy - now : 0;
+          const isMe   = id === uid;
+          const status = seatStatus(p, isMe, now);
+          const stake  = p?.played ? (p.goldSwing ?? handStakeFromSlots(p.slots)) : undefined;
+          const sbLeft = p?.startBy ? p.startBy - now : 0;
           return (
             <Seat
               key={id}
@@ -467,13 +528,9 @@ export function CasinoTable() {
       {/* ── Challenge panel ── */}
       <ChallengePanel
         stats={stats}
-        roll={phase === 'deployed' ? (() => {
-          const rel = mission.release;
-          const col = mission.collect;
-          return rel !== 'special' && col !== 'special'
-            ? { releaseOn: rel === 'on', collectOn: col === 'on' }
-            : null;
-        })() : null}
+        open={mission.casinoOpenStats ?? null}
+        roll={phase === 'deployed' ? reveal : null}
+        showXp={shell !== 'casino'}
       />
 
       {/* ── Felt stage ── */}
@@ -521,107 +578,165 @@ export function CasinoTable() {
             </>
           )}
 
-          {/* CHOOSE */}
-          {phase === 'choose' && (
+          {/* ANTE — the table picks the game; this is just the buy-in */}
+          {phase === 'ante' && (
             <>
-              <div className="cz-stage-title">Your turn — choose a game</div>
-              <div className="cz-stage-note">
-                Each card you commit to is a game you will play this round.
-                Win its gold; the rarer the genre, the richer the reward.
+              <div className="cz-stage-title">Your turn — {cfg.label}</div>
+              <div className="cz-stage-note">{GAME_BLURB[game]}</div>
+              <div className="cz-actions">
+                <button className="cz-btn primary" onClick={doAnte} disabled={busy}>
+                  {game === 'holdem'
+                    ? `Ante ${cfg.ante}g · take two hole cards`
+                    : `Ante ${cfg.ante}g · deal me in`}
+                </button>
               </div>
-              <div className="cz-choices">
-                <button className="cz-choice" onClick={() => chooseGame('poker')} disabled={busy}>
-                  <div className="cz-choice-name">Poker <span className="cz-choice-cost">{CASINO_ANTE.poker}g</span></div>
-                  <div className="cz-choice-desc">Five-card draw. Reject games you would rather not play and reroll once for {CASINO_REROLL_COST}g. Commit any remaining games you like.</div>
-                </button>
-                <button className="cz-choice" onClick={() => chooseGame('blackjack')} disabled={busy}>
-                  <div className="cz-choice-name">Blackjack <span className="cz-choice-cost">{CASINO_ANTE.blackjack}g</span></div>
-                  <div className="cz-choice-desc">Push your luck. Draw from two cards up to six — every card is another game you commit to. Keep at most five.</div>
-                </button>
+              <div className="cz-stage-note">
+                Every card you commit to is a game you will play this round — win its gold;
+                the rarer the genre, the richer the reward.
+                {cfg.reroll   && ` One reroll available for ${cfg.rerollCost}g.`}
+                {cfg.playOn > 0 && ` Playing on after the reveal costs a further ${cfg.playOn}g.`}
               </div>
               <div className="cz-flash">{flash}</div>
             </>
           )}
 
-          {/* POKER */}
-          {phase === 'poker' && (
+          {/* PLAY — one of the three single-sitting games */}
+          {phase === 'play' && (
             <>
-              <div className="cz-stage-title">Poker · Five-Card Draw {pRedrawn ? '· reroll spent' : ''}</div>
+              <div className="cz-stage-title">
+                {cfg.label}
+                {game === 'five_card_draw' && rerolled ? ' · reroll spent' : ''}
+                {game === 'blackjack' ? ` · ${hand.length}/${cfg.maxDraw} drawn` : ''}
+              </div>
+
               <div className="cz-hand">
                 {hand.map(c => {
-                  const rej = pReject.has(c.uid);
+                  // FCD marks a card to be REPLACED; the others mark it to be DROPPED.
+                  const rerolling = game === 'five_card_draw' && reject.has(c.uid);
+                  const dropped   = cfg.subsetSelect && !keep.has(c.uid);
+                  const selectable = game === 'five_card_draw'
+                    ? !rerolled
+                    : game !== 'blackjack' || stood;
                   return (
                     <div
                       key={c.uid}
-                      className={`cz-card-slot${rej ? ' rejected' : ''}`}
-                      onClick={() => !busy && setPReject(r => { const next = new Set(r); next.has(c.uid) ? next.delete(c.uid) : next.add(c.uid); return next; })}
+                      className={`cz-card-slot${rerolling ? ' rejected' : ''}${dropped ? ' discarding' : ''}`}
+                      onClick={() => {
+                        if (busy || !selectable) return;
+                        if (game === 'five_card_draw') setReject(r => toggle(r, c.uid));
+                        else setKeep(k => toggle(k, c.uid));
+                      }}
                     >
-                      <span className={`cz-mark ${rej ? 'reject' : 'keep'}`}>{rej ? '✕' : '✓'}</span>
+                      {game === 'five_card_draw'
+                        ? <span className={`cz-mark ${rerolling ? 'reject' : 'keep'}`}>{rerolling ? '✕' : '✓'}</span>
+                        : dropped && <span className="cz-mark reject">✕</span>}
                       <CardFace card={c} look="plate" width={HAND_W} />
-                      <div className="cz-card-cap">{rej ? 'rerolled' : 'committed'}</div>
+                      {selectable && (
+                        <div className="cz-card-cap">
+                          {game === 'five_card_draw'
+                            ? (rerolling ? 'rerolling' : 'keeping')
+                            : (dropped ? 'dropped' : 'tap to drop')}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-              <PokerReadout cards={committedCards} spent={spent} deckChoice={effectiveDeckChoice} />
-              <div className="cz-actions">
-                <button className="cz-btn" onClick={doReroll} disabled={busy || pRedrawn || pReject.size === 0}>
-                  Reroll {pReject.size > 0 ? `${pReject.size} ` : ''}({CASINO_REROLL_COST}g)
-                </button>
-                <button className="cz-btn primary" onClick={commitToGambit} disabled={busy || committedCards.length === 0}>
-                  Commit {committedCards.length} {committedCards.length === 1 ? 'game' : 'games'}
-                </button>
-                <button className="cz-btn danger" onClick={doFold} disabled={busy}>Fold</button>
-              </div>
-              <div className="cz-flash">{flash}</div>
-            </>
-          )}
 
-          {/* BLACKJACK */}
-          {phase === 'blackjack' && (
-            <>
-              <div className="cz-stage-title">Blackjack · Push Your Luck</div>
-              <div className="cz-hand">
-                {hand.map((c) => {
-                  const isDiscard = c.uid === bDiscardUid;
-                  return (
-                    <div
-                      key={c.uid}
-                      className={`cz-card-slot${isDiscard ? ' discarding' : ''}`}
-                      onClick={() => bStood && !busy && setBDiscardUid(d => d === c.uid ? null : c.uid)}
-                    >
-                      {isDiscard && <span className="cz-mark reject">✕</span>}
-                      <CardFace card={c} look="plate" width={HAND_W} />
-                      {bStood && <div className="cz-card-cap">{isDiscard ? 'discarding' : 'tap to discard'}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-              <BlackjackGauge
-                shownCards={hand.filter(c => c.uid !== bDiscardUid)}
-                allCards={hand}
-                deckChoice={effectiveDeckChoice}
-              />
+              {/* The "best possible" gauge only means something when there is a
+                  larger pool to whittle down; Five Card Draw commits all five. */}
+              {cfg.subsetSelect && (
+                <BlackjackGauge shownCards={committedCards} allCards={hand} deckChoice={effectiveDeckChoice} />
+              )}
+              <PokerReadout cards={committedCards} spent={spent} deckChoice={effectiveDeckChoice} />
+
               <div className="cz-actions">
-                {!bStood ? (
+                {cfg.reroll && (
+                  <button className="cz-btn" onClick={doReroll} disabled={busy || rerolled || reject.size === 0}>
+                    Reroll {reject.size > 0 ? `${reject.size} ` : ''}({cfg.rerollCost}g)
+                  </button>
+                )}
+                {game === 'blackjack' && !stood && (
                   <>
-                    <button className="cz-btn" onClick={doHit} disabled={busy || hand.length >= 6}>
-                      Hit ({hand.length}/6)
+                    <button className="cz-btn" onClick={doHit} disabled={busy || hand.length >= cfg.maxDraw}>
+                      Hit ({hand.length}/{cfg.maxDraw})
                     </button>
-                    <button className="cz-btn primary" onClick={() => setBStood(true)} disabled={busy}>Stand</button>
+                    <button className="cz-btn primary" onClick={() => setStood(true)} disabled={busy}>Stand</button>
                   </>
-                ) : (
-                  <button
-                    className="cz-btn primary"
-                    onClick={commitToGambit}
-                    disabled={busy || (hand.length >= 6 && bDiscardUid === null)}
-                  >
-                    {hand.length >= 6 && bDiscardUid === null
-                      ? 'Drop one card to lock in'
-                      : `Lock in ${hand.filter(c => c.uid !== bDiscardUid).length} games · ${applyDeckBoost(hand.filter(c => c.uid !== bDiscardUid).reduce((s, c) => s + c.value, 0), effectiveDeckChoice)}g`}
+                )}
+                {!(game === 'blackjack' && !stood) && (
+                  <button className="cz-btn primary" onClick={toGambit} disabled={busy || !canCommit}>
+                    {overPick
+                      ? `Drop ${committedCards.length - cfg.pickMax} to commit`
+                      : `Commit ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'} · ${applyDeckBoost(handStake(committedCards), effectiveDeckChoice)}g`}
                   </button>
                 )}
                 <button className="cz-btn danger" onClick={doFold} disabled={busy}>Fold</button>
+              </div>
+              <div className="cz-flash">{flash}</div>
+            </>
+          )}
+
+          {/* HOLDWAIT — Hold 'Em sitting 1 is in; the reveal is a table-wide event */}
+          {phase === 'holdwait' && (
+            <>
+              <div className="cz-stage-title">Hole cards locked</div>
+              <div className="cz-stage-note">
+                Your two cards are in and your ante has fed the pot. The five shared cards are
+                dealt once every seat at this table is filled and locked — come back then to
+                play on or fold. Nothing more is owed until you do.
+              </div>
+              {secretHand && secretHand.length > 0 && (
+                <div className="cz-hand">
+                  {secretHand.map(c => (
+                    <div key={c.uid} className="cz-card-slot">
+                      <CardFace card={c} look="plate" width={HAND_W} />
+                      <div className="cz-card-cap">your hole card</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="cz-ap-banner"><div className="cz-ap-icon">✦</div></div>
+              <div className="cz-flash">{flash}</div>
+            </>
+          )}
+
+          {/* HOLDPLAY — Hold 'Em sitting 2: build the best five, or walk */}
+          {phase === 'holdplay' && (
+            <>
+              <div className="cz-stage-title">The reveal · build your best five</div>
+              <div className="cz-stage-note">
+                Your two hole cards and the five shared cards are all in play. Drop any you don't
+                want and play on for {cfg.playOn}g — or fold and forfeit the {cfg.ante}g you're in for.
+              </div>
+              <div className="cz-hand">
+                {hand.map(c => {
+                  const isHole  = !!secretHand?.some(h => h.uid === c.uid);
+                  const dropped = !keep.has(c.uid);
+                  return (
+                    <div
+                      key={c.uid}
+                      className={`cz-card-slot${dropped ? ' discarding' : ''}`}
+                      onClick={() => !busy && setKeep(k => toggle(k, c.uid))}
+                    >
+                      {dropped && <span className="cz-mark reject">✕</span>}
+                      <CardFace card={c} look="plate" width={HAND_W} />
+                      <div className="cz-card-cap">
+                        {dropped ? 'dropped' : isHole ? 'your hole card' : 'shared'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <BlackjackGauge shownCards={committedCards} allCards={hand} deckChoice={effectiveDeckChoice} />
+              <PokerReadout cards={committedCards} spent={spent + cfg.playOn} deckChoice={effectiveDeckChoice} />
+              <div className="cz-actions">
+                <button className="cz-btn primary" onClick={doPlayOn} disabled={busy || !canCommit}>
+                  {overPick
+                    ? `Drop ${committedCards.length - cfg.pickMax} to play on`
+                    : `Play on (${cfg.playOn}g) with ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'}`}
+                </button>
+                <button className="cz-btn danger" onClick={doHoldemFold} disabled={busy}>Fold</button>
               </div>
               <div className="cz-flash">{flash}</div>
             </>
@@ -632,11 +747,14 @@ export function CasinoTable() {
             <>
               <div className="cz-stage-title">You folded</div>
               <div className="cz-stage-note">
-                Your entry is forfeit — its share already fed the pot.
-                You can try again within the next hour, or give up your seat.
+                {game === 'holdem'
+                  ? "Your ante is forfeit — its share already fed the pot — and your seat at this table is gone. You're free to sit at another table."
+                  : 'Your entry is forfeit — its share already fed the pot. You can ante in again for another hand, or give up your seat.'}
               </div>
               <div className="cz-actions">
-                <button className="cz-btn primary" onClick={rejoin} disabled={busy}>Try again</button>
+                {game === 'holdem'
+                  ? <button className="cz-btn ghost" onClick={() => window.close()}>Close table</button>
+                  : <button className="cz-btn primary" onClick={() => { setFlash(''); setPhase('ante'); }} disabled={busy}>Try again</button>}
               </div>
               <div className="cz-flash">{flash}</div>
             </>
@@ -667,7 +785,7 @@ export function CasinoTable() {
               </div>
               <div className="cz-actions">
                 <button className="cz-btn primary" onClick={doLock} disabled={busy}>
-                  {gPick ? 'Play this gambit & lock in' : 'Skip & lock in'}
+                  {gOffer.length === 0 ? 'Lock in' : gPick ? 'Play this gambit & lock in' : 'Skip & lock in'}
                 </button>
               </div>
               <div className="cz-flash">{flash}</div>
@@ -690,32 +808,27 @@ export function CasinoTable() {
           {phase === 'deployed' && (
             <>
               <div className="cz-stage-title">{missionLabel} · Results</div>
-              {mission.release !== 'special' && mission.collect !== 'special' && (
+              {reveal && (
                 <div className="cz-roll-banner">
-                  <span className={`cz-roll ${mission.release === 'on' ? 'on' : 'off'}`}>
-                    Release {mission.release === 'on' ? 'ON' : 'OFF'}
+                  <span className={`cz-roll ${reveal.releaseOn ? 'on' : 'off'}`}>
+                    Release {reveal.releaseOn ? 'ON' : 'OFF'}
                   </span>
-                  <span className={`cz-roll ${mission.collect === 'on' ? 'on' : 'off'}`}>
-                    Collect {mission.collect === 'on' ? 'ON' : 'OFF'}
+                  <span className={`cz-roll ${reveal.collectOn ? 'on' : 'off'}`}>
+                    Collect {reveal.collectOn ? 'ON' : 'OFF'}
                   </span>
                 </div>
               )}
               <div className="cz-results">
-                {Object.entries(mission.participants ?? {}).map(([id, p]) => {
-                  const part  = p as GMParticipant;
-                  const stake = part.goldSwing ?? handStakeFromSlots(part.slots);
-                  const gambitDefId = undefined; // gambit info not tracked post-deploy
-                  return (
-                    <ResultRow
-                      key={id}
-                      name={part.playerName}
-                      isMe={id === uid}
-                      played={!!part.played}
-                      stake={stake}
-                      gambit={gambitDefId ? (GAMBIT_DEFS_BY_ID[gambitDefId] ?? null) : null}
-                    />
-                  );
-                })}
+                {Object.entries(mission.participants ?? {}).map(([id, p]) => (
+                  <ResultRow
+                    key={id}
+                    name={p.playerName}
+                    isMe={id === uid}
+                    played={!!p.played}
+                    stake={p.goldSwing ?? handStakeFromSlots(p.slots)}
+                    gambit={seatGambits[id] ? (GAMBIT_DEFS_BY_ID[seatGambits[id]] ?? null) : null}
+                  />
+                ))}
               </div>
               <div className="cz-stage-note" style={{ marginTop: '0.5rem' }}>
                 Gold payouts (hand reward + pot share) are credited when the admin marks this mission complete.

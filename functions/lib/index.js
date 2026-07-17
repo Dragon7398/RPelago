@@ -12,8 +12,8 @@ const casinoEngine_1 = require("./casinoEngine");
 const seasonPaths_1 = require("./seasonPaths");
 // Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR in
 // src/lib/constants.ts (dual-copy, like ITEM_COSTS and the casino engine).
-const CASINO_START_GOLD = 200; // fresh casino player's starting balance
-const CASINO_GOLD_FLOOR = 100; // weekly top-up brings anyone below this up to it
+const CASINO_START_GOLD = 500; // fresh casino player's starting balance
+const CASINO_GOLD_FLOOR = 250; // weekly top-up brings anyone below this up to it
 (0, app_1.initializeApp)();
 const discordClientSecret = (0, params_1.defineSecret)('DISCORD_CLIENT_SECRET');
 // ── Adventurer name/class pools (mirrors src/lib/constants.ts) ────────────────
@@ -683,6 +683,9 @@ function gmFreshCasinoTable(game, series, now, rng = Math.random) {
         entryCosts: gmCasinoEntryCosts(game),
         pot: setup.pot,
         casinoStats: setup.stats,
+        // Frozen copy of the same roll — gambits mutate casinoStats, so drift is
+        // only measurable against this. Mirror of freshCasinoTable.
+        casinoOpenStats: { ...setup.stats },
     };
 }
 // Next per-game cohort number — a persisted counter, transaction-incremented so

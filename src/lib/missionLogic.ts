@@ -235,6 +235,9 @@ export function freshCasinoTable(
     entryCosts:     casinoEntryCosts(game),
     pot:            setup.pot,
     casinoStats:    setup.stats,
+    // A frozen copy of the same roll: casinoStats is mutated by gambits, so the
+    // opening odds have to be banked here or the drift is unrecoverable.
+    casinoOpenStats: { ...setup.stats },
   };
 }
 

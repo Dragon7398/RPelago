@@ -709,6 +709,7 @@ interface GMMission {
   entryCosts?:     { label: string; gold: number }[];
   pot?:            number;
   casinoStats?:    CasinoStats;
+  casinoOpenStats?: CasinoStats;                    // the odds rolled at creation, frozen
   casinoLog?:      Record<string, CasinoLogEntry>;
   casinoGame?:     CasinoGame;                      // which game this table is pinned to
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards
@@ -925,6 +926,9 @@ function gmFreshCasinoTable(game: CasinoGame, series: number, now: number, rng: 
     entryCosts:     gmCasinoEntryCosts(game),
     pot:            setup.pot,
     casinoStats:    setup.stats,
+    // Frozen copy of the same roll — gambits mutate casinoStats, so drift is
+    // only measurable against this. Mirror of freshCasinoTable.
+    casinoOpenStats: { ...setup.stats },
   };
 }
 

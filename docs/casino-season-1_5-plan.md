@@ -563,8 +563,9 @@ structure, copy/tone, theming hooks, and interaction rules.
   to `goldTopUpLog`), and the per-seat settle ledger. `completeMission` stamps
   `potShare` + `net` onto the archived copy; `casinoSeatPaid` reads Entries off
   the audit log.
-- **Step 5** — config-driven shell, landing, table cards (with the odds trio), and
-  the three-phase panel (Seated / Board / Ledger). **Remainder is listed below.**
+- **Step 5** — config-driven shell, landing, table cards (with the odds trio),
+  the three-phase panel (Seated / Board / Ledger), **and the `CasinoTable`
+  mini-app rebuild (below).** Smaller remainder listed further down.
 - **Step 6** — `src/lib/apYaml.ts` is written and verified against real S1 YAMLs.
   Nothing consumes it yet; the Manifest UI is unbuilt.
 - **Step 7** — `onMissionComplete` writes the casino-flavoured profile event
@@ -573,25 +574,28 @@ structure, copy/tone, theming hooks, and interaction rules.
 - **Economy is LOCKED** — ×3 antes, 500 GP start / 250 GP floor, `4×seats²` pot
   base + `2×(120−R−C)` flat premium. Re-check with `npm run econ` after any change.
 
-### 🔴 Next: the `CasinoTable` mini-app rebuild (the critical path)
+### ✅ Done: the `CasinoTable` mini-app rebuild
 
-The table is the only thing between a seated player and a played hand, and it is
-the **last component still on the pre-multi-table contract**. Everything below is
-mapped but unwritten. Essentially all of it lives in two blocks of
-`src/casino/CasinoTable.tsx`: the phase machine (~L181–228) and the actions
-(~L246–364).
+`src/casino/CasinoTable.tsx` was rewritten onto the multi-table contract. The
+phase machine is now `deckselect → ante → play | (holdwait → holdplay) → gambit
+→ locked → deployed`, with `folded` off `play`/`holdplay`. The game is read from
+`mission.casinoGame`; there is no in-table game choice any more.
 
-- **The game is no longer the player's choice.** `dealCasinoHand` takes no `game`
-  argument — the table pins it via `mission.casinoGame`. The whole `choose` phase
-  is dead UI, and the `gameType` / `CASINO_ANTE` / `CASINO_REROLL_COST` model
-  behind it is stale. Costs must come from `CASINO_GAMES` / `seatSpend`.
-- **Seven Card Stud has no flow at all** (deal 7, commit ≤5).
-- **Hold 'Em's two sittings have no UI:** `dealHoldemHole` → wait on the shared
-  community reveal (`communityDrawnAt` is the phase-2 gate) → `holdemPlayOn` /
-  `holdemFold`.
-- **The selection model must split in two:** reroll marks (Five Card Draw only,
-  `casinoDraw` action `reroll`) versus a keep-set capped at `pickMax` for the
-  three `subsetSelect` games. `lockCasinoResult` wants the cards to **commit**.
+- **`ante` phase** — the old `choose` UI is gone. The seat reads the table's
+  pinned game and pays in via `dealCasinoHand` (no `game` arg) or, for Hold 'Em,
+  `dealHoldemHole`. All costs come from `CASINO_GAMES` / `seatSpend`.
+- **Seven Card Stud** — deals 7, drop to the best ≤5 (the `subsetSelect` keep-set).
+- **Hold 'Em two sittings** — `holdwait` shows the hole cards and waits on the
+  shared reveal; the derive effect promotes it to `holdplay` the moment
+  `mission.community` lands (it is intentionally **not** a local-only phase, so
+  the server can push it forward). `holdplay` pools 2 hole + 5 community, plays
+  on via `holdemPlayOn`, or empties the seat via `holdemFold`.
+- **Two selection models, split cleanly:** `reject` (Five Card Draw only → cards
+  to REROLL, replaced not dropped) vs `keep` (the three `subsetSelect` games →
+  the cards to COMMIT, capped at `pickMax`). `lockCasinoResult` always gets the
+  commit set.
+- **Reveal** now names each seat's gambit by reading it back off the public
+  `casinoLog` (`gambitsBySeat`), instead of the old "not tracked post-deploy".
 
 > **Two bugs found and fixed while diagnosing this — do not reintroduce:**
 > 1. **The table link MUST carry `seasonId`.** It is a standalone Vite entry with
@@ -604,6 +608,16 @@ mapped but unwritten. Essentially all of it lives in two blocks of
 >    server ignores — and `selectCommitted` reads a missing `keepUids` as "commit
 >    the whole hand", so every lock silently paid out on the full hand. It threw
 >    no error; it just overpaid.
+
+> **Odds drift is measured against the table's OWN opening roll, not 60/30.**
+> Every table rolls its own release/collect at creation (`rollTableSetup`), so the
+> `ChallengePanel` `+/−` diff must compare `casinoStats` against a frozen copy of
+> that roll — `mission.casinoOpenStats`, banked in both `freshCasinoTable` and
+> `gmFreshCasinoTable`. The panel's old fixed `BASE_STATS = 60/30` reported drift
+> on brand-new tables where no gambit had touched the odds. The panel also takes
+> `showXp` — **false in a casino season**, where gambit XP is paid out as gold and
+> the shared XP floor is inert, so the Reward/XP row must not appear. Tables opened
+> before `casinoOpenStats` existed pass `open={null}` and simply show no drift.
 
 ### Step 5 remainder (smaller, after the table)
 

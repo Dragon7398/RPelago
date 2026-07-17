@@ -96,21 +96,25 @@ const CH_ROWS = [
   { key: 'hint'    as keyof CasinoStats, label: 'Hint Cost',    hue: 30  },
 ];
 
-const BASE_STATS: CasinoStats = { release: 60, collect: 30, hint: 10, xp: 50 };
-
 interface ChallengePanelProps {
   stats: CasinoStats;
+  // The odds this table ROLLED at creation. Drift is measured against it, not
+  // against a fixed 60/30 — every table rolls its own opening odds, so a fixed
+  // baseline reported drift on tables where no gambit had been played at all.
+  // Absent (tables opened before it was banked) → no drift shown.
+  open?: CasinoStats | null;
   roll?: { releaseOn: boolean; collectOn: boolean } | null;
+  showXp?: boolean;   // false in a casino season, where XP is inert
 }
 
-export function ChallengePanel({ stats, roll }: ChallengePanelProps) {
+export function ChallengePanel({ stats, open, roll, showXp = true }: ChallengePanelProps) {
   return (
     <div className="cz-challenge">
       <div className="cz-ch-head">The Archipelago Challenge</div>
       <div className="cz-ch-stats">
         {CH_ROWS.map(r => {
           const v    = stats[r.key] as number;
-          const base = BASE_STATS[r.key] as number;
+          const base = open ? (open[r.key] as number) : v;
           const diff = Math.round((v - base) * 10) / 10;
           const on   = roll && r.key !== 'hint'
             ? (r.key === 'release' ? roll.releaseOn : roll.collectOn)
@@ -127,13 +131,15 @@ export function ChallengePanel({ stats, roll }: ChallengePanelProps) {
             </div>
           );
         })}
-        <div className="cz-ch-stat xp">
-          <span className="cz-ch-label">Reward</span>
-          <span className="cz-ch-val">{stats.xp}<small> XP</small></span>
-          {stats.xp !== BASE_STATS.xp
-            ? <span className="cz-ch-diff up">+{stats.xp - BASE_STATS.xp}</span>
-            : <span className="cz-ch-diff flat">each</span>}
-        </div>
+        {showXp && (
+          <div className="cz-ch-stat xp">
+            <span className="cz-ch-label">Reward</span>
+            <span className="cz-ch-val">{stats.xp}<small> XP</small></span>
+            {open && stats.xp !== open.xp
+              ? <span className="cz-ch-diff up">+{stats.xp - open.xp}</span>
+              : <span className="cz-ch-diff flat">each</span>}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -338,6 +338,10 @@ export interface GMMission {
   entryCosts?:     { label: string; gold: number }[]; // house-cut note on the mission card
   pot?:            number;                          // shared gold pot; seeded at cohort creation
   casinoStats?:    CasinoStats;                     // shared odds table modified by gambits
+  // The odds this table ROLLED at creation, frozen. Every table rolls its own
+  // release/collect (rollTableSetup), so drift can only be measured against this
+  // — not against CASINO_START_STATS, which is merely where the roll centres.
+  casinoOpenStats?: CasinoStats;
   casinoLog?:      Record<string, CasinoLogEntry>;  // audit trail of money-moving/outcome events
   casinoGame?:     CasinoGame;                      // which game this table is pinned to (multi-table)
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards (post-reveal)
