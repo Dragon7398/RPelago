@@ -236,6 +236,10 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 
 A separate mini-app (`casino/table.html`) where players select their Guildmaster Mission game slots by playing card games. It is a standalone Vite entry point that shares Firebase auth and the same RTDB mission state but has its own CSS theming (`themes.css`, `cards.css`, `play.css`).
 
+> **The table link MUST carry `?seasonId=`.** The mini-app has no `SeasonProvider`, so the URL is the only way it learns its season; without the param it falls back to `config/activeSeasonId` and looks for the mission in the wrong season, reporting "Mission not found or unavailable." Both link builders pass it: `PhasePanel.tableHref` and `GuildmasterMissions.CasinoTableLink`.
+
+> **`lockCasinoResult` takes `keepUids` — the cards to COMMIT, not discards.** `selectCommitted` reads a missing/null `keepUids` as "commit the whole hand", so a wrong-shaped payload doesn't error, it silently overpays the seat.
+
 **Phase flow**: `loading → choose → poker|blackjack → gambit → locked → deployed`
 
 Two card games are offered:
@@ -248,7 +252,9 @@ Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSl
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
 
-`CASINO_START_STATS`, `CASINO_ANTE`, `CASINO_REROLL_COST`, and `CASINO_MIN_ENLIST_GOLD` are defined in `constants.ts`.
+**Entry costs are per-variant and live in `CASINO_GAMES` (`casinoData.ts`)**, not in `constants.ts` — each game carries its own `ante` / `rerollCost` / `playOn`, summed for a seat by `seatSpend(game, { rerolled, playedOn })`. `CASINO_START_STATS`, `CASINO_MIN_ENLIST_GOLD`, `CASINO_START_GOLD`, `CASINO_GOLD_FLOOR`, and `CASINO_OPEN_TABLES` are in `constants.ts`. (`CASINO_ANTE` / `CASINO_REROLL_COST` are the old family-keyed model, still referenced only by the not-yet-rebuilt `CasinoTable.tsx`.)
+
+The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
 
 > **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus `CASINO_POT_SEED` and `CASINO_POT_CUT_PCT` constants that only live server-side. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
 
@@ -305,7 +311,11 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
-| `src/casino/CasinoTable.tsx` | Casino table root component; owns phase state machine and Firebase subscription |
+| `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`) |
+| `src/components/casino/PhasePanel.tsx` | Current-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger) |
+| `src/components/casino/OddsTrio.tsx` | Rolled Release/Collect/Hint display, shared by table cards and the phase panel |
+| `src/components/casino/useLastSettled.ts` | Finds the player's most recent settled table in `missionsHistory` (the Ledger's subject) |
+| `src/casino/CasinoTable.tsx` | Casino table root component; owns phase state machine and Firebase subscription. **Still on the pre-multi-table contract — see the rebuild map in docs/casino-season-1_5-plan.md** |
 | `src/casino/CardFace.tsx` | Single playing card render |
 | `src/casino/GambitCardFace.tsx` | Gambit card render |
 | `src/casino/TableComponents.tsx` | PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow |

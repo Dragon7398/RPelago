@@ -247,6 +247,9 @@ export interface GameState {
   tiles:    Record<string, Tile>;
   players:  Record<string, Player>;
   missions: Record<string, GMMission>;
+  // Settled tables/cohorts. Already arrives with the season subscription (it is a
+  // child of the season root), so reading it here costs no extra bandwidth.
+  missionsHistory: Record<string, GMMission>;
   orbState: Record<string, OrbAcquisition>;
   orbConfig: OrbConfig;
   shops:    Record<string, Shop>;
@@ -301,6 +304,10 @@ export interface GMParticipant {
   // Hold 'Em (two-sitting) only:
   holeLocked?:  boolean;             // sitting 1: hole cards anted + locked in
   playedOn?:    boolean;             // sitting 2: paid the play-on and selected the final hand
+  // Stamped onto the ARCHIVED copy at settle (see completeMission). The pot split
+  // has a random remainder, so the ledger cannot re-derive it — it must be recorded.
+  potShare?:    number;              // gold this seat took from the pot
+  net?:         number;              // goldSwing + potShare − entry costs actually paid
 }
 
 export interface GMMission {

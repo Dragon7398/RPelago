@@ -350,10 +350,12 @@ export function CasinoTable() {
           gambitDefId: gPick ?? null,
         });
       }
+      // The server takes the cards to COMMIT (`keepUids`), not the ones to drop.
+      // It re-derives the take from them, so sending the old discard-shaped
+      // payload silently committed the whole hand.
       await call<object, { goldSwing: number }>('lockCasinoResult')({
         missionId,
-        discardUid:       gameType === 'blackjack' ? bDiscardUid : null,
-        pokerRejectUids:  gameType === 'poker' ? [...pReject] : null,
+        keepUids: committedCards.map(c => c.uid),
       });
       setPhase('locked');
     } catch (e: any) {

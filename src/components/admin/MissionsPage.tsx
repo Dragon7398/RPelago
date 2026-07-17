@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
-import { SLOT_STATUSES, toRoman, MISSION_DEFS, MISSIONS_CLOSED_FOR_SEASON } from '../../lib/constants';
+import { SLOT_STATUSES, toRoman, MISSION_DEFS } from '../../lib/constants';
+import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
@@ -535,6 +536,11 @@ export default function MissionsPage() {
   const { addToast }  = useToast();
   const [seeding, setSeeding] = useState(false);
 
+  // New cohorts spawn only while the season is draft or active — a closing or
+  // archived season is winding down (mirrors gmSpawnAllowed server-side).
+  const { season } = useSeason();
+  const seedAllowed = season?.status === 'draft' || season?.status === 'active';
+
   const missions = gameState?.missions ?? {};
   const active   = Object.values(missions).filter(m => m.state !== 'complete');
   const forming  = active.filter(m => m.state === 'forming')   .sort((a, b) => (a.createdAt  ?? 0) - (b.createdAt  ?? 0));
@@ -543,11 +549,13 @@ export default function MissionsPage() {
   const handleSeed = async () => {
     setSeeding(true);
     try {
-      const created = await seedInitialMissions();
+      const { shell, created } = await seedInitialMissions();
       addToast(
-        created
-          ? 'Missions seeded — Basic Training · Cohort I, Patrol · Cohort I, and A Night at the Casino · Cohort I are now live.'
-          : 'All mission types already have an active cohort.',
+        created === 0
+          ? 'Nothing to seed — this season already has its cohorts open.'
+          : shell === 'casino'
+            ? `Opened ${created} casino table${created === 1 ? '' : 's'}, each pinned to a game.`
+            : `Seeded ${created} mission cohort${created === 1 ? '' : 's'}.`,
         'success',
       );
     } catch (err) {
@@ -571,12 +579,12 @@ export default function MissionsPage() {
             <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
               <span>No forming missions.</span>
               {active.length === 0 && (
-                MISSIONS_CLOSED_FOR_SEASON ? (
-                  <span className="dash-empty" style={{ padding: 0 }}>New missions are closed for this season.</span>
-                ) : (
+                seedAllowed ? (
                   <button className="dash-action-btn" disabled={seeding} onClick={handleSeed}>
-                    {seeding ? '…' : '⚜ Seed Initial Missions'}
+                    {seeding ? '…' : season?.shell === 'casino' ? '🂡 Open Casino Tables' : '⚜ Seed Initial Missions'}
                   </button>
+                ) : (
+                  <span className="dash-empty" style={{ padding: 0 }}>New missions are closed for this season.</span>
                 )
               )}
             </div>

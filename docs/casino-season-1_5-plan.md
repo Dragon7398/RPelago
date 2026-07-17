@@ -31,15 +31,18 @@ card engine/model; do not reinvent it.
 ## Locked decisions (this conversation)
 
 - **Gold model (floor, not stipend):**
-  - Start every player at **200 GP**.
-  - **Weekly top-up:** any player **below 100 GP** is set **to** 100 GP.
-    Players at/above 100 get nothing — so the economy does not inflate.
-  - **S2 seed:** `max(final S1.5 balance, 100)`; a player with no S1.5 record
-    seeds at 200.
-  - A non-gambler never drops below 100, keeps 200, and carries 200 into S2 —
+  - Start every player at **500 GP**.
+  - **Weekly top-up:** any player **below 250 GP** is set **to** 250 GP.
+    Players at/above 250 get nothing — so the economy does not inflate.
+    250 clears the priciest mandatory full round on the floor (Hold '''Em'''s
+    90g ante + 150g play-on = 240g), so a topped-up player can always afford
+    a complete sitting at *any* table.
+  - **S2 seed:** `max(final S1.5 balance, 250)`; a player with no S1.5 record
+    seeds at 500.
+  - A non-gambler never drops below 250, keeps 500, and carries 500 into S2 —
     so no "participant" definition and no season-length dependency is needed.
-  - **Risk is real and bounded:** win → carry >200; lose → floor at 100, worse
-    than never having played, but never below 100.
+  - **Risk is real and bounded:** win → carry >400; lose → floor at 200, worse
+    than never having played, but never below 200.
 - **Retuned numbers are FINAL and canonical** (become S2's casino baseline;
   S2 feats will modify them from the player's side but this is the floor).
 - **Slot Fill interface:** Manifest.
@@ -70,7 +73,7 @@ card engine/model; do not reinvent it.
 - **Hold 'Em community draw** is a Cloud Function that fires once the table is
   **at max slots** *and* **every seated player has locked their hole cards**
   (so the table is inherently closed to new entrants at that point). After the
-  reveal, seats either play on (pay 50g, finish selection + gambit, lock,
+  reveal, seats either play on (pay 100g, finish selection + gambit, lock,
   submit YAML/slots) or **fold** (forfeit the ante). **Folded seats stay
   empty** — a Hold 'Em table may deploy under its cap. **If all seats fold,
   the table resets** (participants cleared, seats un-decayed) but **keeps its
@@ -175,10 +178,10 @@ each becomes its own table type:
 
 | Game | Cost | Deal | Pick | Reroll | Notes |
 |---|---|---|---|---|---|
-| Five Card Draw | 60g (+30g reroll) | 5 | ≤5 | yes | existing |
-| Seven Card Stud | 75g | 7 | ≤5 | no | new — bigger pool, no reroll |
-| Texas Hold 'Em | 30g ante + 50g play-on (80g total) | 2 hole + 5 shared community | ≤5 | no | new — two-phase, cohort-synced |
-| Blackjack | 40g | push-your-luck | keep ≤5 | — | existing |
+| Five Card Draw | 180g (+90g reroll) | 5 | ≤5 | yes | existing |
+| Seven Card Stud | 225g | 7 | ≤5 | no | new — bigger pool, no reroll |
+| Texas Hold 'Em | 90g ante + 150g play-on (240g total) | 2 hole + 5 shared community | ≤5 | no | new — two-phase, cohort-synced |
+| Blackjack | 120g | push-your-luck | keep ≤5 | — | existing |
 
 Costs replace the current family-keyed `CASINO_ANTE` (poker/blackjack) with a
 **per-variant** cost model, including Hold 'Em's split ante + play-on. Mirror in
@@ -221,7 +224,7 @@ The whole two-phase sequence happens **within `forming`**, before deploy —
 `played: true`, so the community phase must complete before a seat is `played`.
 
 **Sitting 1 — hole cards**
-1. Seats ante 30g, get 2 hole cards, and lock them (`holeLocked: true`).
+1. Seats ante 60g, get 2 hole cards, and lock them (`holeLocked: true`).
 2. Seats are never decayed/kicked out to force this; a player who never draws
    at all times out via `startBy`, freeing the seat with nothing forfeit.
 
@@ -239,10 +242,10 @@ duplicates.** Community cards stay available to every seat regardless of who
 "uses" them.
 
 **Sitting 2 — after the reveal**, each seat chooses one of:
-- **Play on:** pay the 50g play-on, finish selecting ≤5 cards from their 2 hole
+- **Play on:** pay the 150g play-on, finish selecting ≤5 cards from their 2 hole
   + 5 community (fewer/lower allowed), pick their gambit, lock in, and submit
   YAML + slots. Sets `played: true`.
-- **Fold:** with a warning that they **forfeit their entry** (the 30g ante is
+- **Fold:** with a warning that they **forfeit their entry** (the 90g ante is
   simply not refunded — 40% already went to the pot, the rest was house take;
   no additional gold moves). The seat is then **left empty** — it is *not*
   reopened for claiming.
@@ -285,8 +288,16 @@ at **room creation** (the Seated → In-progress transition).
    *Rationale: higher hint cost is harder, so tables with generous Release/
    Collect chances are made costlier to hint — a balancing push so high R/C
    isn't universally better.*
-4. **Initial pot** = `10 + seats×10` (50–90) **+** difficulty bonus
-   `randInt(0, 150 − R − C)`.
+4. **Initial pot** = `20 + seats×20` (120–180) **+** a random difficulty bonus
+   `randInt(0, 2 × (150 − R − C))` **+** a flat difficulty premium
+   `2 × (120 − R − C)`.
+   - The flat term pivots on **120** — the highest R+C the rolls can produce
+     (70 + 50) — so it is never negative and needs no clamp.
+   - Together the two terms give a **~3g-per-point** difficulty slope (1 from the
+     random term, 2 from the flat one), so across the full R/C range a hard table
+     carries **~165g more pot** than an easy one (≈33g/seat at 5 seats). That is
+     what makes a table's rolled odds worth choosing between; the old
+     0.5g-per-point slope made them nearly meaningless next to gambits.
    Bonus range: `randInt(0, 85)` at the easiest odds (40+25) down to
    `randInt(0, 30)` at the most generous (70+50) — never negative.
    *Rationale: lower Release/Collect chances (a harder room) pay a bigger pot.*
@@ -313,6 +324,13 @@ Rendered when `activeSeasonId`'s shell is `casino` (see architecture plan's
     section above the rest of the table, per-game status pills.
   - **Settled** — the **Ledger**: per-seat games (card-typed chips + goal
     ticks) and Hand / Pot / Entries / **Net**; your row + winner highlighted.
+    The pot split awards its floor-division remainder to a *random* seat, so the
+    ledger cannot re-derive who got it: `completeMission` stamps `potShare` and
+    `net` onto each seat of the **archived** copy. Entries come from the audit
+    log (`casinoSeatPaid`), not `seatSpend` — only the log sees the optional
+    spends and the gambit gold, including a penalty gambit's negative `amount`.
+    A settled table clears `activeMission`, so the panel finds its subject by
+    looking for the player in `missionsHistory` (`useLastSettled`).
 - **Table cards / mission log** — felt-topped cards; while Seated or In
   progress, all other tables' buttons disable ("Seated elsewhere") and dim.
 - **Modals:** Profile (gold, won this season, hands played, biggest win, tables
@@ -376,12 +394,12 @@ under `seasons/{id}/`", is in the
   idempotent (mission completion fires once). S1's `onMissionComplete` writes
   profile counters but no economic settlement.
 - **Weekly gold floor top-up** — NEW. Scheduled function: set any player below
-  100 GP **to** 100 GP; leave everyone else untouched. Like
+  250 GP **to** 250 GP; leave everyone else untouched. Like
   `tickGuildmasterMissions`, a scheduled function is **season-blind** (no
   `event.params.seasonId`) and must resolve the active season explicitly —
   and should no-op unless that season's shell is `casino`.
   - **The top-up must be written to the audit log.** Accepted design: a player
-    parked at the 100 GP floor can lose a hand each week and be topped back up
+    parked at the 250 GP floor can lose a hand each week and be topped back up
     — a perpetual weekly free roll. That's the intended safety net, and the
     casino audit is the mitigation for anyone farming it to pump gold into the
     system. But today's `casinoLog` only records *intra-table* movement
@@ -534,6 +552,89 @@ structure, copy/tone, theming hooks, and interaction rules.
 6. Slot Fill (Manifest) + YAML storage.
 7. Profile settle writes + profile-site handoff.
 8. Launch flip (arch plan step 7).
+
+## Build status (as of 2026-07-17)
+
+**Done:** steps 1–4 in full, plus most of 5 and 7.
+
+- **Steps 1–3** — season architecture, canonical engine (both copies, parity-tested),
+  Hold 'Em cohort sync + community draw.
+- **Step 4** — leave/forfeit, `weeklyGoldTopUp` (Sat 06:00 America/Chicago, audited
+  to `goldTopUpLog`), and the per-seat settle ledger. `completeMission` stamps
+  `potShare` + `net` onto the archived copy; `casinoSeatPaid` reads Entries off
+  the audit log.
+- **Step 5** — config-driven shell, landing, table cards (with the odds trio), and
+  the three-phase panel (Seated / Board / Ledger). **Remainder is listed below.**
+- **Step 6** — `src/lib/apYaml.ts` is written and verified against real S1 YAMLs.
+  Nothing consumes it yet; the Manifest UI is unbuilt.
+- **Step 7** — `onMissionComplete` writes the casino-flavoured profile event
+  (gold / handsPlayed / games) and the handoff doc is written. Needs a
+  verification pass, not a build.
+- **Economy is LOCKED** — ×3 antes, 500 GP start / 250 GP floor, `4×seats²` pot
+  base + `2×(120−R−C)` flat premium. Re-check with `npm run econ` after any change.
+
+### 🔴 Next: the `CasinoTable` mini-app rebuild (the critical path)
+
+The table is the only thing between a seated player and a played hand, and it is
+the **last component still on the pre-multi-table contract**. Everything below is
+mapped but unwritten. Essentially all of it lives in two blocks of
+`src/casino/CasinoTable.tsx`: the phase machine (~L181–228) and the actions
+(~L246–364).
+
+- **The game is no longer the player's choice.** `dealCasinoHand` takes no `game`
+  argument — the table pins it via `mission.casinoGame`. The whole `choose` phase
+  is dead UI, and the `gameType` / `CASINO_ANTE` / `CASINO_REROLL_COST` model
+  behind it is stale. Costs must come from `CASINO_GAMES` / `seatSpend`.
+- **Seven Card Stud has no flow at all** (deal 7, commit ≤5).
+- **Hold 'Em's two sittings have no UI:** `dealHoldemHole` → wait on the shared
+  community reveal (`communityDrawnAt` is the phase-2 gate) → `holdemPlayOn` /
+  `holdemFold`.
+- **The selection model must split in two:** reroll marks (Five Card Draw only,
+  `casinoDraw` action `reroll`) versus a keep-set capped at `pickMax` for the
+  three `subsetSelect` games. `lockCasinoResult` wants the cards to **commit**.
+
+> **Two bugs found and fixed while diagnosing this — do not reintroduce:**
+> 1. **The table link MUST carry `seasonId`.** It is a standalone Vite entry with
+>    no `SeasonProvider`, so the URL is the only way it learns its season; without
+>    the param it falls back to `config/activeSeasonId` (still `rpelago_s1`) and
+>    reports *"Mission not found or unavailable."* Both builders now pass it:
+>    `PhasePanel.tableHref` and `GuildmasterMissions.CasinoTableLink`.
+> 2. **`lockCasinoResult` takes `keepUids` (cards to COMMIT), not discards.** The
+>    table was sending the old `discardUid` / `pokerRejectUids` shape, which the
+>    server ignores — and `selectCommitted` reads a missing `keepUids` as "commit
+>    the whole hand", so every lock silently paid out on the full hand. It threw
+>    no error; it just overpaid.
+
+### Step 5 remainder (smaller, after the table)
+
+- **Lounge vs Floor** are still only a copy/density difference — the layouts are
+  meant to genuinely diverge.
+- **Activity feed icon** missing from the top bar (nav is ♠ ☺ ?; wants a feed
+  icon too — no unread badge, see the landing section).
+- **Profile modal** shows gold + net only; wants hands played, biggest win,
+  tables completed, name-colour swatches, external profile link.
+- **Sit flash** unbuilt.
+
+### Not started
+
+- **Admin Casino tab** — `AdminDashboard`'s `PAGES` is still static, so all seven
+  tabs render regardless of season. Needs the season-driven visibility matrix
+  (hide Missions/Map/Orbs/Shops for a casino season) and the Casino tab itself.
+  The `goldTopUpLog` its audit needs already exists.
+- **Step 6 remainder** — Manifest UI, `storage.rules`, and the `storage` block in
+  `firebase.json`. **Enabling the bucket is the operator's action.**
+- **Step 8** — launch flip.
+
+### Ops notes
+
+- **`reseed-casino`** (`functions/scripts/season-migrate.mjs`) wipes the draft's
+  tables / history / series counters / log / secrets and resets player gold,
+  keeping identity + inventory. Draft-only with no `--force` override; needs
+  `--force` to commit. Emulator-tested. Run it, then **Admin → Missions → Open
+  Casino Tables** — tables bank their economy at creation, so anything rolled
+  under old constants keeps those numbers forever.
+- `ensureSeasonPlayer` is deployed. The settle-ledger change is client-side, so
+  it needs no functions deploy.
 
 ## Admin: the Casino tab
 

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.lockCasinoResult = exports.playCasinoGambit = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -36,6 +36,68 @@ const ADV_NAMES_LAST = [
 const ADV_CLASSES = [
     'Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Paladin', 'Bard', 'Druid',
 ];
+// ── Season player records ─────────────────────────────────────────────────────
+/**
+ * Create a player's record for one season, shaped for that season's shell:
+ * a casino season is gold-only (no adventurers/XP/feats), a map season gets the
+ * full RPG record. Callers must check the record doesn't already exist.
+ */
+async function createSeasonPlayer(db, seasonId, shell, uid, identity) {
+    const base = {
+        id: uid,
+        displayName: identity.displayName,
+        joinedAt: Date.now(),
+        ...(identity.discordHandle != null ? { discordHandle: identity.discordHandle } : {}),
+        ...(identity.avatarHash != null ? { avatarHash: identity.avatarHash } : {}),
+    };
+    const ref = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`));
+    if (shell === 'casino') {
+        await ref.set({ ...base, gold: CASINO_START_GOLD });
+        return;
+    }
+    const advId = `${uid}_adv_1`;
+    const firstName = ADV_NAMES_FIRST[Math.floor(Math.random() * ADV_NAMES_FIRST.length)];
+    const lastName = ADV_NAMES_LAST[Math.floor(Math.random() * ADV_NAMES_LAST.length)];
+    const cls = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
+    await ref.set({
+        ...base,
+        xp: 0,
+        gold: 0,
+        adventurers: { [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null } },
+        inventory: {},
+    });
+}
+/**
+ * Give the caller a player record in the season they're actually looking at.
+ *
+ * exchangeDiscordCode only creates a record at Discord sign-in, and only for
+ * whatever season was active THEN — so an already-signed-in player (restored
+ * session), a season cutover, or an admin/alpha previewing a draft all land in a
+ * season with no record and no gold. Idempotent; safe to call on every load.
+ */
+exports.ensureSeasonPlayer = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const uid = request.auth.uid;
+    const { seasonId: reqSeason } = request.data;
+    const db = (0, database_2.getDatabase)();
+    const { seasonId, status, shell } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    // Archived seasons are frozen history — never mint a record into one.
+    if (status === 'archived')
+        return { created: false };
+    const existing = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}/id`)).get();
+    if (existing.exists())
+        return { created: false };
+    // Identity lives on the cross-season profile stub written at sign-in.
+    const profSnap = await db.ref(`profiles/players/${uid}`).get();
+    const prof = (profSnap.val() ?? {});
+    await createSeasonPlayer(db, seasonId, shell, uid, {
+        displayName: prof.displayName ?? 'Unknown',
+        discordHandle: prof.discordHandle ?? null,
+        avatarHash: prof.avatarHash ?? null,
+    });
+    return { created: true };
+});
 // ── Boss coord computation (mirrors src/lib/tileGen.ts) ───────────────────────
 const ROWS = 5, COLS = 7;
 const CORNER_POSITIONS = [
@@ -158,35 +220,11 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
         ]);
         if (!gameExistsSnap.exists()) {
             // New user this season — create the record for the season's shell.
-            if (shell === 'casino') {
-                await gamePlayerRef.set({
-                    id: uid,
-                    displayName,
-                    gold: CASINO_START_GOLD,
-                    joinedAt: Date.now(),
-                    discordHandle: discordUser.username,
-                    avatarHash: discordUser.avatar,
-                });
-            }
-            else {
-                const advId = `${uid}_adv_1`;
-                const firstName = ADV_NAMES_FIRST[Math.floor(Math.random() * ADV_NAMES_FIRST.length)];
-                const lastName = ADV_NAMES_LAST[Math.floor(Math.random() * ADV_NAMES_LAST.length)];
-                const cls = ADV_CLASSES[Math.floor(Math.random() * ADV_CLASSES.length)];
-                await gamePlayerRef.set({
-                    id: uid,
-                    displayName,
-                    xp: 0,
-                    gold: 0,
-                    adventurers: {
-                        [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null },
-                    },
-                    inventory: {},
-                    joinedAt: Date.now(),
-                    discordHandle: discordUser.username,
-                    avatarHash: discordUser.avatar,
-                });
-            }
+            await createSeasonPlayer(db, seasonId, shell, uid, {
+                displayName,
+                discordHandle: discordUser.username,
+                avatarHash: discordUser.avatar,
+            });
         }
         else {
             // Returning user — refresh Discord identity fields.

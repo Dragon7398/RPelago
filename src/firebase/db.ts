@@ -2,12 +2,12 @@ import { ref, set, update, get, onValue, remove, push } from 'firebase/database'
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, KmkStatus, CasinoGame } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoPotShares, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoPotShares, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 
 function assertDb() {
@@ -50,7 +50,13 @@ function defaultOrbConfig(): OrbConfig {
 // No-op while the season is closing or archived (wind-down). Idempotent: only
 // fills up to the target, so re-running never over-seeds. See
 // docs/casino-season-1_5-plan.md → "Table model".
-export async function seedInitialMissions(): Promise<boolean> {
+export interface SeedResult {
+  shell:   'map' | 'casino';
+  /** How many cohorts/tables were actually opened — 0 when there was nothing to do. */
+  created: number;
+}
+
+export async function seedInitialMissions(): Promise<SeedResult> {
   assertDb();
   const d = db!;
   const seasonId = getCurrentSeason();
@@ -61,9 +67,9 @@ export async function seedInitialMissions(): Promise<boolean> {
   ]);
   const listed = listSnap.exists()  ? (listSnap.val()  as { shell?: string; status?: string; casinoOpenTables?: number }) : null;
   const draft  = draftSnap.exists() ? (draftSnap.val() as { shell?: string; casinoOpenTables?: number }) : null;
-  const shell  = listed?.shell ?? draft?.shell ?? 'map';
+  const shell  = (listed?.shell ?? draft?.shell ?? 'map') as 'map' | 'casino';
   const status = listed?.status ?? (draft ? 'draft' : 'archived');
-  if (status === 'closing' || status === 'archived') return false;  // winding down — no new cohorts
+  if (status === 'closing' || status === 'archived') return { shell, created: 0 };  // winding down
 
   const snap     = await get(sRef(d, 'missions'));
   const existing = snap.exists() ? (snap.val() as Record<string, GMMission>) : {};
@@ -74,7 +80,7 @@ export async function seedInitialMissions(): Promise<boolean> {
   if (shell === 'casino') {
     const target  = listed?.casinoOpenTables ?? draft?.casinoOpenTables ?? CASINO_OPEN_TABLES;
     const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
-    if (forming >= target) return false;
+    if (forming >= target) return { shell, created: 0 };
 
     // Continue per-game cohort numbering from the persisted counters.
     const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
@@ -92,25 +98,28 @@ export async function seedInitialMissions(): Promise<boolean> {
     }
     for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
     await update(ref(d), updates);
-    return true;
+    return { shell, created: target - forming };
   }
 
   // Map shell — legacy single-cohort bootstrap for basic + patrol.
   const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
   const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
-  if (hasBasic && hasPatrol) return false;
+  if (hasBasic && hasPatrol) return { shell, created: 0 };
 
+  let created = 0;
   if (!hasBasic) {
     const r = push(sRef(d, 'missions'));
     updates[sPath(`missions/${r.key}`)] = { ...freshMission('basic',  1, now), id: r.key };
+    created++;
   }
   if (!hasPatrol) {
     const r = push(sRef(d, 'missions'));
     updates[sPath(`missions/${r.key}`)] = { ...freshMission('patrol', 1, now), id: r.key };
+    created++;
   }
 
   await update(ref(d), updates);
-  return true;
+  return { shell, created };
 }
 
 // ── Subscribe to full game state ──────────────────────────────────────────────
@@ -127,6 +136,7 @@ function normalizeGameState(raw: GameState): GameState {
     tiles:    raw.tiles    ?? {},
     players:  raw.players  ?? {},
     missions: raw.missions ?? {},
+    missionsHistory: raw.missionsHistory ?? {},
     orbState: raw.orbState ?? {},
     shops:    raw.shops    ?? {},
   };
@@ -816,6 +826,17 @@ function assertFunctions() {
 // Callables take an optional seasonId; passing the current season (which may be
 // a draft under alpha preview) keeps writes on the season the client is viewing.
 // The server defaults to the active season when it's omitted.
+// Give the signed-in player a record in the CURRENT season if they don't have
+// one. A record is otherwise only minted at Discord sign-in, for whatever season
+// was active then — so a restored session, a season cutover, or an admin/alpha
+// previewing a draft would land in a season with no record and no gold.
+// Idempotent and safe to call on every load / season switch.
+export async function ensureSeasonPlayer(): Promise<{ created: boolean }> {
+  assertFunctions();
+  const res = await httpsCallable(functions!, 'ensureSeasonPlayer')({ seasonId: getCurrentSeason() });
+  return res.data as { created: boolean };
+}
+
 export async function enlistInMission(missionId: string): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'enlistInMission')({ missionId, seasonId: getCurrentSeason() });
@@ -875,6 +896,26 @@ export async function syncPlayerProfile(
   );
   const result = await fn({ targetUid, seasonId: getCurrentSeason() });
   return result.data;
+}
+
+// The archived copy a mission settles into. For casino tables it stamps each
+// seat's `potShare` and `net`, which the Settled ledger reads back: the pot split
+// awards its remainder to a randomly chosen seat, so nothing downstream can
+// re-derive who got it. Non-casino missions archive unchanged.
+function archivedMission(mission: GMMission, potShares: Map<string, number>): GMMission {
+  const settled: GMMission = { ...mission, state: 'complete' };
+  if (mission.type !== 'casino') return settled;
+
+  const participants: Record<string, GMParticipant> = {};
+  for (const [pid, p] of Object.entries(mission.participants ?? {})) {
+    const potShare = potShares.get(pid) ?? 0;
+    participants[pid] = {
+      ...p,
+      potShare,
+      net: (p.goldSwing ?? 0) + potShare - casinoSeatPaid(mission, pid),
+    };
+  }
+  return { ...settled, participants };
 }
 
 // Completes a mission: awards XP/GP (with feat bonuses), writes CompletedChallenge
@@ -978,7 +1019,7 @@ export async function completeMission(
     };
   }
 
-  updates[sPath(`missionsHistory/${mission.id}`)] = { ...mission, state: 'complete' };
+  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares);
   updates[sPath(`missions/${mission.id}`)]         = null;
 
   await update(ref(db!), updates);

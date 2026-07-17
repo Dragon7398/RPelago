@@ -385,7 +385,7 @@ the gold specifics):
 |---|---|---|
 | Player identity, Discord link, display name | Yes | `profiles/`, unchanged |
 | Cross-season history / games played / first-event badge | Yes | `profiles/players/{uid}/events/{seasonId}/...`; S1.5 event key = `casino_s1` |
-| **Gold** | **Yes, S1.5 → S2** | Everyone starts S1.5 at **200 GP**. S2 seed = **`max(final S1.5 balance, 100)`**. S1 gold does **not** carry into S1.5. |
+| **Gold** | **Yes, S1.5 → S2** | Everyone starts S1.5 at **500 GP**. S2 seed = **`max(final S1.5 balance, 250)`**. S1 gold does **not** carry into S1.5. |
 | Coat of Many Colors (name-color unlock) | **Yes, from S1** | Granted retroactively to anyone who bought one **or** finished S1 with **≥750 GP** (could have afforded it). Also earnable free in S1.5 by completing all four casino game types. Carries into S2. |
 | Feats, inventory, adventurers, XP/level | No (and absent in S1.5) | S1.5 has no RPG layer at all; S2 reintroduces feats/adventurers fresh. |
 | Tiles, orbs, shops | Fresh per map season | Omitted entirely from S1.5. |
@@ -394,11 +394,11 @@ the gold specifics):
 **Gold model (S1.5 → S2).** A floor, not a stipend — this needs no restake
 counting and no dependence on season length:
 
-- **Start:** every S1.5 player begins at **200 GP**.
-- **Weekly top-up:** any player **below 100 GP** is set **to** 100 GP. (Not
+- **Start:** every S1.5 player begins at **500 GP**.
+- **Weekly top-up:** any player **below 250 GP** is set **to** 250 GP. (Not
   additive — players at or above 100 receive nothing, so the economy doesn't
   inflate.)
-- **S2 seed:** `max(final S1.5 balance, 100)`.
+- **S2 seed:** `max(final S1.5 balance, 200)`.
 - **A player who never gambles** never drops below 100, so keeps 200 and enters
   S2 with **200** — no special-casing, no "participant" definition needed. A
   player who never even logs into S1.5 has no balance record; seed them at the
@@ -414,6 +414,13 @@ Net rule for the S2 seeding script: `s2Gold = max(s15Balance ?? 200, 100)`.
 The dashboard today has a fixed tab set: challenges, missions, kmk, map,
 players, shops, orbs. Most are meaningless in a casino season, so **the visible
 tab set becomes season-driven** (same config-driven principle as the shell).
+
+> **Status (2026-07-17): not started.** `AdminDashboard`'s `PAGES` array is still
+> static, so every tab renders in every season, and there is no Casino tab —
+> casino cohorts currently surface through the generic Missions tab (which does
+> at least know to show "🂡 Open Casino Tables" for a casino shell). The
+> `goldTopUpLog` that the Casino tab's audit needs is already being written by
+> `weeklyGoldTopUp`.
 
 **Tab evolution:**
 
@@ -469,7 +476,7 @@ This is the simpler path: the Coat eligibility check runs **once** against S1
 data instead of being recomputed at each player's first S1.5 login, and the
 S2 gold carry (`max(s15Balance ?? 200, 100)`) reads a record that already
 exists. Players brand-new to S1.5 (never played S1) still get a record created
-at login with 200 GP and no Coat.
+at login with 500 GP and no Coat.
 
 ## Mission rules across seasons
 
@@ -600,7 +607,7 @@ Casino-season launch happen close together. Ordered:
    `{seasonId}`; every callable takes an optional `seasonId` (defaults to the
    active season, validated by `resolveWriteSeason` so a client can't write a
    season it shouldn't); deck/hand moved to `seasonSecrets/`; the player-record
-   factory in `exchangeDiscordCode` is shell-aware (casino → 200 GP, no RPG
+   factory in `exchangeDiscordCode` is shell-aware (casino → 500 GP, no RPG
    record); `profiles/` writes no-op on draft seasons; `requireAdmin` reads
    `config/adminId`; `tickGuildmasterMissions` + `tickSlotStatuses` fan out over
    live + draft seasons; the **weekly gold floor top-up** (`weeklyGoldTopUp`,
@@ -617,7 +624,7 @@ Casino-season launch happen close together. Ordered:
    activeSeasonId held at S1, S1 archived, casino+S2 as drafts, alphaUsers),
    `create-casino-draft`, `kmk-migrate` (pointer → per-list `active`) — **all
    four run in prod (2026-07-15)**. The launch-time commands
-   `bulk-seed-players` (200 GP + retroactive Coat: owned or ≥750 GP) and
+   `bulk-seed-players` (500 GP + retroactive Coat: owned or ≥750 GP) and
    `launch-casino` (flip active + bump minClientVersion) are held for Phase 3.
 4. 🟡 **Client season-awareness — DONE.** `src/firebase/season.ts` (path
    helpers + `resolveSeason`), `src/contexts/SeasonContext.tsx` (config
@@ -643,10 +650,15 @@ Casino-season launch happen close together. Ordered:
    finishing it; **alpha users playtest it** (join/leave/complete missions).
 7. Create `seasons/rpelago_s2` as `status:"draft"` too; S2 content authoring
    starts here directly as a proper draft season.
-8. **Wipe draft playtest data** from `casino_s1` (manual Firebase
-   wipe of the season node), then **bulk-seed S1.5 player records** from
-   archived S1 players (200 GP + retroactive Coat grant). Order matters — seed
-   *after* the wipe.
+8. **Wipe draft playtest data** from `casino_s1` — use
+   `season-migrate.mjs reseed-casino --force` (draft-only, no `--force`
+   override on that check; `--dry-run` to preview). It clears missions,
+   missionsHistory, casinoSeries, activityLog and `seasonSecrets/casino_s1`,
+   keeps player identity/inventory, and resets gold + releases seats. Then
+   **bulk-seed S1.5 player records** from archived S1 players (500 GP +
+   retroactive Coat grant). Order matters — seed *after* the wipe.
+   *Clearing `activeMission` is not optional: a seat still pointing at a deleted
+   table locks that player out of the whole floor.*
 9. Launch: ship the frontend with the **version gate**, then flip
    `config/activeSeasonId = "casino_s1"` and its status to `active`.
    Old bundles force-reload. S1 remains archived/read-only; S2 stays

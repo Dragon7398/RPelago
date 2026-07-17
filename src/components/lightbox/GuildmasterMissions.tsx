@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSeason } from '../../contexts/SeasonContext';
 import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
@@ -253,10 +254,14 @@ function CasinoCostNote({ mission }: { mission: GMMission }) {
 // ── Casino: table link (enter or view results) ────────────────────────────────
 
 function CasinoTableLink({ mission, deployed }: { mission: GMMission; deployed: boolean }) {
+  // The table is a standalone Vite entry with no SeasonProvider, so this link is
+  // the only way it learns its season. Without seasonId it falls back to
+  // config/activeSeasonId and looks for the mission in the wrong season.
+  const seasonId = useSeason().season?.id ?? '';
   const url = mission.tableUrl;
   if (!url) return null;
   const cohort = toRoman(mission.series);
-  const href = `${url}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(cohort)}`;
+  const href = `${url}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(cohort)}&seasonId=${encodeURIComponent(seasonId)}`;
   return (
     <div className="lb-archipelago-link gm-table-link">
       <a href={href} target="_blank" rel="noopener noreferrer">

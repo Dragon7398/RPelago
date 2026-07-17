@@ -1,5 +1,5 @@
 import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } from '../types';
-import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, CASINO_ANTE, toRoman } from './constants';
+import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, toRoman } from './constants';
 import { CASINO_GAMES, CASINO_GAME_ORDER } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
 import type { TriState } from '../types';
@@ -115,7 +115,7 @@ export function computeMissionCard(
   } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
     disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
   } else if (m.type === 'casino' && playerGold != null && playerGold < CASINO_MIN_ENLIST_GOLD && !youIn) {
-    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up. The cheapest game (Blackjack) costs ${CASINO_ANTE.blackjack}g to play.`;
+    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up — that's the cheapest table on the floor.`;
     insufficientGold = true;
   } else if (youIn) {
     doneLabel = 'YOU ARE ENLISTED';
@@ -257,6 +257,19 @@ export function casinoPotShares(
   const remIdx = Math.min(n - 1, Math.floor(rng() * n));
   winnerIds.forEach((id, i) => shares.set(id, base + (i === remIdx ? rem : 0)));
   return shares;
+}
+
+// What a seat actually paid at this table, read back off the audit log rather
+// than re-derived from `seatSpend`: the log is the only record that captures the
+// optional spends (reroll, Hold 'Em play-on) *and* gambit gold — including a
+// penalty gambit's payout, which arrives as a negative `amount` and correctly
+// reduces the total. Used for the settle ledger's Entries column.
+export function casinoSeatPaid(m: GMMission, uid: string): number {
+  let paid = 0;
+  for (const e of Object.values(m.casinoLog ?? {})) {
+    if (e.uid === uid) paid += e.amount ?? 0;
+  }
+  return paid;
 }
 
 export function fmtClock(totalSec: number): string {

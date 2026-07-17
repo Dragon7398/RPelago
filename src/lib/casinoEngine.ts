@@ -103,12 +103,28 @@ export function deriveHintCost(release: number, collect: number): number {
   return Math.round(((release + collect) / 10) * 2) / 2;
 }
 
-// Initial pot = 10 + seats×10 + randInt(0, 150 − R − C). Lower R/C (a harder
-// room) pays a bigger difficulty bonus; the bonus span is never negative.
+// Initial pot = base + a random difficulty bonus + a flat difficulty premium.
+//
+//   base    = 4 × seats²                         → superlinear in table size
+//   random  = randInt(0, 2 × (150 − R − C))      → mean (150−R−C), slope 1/pt
+//   flat    = 2 × (120 − R − C)                  → slope 2/pt
+//
+// Lower R/C (a harder room) pays more. The flat term pivots on 120 — the highest
+// R+C the rolls can produce (70 + 50) — so it can never go negative and needs no
+// clamp. Together the two terms give a ~3g-per-point slope, which is what makes
+// one table's odds worth choosing over another's: across the full R/C range a
+// hard table carries ~165g more pot than an easy one.
+//
+// The base is SQUARED in seats on purpose. A linear base (and a difficulty bonus
+// split more ways) made each extra seat *dilute* the per-seat share, so bigger
+// tables quietly paid less. A big table takes longer to fill and longer to play
+// out, so it should pay each seat slightly MORE — squaring the base outruns the
+// dilution and tilts the per-seat share gently upward with table size.
 export function computeInitialPot(seats: number, release: number, collect: number, rng: Rng = Math.random): number {
-  const base = 10 + seats * 10;
+  const base = 4 * seats * seats;
   const span = Math.max(0, 150 - release - collect);
-  return base + randInt(span, rng);
+  const flat = 2 * Math.max(0, 120 - release - collect);
+  return base + randInt(span * 2, rng) + flat;
 }
 
 // The gold added to the shared pot from one fee (40% of it, floored).

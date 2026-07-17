@@ -34,12 +34,15 @@ export interface DeckCard extends CardDef {
   copyIndex: number;
 }
 
+// Gold ranges are the S1 values ×2 — see docs/casino-season-1_5-plan.md
+// "Economy tuning". Cards, antes, the pot and the starting stake all doubled so
+// the (unchanged) gambit payouts stop out-earning the hand itself.
 export const CARD_TYPES: Readonly<Record<CardTypeKey, CardTypeDef>> = {
-  wild:      { key: 'wild',      label: 'Wild',      suit: '✦', copies: 5, range: null,     order: 0 },
-  broad:     { key: 'broad',     label: 'Broad',     suit: '♦', copies: 3, range: [15, 30], order: 1 },
-  platform:  { key: 'platform',  label: 'Platform',  suit: '♠', copies: 2, range: [20, 35], order: 2 },
-  franchise: { key: 'franchise', label: 'Franchise', suit: '♥', copies: 1, range: [25, 40], order: 3 },
-  narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [25, 50], order: 4 },
+  wild:      { key: 'wild',      label: 'Wild',      suit: '✦', copies: 5, range: null,      order: 0 },
+  broad:     { key: 'broad',     label: 'Broad',     suit: '♦', copies: 3, range: [30, 60],  order: 1 },
+  platform:  { key: 'platform',  label: 'Platform',  suit: '♠', copies: 2, range: [40, 70],  order: 2 },
+  franchise: { key: 'franchise', label: 'Franchise', suit: '♥', copies: 1, range: [50, 80],  order: 3 },
+  narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [50, 100], order: 4 },
 };
 
 // Raw category data: [name, type, gameCount]
@@ -115,7 +118,7 @@ export const WILD_DEF: CardDef = {
   name:  'Wild',
   type:  'wild',
   count: null,
-  value: 10,
+  value: 20,
   copies: 5,
   blurb: 'Choose any game you like.',
 };
@@ -218,32 +221,37 @@ export interface CasinoGameDef {
   subsetSelect: boolean;
 }
 
-// Costs are FINAL (locked this season):
-//   Five Card Draw 60g (+30g reroll) · Seven Card Stud 75g · Hold 'Em 30g ante
-//   + 50g play-on (80g total) · Blackjack 40g.
+// Entry costs are the S1 values ×3, against ×2 on cards/pot/stake. Deliberately
+// steeper than the rest of the inflation: it tightens margins (leaving room for
+// a future entry-cost reduction to matter), roughly halves what the house injects
+// per table, and makes a bonus gambit a real sacrifice rather than small change.
+//   Five Card Draw 180g (+90g reroll) · Seven Card Stud 225g · Hold 'Em 90g ante
+//   + 150g play-on (240g total) · Blackjack 120g.
+// 240g is the priciest MANDATORY full round, which is why the weekly floor sits
+// at 250 — a topped-up player can always afford a full round of any game.
 export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
   five_card_draw: {
     key: 'five_card_draw', label: 'Five Card Draw',
     sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
-    reroll: true, ante: 60, rerollCost: 30, playOn: 0,
+    reroll: true, ante: 180, rerollCost: 90, playOn: 0,
     subsetSelect: false,   // hold 5, commit ≤5 — no larger pool to optimise.
   },
   seven_card_stud: {
     key: 'seven_card_stud', label: 'Seven Card Stud',
     sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 75, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 225, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // pick the best 5 of 7.
   },
   holdem: {
     key: 'holdem', label: "Texas Hold 'Em",
     sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 30, rerollCost: 0, playOn: 50,
+    reroll: false, ante: 90, rerollCost: 0, playOn: 150,
     subsetSelect: true,    // pick the best 5 of 2 hole + 5 community.
   },
   blackjack: {
     key: 'blackjack', label: 'Blackjack',
     sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
-    reroll: false, ante: 40, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 120, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
   },
 };

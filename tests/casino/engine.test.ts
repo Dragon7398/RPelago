@@ -19,7 +19,7 @@ import {
   GAMBIT_DEFS, makeGambitDeck, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
 } from '../../src/lib/casinoGambits';
 import {
-  casinoEntryCosts, pickNextCasinoGame, freshCasinoTable, casinoPotShares,
+  casinoEntryCosts, pickNextCasinoGame, freshCasinoTable, casinoPotShares, casinoSeatPaid,
 } from '../../src/lib/missionLogic';
 import type { GMMission } from '../../src/types';
 
@@ -44,10 +44,10 @@ function card(value: number, name = 'X', type = 'broad'): DeckCard {
 // ── Per-variant cost model (FINAL numbers) ───────────────────────────────────
 describe('CASINO_GAMES cost model', () => {
   it('locks the four game antes/rerolls/play-on', () => {
-    expect(CASINO_GAMES.five_card_draw).toMatchObject({ ante: 60, rerollCost: 30, reroll: true,  playOn: 0,  sittings: 1 });
-    expect(CASINO_GAMES.seven_card_stud).toMatchObject({ ante: 75, rerollCost: 0,  reroll: false, playOn: 0,  sittings: 1 });
-    expect(CASINO_GAMES.holdem).toMatchObject({          ante: 30, rerollCost: 0,  reroll: false, playOn: 50, sittings: 2 });
-    expect(CASINO_GAMES.blackjack).toMatchObject({       ante: 40, rerollCost: 0,  reroll: false, playOn: 0,  sittings: 1 });
+    expect(CASINO_GAMES.five_card_draw).toMatchObject({ ante: 180, rerollCost: 90, reroll: true,  playOn: 0,   sittings: 1 });
+    expect(CASINO_GAMES.seven_card_stud).toMatchObject({ ante: 225, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
+    expect(CASINO_GAMES.holdem).toMatchObject({          ante: 90,  rerollCost: 0, reroll: false, playOn: 150, sittings: 2 });
+    expect(CASINO_GAMES.blackjack).toMatchObject({       ante: 120, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
   });
 
   it('never lets a seat commit more than 5 cards', () => {
@@ -63,17 +63,17 @@ describe('CASINO_GAMES cost model', () => {
     expect(CASINO_GAMES.blackjack.subsetSelect).toBe(true);
   });
 
-  it('minCasinoAnte is the cheapest ante (Hold \'Em, 30g)', () => {
-    expect(minCasinoAnte()).toBe(30);
+  it('minCasinoAnte is the cheapest ante (Hold \'Em, 90g)', () => {
+    expect(minCasinoAnte()).toBe(90);
   });
 
   it('seatSpend sums ante + optional reroll + optional play-on', () => {
-    expect(seatSpend('five_card_draw')).toBe(60);
-    expect(seatSpend('five_card_draw', { rerolled: true })).toBe(90);
-    expect(seatSpend('seven_card_stud', { rerolled: true })).toBe(75); // no reroll → flag ignored
-    expect(seatSpend('holdem')).toBe(30);
-    expect(seatSpend('holdem', { playedOn: true })).toBe(80);
-    expect(seatSpend('blackjack', { rerolled: true, playedOn: true })).toBe(40); // neither applies
+    expect(seatSpend('five_card_draw')).toBe(180);
+    expect(seatSpend('five_card_draw', { rerolled: true })).toBe(270);
+    expect(seatSpend('seven_card_stud', { rerolled: true })).toBe(225); // no reroll → flag ignored
+    expect(seatSpend('holdem')).toBe(90);
+    expect(seatSpend('holdem', { playedOn: true })).toBe(240);
+    expect(seatSpend('blackjack', { rerolled: true, playedOn: true })).toBe(120); // neither applies
   });
 });
 
@@ -98,23 +98,33 @@ describe('deriveHintCost', () => {
 
 // ── Dynamic pot ──────────────────────────────────────────────────────────────
 describe('computeInitialPot', () => {
-  it('floors at base (10 + seats×10) when the bonus rolls 0', () => {
-    expect(computeInitialPot(5, 40, 25, () => 0)).toBe(60); // 10 + 50 + 0
-    expect(computeInitialPot(8, 70, 50, () => 0)).toBe(90); // 10 + 80 + 0
+  // pot = 4×seats² + randInt(0, 2×(150−R−C)) + 2×(120−R−C)
+  it('floors at base + the flat difficulty premium when the random term rolls 0', () => {
+    // Hardest odds (40+25=65): flat = 2×55 = 110.
+    expect(computeInitialPot(5, 40, 25, () => 0)).toBe(100 + 110); // 4×25 + 0 + 110
+    // Easiest odds (70+50=120): flat = 0 — an easy table earns no premium.
+    expect(computeInitialPot(8, 70, 50, () => 0)).toBe(256);       // 4×64 + 0 + 0
   });
 
-  it('caps at base + (150 − R − C) when the bonus rolls high', () => {
-    // Easiest odds (40+25) → span 85; hardest-to-beat rng ~1 hits the cap.
-    expect(computeInitialPot(5, 40, 25, () => 0.999999)).toBe(60 + 85);
-    // Most generous odds (70+50) → span 30.
-    expect(computeInitialPot(8, 70, 50, () => 0.999999)).toBe(90 + 30);
+  it('caps at base + 2×(150−R−C) + flat when the random term rolls high', () => {
+    // Hardest: span 85 → doubled 170; flat 110.
+    expect(computeInitialPot(5, 40, 25, () => 0.999999)).toBe(100 + 170 + 110);
+    // Easiest: span 30 → doubled 60; flat 0.
+    expect(computeInitialPot(8, 70, 50, () => 0.999999)).toBe(256 + 60);
   });
 
-  it('never produces a negative bonus span', () => {
-    // Even at the max R+C the pot is still ≥ base.
+  it('is never negative at the maximum R+C (the flat term pivots on 120)', () => {
     for (let s = 5; s <= 8; s++) {
-      expect(computeInitialPot(s, 70, 50, () => 0)).toBe(10 + s * 10);
+      expect(computeInitialPot(s, 70, 50, () => 0)).toBe(4 * s * s);
     }
+  });
+
+  it('pays a harder table meaningfully more — ~3g per point of difficulty', () => {
+    // Same seats, same rng: compare the two extremes of the rollable R/C range.
+    const hard = computeInitialPot(6, 40, 25, () => 0.5);  // R+C = 65
+    const easy = computeInitialPot(6, 70, 50, () => 0.5);  // R+C = 120
+    expect(hard - easy).toBe(165);            // 55 points × 3g
+    expect((hard - easy) / 55).toBeCloseTo(3, 5);
   });
 });
 
@@ -317,10 +327,10 @@ const formingTable = (game: CasinoGame): GMMission =>
 
 describe('casinoEntryCosts', () => {
   it('derives the house-cut note from each game\'s cost model', () => {
-    expect(casinoEntryCosts('five_card_draw')).toEqual([{ label: 'Ante', gold: 60 }, { label: 'Reroll', gold: 30 }]);
-    expect(casinoEntryCosts('seven_card_stud')).toEqual([{ label: 'Ante', gold: 75 }]);
-    expect(casinoEntryCosts('holdem')).toEqual([{ label: 'Ante', gold: 30 }, { label: 'Play-on', gold: 50 }]);
-    expect(casinoEntryCosts('blackjack')).toEqual([{ label: 'Ante', gold: 40 }]);
+    expect(casinoEntryCosts('five_card_draw')).toEqual([{ label: 'Ante', gold: 180 }, { label: 'Reroll', gold: 90 }]);
+    expect(casinoEntryCosts('seven_card_stud')).toEqual([{ label: 'Ante', gold: 225 }]);
+    expect(casinoEntryCosts('holdem')).toEqual([{ label: 'Ante', gold: 90 }, { label: 'Play-on', gold: 150 }]);
+    expect(casinoEntryCosts('blackjack')).toEqual([{ label: 'Ante', gold: 120 }]);
   });
 });
 
@@ -375,6 +385,38 @@ describe('casinoPotShares', () => {
   });
 });
 
+describe('casinoSeatPaid', () => {
+  const log = (uid: string, event: string, amount?: number) =>
+    ({ ts: 1, uid, playerName: uid, event, amount }) as GMMission['casinoLog'][string];
+
+  const mission = {
+    casinoLog: {
+      a1: log('a', 'deal', 180),
+      a2: log('a', 'reroll', 90),
+      a3: log('a', 'gambit', 30),
+      b1: log('b', 'deal', 180),
+      // A penalty gambit PAYS the seat in a casino season — a negative `amount`
+      // that has to reduce what the ledger says they put in.
+      b2: log('b', 'gambit', -40),
+      c1: log('c', 'deal'),        // an event that moved no money at all
+    },
+  } as unknown as GMMission;
+
+  it('sums what a seat paid, including the optional spends', () => {
+    expect(casinoSeatPaid(mission, 'a')).toBe(300);
+  });
+
+  it('lets a penalty gambit payout offset the entry', () => {
+    expect(casinoSeatPaid(mission, 'b')).toBe(140);
+  });
+
+  it('ignores amount-less events and unknown seats', () => {
+    expect(casinoSeatPaid(mission, 'c')).toBe(0);
+    expect(casinoSeatPaid(mission, 'nobody')).toBe(0);
+    expect(casinoSeatPaid({} as GMMission, 'a')).toBe(0);
+  });
+});
+
 describe('freshCasinoTable', () => {
   it('builds a forming casino table pinned to the game, with rolled seats/odds/pot', () => {
     const t = freshCasinoTable('holdem', 3, 1000, mulberry32(42));
@@ -387,8 +429,8 @@ describe('freshCasinoTable', () => {
     expect(t.collect).toBe('special');
     expect(t.baseMax).toBeGreaterThanOrEqual(5);
     expect(t.baseMax).toBeLessThanOrEqual(8);
-    expect(t.entryCosts).toEqual([{ label: 'Ante', gold: 30 }, { label: 'Play-on', gold: 50 }]);
-    expect(t.pot).toBeGreaterThanOrEqual(10 + t.baseMax * 10);
+    expect(t.entryCosts).toEqual([{ label: 'Ante', gold: 90 }, { label: 'Play-on', gold: 150 }]);
+    expect(t.pot).toBeGreaterThanOrEqual(4 * t.baseMax * t.baseMax);
     expect(t.casinoStats!.xp).toBe(50);
     expect(t.hint).toBe(t.casinoStats!.hint);
   });

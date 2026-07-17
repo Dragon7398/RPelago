@@ -323,7 +323,9 @@ export interface GMMissionDef {
 // Starting odds written to casinoStats when a casino cohort is created.
 export const CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 } as const;
 // Minimum gold a player must hold to enlist (= cheapest game ante: blackjack).
-export const CASINO_MIN_ENLIST_GOLD = 30;
+// = the cheapest ante across CASINO_GAMES (Hold 'Em, 90g). Kept as a constant
+// because the server gates enlist on it; see minCasinoAnte() in casinoData.
+export const CASINO_MIN_ENLIST_GOLD = 90;
 // Ante costs by game type.
 export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, blackjack: 30 };
 // Cost to reroll rejected cards in poker.
@@ -332,8 +334,8 @@ export const CASINO_REROLL_COST = 20;
 // Casino-season gold economy. Mirrored in functions/src/index.ts — keep in sync.
 // A fresh casino player starts at START_GOLD; the weekly top-up brings anyone
 // below GOLD_FLOOR up to it; S2 seed = max(final S1.5 balance, GOLD_FLOOR).
-export const CASINO_START_GOLD = 200;
-export const CASINO_GOLD_FLOOR = 100;
+export const CASINO_START_GOLD = 500;
+export const CASINO_GOLD_FLOOR = 250;
 
 // How many casino tables are open (forming) at once in a casino season. A
 // per-season override lives at config/seasonList/{seasonId}/casinoOpenTables;
@@ -341,10 +343,10 @@ export const CASINO_GOLD_FLOOR = 100;
 // spawns (least-represented game) whenever a table deploys, holding the count.
 export const CASINO_OPEN_TABLES = 6;
 
-// Season-end control: when true, admins can no longer seed brand-new mission cohorts
-// (existing forming/in-progress cohorts still play out normally). Flip back to false
-// when the next season kicks off.
-export const MISSIONS_CLOSED_FOR_SEASON = true;
+// Season-end control is data-driven now: whether new cohorts may spawn follows the
+// season's `status` (draft/active spawn; closing/archived wind down) — see
+// gmSpawnAllowed in functions/src/index.ts and seedInitialMissions in db.ts. The
+// old hand-flipped MISSIONS_CLOSED_FOR_SEASON dual-copy constant is gone.
 
 export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
   basic: {

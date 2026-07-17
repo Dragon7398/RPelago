@@ -4,9 +4,14 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { useIsAdmin } from '../../contexts/SeasonContext';
 import SettingsPanel from '../SettingsPanel';
 import HelpModal from '../HelpModal';
-import { CASINO_GAMES, CASINO_GAME_ORDER, type CasinoGame } from '../../lib/casinoData';
+import LoginModal from '../LoginModal';
+import PrivacyModal from '../PrivacyModal';
+import PhasePanel from './PhasePanel';
+import { useLastSettled } from './useLastSettled';
+import OddsTrio from './OddsTrio';
+import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD } from '../../lib/constants';
-import { currentMaxSlots } from '../../lib/missionLogic';
+import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission } from '../../types';
 import '../../casino/themes.css';
@@ -24,17 +29,28 @@ const gameFamily = (g: CasinoGame): string => (g === 'blackjack' ? 'Blackjack' :
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
 
 // ── Table card ────────────────────────────────────────────────────────────────
+/**
+ * Gold a seat needs before sitting down. Play-on counts: a Hold 'Em seat that
+ * antes in and then can't cover the second sitting is forced to fold, forfeiting
+ * the ante. Reroll is genuinely optional, so it stays out.
+ */
+function seatBuyIn(game: CasinoGame): number {
+  return seatSpend(game, { playedOn: true });
+}
+
 interface TableCardProps {
   m: GMMission;
   now: number;
   seatedHere: boolean;
   locked: boolean;
   lockLabel: string;
+  /** Gold a seat must have on hand to see the game through — see `seatBuyIn`. */
+  buyIn: number;
   canAfford: boolean;
   onSit: (m: GMMission) => void;
 }
 
-function TableCard({ m, now, seatedHere, locked, lockLabel, canAfford, onSit }: TableCardProps) {
+function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, onSit }: TableCardProps) {
   const game    = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg     = CASINO_GAMES[game];
   const maxSeats = currentMaxSlots(m, now);
@@ -65,6 +81,7 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, canAfford, onSit }: 
       </div>
       <div className="rl-tcard-body">
         <div className="rl-pips">{pips}</div>
+        {m.casinoStats && <OddsTrio stats={m.casinoStats} />}
         <div className="rl-tcard-stats">
           <div className="rl-mini"><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{filled}/{maxSeats}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Played</span><span className="rl-mini-val">{played}</span></div>
@@ -82,7 +99,7 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, canAfford, onSit }: 
           {seatedHere
             ? <span className="rl-time">You're seated here</span>
             : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
-                title={locked ? lockLabel : !canAfford ? `Need ${ante}g to ante up` : full ? 'Table full' : undefined}>
+                title={locked ? lockLabel : !canAfford ? `Need ${buyIn}g to play this table through` : full ? 'Table full' : undefined}>
                 {locked ? lockLabel : !canAfford ? 'Not enough gold' : 'Take a seat'}
               </button>}
         </div>
@@ -126,7 +143,9 @@ function GamesModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProfileModal({ name, gold, net, onClose }: { name: string; gold: number; net: number; onClose: () => void }) {
+function ProfileModal({ name, gold, net, onSignOut, onClose }: {
+  name: string; gold: number; net: number; onSignOut: () => void; onClose: () => void;
+}) {
   return (
     <Modal title={name || 'Your Profile'} tag="At the Casino" onClose={onClose}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
@@ -141,18 +160,23 @@ function ProfileModal({ name, gold, net, onClose }: { name: string; gold: number
           </div>
         </div>
       </div>
+      <button className="rl-btn rl-full" style={{ marginTop: '1.1rem' }} onClick={onSignOut}>
+        Leave the Casino
+      </button>
     </Modal>
   );
 }
 
 // ── The landing shell ─────────────────────────────────────────────────────────
 export default function CasinoShell() {
-  const { user } = useAuth();
-  const { gameState, enlistInMission } = useGameState();
+  const { user, signOut } = useAuth();
+  const { gameState, enlistInMission, standDownFromMission } = useGameState();
   const isAdmin = useIsAdmin();
   const [view, setView] = useState<View>(loadView);
   const [modal, setModal] = useState<null | 'profile' | 'games'>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen]       = useState(false);
+  const [loginOpen, setLoginOpen]     = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(() => window.location.hash === '#privacy');
   const [now, setNow] = useState(() => Date.now());
 
   // The casino token layer (casino/themes.css) is scoped to `.casino-scope` so it
@@ -187,6 +211,11 @@ export default function CasinoShell() {
       .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
   }, [gameState?.missions]);
 
+  // The table you hold a seat at — live, so it carries you from forming through
+  // in-progress without the panel tracking phase itself.
+  const seatedAt   = activeMission ? gameState?.missions?.[activeMission] ?? null : null;
+  const lastSettled = useLastSettled(gameState?.missionsHistory, user?.id ?? null);
+
   const locked    = !!activeMission;
   const lockLabel = 'Seated elsewhere';
 
@@ -207,16 +236,20 @@ export default function CasinoShell() {
           <span className="rl-sub">{isFloor ? 'Walk the floor' : 'A quiet corner of the archipelago'}</span>
         </div>
         <div className="rl-top-right">
-          <div className="rl-gold">
-            <div className="rl-gold-ico">◈</div>
-            <div className="rl-gold-info">
-              <span className="rl-gold-lbl">Your gold</span>
-              <span className="rl-gold-amt">
-                {gold}<small>g</small>
-                {net !== 0 && <span className={`rl-gold-net ${net > 0 ? 'pos' : 'neg'}`}>{net > 0 ? '+' : '−'}{Math.abs(net)} this season</span>}
-              </span>
+          {user ? (
+            <div className="rl-gold">
+              <div className="rl-gold-ico">◈</div>
+              <div className="rl-gold-info">
+                <span className="rl-gold-lbl">Your gold</span>
+                <span className="rl-gold-amt">
+                  {gold}<small>g</small>
+                  {net !== 0 && <span className={`rl-gold-net ${net > 0 ? 'pos' : 'neg'}`}>{net > 0 ? '+' : '−'}{Math.abs(net)} this season</span>}
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <button className="rl-btn primary" onClick={() => setLoginOpen(true)}>⚔ ENTER RPelago</button>
+          )}
           <div className="rl-viewtoggle" role="tablist" aria-label="Landing view">
             {(['lounge', 'floor'] as View[]).map(v => (
               <button key={v} role="tab" aria-selected={view === v}
@@ -229,20 +262,17 @@ export default function CasinoShell() {
               casino-specific modal — see SettingsPanel at the foot of the page. */}
           <div className="rl-nav">
             <button className="rl-navbtn" title="The Games" onClick={() => setModal('games')}>♠</button>
-            <button className="rl-navbtn" title="Profile" onClick={() => setModal('profile')}>☺</button>
+            {user && <button className="rl-navbtn" title="Profile" onClick={() => setModal('profile')}>☺</button>}
             <button className="rl-navbtn" title="Adventurer's Guide" onClick={() => setHelpOpen(true)}>?</button>
           </div>
         </div>
       </div>
 
-      {/* Current-seat line — the full evolving phase panel lands in a later slice. */}
-      <div className="rl-seatline">
-        <div className="rl-ct-kick">{activeMission ? 'Your seat' : 'No seat yet'}</div>
-        <div className="rl-ct-name">{activeMission ? 'You are seated at a table' : "You're not seated at a table"}</div>
-        <p className="rl-muted">
-          {activeMission ? 'Head to the card table to play your hand.' : 'Pull up a chair at any open table below to start playing for gold.'}
-        </p>
-      </div>
+      {/* One panel, phase owned by the backend: mission state IS the phase. */}
+      <PhasePanel
+        mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now}
+        onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
+      />
 
       <div className="rl-sec">
         <div className="rl-sec-head">
@@ -252,13 +282,16 @@ export default function CasinoShell() {
         {tables.length === 0
           ? <p className="rl-muted">No tables are open right now — check back soon.</p>
           : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
-              {tables.map(m => (
-                <TableCard key={m.id} m={m} now={now}
-                  seatedHere={activeMission === m.id}
-                  locked={locked} lockLabel={lockLabel}
-                  canAfford={gold >= CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].ante}
-                  onSit={sit} />
-              ))}
+              {tables.map(m => {
+                const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                return (
+                  <TableCard key={m.id} m={m} now={now}
+                    seatedHere={activeMission === m.id}
+                    locked={locked} lockLabel={lockLabel}
+                    buyIn={buyIn} canAfford={gold >= buyIn}
+                    onSit={sit} />
+                );
+              })}
             </div>}
       </div>
 
@@ -276,8 +309,22 @@ export default function CasinoShell() {
       {/* Shared guide, filtered to the sections a casino season actually has. */}
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} variant="casino" />
 
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onPrivacyClick={() => { setLoginOpen(false); setPrivacyOpen(true); }}
+      />
+      <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
+
       {modal === 'games'   && <GamesModal   onClose={() => setModal(null)} />}
-      {modal === 'profile' && <ProfileModal name={me?.displayName ?? ''} gold={gold} net={net} onClose={() => setModal(null)} />}
+      {modal === 'profile' && (
+        <ProfileModal
+          name={me?.displayName ?? user?.displayName ?? ''}
+          gold={gold} net={net}
+          onSignOut={() => { setModal(null); void signOut(); }}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }

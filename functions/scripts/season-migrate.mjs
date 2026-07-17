@@ -14,9 +14,12 @@
  *                       active season at S1 (archived, read-only) until launch.
  *   create-casino-draft Create the empty S1.5 season skeleton (draft).
  *   kmk-migrate         Convert game/meta/kmkActiveListId → per-list `active`.
+ *   reseed-casino       Wipe the casino DRAFT's playtest tables/secrets/log and
+ *                       reset player gold, so the app can re-open tables at
+ *                       current numbers. Draft-only; needs --force to commit.
  *   ── run these two at LAUNCH, after wiping any draft playtest data ──
  *   bulk-seed-players   Create S1.5 player records from archived S1 players
- *                       (200 GP + retroactive Coat grant).
+ *                       (500 GP + retroactive Coat grant).
  *   launch-casino       Flip S1.5 to active + bump minClientVersion.
  *
  * Connection:
@@ -38,7 +41,7 @@ const S1     = 'rpelago_s1';
 const CASINO = 'casino_s1';
 const S2     = 'rpelago_s2';
 
-const CASINO_START_GOLD    = 200;   // mirror of src/lib/constants.ts
+const CASINO_START_GOLD    = 500;   // mirror of src/lib/constants.ts
 const COAT_ITEM            = 'coat_of_many_colors';
 const COAT_GOLD_THRESHOLD  = 750;   // S1 balance that "could have bought" the Coat
 const CASINO_OPEN_TABLES   = 6;
@@ -208,6 +211,56 @@ async function bulkSeedPlayers(db) {
     () => db.ref(`seasons/${CASINO}/players`).set(records));
 }
 
+// Wipe a casino DRAFT's playtest data so the app can re-open tables at current
+// numbers. Tables bank their economy at creation (seats, odds, and pot are rolled
+// by freshCasinoTable and then persisted), so tables rolled under older constants
+// keep those numbers forever — the only way to re-price them is to delete and
+// re-open. seedInitialMissions() only tops up to the target, so it is a no-op
+// until the stale tables are gone; that's what this clears.
+//
+// Player records SURVIVE (identity, inventory, Coat grants), but gold resets to
+// the current start and activeMission is cleared — a seat still pointing at a
+// deleted table would lock that player out of the whole floor.
+//
+// Draft-only, with no --force override: this deletes player-facing history, and
+// a live season's tables have real gold in them.
+async function reseedCasino(db) {
+  const [draftSnap, listedSnap] = await Promise.all([
+    db.ref(`config/draftSeasons/${CASINO}`).get(),
+    db.ref(`config/seasonList/${CASINO}`).get(),
+  ]);
+  const status = listedSnap.val()?.status;
+  if (!draftSnap.exists() || (status && status !== 'draft'))
+    throw new Error(`${CASINO} is not a draft season (status: ${status ?? 'unlisted'}) — refusing to wipe live tables.`);
+  if (!FORCE && !DRY_RUN)
+    throw new Error('reseed-casino deletes data. Re-run with --dry-run to preview, or --force to commit.');
+
+  const [missionsSnap, historySnap, playersSnap] = await Promise.all([
+    db.ref(`seasons/${CASINO}/missions`).get(),
+    db.ref(`seasons/${CASINO}/missionsHistory`).get(),
+    db.ref(`seasons/${CASINO}/players`).get(),
+  ]);
+  const players = playersSnap.val() ?? {};
+
+  const updates = {
+    [`seasons/${CASINO}/missions`]:        null,  // the stale tables
+    [`seasons/${CASINO}/missionsHistory`]: null,  // settled tables priced under old numbers
+    [`seasons/${CASINO}/casinoSeries`]:    null,  // cohort counters → new tables start at I again
+    [`seasons/${CASINO}/activityLog`]:     null,
+    [`seasonSecrets/${CASINO}`]:           null,  // decks + hands of half-played seats
+  };
+  for (const uid of Object.keys(players)) {
+    updates[`seasons/${CASINO}/players/${uid}/gold`]          = CASINO_START_GOLD;
+    updates[`seasons/${CASINO}/players/${uid}/activeMission`] = null;
+  }
+
+  console.log(`reseed-casino: clearing ${Object.keys(missionsSnap.val() ?? {}).length} table(s), ` +
+              `${Object.keys(historySnap.val() ?? {}).length} settled, secrets, log`);
+  console.log(`  ${Object.keys(players).length} player record(s) kept — gold → ${CASINO_START_GOLD} GP, seats released`);
+  await commit('wipe casino playtest data', () => db.ref().update(updates));
+  console.log('  next: Admin → Missions → "Open Casino Tables" to re-open at current numbers.');
+}
+
 async function launchCasino(db) {
   const configSnap = await db.ref('config').get();
   if (!configSnap.exists()) throw new Error('config/ not found — run seed-config first.');
@@ -243,6 +296,7 @@ const COMMANDS = {
   'seed-config':         seedConfig,
   'create-casino-draft': createCasinoDraft,
   'kmk-migrate':         kmkMigrate,
+  'reseed-casino':       reseedCasino,
   'bulk-seed-players':   bulkSeedPlayers,
   'launch-casino':       launchCasino,
 };

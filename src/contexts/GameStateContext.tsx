@@ -5,7 +5,9 @@ import { onValue, ref, remove } from 'firebase/database';
 import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
 import { firebaseReady, functions, auth as firebaseAuth, db as firebaseDb } from '../firebase/config';
 import { sPath } from '../firebase/season';
+import { useAuth } from './AuthContext';
 import {
+  ensureSeasonPlayer,
   subscribeToGame,
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
   completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
@@ -128,6 +130,20 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     const unsubscribeLog = subscribeToActivityLog(setActivityLog);
     return () => { unsubscribeGame(); unsubscribeLog(); };
   }, [seasonId]);
+
+  // Make sure the signed-in player actually exists in whatever season we're
+  // rendering. A record is only minted at Discord sign-in, for the season active
+  // AT THAT MOMENT — so a restored session, a season cutover, or an admin/alpha
+  // previewing a draft would otherwise show a player with no record and 0 gold.
+  // Re-runs on season switch; the callable is idempotent and no-ops on archived
+  // seasons (frozen history).
+  const { user: authUser } = useAuth();
+  useEffect(() => {
+    if (!firebaseReady || !authUser || !seasonId) return;
+    void ensureSeasonPlayer().catch(err => {
+      console.warn('[RPelago] Could not ensure a player record for this season.', err);
+    });
+  }, [authUser?.id, seasonId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Track the current uid for the notification listener. (Game/season creation
   // is no longer client-triggered — see db.ts "Season creation".)
