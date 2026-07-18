@@ -25,7 +25,9 @@ export default function TraitEditor({ tile, selectedCoord }: Props) {
       delete next[def.id];
     }
     try {
-      await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as any });
+      // null clears the traits node in Firebase; Tile['traits'] models it as
+      // optional, so the cast just reconciles the delete-sentinel with the type.
+      await adminUpdateTile(selectedCoord, { traits: (Object.keys(next).length > 0 ? next : null) as Tile['traits'] });
     } catch {
       addToast('Failed to update trait. Please try again.', 'error');
     }

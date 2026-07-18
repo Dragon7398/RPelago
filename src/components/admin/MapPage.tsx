@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { hasUnfinishedTileSlots } from '../../lib/missionLogic';
-import type { TileState, TriState, SlotStatus } from '../../types';
+import type { Tile, TileState, TriState, SlotStatus } from '../../types';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 import MapGridPanel        from './mapPage/MapGridPanel';
@@ -75,7 +75,7 @@ export default function MapPage({ initialCoord }: { initialCoord?: string }) {
   const handleFieldSave = async () => {
     if (!selectedCoord || Object.keys(localEdits).length === 0) return;
     try {
-      await adminUpdateTile(selectedCoord, localEdits as any);
+      await adminUpdateTile(selectedCoord, localEdits as Partial<Tile>);
       setLocalEdits({});
     } catch {
       addToast('Failed to save tile changes. Please try again.', 'error');

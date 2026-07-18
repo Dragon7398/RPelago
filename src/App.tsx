@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { AuthProvider } from './contexts/AuthContext';
-import { GameStateProvider } from './contexts/GameStateContext';
-import { ToastProvider } from './contexts/ToastContext';
+import { AuthProvider } from './contexts/AuthProvider';
+import { GameStateProvider } from './contexts/GameStateProvider';
+import { ToastProvider } from './contexts/ToastProvider';
 import { useAuth } from './contexts/AuthContext';
 import { useGameState } from './contexts/GameStateContext';
-import { SeasonProvider, useIsAdmin, useSeason } from './contexts/SeasonContext';
+import { SeasonProvider } from './contexts/SeasonProvider';
+import { useIsAdmin, useSeason } from './contexts/SeasonContext';
 import CasinoShell from './components/casino/CasinoShell';
 import SettingsPanel from './components/SettingsPanel';
 import { firebaseReady } from './firebase/config';
@@ -20,7 +21,7 @@ import PrivacyModal from './components/PrivacyModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 import KmkBoard from './components/kmk/KmkBoard';
-import { KmkProvider } from './contexts/KmkContext';
+import { KmkProvider } from './contexts/KmkProvider';
 import AgendaLauncher from './components/agenda/AgendaLauncher';
 import AgendaDrawer from './components/agenda/AgendaDrawer';
 import { deriveAgendaData } from './components/agenda/agendaHelpers';
@@ -43,6 +44,9 @@ function AppContent() {
   const [helpOpen,     setHelpOpen]     = useState(false);
   const [privacyOpen,  setPrivacyOpen]  = useState(() => window.location.hash === '#privacy');
   const [agendaOpen,   setAgendaOpen]   = useState(false);
+  // Captured once at mount rather than read during render (the decay it feeds
+  // only shifts every 24h, so a live clock would just be an impure render read).
+  const [now] = useState(() => Date.now());
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
@@ -63,7 +67,6 @@ function AppContent() {
       }
       return false;
     }).length;
-    const now = Date.now();
     const missionWarn = Object.values(gameState.missions ?? {}).filter(m => {
       if (m.state === 'complete') return false;
       const filled = Object.keys(m.participants ?? {}).length;

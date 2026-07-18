@@ -41,7 +41,7 @@ export default function AdvSlotEditor({ tile, selectedCoord, unassigned1, unassi
           <div key={roomNum ?? 'all'} className={isBifurcated ? 'admin-room-group' : undefined}>
             {isBifurcated && <div className="admin-room-group-header">Room {roomNum}</div>}
             {roomEntries.map(entry => {
-        const slots = normalizeSlots(entry.slots as any);
+        const slots = normalizeSlots(entry.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
         const draft = slotDrafts[entry.advId] ?? { name: '', game: '', details: '', status: 'Unstarted' as SlotStatus, bonusXP: 0, bonusGold: 0 };
         const save  = (next: AdvSlot[]) => adminSetAdventurerSlots(selectedCoord, entry.advId, next);
         const advRoom: 1 | 2 = isBifurcated ? (entry.room ?? 1) : 1;

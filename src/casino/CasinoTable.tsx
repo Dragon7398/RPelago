@@ -227,6 +227,13 @@ export function CasinoTable() {
 
   // Derive phase from Firebase state (only when not in an active local phase).
   // Also handles session recovery when the player reloads mid-hand.
+  //
+  // This deliberately mirrors an external subscription (the mission) into the
+  // local phase machine: server-driven phases (deployed, locked, the Hold 'Em
+  // reveal) and page-reload recovery both require setting phase in response to
+  // Firebase changes — the one setState-in-effect pattern the rule sanctions but
+  // can't recognize here, so it's scoped off for this effect only.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!uid || !mission || !game || !cfg) return;
     const seat = mission.participants?.[uid];
@@ -291,6 +298,7 @@ export function CasinoTable() {
     // every phase change and loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, mission, secretHand, game, cfg]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Callables. The resolved seasonId is injected into every payload so the
   // server writes to the right season — essential when an alpha user is

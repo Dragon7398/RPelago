@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { ALL_ORBS } from '../lib/constants';
 import type { OrbAcquisition } from '../types';
@@ -27,7 +27,9 @@ function acquisitionTitle(acq: OrbAcquisition): string {
 
 export default function OrbBar() {
   const { gameState, loading } = useGameState();
-  const orbState  = gameState?.orbState  ?? {};
+  // Memoized so its identity is stable across renders — it's a dependency of the
+  // flash effect below, and a fresh {} each render would re-run it every time.
+  const orbState  = useMemo(() => gameState?.orbState ?? {}, [gameState?.orbState]);
   const orbConfig = gameState?.orbConfig;
   const count     = Object.keys(orbState).length;
   const minOrbs   = orbConfig?.bossMinOrbs ?? 5;

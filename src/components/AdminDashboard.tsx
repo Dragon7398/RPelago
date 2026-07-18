@@ -34,6 +34,9 @@ export default function AdminDashboard() {
     return params.get('coord') ?? undefined;
   });
   const [menuOpen, setMenuOpen] = useState(false);
+  // Captured once at mount rather than read during render (the decay it feeds
+  // only shifts every 24h, so a live clock would just be an impure render read).
+  const [now] = useState(() => Date.now());
 
   const navigateToMap = (coord: string) => {
     setMapInitCoord(coord);
@@ -60,7 +63,7 @@ export default function AdminDashboard() {
   const missionWarnCount = gameState ? Object.values(gameState.missions ?? {}).filter(m => {
     if (m.state === 'complete') return false;
     const filled = Object.keys(m.participants ?? {}).length;
-    const max = currentMaxSlots(m, Date.now());
+    const max = currentMaxSlots(m, now);
     if (m.state === 'forming') return filled > 0 && max > 0 && filled >= max;
     if (m.state === 'inprogress') {
       if (!m.link) return true;
