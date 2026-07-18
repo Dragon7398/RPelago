@@ -52,7 +52,7 @@ const GAME_BLURB: Record<CasinoGame, string> = {
     'play-on to build your best five out of all seven, or fold and walk away from your ante.',
   blackjack:
     'Push your luck. Draw from two cards up to six — every card is another game you commit to. ' +
-    'Keep at most five.',
+    'You may discard at most one before you lock; at six cards you must discard exactly one.',
 };
 
 // ── URL params ────────────────────────────────────────────────────────────────
@@ -342,6 +342,12 @@ export function CasinoTable() {
   const overPick = cfg ? committedCards.length > cfg.pickMax : false;
   const canCommit = committedCards.length > 0 && !overPick;
 
+  // Blackjack is push-your-luck: a seat may drop AT MOST one card (mandatory at
+  // the six-card cap), so its keep-floor is handLength−1. Every other game keeps
+  // a free ≤pickMax subset (floor 1). Keeping fewer than the floor is blocked, so
+  // you can't cherry-pick a six-card Blackjack hand down to the two you like.
+  const minKeep = game === 'blackjack' ? Math.max(1, hand.length - 1) : 1;
+
   // Fill empty seats up to baseMax
   const baseMax = mission?.baseMax ?? 6;
   const seatEntries: [string, GMParticipant | null][] =
@@ -621,29 +627,35 @@ export function CasinoTable() {
                 {hand.map(c => {
                   // FCD marks a card to be REPLACED; the others mark it to be DROPPED.
                   const rerolling = game === 'five_card_draw' && reject.has(c.uid);
-                  const dropped   = cfg.subsetSelect && !keep.has(c.uid);
+                  const kept      = keep.has(c.uid);
+                  const dropped   = cfg.subsetSelect && !kept;
+                  // A kept card can only be dropped while doing so stays at/above
+                  // the keep-floor (Blackjack: at most one discard); a dropped card
+                  // can always be picked back up.
+                  const canToggle = kept ? keep.size > minKeep : true;
                   const selectable = game === 'five_card_draw'
                     ? !rerolled
-                    : game !== 'blackjack' || stood;
+                    : (game !== 'blackjack' || stood) && canToggle;
                   return (
                     <div
                       key={c.uid}
                       className={`cz-card-slot${rerolling ? ' rejected' : ''}${dropped ? ' discarding' : ''}`}
                       onClick={() => {
-                        if (busy || !selectable) return;
-                        if (game === 'five_card_draw') setReject(r => toggle(r, c.uid));
-                        else setKeep(k => toggle(k, c.uid));
+                        if (busy) return;
+                        if (game === 'five_card_draw') { if (!rerolled) setReject(r => toggle(r, c.uid)); return; }
+                        if (!selectable) return;
+                        setKeep(k => toggle(k, c.uid));
                       }}
                     >
                       {game === 'five_card_draw'
                         ? <span className={`cz-mark ${rerolling ? 'reject' : 'keep'}`}>{rerolling ? '✕' : '✓'}</span>
                         : dropped && <span className="cz-mark reject">✕</span>}
                       <CardFace card={c} look="plate" width={HAND_W} />
-                      {selectable && (
+                      {(game === 'five_card_draw' || (game === 'blackjack' ? stood : true)) && (
                         <div className="cz-card-cap">
                           {game === 'five_card_draw'
                             ? (rerolling ? 'rerolling' : 'keeping')
-                            : (dropped ? 'dropped' : 'tap to drop')}
+                            : dropped ? 'dropped' : selectable ? 'tap to drop' : 'committed'}
                         </div>
                       )}
                     </div>

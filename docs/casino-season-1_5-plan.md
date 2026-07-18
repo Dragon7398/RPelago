@@ -563,9 +563,10 @@ structure, copy/tone, theming hooks, and interaction rules.
   to `goldTopUpLog`), and the per-seat settle ledger. `completeMission` stamps
   `potShare` + `net` onto the archived copy; `casinoSeatPaid` reads Entries off
   the audit log.
-- **Step 5** — config-driven shell, landing, table cards (with the odds trio),
-  the three-phase panel (Seated / Board / Ledger), **and the `CasinoTable`
-  mini-app rebuild (below).** Smaller remainder listed further down.
+- **Step 5** — DONE. Config-driven shell, landing, table cards (with the odds
+  trio), the three-phase panel (Seated / Board / Ledger), the `CasinoTable`
+  mini-app rebuild, and the landing polish (Lounge/Floor divergence, activity
+  feed, profile stats + Coat-gated name colors, sit flash).
 - **Step 6** — `src/lib/apYaml.ts` is written and verified against real S1 YAMLs.
   Nothing consumes it yet; the Manifest UI is unbuilt.
 - **Step 7** — `onMissionComplete` writes the casino-flavoured profile event
@@ -619,15 +620,29 @@ phase machine is now `deckselect → ante → play | (holdwait → holdplay) →
 > the shared XP floor is inert, so the Reward/XP row must not appear. Tables opened
 > before `casinoOpenStats` existed pass `open={null}` and simply show no drift.
 
-### Step 5 remainder (smaller, after the table)
+### ✅ Step 5 complete (landing polish)
 
-- **Lounge vs Floor** are still only a copy/density difference — the layouts are
-  meant to genuinely diverge.
-- **Activity feed icon** missing from the top bar (nav is ♠ ☺ ?; wants a feed
-  icon too — no unread badge, see the landing section).
-- **Profile modal** shows gold + net only; wants hands played, biggest win,
-  tables completed, name-colour swatches, external profile link.
-- **Sit flash** unbuilt.
+All four remaining landing items are built in `CasinoShell.tsx` / `landing.css`:
+
+- **Lounge vs Floor** now genuinely diverge, not just density: Lounge keeps the
+  felt-topped card grid (`TableCard`); Floor renders each table as a condensed
+  horizontal strip (`FloorRow` → `.rl-frow`), sightline-first.
+- **Activity feed** — a ☷ nav button opens `FeedModal`, rendering the per-season
+  `activityLog` newest-first with relative timestamps. **No unread badge** (by
+  design — casino players are less affected by each other's activity).
+- **Profile modal** — external profile link (`profiles.brisbe.org/p/<uid>`, name
+  tinted by `nameColor`), a 4-stat grid (gold, net this season, tables played,
+  biggest win — all computed client-side from `missionsHistory`, since the
+  profile-site counters live in a tree this shell can't read), and name-color
+  swatches. Swatches stay **gated on the Coat of Many Colors**; without it the
+  section shows Coat-earn progress (✓/· across the four game types, read from
+  `player.casinoGamesCompleted`).
+- **Sit flash** — a brief `.rl-sitflash` overlay confirms the seat as `sit()`
+  fires; the PhasePanel then carries the player through the round.
+
+> **Hands played == tables completed** in this model (one seat = one hand per
+> table), so the profile shows the count once as "Tables played" rather than as
+> two identical stats.
 
 ### Not started
 

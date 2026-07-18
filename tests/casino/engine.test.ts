@@ -299,6 +299,30 @@ describe('selectCommitted', () => {
     expect(selectCommitted(hand, [], 5)).toMatchObject({ ok: false });
     expect(selectCommitted(hand, hand.map(c => c.uid).slice(0, 6), 5)).toEqual({ ok: false, reason: 'Keep at most 5 cards.' });
   });
+
+  // Blackjack passes minKeep = handLength − 1: at most one discard. This is the
+  // push-your-luck rule — a six-card hand can drop exactly one, never more.
+  describe('minKeep (Blackjack: at most one discard)', () => {
+    const six  = hand.slice(0, 6);                 // a six-card Blackjack hand
+    const four = hand.slice(0, 4);
+    const keepN = (h: typeof hand, n: number) => h.slice(0, n).map(c => c.uid);
+
+    it('lets a six-card hand drop exactly one (keep five)', () => {
+      const r = selectCommitted(six, keepN(six, 5), 5, 5);
+      expect(r.ok && r.committed.length).toBe(5);
+    });
+    it('rejects dropping two from a six-card hand', () => {
+      expect(selectCommitted(six, keepN(six, 4), 5, 5)).toEqual({ ok: false, reason: 'You may discard at most one card.' });
+    });
+    it('lets a four-card hand discard zero or one, but not two', () => {
+      expect(selectCommitted(four, null, 5, 3).ok).toBe(true);          // keep all four
+      expect(selectCommitted(four, keepN(four, 3), 5, 3).ok).toBe(true); // drop one
+      expect(selectCommitted(four, keepN(four, 2), 5, 3)).toMatchObject({ ok: false });
+    });
+    it('defaults to a free ≤pickMax subset (minKeep 1) for the other games', () => {
+      expect(selectCommitted(hand, keepN(hand, 1), 5).ok).toBe(true);   // Stud: keep just one of seven
+    });
+  });
 });
 
 // ── Hold 'Em community draw ───────────────────────────────────────────────────

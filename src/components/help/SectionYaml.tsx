@@ -74,6 +74,7 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
             <li><YamlVal base={0} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''} per game</li>
             <li><YamlVal base={2} bonus={hasHelp ? 2 : 0} /> priority locations per game</li>
             <li><YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations per game</li>
+            <li>Progression balancing between <YamlVal base={0} bonus={0} /> and <YamlVal base={50} bonus={0} /></li>
             <li>
               Either <YamlVal base={0} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? '' : 's'} and{' '}
               <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''} per game, or{' '}

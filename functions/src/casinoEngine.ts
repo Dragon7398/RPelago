@@ -328,10 +328,13 @@ export function initialDealCount(game: CasinoGame): number {
 
 export type CommitResult = { ok: true; committed: DeckCard[] } | { ok: false; reason: string };
 
+// `minKeep` defaults to 1 (free subset); Blackjack passes handLength−1 so a seat
+// may drop AT MOST one card — the push-your-luck rule. Mirror of src/lib/casinoEngine.ts.
 export function selectCommitted(
   hand: readonly DeckCard[],
   keepUids: number[] | undefined | null,
   pickMax: number,
+  minKeep = 1,
 ): CommitResult {
   let committed = hand.slice();
   if (keepUids != null) {
@@ -339,7 +342,9 @@ export function selectCommitted(
     committed = hand.filter(c => keep.has(c.uid));
     if (committed.length !== keep.size) return { ok: false, reason: 'Selected a card not in your hand.' };
   }
-  if (committed.length === 0)      return { ok: false, reason: 'Keep at least one card.' };
+  if (committed.length < minKeep) {
+    return { ok: false, reason: minKeep > 1 ? 'You may discard at most one card.' : 'Keep at least one card.' };
+  }
   if (committed.length > pickMax)  return { ok: false, reason: `Keep at most ${pickMax} cards.` };
   return { ok: true, committed };
 }

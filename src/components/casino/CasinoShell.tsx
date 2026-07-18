@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'r
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useIsAdmin } from '../../contexts/SeasonContext';
+import { useToast } from '../../contexts/ToastContext';
 import SettingsPanel from '../SettingsPanel';
 import HelpModal from '../HelpModal';
 import LoginModal from '../LoginModal';
@@ -10,12 +11,24 @@ import PhasePanel from './PhasePanel';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
-import { CASINO_START_GOLD } from '../../lib/constants';
+import { CASINO_START_GOLD, NAME_COLORS } from '../../lib/constants';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
-import type { GMMission } from '../../types';
+import type { GMMission, ActivityEntry, Player } from '../../types';
 import '../../casino/themes.css';
 import './landing.css';
+
+// Short relative-time label for the activity feed ("just now", "4m", "2h", "3d").
+function fmtAgo(ts: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 45)    return 'just now';
+  if (s < 3600)  return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
+
+const nameColorValue = (id: string | undefined): string =>
+  NAME_COLORS.find(c => c.id === (id ?? 'default'))?.value ?? NAME_COLORS[0].value;
 
 // ── View persistence (Lounge cozy / Floor sleek) ─────────────────────────────
 const VIEW_KEY = 'rpelago.casino.view';
@@ -108,6 +121,44 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
   );
 }
 
+// ── Floor view: the same table as a condensed, scannable strip ────────────────
+// Genuinely different layout from the Lounge card (not just tighter): one
+// horizontal row per table, sightline-first — game, pot, seats, odds, action.
+function FloorRow({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, onSit }: TableCardProps) {
+  const game     = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
+  const cfg      = CASINO_GAMES[game];
+  const maxSeats = currentMaxSlots(m, now);
+  const seats    = Object.values(m.participants ?? {});
+  const filled   = seats.length;
+  const played   = seats.filter(p => p.played).length;
+  const full     = filled >= maxSeats;
+  const takeable  = !locked && !full && canAfford;
+
+  return (
+    <div className={`rl-frow${seatedHere ? ' seated-here' : ''}${locked && !seatedHere ? ' locked' : ''}`}>
+      <div className="rl-frow-id">
+        <span className="rl-frow-tag">{gameFamily(game)}</span>
+        <span className="rl-frow-name">{cfg.label}</span>
+        <span className="rl-frow-room">Cohort {toRoman(m.series)}</span>
+      </div>
+      <div className="rl-frow-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></div>
+      {m.casinoStats && <div className="rl-frow-odds"><OddsTrio stats={m.casinoStats} /></div>}
+      <div className="rl-frow-seats">
+        <span className="rl-mini-val">{filled}/{maxSeats}</span>
+        <span className="rl-mini-lbl">{played} played · {cfg.ante}g ante</span>
+      </div>
+      <div className="rl-frow-act">
+        {seatedHere
+          ? <span className="rl-badge seated">Your seat</span>
+          : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
+              title={locked ? lockLabel : !canAfford ? `Need ${buyIn}g to play this table through` : full ? 'Table full' : undefined}>
+              {locked ? lockLabel : !canAfford ? 'Not enough gold' : full ? 'Full' : 'Take a seat'}
+            </button>}
+      </div>
+    </div>
+  );
+}
+
 // ── Nav modals (compact, real data) ───────────────────────────────────────────
 function Modal({ title, tag, onClose, children }: { title: string; tag: string; onClose: () => void; children: ReactNode }) {
   return (
@@ -143,23 +194,78 @@ function GamesModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProfileModal({ name, gold, net, onSignOut, onClose }: {
-  name: string; gold: number; net: number; onSignOut: () => void; onClose: () => void;
+interface ProfileStats { gold: number; net: number; tablesPlayed: number; biggestWin: number; }
+
+function ProfStat({ label, value, tone }: { label: string; value: ReactNode; tone?: 'pos' | 'neg' }) {
+  return (
+    <div className="rl-prof-stat">
+      <div className="rl-mini-lbl">{label}</div>
+      <div className="rl-prof-statval" style={tone ? { color: `var(--${tone})` } : undefined}>{value}</div>
+    </div>
+  );
+}
+
+function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose }: {
+  name: string; uid: string; player: Player | undefined; stats: ProfileStats;
+  onSetColor: (colorId: string | null) => void; onSignOut: () => void; onClose: () => void;
 }) {
+  const { gold, net, tablesPlayed, biggestWin } = stats;
+  const hasCoat  = (player?.inventory?.['coat_of_many_colors'] ?? 0) > 0;
+  const done     = player?.casinoGamesCompleted ?? {};
+  const doneCount = CASINO_GAME_ORDER.filter(g => done[g]).length;
+
   return (
     <Modal title={name || 'Your Profile'} tag="At the Casino" onClose={onClose}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
-        <div className="rl-tcard-felt" style={{ borderRadius: 9, textAlign: 'center' }}>
-          <div className="rl-mini-lbl">Gold on hand</div>
-          <div className="rl-gold-amt">{gold}<small>g</small></div>
-        </div>
-        <div className="rl-tcard-felt" style={{ borderRadius: 9, textAlign: 'center' }}>
-          <div className="rl-mini-lbl">This season</div>
-          <div className="rl-gold-amt" style={{ color: net >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-            {net >= 0 ? '+' : '−'}{Math.abs(net)}<small>g</small>
-          </div>
-        </div>
+      <div className="rl-prof-namerow">
+        <span className="rl-prof-name" style={{ color: nameColorValue(player?.nameColor) }}>
+          {(name || 'Player').toUpperCase()}
+        </span>
+        <a className="rl-prof-ext" href={`https://profiles.brisbe.org/p/${uid}`}
+           target="_blank" rel="noopener noreferrer" title="View player profile">
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M10 1 L8.5 8.5 L11.5 8.5 Z" /><path d="M10 19 L11.5 11.5 L8.5 11.5 Z" />
+            <path d="M1 10 L8.5 8.5 L8.5 11.5 Z" /><path d="M19 10 L11.5 11.5 L11.5 8.5 Z" />
+            <circle cx="10" cy="10" r="2" />
+          </svg>
+        </a>
       </div>
+
+      <div className="rl-prof-grid">
+        <ProfStat label="Gold on hand" value={<>{gold}<small>g</small></>} />
+        <ProfStat label="This season" tone={net >= 0 ? 'pos' : 'neg'}
+              value={<>{net >= 0 ? '+' : '−'}{Math.abs(net)}<small>g</small></>} />
+        <ProfStat label="Tables played" value={tablesPlayed} />
+        <ProfStat label="Biggest win" tone={biggestWin > 0 ? 'pos' : undefined}
+              value={biggestWin > 0 ? <>+{biggestWin}<small>g</small></> : '—'} />
+      </div>
+
+      <div className="rl-prof-sec">
+        <div className="rl-prof-sec-head">Name Color</div>
+        {hasCoat ? (
+          <div className="rl-prof-swatches">
+            {NAME_COLORS.map(nc => (
+              <button key={nc.id} title={nc.label} style={{ backgroundColor: nc.value }}
+                className={`rl-prof-swatch${(player?.nameColor ?? 'default') === nc.id ? ' on' : ''}`}
+                onClick={() => onSetColor(nc.id === 'default' ? null : nc.id)} />
+            ))}
+          </div>
+        ) : (
+          <div className="rl-prof-coat">
+            <p className="rl-muted" style={{ margin: 0 }}>
+              Complete a table of all four games to earn the <b>Coat of Many Colors</b> and unlock name colors.
+            </p>
+            <div className="rl-prof-coatprog">
+              {CASINO_GAME_ORDER.map(g => (
+                <span key={g} className={`rl-prof-coatpip${done[g] ? ' on' : ''}`} title={CASINO_GAMES[g].label}>
+                  {done[g] ? '✓' : '·'}
+                </span>
+              ))}
+              <span className="rl-mini-lbl" style={{ marginLeft: '0.4rem' }}>{doneCount}/4</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       <button className="rl-btn rl-full" style={{ marginTop: '1.1rem' }} onClick={onSignOut}>
         Leave the Casino
       </button>
@@ -167,17 +273,38 @@ function ProfileModal({ name, gold, net, onSignOut, onClose }: {
   );
 }
 
+function FeedModal({ entries, now, onClose }: { entries: ActivityEntry[]; now: number; onClose: () => void }) {
+  const sorted = [...entries].sort((a, b) => b.timestamp - a.timestamp);
+  return (
+    <Modal title="The Floor Report" tag="Recent Happenings" onClose={onClose}>
+      {sorted.length === 0
+        ? <p className="rl-muted">Nothing has stirred at the tables yet.</p>
+        : <div className="rl-feed">
+            {sorted.map(e => (
+              <div key={e.id} className="rl-feed-row">
+                <span className="rl-feed-ico">{e.icon || '•'}</span>
+                <span className="rl-feed-msg">{e.message}</span>
+                <span className="rl-feed-time">{fmtAgo(e.timestamp, now)}</span>
+              </div>
+            ))}
+          </div>}
+    </Modal>
+  );
+}
+
 // ── The landing shell ─────────────────────────────────────────────────────────
 export default function CasinoShell() {
   const { user, signOut } = useAuth();
-  const { gameState, enlistInMission, standDownFromMission } = useGameState();
+  const { gameState, enlistInMission, standDownFromMission, setNameColor, activityLog } = useGameState();
+  const { addToast } = useToast();
   const isAdmin = useIsAdmin();
   const [view, setView] = useState<View>(loadView);
-  const [modal, setModal] = useState<null | 'profile' | 'games'>(null);
+  const [modal, setModal] = useState<null | 'profile' | 'games' | 'feed'>(null);
   const [helpOpen, setHelpOpen]       = useState(false);
   const [loginOpen, setLoginOpen]     = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(() => window.location.hash === '#privacy');
   const [now, setNow] = useState(() => Date.now());
+  const [sitFlash, setSitFlash] = useState<string | null>(null);
 
   // The casino token layer (casino/themes.css) is scoped to `.casino-scope` so it
   // never repaints the map's themes. Apply it — and the player's saved theme — for
@@ -204,6 +331,24 @@ export default function CasinoShell() {
   const net  = gold - CASINO_START_GOLD;
   const activeMission = me?.activeMission ?? null;
 
+  // Lifetime casino record, computed from settled tables (the profile-site
+  // counters live in a separate `profiles/` tree this shell can't read). A seat
+  // only reaches missionsHistory with `played` set if it saw the hand through —
+  // folds are removed at fold — so this matches `handsPlayed`'s predicate.
+  const profileStats = useMemo<ProfileStats>(() => {
+    const uid = user?.id;
+    let tablesPlayed = 0, biggestWin = 0;
+    if (uid) {
+      for (const m of Object.values(gameState?.missionsHistory ?? {})) {
+        const seat = m.type === 'casino' ? m.participants?.[uid] : undefined;
+        if (!seat?.played) continue;
+        tablesPlayed++;
+        biggestWin = Math.max(biggestWin, seat.net ?? 0);
+      }
+    }
+    return { gold, net, tablesPlayed, biggestWin };
+  }, [gameState?.missionsHistory, user?.id, gold, net]);
+
   const tables = useMemo(() => {
     const all = Object.values(gameState?.missions ?? {});
     return all
@@ -220,7 +365,16 @@ export default function CasinoShell() {
   const lockLabel = 'Seated elsewhere';
 
   const sit = (m: GMMission) => {
-    void enlistInMission(m.id, `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`);
+    const label = `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`;
+    setSitFlash(label);
+    window.setTimeout(() => setSitFlash(null), 2200);
+    void enlistInMission(m.id, label);
+  };
+
+  const chooseNameColor = (colorId: string | null) => {
+    if (!user) return;
+    void setNameColor(user.id, colorId).catch(() =>
+      addToast('Failed to update name color. Please try again.', 'error'));
   };
 
   const isFloor = view === 'floor';
@@ -262,6 +416,7 @@ export default function CasinoShell() {
               casino-specific modal — see SettingsPanel at the foot of the page. */}
           <div className="rl-nav">
             <button className="rl-navbtn" title="The Games" onClick={() => setModal('games')}>♠</button>
+            <button className="rl-navbtn" title="The Floor Report" onClick={() => setModal('feed')}>☷</button>
             {user && <button className="rl-navbtn" title="Profile" onClick={() => setModal('profile')}>☺</button>}
             <button className="rl-navbtn" title="Adventurer's Guide" onClick={() => setHelpOpen(true)}>?</button>
           </div>
@@ -281,18 +436,31 @@ export default function CasinoShell() {
         </div>
         {tables.length === 0
           ? <p className="rl-muted">No tables are open right now — check back soon.</p>
-          : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
-              {tables.map(m => {
-                const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
-                return (
-                  <TableCard key={m.id} m={m} now={now}
-                    seatedHere={activeMission === m.id}
-                    locked={locked} lockLabel={lockLabel}
-                    buyIn={buyIn} canAfford={gold >= buyIn}
-                    onSit={sit} />
-                );
-              })}
-            </div>}
+          : isFloor
+            ? <div className="rl-floor">
+                {tables.map(m => {
+                  const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                  return (
+                    <FloorRow key={m.id} m={m} now={now}
+                      seatedHere={activeMission === m.id}
+                      locked={locked} lockLabel={lockLabel}
+                      buyIn={buyIn} canAfford={gold >= buyIn}
+                      onSit={sit} />
+                  );
+                })}
+              </div>
+            : <div className="rl-grid">
+                {tables.map(m => {
+                  const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                  return (
+                    <TableCard key={m.id} m={m} now={now}
+                      seatedHere={activeMission === m.id}
+                      locked={locked} lockLabel={lockLabel}
+                      buyIn={buyIn} canAfford={gold >= buyIn}
+                      onSit={sit} />
+                  );
+                })}
+              </div>}
       </div>
 
       {/* Shared site settings (theme + font size + reduced motion). The font
@@ -316,14 +484,30 @@ export default function CasinoShell() {
       />
       <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
 
-      {modal === 'games'   && <GamesModal   onClose={() => setModal(null)} />}
-      {modal === 'profile' && (
+      {modal === 'games' && <GamesModal onClose={() => setModal(null)} />}
+      {modal === 'feed'  && <FeedModal entries={activityLog} now={now} onClose={() => setModal(null)} />}
+      {modal === 'profile' && user && (
         <ProfileModal
-          name={me?.displayName ?? user?.displayName ?? ''}
-          gold={gold} net={net}
+          name={me?.displayName ?? user.displayName ?? ''}
+          uid={user.id}
+          player={me}
+          stats={profileStats}
+          onSetColor={chooseNameColor}
           onSignOut={() => { setModal(null); void signOut(); }}
           onClose={() => setModal(null)}
         />
+      )}
+
+      {/* Sit flash — a brief confirmation as the seat is taken; the PhasePanel
+          then carries the player through the round. */}
+      {sitFlash && (
+        <div className="rl-sitflash" onClick={() => setSitFlash(null)}>
+          <div className="rl-sitflash-card">
+            <div className="rl-sitflash-chip">♠</div>
+            <div className="rl-sitflash-kick">Seat taken</div>
+            <div className="rl-sitflash-name">{sitFlash}</div>
+          </div>
+        </div>
       )}
     </div>
   );

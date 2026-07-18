@@ -1550,8 +1550,12 @@ export const lockCasinoResult = onCall(async (request) => {
   if (rawHand.length === 0) throw new HttpsError('failed-precondition', 'No hand to lock.');
 
   // Validate the committed selection against the game's pickMax (≤5 everywhere).
+  // Blackjack is push-your-luck: every drawn card is a committed game, and a seat
+  // may discard AT MOST one (mandatory at the six-card cap). So its floor is
+  // handLength−1 — you cannot cherry-pick a big hand down to a couple of cards.
   const pickMax = mission.casinoGame ? CASINO_GAMES[mission.casinoGame].pickMax : 5;
-  const sel = selectCommitted(rawHand, keepUids, pickMax);
+  const minKeep = mission.casinoGame === 'blackjack' ? Math.max(1, rawHand.length - 1) : 1;
+  const sel = selectCommitted(rawHand, keepUids, pickMax, minKeep);
   if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
   const hand = sel.committed;
 
