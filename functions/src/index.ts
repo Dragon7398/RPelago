@@ -671,6 +671,7 @@ interface GMParticipant {
   startBy?:     number;                    // deadline to start a casino round (epoch ms)
   played?:      boolean;                   // true once the seat is locked (immutable)
   goldSwing?:   number;                    // sum of committed card values
+  lockedCards?: DeckCard[];               // the committed cards, made public at lock for the landing
   casinoXp?:   number;                    // XP this seat contributed via gambits
   gambitPlayed?: boolean;                  // true once the gambit phase is resolved for this seat
   gameType?:    'poker' | 'blackjack';     // which game was chosen (for session recovery)
@@ -1571,6 +1572,10 @@ export const lockCasinoResult = onCall(async (request) => {
     [sp(seasonId, `missions/${missionId}/participants/${uid}/played`)]:    true,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]: goldSwing,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]:     slots,
+    // The committed cards, made PUBLIC so the landing can render them. They map
+    // 1:1 to the slots above (same genre + value), so this exposes nothing the
+    // slots don't already; the secret hand/deck below are still cleared.
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)]: hand,
     // Clear the secret hand/deck now that the seat is locked.
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]:  null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:  null,

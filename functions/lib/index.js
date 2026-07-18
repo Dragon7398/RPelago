@@ -1271,6 +1271,10 @@ exports.lockCasinoResult = (0, https_1.onCall)(async (request) => {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/played`)]: true,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]: goldSwing,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/slots`)]: slots,
+        // The committed cards, made PUBLIC so the landing can render them. They map
+        // 1:1 to the slots above (same genre + value), so this exposes nothing the
+        // slots don't already; the secret hand/deck below are still cleared.
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)]: hand,
         // Clear the secret hand/deck now that the seat is locked.
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,

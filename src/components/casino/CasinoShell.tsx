@@ -12,7 +12,7 @@ import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS } from '../../lib/constants';
-import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
+import { currentMaxSlots, msToNextDecay, missionDisplayLabel } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player } from '../../types';
 import '../../casino/themes.css';
@@ -40,6 +40,47 @@ function loadView(): View {
 
 const gameFamily = (g: CasinoGame): string => (g === 'blackjack' ? 'Blackjack' : 'Poker');
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
+
+// Compact "1d 4h" / "5h" / "40m" for a forward duration.
+function fmtDur(ms: number): string {
+  const m = Math.max(0, Math.round(ms / 60000));
+  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), min = m % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${min}m`;
+  return `${min}m`;
+}
+
+// Seat pips: ALL baseMax seats are drawn, so decay is visible — seats past the
+// (decayed) max show as closed, and the last still-open seat pulses when a decay
+// step is pending. Mirrors the map's mission pips.
+function SeatPips({ m, now }: { m: GMMission; now: number }) {
+  const baseMax  = m.baseMax;
+  const maxSeats = currentMaxSlots(m, now);
+  const seats    = Object.values(m.participants ?? {});
+  const filled   = seats.length;
+  const played   = seats.filter(p => p.played).length;
+  const decaying = msToNextDecay(m, now) != null;
+
+  const pips: ReactNode[] = [];
+  for (let i = 0; i < baseMax; i++) {
+    if (i >= maxSeats) { pips.push(<span key={i} className="rl-pip closed" />); continue; }
+    const last = i === maxSeats - 1;
+    const cls  = i < played ? 'rl-pip'
+      : i < filled ? 'rl-pip unplayed'
+      : `rl-pip empty${decaying && last ? ' decaying' : ''}`;
+    pips.push(<span key={i} className={cls} style={{ '--ph': seatHue(i) } as React.CSSProperties} />);
+  }
+  return <div className="rl-pips">{pips}</div>;
+}
+
+// One-line decay status: how long until the next seat closes, or how many have.
+function DecayNote({ m, now }: { m: GMMission; now: number }) {
+  const next   = msToNextDecay(m, now);
+  const closed = m.baseMax - currentMaxSlots(m, now);
+  if (next != null) return <span className="rl-decay">Next seat closes in {fmtDur(next)}</span>;
+  if (closed > 0)   return <span className="rl-decay closed">{closed} seat{closed === 1 ? '' : 's'} closed to decay</span>;
+  return null;
+}
 
 // ── Table card ────────────────────────────────────────────────────────────────
 /**
@@ -73,13 +114,6 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
   const full    = filled >= maxSeats;
   const ante    = cfg.ante;
 
-  const pips: ReactNode[] = [];
-  for (let i = 0; i < maxSeats; i++) {
-    if (i < played)      pips.push(<span key={i} className="rl-pip"          style={{ '--ph': seatHue(i) } as React.CSSProperties} />);
-    else if (i < filled) pips.push(<span key={i} className="rl-pip unplayed" style={{ '--ph': seatHue(i) } as React.CSSProperties} />);
-    else                 pips.push(<span key={i} className="rl-pip empty" />);
-  }
-
   const takeable = !locked && !full && canAfford;
 
   return (
@@ -93,8 +127,9 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
         <div className="rl-tcard-room">Cohort {toRoman(m.series)}</div>
       </div>
       <div className="rl-tcard-body">
-        <div className="rl-pips">{pips}</div>
-        {m.casinoStats && <OddsTrio stats={m.casinoStats} />}
+        <SeatPips m={m} now={now} />
+        <DecayNote m={m} now={now} />
+        {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
         <div className="rl-tcard-stats">
           <div className="rl-mini"><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{filled}/{maxSeats}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Played</span><span className="rl-mini-val">{played}</span></div>
@@ -116,44 +151,6 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
                 {locked ? lockLabel : !canAfford ? 'Not enough gold' : 'Take a seat'}
               </button>}
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Floor view: the same table as a condensed, scannable strip ────────────────
-// Genuinely different layout from the Lounge card (not just tighter): one
-// horizontal row per table, sightline-first — game, pot, seats, odds, action.
-function FloorRow({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, onSit }: TableCardProps) {
-  const game     = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
-  const cfg      = CASINO_GAMES[game];
-  const maxSeats = currentMaxSlots(m, now);
-  const seats    = Object.values(m.participants ?? {});
-  const filled   = seats.length;
-  const played   = seats.filter(p => p.played).length;
-  const full     = filled >= maxSeats;
-  const takeable  = !locked && !full && canAfford;
-
-  return (
-    <div className={`rl-frow${seatedHere ? ' seated-here' : ''}${locked && !seatedHere ? ' locked' : ''}`}>
-      <div className="rl-frow-id">
-        <span className="rl-frow-tag">{gameFamily(game)}</span>
-        <span className="rl-frow-name">{cfg.label}</span>
-        <span className="rl-frow-room">Cohort {toRoman(m.series)}</span>
-      </div>
-      <div className="rl-frow-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></div>
-      {m.casinoStats && <div className="rl-frow-odds"><OddsTrio stats={m.casinoStats} /></div>}
-      <div className="rl-frow-seats">
-        <span className="rl-mini-val">{filled}/{maxSeats}</span>
-        <span className="rl-mini-lbl">{played} played · {cfg.ante}g ante</span>
-      </div>
-      <div className="rl-frow-act">
-        {seatedHere
-          ? <span className="rl-badge seated">Your seat</span>
-          : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
-              title={locked ? lockLabel : !canAfford ? `Need ${buyIn}g to play this table through` : full ? 'Table full' : undefined}>
-              {locked ? lockLabel : !canAfford ? 'Not enough gold' : full ? 'Full' : 'Take a seat'}
-            </button>}
       </div>
     </div>
   );
@@ -425,7 +422,7 @@ export default function CasinoShell() {
 
       {/* One panel, phase owned by the backend: mission state IS the phase. */}
       <PhasePanel
-        mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now}
+        mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now} view={view}
         onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
       />
 
@@ -436,31 +433,18 @@ export default function CasinoShell() {
         </div>
         {tables.length === 0
           ? <p className="rl-muted">No tables are open right now — check back soon.</p>
-          : isFloor
-            ? <div className="rl-floor">
-                {tables.map(m => {
-                  const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
-                  return (
-                    <FloorRow key={m.id} m={m} now={now}
-                      seatedHere={activeMission === m.id}
-                      locked={locked} lockLabel={lockLabel}
-                      buyIn={buyIn} canAfford={gold >= buyIn}
-                      onSit={sit} />
-                  );
-                })}
-              </div>
-            : <div className="rl-grid">
-                {tables.map(m => {
-                  const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
-                  return (
-                    <TableCard key={m.id} m={m} now={now}
-                      seatedHere={activeMission === m.id}
-                      locked={locked} lockLabel={lockLabel}
-                      buyIn={buyIn} canAfford={gold >= buyIn}
-                      onSit={sit} />
-                  );
-                })}
-              </div>}
+          : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
+              {tables.map(m => {
+                const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                return (
+                  <TableCard key={m.id} m={m} now={now}
+                    seatedHere={activeMission === m.id}
+                    locked={locked} lockLabel={lockLabel}
+                    buyIn={buyIn} canAfford={gold >= buyIn}
+                    onSit={sit} />
+                );
+              })}
+            </div>}
       </div>
 
       {/* Shared site settings (theme + font size + reduced motion). The font

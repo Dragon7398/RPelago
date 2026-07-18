@@ -1,9 +1,20 @@
 import { useState, type ReactNode } from 'react';
 import type { AdvSlot, GMMission, GMParticipant, SlotStatus } from '../../types';
-import type { CasinoGame } from '../../lib/casinoData';
+import type { CasinoGame, DeckCard } from '../../lib/casinoData';
+import { CASINO_GAMES } from '../../lib/casinoData';
 import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
+import { CardFace } from '../../casino/CardFace';
+import '../../casino/cards.css';
+
+type View = 'lounge' | 'floor';
+
+const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
+const initial = (name: string): string => (name.trim()[0] ?? '?').toUpperCase();
+// Blackjack is the lone "Casino"-family game; the rest are poker variants whose
+// committed cards are a deliberate take, hence the different stake wording.
+const stakeLabel = (g: CasinoGame): string => (g === 'blackjack' ? "You're playing for" : 'Your committed take');
 
 // The single panel above the table list. Its phase is backend-owned — mission
 // state IS the phase (forming → Seated, inprogress → Board, complete → Ledger) —
@@ -89,61 +100,162 @@ function seatStanding(m: GMMission, seat: GMParticipant): { badge: string; take:
   return { badge: 'Hand in progress', take: null, note: 'Head back to the table to finish your hand.' };
 }
 
-function Roster({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
+// Deploy-progress bar: seats filled (soft) over seats played (bright); turns
+// green once the table is ready to deal in. Mirrors the design's DeployBar.
+function DeployBar({ m, max }: { m: GMMission; max: number }) {
+  const seats  = Object.values(m.participants ?? {});
+  const filled = seats.length;
+  const played = seats.filter(s => s.played).length;
+  const ready  = filled > 0 && filled >= max && played === filled;
+  const pct    = (n: number) => (max ? Math.min(100, (n / max) * 100) : 0);
+  return (
+    <div className={`rl-deploy${ready ? ' ready' : ''}`}>
+      <div className="rl-deploy-head">
+        <span>Deploy progress</span>
+        <span><b>{filled}</b>/{max} seated · <b>{played}</b> played</span>
+      </div>
+      <div className="rl-deploy-track">
+        <div className="rl-deploy-filled" style={{ width: `${pct(filled)}%` }} />
+        <div className="rl-deploy-played" style={{ width: `${pct(played)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// The player's OWN committed cards, persisted publicly at lock (see lockCasinoResult).
+function LockedHand({ cards, width }: { cards: DeckCard[] | undefined; width: number }) {
+  if (!cards?.length) return null;
+  return <div className="rl-hand">{cards.map((c, i) => <CardFace key={i} card={c} look="plate" width={width} />)}</div>;
+}
+
+function Stake({ amount, label }: { amount: number; label: string }) {
+  return (
+    <div className="rl-stakewrap">
+      <span className="rl-stake-lbl">{label}</span>
+      <span className="rl-stake"><span className="n">{amount}</span><span className="u">g on the table</span></span>
+    </div>
+  );
+}
+
+// Roster as avatar chips (Lounge) — name + "Ng locked" / "seated · to play".
+function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
   const seats = Object.values(m.participants ?? {});
   return (
     <div className="rl-roster">
-      {seats.map(s => (
-        <div key={s.playerId} className={`rl-roster-row${s.playerId === uid ? ' you' : ''}`}>
-          <span className="rl-roster-name">{s.playerName}{s.playerId === uid && <span className="rl-you">you</span>}</span>
-          <span className={`rl-badge ${s.played ? 'seated' : 'open'}`}>{s.played ? 'Played' : 'Playing'}</span>
+      {seats.map((s, i) => (
+        <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
+          <span className="rl-seat-av" style={{ '--ph': seatHue(i) } as React.CSSProperties}>{initial(s.playerName)}</span>
+          <div className="rl-seat-txt">
+            <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g locked` : 'seated · to play'}</span>
+          </div>
         </div>
       ))}
       {Array.from({ length: Math.max(0, max - seats.length) }, (_, i) => (
-        <div key={`e${i}`} className="rl-roster-row empty"><span className="rl-roster-name">Empty seat</span></div>
+        <div key={`e${i}`} className="rl-seat empty">
+          <span className="rl-seat-av">·</span>
+          <div className="rl-seat-txt"><span className="rl-seat-nm">Open seat</span><span className="rl-seat-st open">waiting</span></div>
+        </div>
       ))}
     </div>
   );
 }
 
-function SeatedView({ m, uid, now, seasonId, onLeave }: { m: GMMission; uid: string; now: number; seasonId: string; onLeave: () => void }) {
-  const seat  = m.participants?.[uid];
-  const max   = currentMaxSlots(m, now);
+// Roster as a compact seat grid (Floor/rail) — one small cell per seat.
+function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
   const seats = Object.values(m.participants ?? {});
-  const href  = tableHref(m, seasonId);
+  return (
+    <div className="rl-seatgrid">
+      {Array.from({ length: max }, (_, i) => {
+        const s = seats[i];
+        if (!s) return (
+          <div className="rl-railseat empty" key={i}>
+            <span className="rl-seat-av">·</span><span className="rl-seat-st open">open</span>
+          </div>
+        );
+        return (
+          <div className={`rl-railseat${s.playerId === uid ? ' you' : ''}`} key={i}>
+            <span className="rl-seat-av" style={{ '--ph': seatHue(i) } as React.CSSProperties}>{initial(s.playerName)}</span>
+            <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g` : 'to play'}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
+  m: GMMission; uid: string; now: number; seasonId: string; view: View; onLeave: () => void;
+}) {
+  const seat = m.participants?.[uid];
+  const max  = currentMaxSlots(m, now);
+  const href = tableHref(m, seasonId);
   if (!seat) return null;
 
+  const game     = tableGame(m);
   const standing = seatStanding(m, seat);
-  const paid = casinoSeatPaid(m, uid);
+  const seats    = Object.values(m.participants ?? {});
+  const ready    = seats.length > 0 && seats.length >= max && seats.every(s => s.played);
 
+  const head = (
+    <div>
+      <div className="rl-ct-kick">You're seated at</div>
+      <div className="rl-ct-name">{missionDisplayLabel(m)}</div>
+      <div className="rl-ct-room">{CASINO_GAMES[game].label} · {standing.badge}</div>
+    </div>
+  );
+
+  const hand = seat.played && seat.lockedCards?.length
+    ? <LockedHand cards={seat.lockedCards} width={view === 'lounge' ? 84 : 54} />
+    : <div className="rl-hand-empty">{standing.note}</div>;
+
+  const actions = (
+    <>
+      {href && (
+        <a className="rl-btn primary" href={href} target="_blank" rel="noopener noreferrer">
+          {seat.played ? 'Review your hand →' : 'Return to the table →'}
+        </a>
+      )}
+      <button className="rl-btn" onClick={onLeave}>Leave your seat</button>
+    </>
+  );
+
+  if (view === 'lounge') {
+    return (
+      <div className="rl-ct lounge">
+        {head}
+        {hand}
+        {seat.played && <Stake amount={seat.goldSwing ?? 0} label={stakeLabel(game)} />}
+        {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
+        <DeployBar m={m} max={max} />
+        <RosterChips m={m} uid={uid} max={max} />
+        <div className="rl-ct-acts">{actions}</div>
+      </div>
+    );
+  }
+
+  // rail (Floor)
   return (
-    <Panel kick="Your seat" name={missionDisplayLabel(m)} sub={standing.note}>
-      <div className="rl-phase-stats">
-        <Stat label="Standing" value={standing.badge} />
-        <Stat label="Your take" value={standing.take === null ? '—' : gold(standing.take)} tone="gold" />
-        <Stat label="On the table" value={gold(m.pot ?? 0)} tone="gold" />
-        <Stat label="You've paid" value={gold(paid)} />
-        <Stat label="Seats" value={`${seats.length}/${max}`} />
-        <Stat label="Played" value={seats.filter(s => s.played).length} />
+    <div className="rl-ct rail">
+      <div className="rl-spread">
+        {head}
+        <span className={`rl-badge ${ready ? 'ready' : 'seated'}`}>{ready ? 'Ready to deploy' : 'Your seat'}</span>
       </div>
-
-      {m.casinoStats && <OddsTrio stats={m.casinoStats} />}
-
-      <Roster m={m} uid={uid} max={max} />
-
-      <div className="rl-phase-acts">
-        {href && (
-          <a className="rl-btn primary" href={href} target="_blank" rel="noopener noreferrer">
-            {seat.played ? 'Review your hand →' : 'Return to the table →'}
-          </a>
-        )}
-        <button className="rl-btn" onClick={onLeave}>Leave the table</button>
+      <SeatGrid m={m} uid={uid} max={max} />
+      <div className="rl-ct-cols">
+        <div>
+          <div className="rl-ct-cell-lbl">{seat.played ? 'Your hand' : 'Your seat'}</div>
+          {hand}
+          {seat.played && <Stake amount={seat.goldSwing ?? 0} label={stakeLabel(game)} />}
+        </div>
+        <div className="rl-ct-col">
+          {m.casinoStats && <div><div className="rl-ct-cell-lbl">Odds rolled</div><OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} /></div>}
+          <DeployBar m={m} max={max} />
+        </div>
       </div>
-      <p className="rl-muted rl-fine">
-        The table deals in once every seat is filled and played. Seats decay one per 36h, so a
-        quiet table still runs.
-      </p>
-    </Panel>
+      <div className="rl-ct-acts">{actions}</div>
+    </div>
   );
 }
 
@@ -265,10 +377,12 @@ interface Props {
   settled: GMMission | null;
   uid: string | null;
   now: number;
+  /** Landing view — only the Seated panel diverges (lounge = cozy, floor = rail). */
+  view: View;
   onLeave: (m: GMMission) => void;
 }
 
-export default function PhasePanel({ mission, settled, uid, now, onLeave }: Props) {
+export default function PhasePanel({ mission, settled, uid, now, view, onLeave }: Props) {
   const seasonId = useSeason().season?.id ?? '';
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -282,7 +396,7 @@ export default function PhasePanel({ mission, settled, uid, now, onLeave }: Prop
       <>
         {mission.state === 'inprogress'
           ? <BoardView m={mission} uid={uid} now={now} seasonId={seasonId} />
-          : <SeatedView m={mission} uid={uid} now={now} seasonId={seasonId} onLeave={() => setConfirmLeave(true)} />}
+          : <SeatedView m={mission} uid={uid} now={now} seasonId={seasonId} view={view} onLeave={() => setConfirmLeave(true)} />}
         {confirmLeave && (
           <div className="rl-overlay" onClick={() => setConfirmLeave(false)}>
             <div className="rl-modal" onClick={e => e.stopPropagation()}>

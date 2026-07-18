@@ -35,6 +35,16 @@ export function currentMaxSlots(m: GMMission, now: number): number {
   return Math.max(1, m.baseMax - steps);
 }
 
+// Time until the next seat closes (decay lowers max-slots by one), or null when
+// decay hasn't started (no first join yet) or the floor of 1 seat is reached.
+// Keeps the decay-window constant in one place for any UI that shows a countdown.
+export function msToNextDecay(m: GMMission, now: number): number | null {
+  if (m.firstJoinAt == null || m.state !== 'forming') return null;
+  if (currentMaxSlots(m, now) <= 1) return null;
+  const w = decayWindowMs(m);
+  return w - (Math.max(0, now - m.firstJoinAt) % w);
+}
+
 export function filledCount(m: GMMission): number {
   return Object.keys(m.participants ?? {}).length;
 }

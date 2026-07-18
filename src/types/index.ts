@@ -296,6 +296,9 @@ export interface GMParticipant {
   startBy?:     number;              // epoch ms — must start a casino round by this time or be stood down
   played?:      boolean;             // true once the player has locked their casino hand (immutable)
   goldSwing?:   number;              // sum of committed card values; paid out at mission complete
+  lockedCards?: DeckCard[];          // the cards this seat COMMITTED, written from the secret hand at
+                                     // lock so the landing can show them (they map 1:1 to the public
+                                     // slots, so nothing secret is exposed). Only set once played.
   casinoXp?:    number;              // XP earned from gambits; merged into mission.xp at deploy
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
   gameType?:    'poker' | 'blackjack'; // legacy single-sitting selector; Hold 'Em uses mission.casinoGame

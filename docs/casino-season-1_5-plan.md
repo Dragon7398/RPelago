@@ -624,9 +624,18 @@ phase machine is now `deckselect → ante → play | (holdwait → holdplay) →
 
 All four remaining landing items are built in `CasinoShell.tsx` / `landing.css`:
 
-- **Lounge vs Floor** now genuinely diverge, not just density: Lounge keeps the
-  felt-topped card grid (`TableCard`); Floor renders each table as a condensed
-  horizontal strip (`FloorRow` → `.rl-frow`), sightline-first.
+- **Lounge vs Floor** diverge per the design (`landing/layouts.jsx`): the table
+  cards are **identical** in both — Floor just runs a tighter grid
+  (`.rl-grid-tight`). The real divergence is the **seated current-table panel**
+  (`PhasePanel` `SeatedView`, driven by a `view` prop): Lounge (`.rl-ct.lounge`)
+  is cozy/centered/large; Floor (`.rl-ct.rail`) is a sleek panel with a compact
+  seat grid. Board and Ledger phases are view-agnostic, matching the design.
+  Both variants use the design's `DeployBar` and seat-chip roster, and render the
+  player's **committed card faces** — persisted publicly as `participant.lockedCards`
+  at lock (`lockCasinoResult`), since the secret hand is cleared then. The cards
+  map 1:1 to the public slots, so nothing secret is exposed.
+  (An earlier build had this backwards — cards as horizontal `FloorRow` strips
+  and a single seated panel; that was scrapped for the design's model.)
 - **Activity feed** — a ☷ nav button opens `FeedModal`, rendering the per-season
   `activityLog` newest-first with relative timestamps. **No unread badge** (by
   design — casino players are less affected by each other's activity).

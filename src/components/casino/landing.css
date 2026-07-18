@@ -96,6 +96,10 @@
 .rl-odd-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-odd-val { font-family:'Cinzel',serif; font-weight: 800; font-size: 1rem; color: oklch(var(--stat-l, 82%) 0.12 var(--oh, 200)); }
 .rl-odd-val small { font-size: 0.55em; color: var(--gold-dim); font-weight: 600; }
+/* Gambit-driven drift from the table's opening roll (+N / −N). */
+.rl-odd-diff { font-size: 0.6em; font-weight: 700; margin-left: 0.28rem; letter-spacing: 0.02em; }
+.rl-odd-diff.up { color: var(--pos); }
+.rl-odd-diff.down { color: var(--neg); }
 
 /* seat pips */
 .rl-pips { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
@@ -108,38 +112,18 @@
 .rl-pip.you { box-shadow: 0 0 0 2px var(--gold), 0 0 10px oklch(from var(--gold) l c h / 0.4); }
 .rl-pip.unplayed { opacity: 0.55; }
 .rl-pip.empty { background: none; border: 1.5px dashed var(--line-glow); color: transparent; }
+/* A seat lost to decay (past the current max), and the next one about to go. */
+.rl-pip.closed { background: none; border: 1.5px dashed var(--line); opacity: 0.35; }
+.rl-pip.empty.decaying { border-color: oklch(from var(--neg) l c h / 0.7); animation: rlDecayPulse 1.6s ease-in-out infinite; }
+@keyframes rlDecayPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; box-shadow: 0 0 8px oklch(from var(--neg) l c h / 0.4); } }
 
-/* ══ Table card grid (Lounge) ══ */
+/* Decay countdown line under the pips. */
+.rl-decay { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; color: oklch(from var(--neg) l c h / 0.85); }
+.rl-decay.closed { color: var(--gold-dim); }
+
+/* ══ Table card grid — identical cards in both views; Floor just runs tighter ══ */
 .rl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.1rem; }
-
-/* ══ Floor view — condensed horizontal strips, one table per row ══ */
-.rl-floor { display: flex; flex-direction: column; gap: 0.55rem; }
-.rl-frow {
-  display: grid; align-items: center; gap: 0.9rem 1.2rem;
-  grid-template-columns: minmax(11rem, 1.4fr) auto 1fr auto minmax(8rem, auto);
-  padding: 0.7rem 1.1rem; border-radius: 10px;
-  border: 1px solid var(--line); background: linear-gradient(120deg, oklch(from var(--felt) calc(l + 0.02) c h / 0.35), oklch(from var(--bg-card) l c h / 0.6));
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.rl-frow:hover { border-color: var(--line-glow); box-shadow: 0 6px 18px #0006; }
-.rl-frow.seated-here { border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
-.rl-frow.locked { opacity: 0.6; }
-.rl-frow-id { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-.rl-frow-tag { font-family:'Cinzel',serif; font-size: 0.46rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
-.rl-frow-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.98rem; color: var(--gold); }
-.rl-frow-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.78rem; }
-.rl-frow-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; }
-.rl-frow-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.1rem; }
-.rl-frow-pot .u { font-size: 0.56rem; color: var(--gold-dim); }
-.rl-frow-odds { min-width: 0; }
-.rl-frow-seats { display: flex; flex-direction: column; line-height: 1.15; text-align: right; white-space: nowrap; }
-.rl-frow-act { justify-self: end; }
-@media (max-width: 720px) {
-  .rl-frow { grid-template-columns: 1fr auto; grid-auto-rows: auto; row-gap: 0.5rem; }
-  .rl-frow-odds, .rl-frow-seats { grid-column: 1 / -1; text-align: left; }
-  .rl-frow-seats { flex-direction: row; gap: 0.6rem; align-items: baseline; }
-  .rl-frow-act { grid-column: 2; grid-row: 1; }
-}
+.rl-grid.rl-grid-tight { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 0.9rem; }
 .rl-tcard {
   position: relative; text-align: left;
   border-radius: 12px; border: 1px solid var(--line); overflow: hidden;
@@ -161,7 +145,10 @@
 .rl-tcard-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.86rem; margin-top: 0.1rem; }
 .rl-tcard-body { padding: 0.9rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; flex: 1; }
 .rl-tcard-stats { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
-.rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-top: auto; }
+.rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 0.7rem; margin-top: auto; flex-wrap: wrap; }
+/* Long lock labels ("Seated elsewhere") must break rather than overrun the card
+   (which clips via overflow:hidden) at larger font sizes. */
+.rl-tcard-foot .rl-btn { white-space: normal; text-align: center; min-width: 0; }
 
 .rl-mini { display: flex; flex-direction: column; line-height: 1.1; }
 .rl-mini-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
@@ -203,21 +190,87 @@
 .rl-phase-acts { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
 .rl-phase-acts .rl-btn { text-decoration: none; display: inline-flex; align-items: center; }
 
-/* Roster (Seated) */
-.rl-roster { display: flex; flex-direction: column; gap: 0.3rem; }
-.rl-roster-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
-  padding: 0.4rem 0.7rem; border-radius: 8px;
-  border: 1px solid var(--line); background: oklch(from var(--bg-card) l c h / 0.4);
+/* Roster — avatar chips (Lounge) and shared name/you/crown bits (Board/Ledger) */
+.rl-roster { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.rl-seat {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.4rem 0.7rem 0.4rem 0.45rem;
 }
-.rl-roster-row.you { border-color: oklch(from var(--gold) l c h / 0.5); background: oklch(from var(--gold) l c h / 0.08); }
-.rl-roster-row.empty { border-style: dashed; opacity: 0.5; }
+.rl-seat.you { border-color: var(--line-glow); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+.rl-seat.empty { border-style: dashed; opacity: 0.6; }
+.rl-seat-av {
+  width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  font-family:'Cinzel',serif; font-weight: 700; font-size: 0.72rem; color: oklch(18% 0.03 70);
+  background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75)));
+}
+.rl-seat.empty .rl-seat-av { background: none; border: 1.5px dashed var(--line-glow); color: var(--gold-dim); }
+.rl-seat-txt { display: flex; flex-direction: column; line-height: 1.1; }
+.rl-seat-nm { font-family:'Cinzel',serif; font-size: 0.72rem; color: var(--parchment); }
+.rl-seat-st { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.rl-seat-st.played { color: var(--pos); }
+.rl-seat-st.wait { color: var(--gold-dim); }
+.rl-seat-st.open { color: var(--gold-dim); font-style: italic; text-transform: none; letter-spacing: 0; font-family:'Crimson Pro',serif; }
 .rl-roster-name { font-family:'Cinzel',serif; font-size: 0.78rem; color: var(--parchment); display: flex; align-items: center; gap: 0.4rem; }
 .rl-you {
   font-size: 0.48rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold);
   border: 1px solid oklch(from var(--gold) l c h / 0.5); border-radius: 999px; padding: 0.05rem 0.35rem;
 }
 .rl-crown { color: var(--gold); font-size: 0.9rem; }
+
+/* ══ Seated current-table panel — the Lounge/Floor divergence lives here ══ */
+.rl-ct { position: relative; border-radius: 14px; overflow: hidden; }
+.rl-ct-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.9rem; margin-top: 0.1rem; }
+.rl-ct-cell-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.3rem; }
+.rl-ct-acts { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.rl-ct-acts .rl-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.rl-spread { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+
+/* Lounge — cozy, centered, large */
+.rl-ct.lounge {
+  border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.5);
+  background: radial-gradient(ellipse 80% 70% at 50% 0%, oklch(from var(--felt) calc(l + 0.08) c h) 0%, var(--felt) 72%), var(--felt);
+  box-shadow: inset 0 0 70px #0007, 0 22px 54px #000b;
+  padding: 2rem 1.6rem 1.7rem; display: flex; flex-direction: column; align-items: center; gap: 1.1rem; text-align: center;
+}
+.rl-ct.lounge .rl-hand, .rl-ct.lounge .rl-roster, .rl-ct.lounge .rl-odds, .rl-ct.lounge .rl-ct-acts { justify-content: center; }
+.rl-ct.lounge .rl-deploy, .rl-ct.lounge .rl-stakewrap { align-items: center; }
+
+/* Floor (rail) — sleek panel with a compact seat grid */
+.rl-ct.rail {
+  border: 1px solid var(--line-glow); background: var(--panel);
+  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem;
+}
+.rl-seatgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem; }
+@media (max-width: 640px){ .rl-seatgrid { grid-template-columns: repeat(3, 1fr); } }
+.rl-railseat {
+  background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.55rem 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; text-align: center;
+}
+.rl-railseat.you { border-color: var(--gold); box-shadow: 0 0 14px oklch(from var(--gold) l c h / 0.2); }
+.rl-railseat.empty { border-style: dashed; opacity: 0.6; }
+.rl-railseat .rl-seat-av { width: 2rem; height: 2rem; }
+.rl-ct-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1rem 1.2rem; align-items: start; }
+@media (max-width: 560px){ .rl-ct-cols { grid-template-columns: 1fr; } }
+.rl-ct-col { display: flex; flex-direction: column; gap: 0.7rem; }
+
+/* Locked hand (CardFaces) + stake + empty note, shared by both variants */
+.rl-hand { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.rl-hand-empty { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+.rl-stakewrap { display: flex; flex-direction: column; gap: 0.1rem; }
+.rl-stake { display: inline-flex; align-items: baseline; gap: 0.25rem; font-family:'Cinzel',serif; }
+.rl-stake .n { font-weight: 800; color: var(--gold); font-size: 1.05rem; }
+.rl-stake .u { font-size: 0.6rem; color: var(--gold-dim); }
+.rl-stake-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); }
+
+/* Deploy-progress bar */
+.rl-deploy { display: flex; flex-direction: column; gap: 0.3rem; }
+.rl-deploy-head { display: flex; justify-content: space-between; gap: 0.6rem; font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-deploy-head b { color: var(--parchment); font-weight: 700; }
+.rl-deploy-track { height: 8px; border-radius: 999px; background: oklch(from var(--bg-card) calc(l - 0.05) c h); border: 1px solid var(--line); overflow: hidden; position: relative; }
+.rl-deploy-filled { position: absolute; inset: 0 auto 0 0; background: oklch(from var(--gold) l c h / 0.25); }
+.rl-deploy-played { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, oklch(from var(--gold) calc(l - 0.1) c h), var(--gold)); }
+.rl-deploy.ready .rl-deploy-played { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.14) c h), var(--pos)); }
 
 /* Board */
 .rl-meter {
