@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminSetPlayerDisabled = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1731,6 +1731,38 @@ exports.adminDenyCasinoYaml = (0, https_1.onCall)(async (request) => {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}/yamlDeniedReason`)]: reasonTxt || null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}/yamlDeniedAt`)]: Date.now(),
     });
+    return { ok: true };
+});
+// Admin: disable/enable a player as a real kill-switch. Sets the per-season game
+// flag (every other callable gates on `players/{uid}/disabled`) AND the Firebase
+// Auth account — the latter is the ONLY thing that can stop a direct Storage upload,
+// since Storage rules can't read RTDB. Disabling blocks new sign-ins/token minting;
+// revoking refresh tokens forces re-auth (an already-issued ID token stays valid up
+// to ~1h). A player who never signed in has no Auth record — the game flag still
+// applies. Refuses to disable the admin's own account (lockout guard).
+exports.adminSetPlayerDisabled = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    await requireAdmin(request.auth.uid);
+    const { playerId, disabled, seasonId: reqSeason } = request.data;
+    if (!playerId || typeof disabled !== 'boolean')
+        throw new https_1.HttpsError('invalid-argument', 'Missing playerId or disabled flag.');
+    if (disabled && playerId === request.auth.uid)
+        throw new https_1.HttpsError('failed-precondition', 'You cannot disable your own account.');
+    const db = (0, database_2.getDatabase)();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(request.auth.uid, reqSeason, db);
+    // 1) Per-season game flag — what the shop/mission/kmk callables check.
+    await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/disabled`)).set(disabled ? true : null);
+    // 2) Firebase Auth account — gates direct Storage uploads (rules can't see the flag).
+    try {
+        await (0, auth_1.getAuth)().updateUser(playerId, { disabled });
+        if (disabled)
+            await (0, auth_1.getAuth)().revokeRefreshTokens(playerId);
+    }
+    catch (err) {
+        if (err.code !== 'auth/user-not-found')
+            throw err;
+    }
     return { ok: true };
 });
 exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {

@@ -2078,6 +2078,42 @@ export const adminDenyCasinoYaml = onCall(async (request) => {
   return { ok: true };
 });
 
+// Admin: disable/enable a player as a real kill-switch. Sets the per-season game
+// flag (every other callable gates on `players/{uid}/disabled`) AND the Firebase
+// Auth account — the latter is the ONLY thing that can stop a direct Storage upload,
+// since Storage rules can't read RTDB. Disabling blocks new sign-ins/token minting;
+// revoking refresh tokens forces re-auth (an already-issued ID token stays valid up
+// to ~1h). A player who never signed in has no Auth record — the game flag still
+// applies. Refuses to disable the admin's own account (lockout guard).
+export const adminSetPlayerDisabled = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { playerId, disabled, seasonId: reqSeason } = request.data as {
+    playerId?: string; disabled?: boolean; seasonId?: string;
+  };
+  if (!playerId || typeof disabled !== 'boolean')
+    throw new HttpsError('invalid-argument', 'Missing playerId or disabled flag.');
+  if (disabled && playerId === request.auth.uid)
+    throw new HttpsError('failed-precondition', 'You cannot disable your own account.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+
+  // 1) Per-season game flag — what the shop/mission/kmk callables check.
+  await db.ref(sp(seasonId, `players/${playerId}/disabled`)).set(disabled ? true : null);
+
+  // 2) Firebase Auth account — gates direct Storage uploads (rules can't see the flag).
+  try {
+    await getAuth().updateUser(playerId, { disabled });
+    if (disabled) await getAuth().revokeRefreshTokens(playerId);
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'auth/user-not-found') throw err;
+  }
+
+  return { ok: true };
+});
+
 
 export const adminKickMissionParticipant = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');

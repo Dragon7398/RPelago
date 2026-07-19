@@ -435,8 +435,10 @@ goes to a **Firebase Storage bucket** (not currently set up — needs enabling).
 - **Storage rules:** write restricted to the owning authenticated player, and
   only while their seat is unlocked (replace-before-lock); read restricted to
   admin + owner. **Not public.**
-- **Size cap:** ≤64KB, enforced in the Storage rule (`request.resource.size`),
-  not just client-side.
+- **Size cap:** <1 MB, enforced in the Storage rule (`request.resource.size`) —
+  fits real multi-game AP YAMLs (which can top 100 KB) while blocking abuse. Also
+  guarded client-side (`MAX_YAML_BYTES`) for a clear early error; the rule is the
+  real gate. **Keep the two values in sync.**
 - **Content type:** accept text/YAML only; reject anything else at the rule.
 - Client parses the YAML **in-browser** to prefill the Manifest slots via the
   **reusable `src/lib/apYaml.ts` parser** (`parseApYaml`), which is deliberately
@@ -581,7 +583,7 @@ the smaller Admin gold-top-up audit view and optional polish.
   in (client gate + server existence check). `lockCasinoResult` takes the manifest
   (keyed by card uid), requires a game per card, and stamps game/name into the slots.
   The YAML text is uploaded to Storage at `casino/{seasonId}/{missionId}/{uid}.yaml`
-  (owner-scoped, ≤64KB — `storage.rules` + the `storage` block in `firebase.json`).
+  (owner-scoped, <1 MB — `storage.rules` + the `storage` block in `firebase.json`).
 - **Step 7** — `onMissionComplete` writes the casino-flavoured profile event
   (gold / handsPlayed / games); `completeMission` is now gold-only in a casino
   season and awards XP only in a map season (S2-ready — see below). Verified.

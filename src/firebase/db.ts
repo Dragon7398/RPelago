@@ -635,12 +635,13 @@ export async function setPlayerNameColor(playerId: string, colorId: string | nul
 }
 
 // ── Player disable / enable ───────────────────────────────────────────────────
+// Goes through a Cloud Function so it can be a real kill-switch: it sets the
+// per-season game flag AND disables the Firebase Auth account (+ revokes refresh
+// tokens). The Auth part is what stops direct Storage uploads — Storage rules can't
+// read the RTDB flag, so a client-only write would leave uploads wide open.
 export async function setPlayerDisabled(playerId: string, disabled: boolean): Promise<void> {
-  if (disabled) {
-    await set(sRef(db!, `players/${playerId}/disabled`), true);
-  } else {
-    await remove(sRef(db!, `players/${playerId}/disabled`));
-  }
+  assertFunctions();
+  await httpsCallable(functions!, 'adminSetPlayerDisabled')({ playerId, disabled, seasonId: getCurrentSeason() });
 }
 
 export async function isPlayerDisabled(playerId: string): Promise<boolean> {

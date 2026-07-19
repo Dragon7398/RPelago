@@ -12,7 +12,7 @@ import {
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import { parseApYaml, checkWorldCount } from '../lib/apYaml';
-import { uploadCasinoYaml } from '../firebase/casinoYaml';
+import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS } from '../lib/constants';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
@@ -516,6 +516,12 @@ export function CasinoTable() {
   // surface broken-file / wrong-world-count / randomized warnings (non-blocking).
   const onPickYaml = (file: File | null) => {
     if (!file) { setYamlText(null); setYamlInfo(null); setYamlWarn([]); return; }
+    // Reject oversized files up front (the upload + storage rule enforce it too).
+    if (file.size >= MAX_YAML_BYTES) {
+      setYamlText(null); setYamlInfo(null);
+      setYamlWarn([`That file is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Configs must be under 1 MB.`]);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result ?? '');
