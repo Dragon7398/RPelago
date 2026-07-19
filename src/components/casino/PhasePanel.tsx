@@ -250,7 +250,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
   );
 
   const hand = seat.played && seat.lockedCards?.length
-    ? <LockedHand cards={seat.lockedCards} width={view === 'lounge' ? 84 : 54} />
+    ? <LockedHand cards={seat.lockedCards} width={view === 'lounge' ? 84 : 68} />
     : <div className="rl-hand-empty">{standing.note}</div>;
 
   const actions = (

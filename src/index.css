@@ -1684,6 +1684,7 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 
 /* Season switcher (admin/alpha only — live season vs. preview a draft) */
 .dash-season { display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0; }
+.settings-popout .dash-season { flex-wrap: wrap; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border); }
 .dash-season-lbl {
   font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--gold-dim);

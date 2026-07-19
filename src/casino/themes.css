@@ -13,6 +13,18 @@
    Gilded Hearth and the remaining themes keep equal-lightness hues.
 */
 
+/* The table is a standalone document that does NOT load index.css, so it needs its
+   own copy of the main app's text-size scaling: main.tsx sets --font-scale on
+   documentElement from `realm_font_scale`, and this drives the root font size, so
+   all the casino rem units track the slider exactly like the map/landing. */
+:root { --font-scale: 1; }
+html { font-size: calc(16px * var(--font-scale, 1)); }
+
+/* Theme-aware card drop shadow: a darker shade of the current felt rather than
+   near-black, so cards lift off a dark table AND don't pool a heavy dark blob on a
+   light-theme felt. Defined once — it resolves var(--felt) per active theme. */
+body.casino-scope { --card-drop: oklch(from var(--felt) calc(l - 0.30) c h / 0.4); }
+
 /* ══════════════════════════════════════════════════════════════
    DARK THEMES
    ══════════════════════════════════════════════════════════════ */

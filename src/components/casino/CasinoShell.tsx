@@ -407,7 +407,6 @@ export default function CasinoShell() {
                 <span className="rl-gold-lbl">Your gold</span>
                 <span className="rl-gold-amt">
                   {gold}<small>g</small>
-                  {net !== 0 && <span className={`rl-gold-net ${net > 0 ? 'pos' : 'neg'}`}>{net > 0 ? '+' : '−'}{Math.abs(net)} this season</span>}
                 </span>
               </div>
             </div>

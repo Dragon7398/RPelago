@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import SeasonSwitcher from './SeasonSwitcher';
 
 /**
  * The site settings popout — shared by every season shell.
@@ -111,6 +112,10 @@ export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | '
     <>
       <div className={`settings-popout ${open ? 'open' : ''}`}>
         <div className="settings-title">⚙ SETTINGS</div>
+        {/* Admin/alpha only (self-hides otherwise) — lets a playtester preview a
+            draft season from either shell, since the dashboard switcher isn't
+            reachable by non-admins. */}
+        <SeasonSwitcher />
         <div className="settings-theme-block">
           <span className="settings-label settings-section-label">THEME</span>
           <div className="settings-theme-options">
