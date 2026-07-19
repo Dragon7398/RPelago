@@ -5,17 +5,18 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath } from '../firebase/season';
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
-import type { DeckCard, CasinoGame } from '../lib/casinoData';
+import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
-  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, seatSpend,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
 } from '../lib/casinoData';
-import { makeGambitDeck, type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
+import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
+import { parseApYaml, checkWorldCount } from '../lib/apYaml';
+import { uploadCasinoYaml } from '../firebase/casinoYaml';
 import { CASINO_START_STATS } from '../lib/constants';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
-import { MissionSlots } from './MissionBar';
 import { DeckPreview } from './DeckPreview';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -33,18 +34,19 @@ type Phase =
   | 'holdplay'  // Hold 'Em sitting 2 — build the best five, or fold
   | 'folded'
   | 'gambit'
+  | 'manifest'  // name the game you'll play for each committed card (Slot Fill)
   | 'locked'
   | 'deployed';
 
 // Phases owned by local interaction. The Firebase-derived effect must not yank
 // the player out of one of these mid-hand. `holdwait` is deliberately NOT here:
 // it exists precisely to be pushed forward by the server's community reveal.
-const LOCAL_PHASES: Phase[] = ['deckselect', 'play', 'holdplay', 'folded', 'gambit'];
+const LOCAL_PHASES: Phase[] = ['deckselect', 'play', 'holdplay', 'folded', 'gambit', 'manifest'];
 
 const GAME_BLURB: Record<CasinoGame, string> = {
   five_card_draw:
-    'Five cards, one hand. Mark any you would rather not play and reroll them once — ' +
-    'you commit to whatever you are holding when you are done.',
+    'Five cards, one hand. Mark any you would rather not play — reroll them once for a ' +
+    'fresh draw, or just leave them out. Commit the games you like (fewer than five is fine).',
   seven_card_stud:
     'Seven cards, dealt at once. Drop the two you least want to play and commit the best five.',
   holdem:
@@ -54,6 +56,12 @@ const GAME_BLURB: Record<CasinoGame, string> = {
     'Push your luck. Draw from two cards up to six — every card is another game you commit to. ' +
     'You may discard at most one before you lock; at six cards you must discard exactly one.',
 };
+
+// Card-type visuals for the Slot-Fill badges: suit from CARD_TYPES, hue mirroring
+// CardFace's TYPE_META.
+const CARD_HUE: Record<CardTypeKey, number> = { wild: 75, broad: 200, platform: 295, franchise: 30, narrow: 150 };
+
+interface ManifestVal { name: string; game: string }
 
 // ── URL params ────────────────────────────────────────────────────────────────
 
@@ -124,14 +132,24 @@ export function CasinoTable() {
   const [spent, setSpent]         = useState(0);
   const [gOffer, setGOffer]       = useState<GambitCard[]>([]);
   const [gPick, setGPick]         = useState<string | null>(null);
+  // Slot Fill (Manifest): the game (+ optional slot name) named for each committed
+  // card, keyed by card uid; plus the attached YAML text and its parse warnings.
+  const [manifest, setManifest]   = useState<Record<number, ManifestVal>>({});
+  const [yamlText, setYamlText]   = useState<string | null>(null);
+  const [yamlInfo, setYamlInfo]   = useState<{ name: string; docs: number; filled: number } | null>(null);
+  const [yamlWarn, setYamlWarn]   = useState<string[]>([]);
+  // True while re-editing an already-locked config (forming self-tweak, or after a
+  // host denial): reuses the Manifest phase, but Submit resubmits instead of locking.
+  const [resubmitting, setResubmitting] = useState(false);
   const [flash, setFlash]         = useState('');
   const [busy, setBusy]           = useState(false);
-  const [now, setNow]             = useState(Date.now());
+  const [now, setNow]             = useState(() => Date.now());
   const [potBump, setPotBump]     = useState(false);
   const [preferredDeck, setPreferredDeck] = useState<CasinoDeckChoice>('purist');
   const [previewDeck, setPreviewDeck]     = useState<CasinoDeckChoice | null>(null);
 
   const prevPot = useRef<number | null>(null);
+  const yamlInputRef = useRef<HTMLInputElement>(null);
 
   // 1-second tick for countdown timers
   useEffect(() => {
@@ -238,17 +256,22 @@ export function CasinoTable() {
     if (!uid || !mission || !game || !cfg) return;
     const seat = mission.participants?.[uid];
 
-    if (mission.state === 'inprogress' || mission.state === 'complete') { setPhase('deployed'); return; }
+    // A settled table always wins — even if the player is mid-resubmit.
+    if (mission.state === 'complete') { setResubmitting(false); setPhase('deployed'); return; }
+    // Actively re-editing a locked config: hold the Manifest view against mission
+    // ticks (a subscription update would otherwise force locked/deployed and boot us).
+    if (resubmitting) return;
+    if (mission.state === 'inprogress') { setPhase('deployed'); return; }
     if (seat?.played) { setPhase('locked'); return; }
     if (LOCAL_PHASES.includes(phase)) return;
 
-    // Recovery: gambit already resolved but not locked — an empty offer means the
-    // lock button goes straight to lockCasinoResult without re-playing a gambit.
+    // Recovery: the gambit was already played but the seat isn't locked (a reload
+    // after the gambit committed) — resume at the Slot Fill step, where Submit
+    // skips the already-played gambit and locks.
     if (seat?.gambitPlayed && secretHand?.length) {
       setHand(secretHand);
       setKeep(new Set(secretHand.map(c => c.uid)));
-      setGOffer([]);
-      setPhase('gambit');
+      setPhase('manifest');
       return;
     }
 
@@ -256,10 +279,12 @@ export function CasinoTable() {
       // Sitting 2 already paid for: the server narrowed the secret hand to the
       // cards chosen, so the only thing left is the gambit → lock flow.
       if (seat?.playedOn && secretHand?.length) {
+        // At the gambit step but not yet resolved — the offer is fetched from the
+        // server by the effect below (idempotent, so a reload returns the same 3).
         setHand(secretHand);
         setKeep(new Set(secretHand.map(c => c.uid)));
         setSpent(seatSpend('holdem', { playedOn: true }));
-        setGOffer(makeGambitDeck().drawOffer(3));
+        setGOffer([]);
         setGPick(null);
         setPhase('gambit');
         return;
@@ -295,9 +320,10 @@ export function CasinoTable() {
     // subscription, which can resolve after the mission does. Without it, a
     // player reloading mid-hand would never have their hand restored.
     // `phase` is deliberately omitted — including it would re-run this effect on
-    // every phase change and loop.
+    // every phase change and loop. `resubmitting` IS a dep: the guard above reads
+    // it, so the effect must see its current value when a mission tick fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, mission, secretHand, game, cfg]);
+  }, [uid, mission, secretHand, game, cfg, resubmitting]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Callables. The resolved seasonId is injected into every payload so the
@@ -332,12 +358,16 @@ export function CasinoTable() {
   const seatDeckChoice   = uid ? (mission?.participants?.[uid]?.deckChoice ?? null) : null;
   const effectiveDeckChoice: CasinoDeckChoice = seatDeckChoice ?? 'purist';
 
-  // Five Card Draw has no larger pool to optimise (5 dealt, 5 committed), so its
-  // marks mean "reroll", not "drop": the whole hand is always what gets committed.
+  // What actually gets committed:
+  //  · Five Card Draw — everything you DIDN'T mark. A mark means "reroll or drop":
+  //    you may reroll the marked cards once, or just leave them out and commit the
+  //    rest (fewer than five is fine — you commit the games you like).
+  //  · subsetSelect games (Stud / Hold 'Em / Blackjack) — the cards you kept.
   const committedCards = useMemo(() => {
     if (!cfg) return [];
+    if (game === 'five_card_draw') return hand.filter(c => !reject.has(c.uid));
     return cfg.subsetSelect ? hand.filter(c => keep.has(c.uid)) : hand;
-  }, [hand, keep, cfg]);
+  }, [hand, keep, reject, cfg, game]);
 
   const overPick = cfg ? committedCards.length > cfg.pickMax : false;
   const canCommit = committedCards.length > 0 && !overPick;
@@ -354,7 +384,7 @@ export function CasinoTable() {
     Object.entries(mission?.participants ?? {});
   while (seatEntries.length < baseMax) seatEntries.push([`__empty_${seatEntries.length}`, null]);
 
-  const lockedHand = ['gambit', 'locked'].includes(phase) ? committedCards : [];
+  const lockedHand = ['gambit', 'manifest', 'locked'].includes(phase) ? committedCards : [];
   const seatGambits = useMemo(() => gambitsBySeat(mission), [mission]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -413,7 +443,8 @@ export function CasinoTable() {
     setHand(res.hand);
     setKeep(new Set(res.hand.map(c => c.uid)));
     setSpent(seatSpend('holdem', { playedOn: true }));
-    toGambit();
+    await dealGambit();
+    setPhase('gambit');
   }, 'Play-on failed. Try again.');
 
   // Folding after a Hold 'Em reveal EMPTIES the seat for good — it isn't the
@@ -436,26 +467,138 @@ export function CasinoTable() {
     setPhase('folded');
   }, 'Fold failed. Try again.');
 
-  function toGambit() {
-    setGOffer(makeGambitDeck().drawOffer(3));
+  // Fetch this seat's gambit offer from the SHARED, server-authoritative deck.
+  // Idempotent, so the deck depletes only once even across reloads. The negative
+  // -guard and the random-3 draw both happen server-side now.
+  const dealGambit = async () => {
+    const res = await call<object, { offer: GambitCard[] }>('dealGambitOffer')({ missionId });
+    setGOffer(res.offer);
     setGPick(null);
-    setPhase('gambit');
-  }
+  };
 
-  const doLock = () => run(async () => {
-    // Skip the gambit callable if it was already resolved before a page reload.
+  const toGambit = () => run(async () => { await dealGambit(); setPhase('gambit'); },
+    'Could not draw your gambits. Try again.');
+
+  // Recovery: landed on the gambit step without the offer (a reload, or the Hold
+  // 'Em play-on recovery path) — fetch it. Idempotent server-side, so this never
+  // re-draws or double-depletes the shared deck. The fetch's setState all runs
+  // after the await, so nothing is set synchronously inside the effect.
+  useEffect(() => {
+    if (phase !== 'gambit' || gOffer.length > 0) return;
+    if (uid && mission?.participants?.[uid]?.gambitPlayed) return;  // resolved — lock directly
+    void dealGambit().catch(e => doFlash((e as { message?: string })?.message ?? 'Could not draw your gambits. Try again.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  // ── Slot Fill (Manifest) ────────────────────────────────────────────────────
+
+  const updateManifest = (uidKey: number, field: 'name' | 'game', value: string) =>
+    setManifest(m => {
+      const prev = m[uidKey] ?? { name: '', game: '' };
+      return { ...m, [uidKey]: { ...prev, [field]: value } };
+    });
+
+  // Move a committed card's named game (+ slot name) up or down among the manifest
+  // rows — so an out-of-order YAML import (Hollow Knight landing on a Puzzle card)
+  // can be realigned to the right card without editing the file.
+  const moveManifest = (index: number, dir: -1 | 1) => {
+    const a = committedCards[index];
+    const b = committedCards[index + dir];
+    if (!a || !b) return;
+    setManifest(m => ({
+      ...m,
+      [a.uid]: m[b.uid] ?? { name: '', game: '' },
+      [b.uid]: m[a.uid] ?? { name: '', game: '' },
+    }));
+  };
+
+  // Attach a YAML: parse in-browser, prefill the manifest in committed order, and
+  // surface broken-file / wrong-world-count / randomized warnings (non-blocking).
+  const onPickYaml = (file: File | null) => {
+    if (!file) { setYamlText(null); setYamlInfo(null); setYamlWarn([]); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      const { slots: parsed, errors } = parseApYaml(text);
+      setManifest(m => {
+        const next = { ...m };
+        committedCards.forEach((c, i) => {
+          const p = parsed[i];
+          if (p) next[c.uid] = { name: p.name || (m[c.uid]?.name ?? ''), game: p.game || (m[c.uid]?.game ?? '') };
+        });
+        return next;
+      });
+      const warn = [...errors];
+      const wc = checkWorldCount(parsed.length, { count: committedCards.length });
+      if (wc) warn.push(wc);
+      if (parsed.some(p => p.randomized))
+        warn.push('One or more games are a weighted / randomized choice — set the real game by hand.');
+      setYamlText(text);
+      setYamlInfo({ name: file.name, docs: parsed.length, filled: Math.min(parsed.length, committedCards.length) });
+      setYamlWarn(warn);
+    };
+    reader.readAsText(file);
+  };
+
+  const mySeat     = uid ? mission?.participants?.[uid] : undefined;
+  const yamlDenied = mySeat?.yamlDenied === true;
+
+  const manifestReady = committedCards.filter(c => (manifest[c.uid]?.game ?? '').trim().length > 0).length;
+  // A new attach is REQUIRED for an initial submit and for a denied resubmit (the
+  // host deleted the old file). A forming self-resubmit keeps the stored file, so a
+  // reorder-only pass with no new attach is allowed. Every slot must still be named.
+  const attachRequired = !resubmitting || yamlDenied;
+  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired);
+
+  // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
+  // (already-locked). The per-card manifest is keyed by card uid, so reordering the
+  // games among cards is captured regardless of the committed order.
+  const doSubmit = () => run(async () => {
+    if (yamlText && uid) await uploadCasinoYaml(resolvedSeasonId, missionId, uid, yamlText);
+    const manifestPayload = Object.fromEntries(committedCards.map(c => [String(c.uid), {
+      game: (manifest[c.uid]?.game ?? '').trim(),
+      name: (manifest[c.uid]?.name ?? '').trim(),
+    }]));
+
+    if (resubmitting) {
+      await call<object, unknown>('resubmitCasinoYaml')({ missionId, manifest: manifestPayload });
+      setResubmitting(false);
+      doFlash('Config resubmitted to your host.');
+      setPhase(mission?.state === 'forming' ? 'locked' : 'deployed');
+      return;
+    }
+
     const seatGambitPlayed = uid ? mission?.participants?.[uid]?.gambitPlayed === true : false;
     if (!seatGambitPlayed) {
       await call<object, unknown>('playCasinoGambit')({ missionId, gambitDefId: gPick ?? null });
     }
-    // The server takes the cards to COMMIT (`keepUids`), not the ones to drop.
-    // It re-derives the take from them, and reads a missing list as "commit the
-    // whole hand" — so a discard-shaped payload here silently overpays the seat.
     await call<object, { goldSwing: number }>('lockCasinoResult')({
-      missionId, keepUids: committedCards.map(c => c.uid),
+      missionId, keepUids: committedCards.map(c => c.uid), manifest: manifestPayload,
     });
     setPhase('locked');
-  }, 'Lock failed. Please try again.');
+  }, 'Submit failed. Please try again.');
+
+  // Reopen a locked config in the Manifest view so the player can reorder games or
+  // attach an updated file. Seeds the manifest from the committed cards + current
+  // slots so nothing is lost if they only want to tweak the order.
+  const startResubmit = () => {
+    const cards = mySeat?.lockedCards ?? [];
+    const slots = mySeat?.slots ?? [];
+    setHand(cards);
+    setKeep(new Set(cards.map(c => c.uid)));
+    setReject(new Set());
+    const seeded: Record<number, ManifestVal> = {};
+    cards.forEach((c, i) => { seeded[c.uid] = { name: slots[i]?.name ?? '', game: slots[i]?.game ?? '' }; });
+    setManifest(seeded);
+    setYamlText(null); setYamlInfo(null); setYamlWarn([]);
+    setResubmitting(true);
+    setPhase('manifest');
+  };
+
+  const cancelResubmit = () => {
+    setResubmitting(false);
+    setPhase(mission?.state === 'forming' ? 'locked' : 'deployed');
+  };
 
   const toggle = (set: Set<number>, uidKey: number) => {
     const next = new Set(set);
@@ -467,6 +610,25 @@ export function CasinoTable() {
 
   const HAND_W = 108;
   const GAMB_W = 130;
+
+  // Post-lock config resubmit: allowed while the table is still FORMING (a
+  // self-initiated tweak) or whenever the host has DENIED this seat's config.
+  // "Reopen my slots" drops back into the Manifest view (startResubmit) so games can
+  // be reordered or an updated file attached. Shown in locked (forming) + deployed.
+  const canResubmit = !!mySeat?.played && mission?.state !== 'complete'
+    && (mission?.state === 'forming' || yamlDenied);
+  const resubmitBlock = canResubmit ? (
+    <div className={`cz-resubmit${yamlDenied ? ' denied' : ''}`}>
+      <div className="cz-resub-head">
+        {yamlDenied
+          ? <><b>⛔ Your config was denied</b><span>{mySeat?.yamlDeniedReason || 'Your host asked you to fix and resubmit your Archipelago config.'}</span></>
+          : <><b>Need to tweak a setting or the order?</b><span>Reopen your slots to reorder games or attach an updated config while the table is still forming.</span></>}
+      </div>
+      <button className="cz-btn" disabled={busy} onClick={startResubmit}>
+        {yamlDenied ? 'Fix & resubmit config' : 'Reopen my slots'}
+      </button>
+    </div>
+  ) : null;
 
   if (phase === 'loading') {
     return (
@@ -625,8 +787,9 @@ export function CasinoTable() {
 
               <div className="cz-hand">
                 {hand.map(c => {
-                  // FCD marks a card to be REPLACED; the others mark it to be DROPPED.
-                  const rerolling = game === 'five_card_draw' && reject.has(c.uid);
+                  // FCD: a marked card is left out of the commit — rerolled once if
+                  // you reroll, otherwise simply dropped. Other games mark to DROP.
+                  const marked    = game === 'five_card_draw' && reject.has(c.uid);
                   const kept      = keep.has(c.uid);
                   const dropped   = cfg.subsetSelect && !kept;
                   // A kept card can only be dropped while doing so stays at/above
@@ -634,27 +797,27 @@ export function CasinoTable() {
                   // can always be picked back up.
                   const canToggle = kept ? keep.size > minKeep : true;
                   const selectable = game === 'five_card_draw'
-                    ? !rerolled
+                    ? true
                     : (game !== 'blackjack' || stood) && canToggle;
                   return (
                     <div
                       key={c.uid}
-                      className={`cz-card-slot${rerolling ? ' rejected' : ''}${dropped ? ' discarding' : ''}`}
+                      className={`cz-card-slot${marked ? ' rejected' : ''}${dropped ? ' discarding' : ''}`}
                       onClick={() => {
                         if (busy) return;
-                        if (game === 'five_card_draw') { if (!rerolled) setReject(r => toggle(r, c.uid)); return; }
+                        if (game === 'five_card_draw') { setReject(r => toggle(r, c.uid)); return; }
                         if (!selectable) return;
                         setKeep(k => toggle(k, c.uid));
                       }}
                     >
                       {game === 'five_card_draw'
-                        ? <span className={`cz-mark ${rerolling ? 'reject' : 'keep'}`}>{rerolling ? '✕' : '✓'}</span>
+                        ? <span className={`cz-mark ${marked ? 'reject' : 'keep'}`}>{marked ? '✕' : '✓'}</span>
                         : dropped && <span className="cz-mark reject">✕</span>}
                       <CardFace card={c} look="plate" width={HAND_W} />
                       {(game === 'five_card_draw' || (game === 'blackjack' ? stood : true)) && (
                         <div className="cz-card-cap">
                           {game === 'five_card_draw'
-                            ? (rerolling ? 'rerolling' : 'keeping')
+                            ? (marked ? (rerolled ? 'dropped' : 'reroll or drop') : 'committed')
                             : dropped ? 'dropped' : selectable ? 'tap to drop' : 'committed'}
                         </div>
                       )}
@@ -781,32 +944,155 @@ export function CasinoTable() {
           )}
 
           {/* GAMBIT */}
-          {phase === 'gambit' && (
+          {phase === 'gambit' && (() => {
+            // Offer empty but gambit not yet resolved → it's still being drawn
+            // from the shared server deck (or a reload is re-fetching it).
+            const gambitDone   = uid ? mission.participants?.[uid]?.gambitPlayed === true : false;
+            const loadingOffer = gOffer.length === 0 && !gambitDone;
+            return (
+              <>
+                <div className="cz-stage-title">Play a Gambit?</div>
+                <div className="cz-stage-note">
+                  You locked in {lockedHand.length} games worth {applyDeckBoost(handStake(lockedHand), effectiveDeckChoice)}g.
+                  Choose one of these to bend the room's odds for everyone — or play none and lock in.
+                </div>
+                <div className="cz-gambit-offer">
+                  {loadingOffer
+                    ? <div className="cz-card-cap">Drawing your gambits from the deck…</div>
+                    : gOffer.map(card => {
+                        const selected = gPick === card.defId;
+                        return (
+                          <div
+                            key={card.uid}
+                            className={`cz-gambit-pick${selected ? ' selected' : ''}`}
+                            onClick={() => !busy && setGPick(sel => sel === card.defId ? null : card.defId)}
+                          >
+                            <GambitCardFace card={card} width={GAMB_W} />
+                            <div className="cz-card-cap">{selected ? 'selected' : 'tap to choose'}</div>
+                          </div>
+                        );
+                      })}
+                </div>
+                <div className="cz-actions">
+                  <button className="cz-btn primary" onClick={() => setPhase('manifest')} disabled={busy || loadingOffer}>
+                    {loadingOffer ? 'Drawing…' : gOffer.length === 0 ? 'Continue →' : gPick ? 'Play this gambit & continue →' : 'Skip & continue →'}
+                  </button>
+                </div>
+                <div className="cz-flash">{flash}</div>
+              </>
+            );
+          })()}
+
+          {/* MANIFEST — Slot Fill: name the game you'll play for each committed card */}
+          {phase === 'manifest' && (
             <>
-              <div className="cz-stage-title">Play a Gambit?</div>
+              {!resubmitting && (
+                <div className="sf-steps">
+                  <span className="done">✓ Cards</span><span className="dot" />
+                  <span className="done">✓ Gambit</span><span className="dot" />
+                  <span className="now">Fill your slots</span><span className="dot" />
+                  <span>Submit</span>
+                </div>
+              )}
+              <div className="cz-stage-title">{resubmitting ? 'Reopen your slots' : 'Fill your slots'}</div>
               <div className="cz-stage-note">
-                You locked in {lockedHand.length} games worth {applyDeckBoost(handStake(lockedHand), effectiveDeckChoice)}g.
-                Choose one of these to bend the room's odds for everyone — or play none and lock in.
+                {resubmitting
+                  ? 'Reorder games with the ↑/↓ arrows, or attach an updated config to re-map them. Your committed cards and gambit are unchanged.'
+                  : "Name the game you'll play for each committed card. Your host reviews every submission and may reject a game that doesn't fit its card."}
               </div>
-              <div className="cz-gambit-offer">
-                {gOffer.map(card => {
-                  const selected = gPick === card.defId;
+
+              {/* Mission Manifest summary + YAML attach */}
+              <div className="sf-panel">
+                <div className="sf-panel-title">Mission Manifest</div>
+                <div className="sf-mlist">
+                  {committedCards.map(c => {
+                    const v = manifest[c.uid];
+                    const nm = v?.name?.trim();
+                    const gm = v?.game?.trim();
+                    return (
+                      <div className="sf-mline" key={c.uid}>
+                        <span className={`sf-mline-slot${nm ? '' : ' empty'}`}>{nm || '(from config)'}</span>
+                        <span className="sf-mline-arrow">→</span>
+                        <span className={`sf-mline-game${gm ? '' : ' empty'}`}>{gm || 'game required'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="sf-yaml">
+                  <div className="sf-yaml-head">
+                    <span className="sf-yaml-lbl">Attach your config (.yaml) {attachRequired
+                      ? <span className="req">✳ required</span>
+                      : <span className="opt">— optional; keeps your current file</span>}</span>
+                    <button type="button" className="cz-btn" onClick={() => yamlInputRef.current?.click()} disabled={busy}>Choose file</button>
+                  </div>
+                  <input ref={yamlInputRef} type="file" accept=".yaml,.yml,.txt" style={{ display: 'none' }}
+                         onChange={e => onPickYaml(e.target.files?.[0] ?? null)} />
+                  {yamlInfo && (
+                    <div className={`sf-yaml-file${yamlInfo.filled ? '' : ' none'}`}>
+                      {yamlInfo.filled
+                        ? <>✓ {yamlInfo.name} — filled <b>{yamlInfo.filled}</b> slot{yamlInfo.filled === 1 ? '' : 's'} from {yamlInfo.docs} world{yamlInfo.docs === 1 ? '' : 's'}</>
+                        : <>⚠ {yamlInfo.name} — no usable worlds found; fill the slots by hand</>}
+                    </div>
+                  )}
+                  {yamlWarn.map((w, i) => <div className="sf-yaml-warn" key={i}>⚠ {w}</div>)}
+                  <div className="sf-yaml-hint">
+                    Parsed in your browser — we read each world's <code>name</code> and <code>game</code> to prefill the
+                    slots in order. Use the ↑/↓ arrows to move a game to the right card. The file is stored for your
+                    host{attachRequired ? <> and is <b>required</b> to {resubmitting ? 'resubmit' : 'lock in'}.</> : '.'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-card rows */}
+              <div className="sf-list">
+                {committedCards.map((c, i) => {
+                  const v = manifest[c.uid] ?? { name: '', game: '' };
+                  const hue = CARD_HUE[c.type];
+                  const ok = v.game.trim().length > 0;
                   return (
-                    <div
-                      key={card.uid}
-                      className={`cz-gambit-pick${selected ? ' selected' : ''}`}
-                      onClick={() => !busy && setGPick(sel => sel === card.defId ? null : card.defId)}
-                    >
-                      <GambitCardFace card={card} width={GAMB_W} />
-                      <div className="cz-card-cap">{selected ? 'selected' : 'tap to choose'}</div>
+                    <div className="sf-lrow" key={c.uid}>
+                      <div className="sf-cat" style={{ '--th': hue } as React.CSSProperties}>
+                        <span className="sf-suit">{CARD_TYPES[c.type].suit}</span>
+                        <span className="sf-cat-txt">
+                          <span className="sf-cat-type">{CARD_TYPES[c.type].label}</span>
+                          <span className="sf-cat-name">{c.name}</span>
+                        </span>
+                      </div>
+                      <div className="sf-field">
+                        <span className="sf-flabel">Slot name <span className="opt">optional</span></span>
+                        <input className="sf-input" value={v.name} disabled={busy}
+                               onChange={e => updateManifest(c.uid, 'name', e.target.value)} />
+                      </div>
+                      <div className="sf-field">
+                        <span className="sf-flabel">Game <span className="req">✳ required</span></span>
+                        <input className={`sf-input${ok ? ' ok' : ' need'}`} value={v.game} disabled={busy}
+                               placeholder={`A ${CARD_TYPES[c.type].label.toLowerCase()} game`}
+                               onChange={e => updateManifest(c.uid, 'game', e.target.value)} />
+                      </div>
+                      <div className="sf-move">
+                        <button className="sf-movebtn" title="Move up" disabled={busy || i === 0}
+                                onClick={() => moveManifest(i, -1)}>↑</button>
+                        <button className="sf-movebtn" title="Move down" disabled={busy || i === committedCards.length - 1}
+                                onClick={() => moveManifest(i, 1)}>↓</button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-              <div className="cz-actions">
-                <button className="cz-btn primary" onClick={doLock} disabled={busy}>
-                  {gOffer.length === 0 ? 'Lock in' : gPick ? 'Play this gambit & lock in' : 'Skip & lock in'}
-                </button>
+
+              <div className="sf-foot">
+                <span className={`sf-ready${canSubmit ? ' go' : ''}`}>
+                  {canSubmit ? '✓ ' : ''}<b>{manifestReady}</b>/{committedCards.length} slots ready
+                  {attachRequired && !yamlText && <> · <span className="sf-ready-need">config required</span></>}
+                </span>
+                <div className="sf-foot-acts">
+                  {resubmitting && (
+                    <button className="cz-btn" disabled={busy} onClick={cancelResubmit}>Cancel</button>
+                  )}
+                  <button className="cz-btn primary" disabled={busy || !canSubmit} onClick={doSubmit}>
+                    {busy ? 'Submitting…' : resubmitting ? 'Resubmit to guildmaster →' : 'Submit to guildmaster →'}
+                  </button>
+                </div>
               </div>
               <div className="cz-flash">{flash}</div>
             </>
@@ -821,6 +1107,7 @@ export function CasinoTable() {
                 Once everyone has played, the mission deploys.
               </div>
               <div className="cz-ap-banner"><div className="cz-ap-icon">✦</div></div>
+              {resubmitBlock}
             </>
           )}
 
@@ -828,6 +1115,7 @@ export function CasinoTable() {
           {phase === 'deployed' && (
             <>
               <div className="cz-stage-title">{missionLabel} · Results</div>
+              {resubmitBlock}
               {reveal && (
                 <div className="cz-roll-banner">
                   <span className={`cz-roll ${reveal.releaseOn ? 'on' : 'off'}`}>
@@ -861,11 +1149,6 @@ export function CasinoTable() {
 
         </div>
       </div>
-
-      {/* ── Locked slots panel ── */}
-      {lockedHand.length > 0 && (
-        <MissionSlots hand={lockedHand} missionLabel={missionLabel} deckChoice={effectiveDeckChoice} />
-      )}
 
       {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
     </div>

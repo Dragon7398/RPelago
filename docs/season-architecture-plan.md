@@ -415,12 +415,14 @@ The dashboard today has a fixed tab set: challenges, missions, kmk, map,
 players, shops, orbs. Most are meaningless in a casino season, so **the visible
 tab set becomes season-driven** (same config-driven principle as the shell).
 
-> **Status (2026-07-17): not started.** `AdminDashboard`'s `PAGES` array is still
-> static, so every tab renders in every season, and there is no Casino tab —
-> casino cohorts currently surface through the generic Missions tab (which does
-> at least know to show "🂡 Open Casino Tables" for a casino shell). The
-> `goldTopUpLog` that the Casino tab's audit needs is already being written by
-> `weeklyGoldTopUp`.
+> **Status (2026-07-18): built (first cut).** `AdminDashboard` now filters
+> `ALL_PAGES` by the season's shell (each page carries a `shells: ['map'|'casino']`
+> allowlist); the current tab falls back to the first visible one when hidden. The
+> Casino/Missions split is `MissionsPage` with a `filter` prop (`casino` |
+> `noncasino`) — the Casino tab reuses all its casino detail (pot, rosters,
+> per-seat slots, gambit odds, `CasinoAuditLog`, spectate link); warn badges split
+> by type. **Remaining:** the season-level gold-top-up audit view (`goldTopUpLog`)
+> is not surfaced yet — only the per-table `CasinoAuditLog` is.
 
 **Tab evolution:**
 

@@ -301,6 +301,14 @@ export interface GMParticipant {
                                      // slots, so nothing secret is exposed). Only set once played.
   casinoXp?:    number;              // XP earned from gambits; merged into mission.xp at deploy
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
+  gambitOffer?:  string[];           // the gambit defIds the server dealt this seat (authoritative — the
+                                     // only ones playCasinoGambit will accept); drawn from the shared deck
+  // Set when the host denies this seat's uploaded config: the stored YAML is
+  // deleted and the seat is flagged so the player is prompted to resubmit (works
+  // whether the table is still forming or already in progress). Cleared on resubmit.
+  yamlDenied?:       boolean;
+  yamlDeniedReason?: string;
+  yamlDeniedAt?:     number;
   gameType?:    'poker' | 'blackjack'; // legacy single-sitting selector; Hold 'Em uses mission.casinoGame
   rerolled?:    boolean;             // true once the poker reroll has been used this session
   deckChoice?:  CasinoDeckChoice;    // which deck variant this seat is drawing from this cohort

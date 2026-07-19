@@ -17,6 +17,8 @@ exports.selectCommitted = selectCommitted;
 exports.applyDeckBoost = applyDeckBoost;
 exports.gambitCasinoGold = gambitCasinoGold;
 exports.buildGambitDeck = buildGambitDeck;
+exports.gambitOfferable = gambitOfferable;
+exports.makeGambitDeck = makeGambitDeck;
 exports.applyGambit = applyGambit;
 exports.rollCasinoOdds = rollCasinoOdds;
 exports.rollSeatCount = rollSeatCount;
@@ -315,6 +317,42 @@ function buildGambitDeck() {
         }
     }
     return shuffle(deck);
+}
+// A gambit may be offered only if applying it wouldn't drive its stat below 0.
+// Mirror of src/lib/casinoGambits.ts.
+function gambitOfferable(stats, card) {
+    const current = card.stat === 'release' ? stats.release
+        : card.stat === 'collect' ? stats.collect
+            : stats.hint;
+    return Math.round((current + card.delta) * 10) / 10 >= 0;
+}
+// Shared, depleting gambit deck. Draws up to n cards with DISTINCT defId; `allow`
+// filters out cards that fail it (returned to circulation like duplicates).
+// Mirror of src/lib/casinoGambits.ts — the server draws the authoritative offer.
+function makeGambitDeck(cards) {
+    let remaining = cards ? cards.slice() : buildGambitDeck();
+    return {
+        remaining: () => remaining.length,
+        drawOffer(n, allow) {
+            const offer = [];
+            const used = new Set();
+            const skipped = [];
+            while (offer.length < n && remaining.length > 0) {
+                const card = remaining.shift();
+                if (used.has(card.defId) || (allow && !allow(card))) {
+                    skipped.push(card);
+                    continue;
+                }
+                used.add(card.defId);
+                offer.push(card);
+            }
+            remaining = remaining.concat(skipped);
+            return offer;
+        },
+        toArray() {
+            return remaining.slice();
+        },
+    };
 }
 // ── Gambit application ───────────────────────────────────────────────────────
 function clamp(v, lo, hi) {

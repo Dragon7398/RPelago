@@ -53,7 +53,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   // Which season we're rendering. Null until config resolves; every
   // season-scoped read/write below waits on it.
-  const seasonId = useSeason().season?.id ?? null;
+  const season = useSeason().season;
+  const seasonId = season?.id ?? null;
+  // Whether this season awards XP (map) or is gold-only (casino) — see completeMission.
+  const seasonShell = season?.shell ?? 'map';
 
   // Subscribe to the ACTIVE SEASON's state. Reads are open to all users, but we
   // must wait for SeasonContext to resolve which season to read — the db.ts path
@@ -449,8 +452,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     if (!gameState) return {};
     const mission = gameState.missions?.[missionId];
     if (!mission) return {};
-    return await dbCompleteMission(mission, gameState.players, confirmed);
-  }, [gameState]);
+    return await dbCompleteMission(mission, gameState.players, seasonShell, confirmed);
+  }, [gameState, seasonShell]);
 
   const adminBackfillChallengeHistory = useCallback(async (coord: string) => {
     return await dbBackfillChallengeHistory(coord);

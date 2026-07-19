@@ -128,10 +128,23 @@ export function buildGambitDeck(): GambitCard[] {
   return shuffle(deck);
 }
 
+// A gambit may be offered to a player only if applying it wouldn't drive its
+// stat below 0 — e.g. a −5% or −7% Collect penalty is withheld when Collect is
+// already at 4%. The server clamps at 0 regardless; this keeps a gambit whose
+// effect would be (partly) wasted out of the player's offer in the first place.
+export function gambitOfferable(stats: CasinoStats, card: GambitDef): boolean {
+  const current = card.stat === 'release' ? stats.release
+    : card.stat === 'collect' ? stats.collect
+    : stats.hint;
+  return round1(current + card.delta) >= 0;
+}
+
 export interface GambitDeckHandle {
   remaining(): number;
   // Draw up to n cards with DISTINCT defId (no duplicate type in one offer).
-  drawOffer(n: number): GambitCard[];
+  // `allow`, when given, filters out cards that fail it (e.g. would-go-negative
+  // gambits) — they're returned to circulation like duplicates.
+  drawOffer(n: number, allow?: (card: GambitCard) => boolean): GambitCard[];
   toArray(): GambitCard[];
 }
 
@@ -139,17 +152,17 @@ export function makeGambitDeck(cards?: GambitCard[]): GambitDeckHandle {
   let remaining = cards ? cards.slice() : buildGambitDeck();
   return {
     remaining: () => remaining.length,
-    drawOffer(n: number): GambitCard[] {
+    drawOffer(n: number, allow?: (card: GambitCard) => boolean): GambitCard[] {
       const offer: GambitCard[] = [];
       const used  = new Set<string>();
       const skipped: GambitCard[] = [];
       while (offer.length < n && remaining.length > 0) {
         const card = remaining.shift()!;
-        if (used.has(card.defId)) { skipped.push(card); continue; }
+        if (used.has(card.defId) || (allow && !allow(card))) { skipped.push(card); continue; }
         used.add(card.defId);
         offer.push(card);
       }
-      // Return skipped duplicates to the bottom so they stay in circulation
+      // Return skipped duplicates / filtered cards to the bottom so they stay in circulation
       remaining = remaining.concat(skipped);
       return offer;
     },

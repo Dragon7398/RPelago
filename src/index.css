@@ -1004,6 +1004,52 @@ header p {
   padding: 0.4rem 0.5rem; background: oklch(14% 0.04 75 / 0.6); border: 1px solid var(--border); border-radius: 3px;
 }
 .casino-log-row { font-family: 'Crimson Pro', serif; font-size: 0.7rem; color: var(--parchment); }
+
+/* Casino: admin YAML download */
+.casino-yaml-block { margin-top: 0.5rem; }
+.casino-yaml-list { margin-top: 0.4rem; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.casino-yaml-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  padding: 0.4rem 0.6rem; background: oklch(14% 0.04 75 / 0.6);
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.06em; color: var(--gold-dim);
+  border-bottom: 1px solid var(--border);
+}
+.casino-yaml-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  padding: 0.32rem 0.6rem; border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
+}
+.casino-yaml-row:last-child { border-bottom: none; }
+.casino-yaml-name { font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment); }
+.casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
+.casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* Per-row icon buttons (download ⬇ / deny ⛔). These are <button>s, so reset the
+   default UA chrome — otherwise the glyph sits on a white default button — and give
+   them the same gold/red ghost frame as the panel's action buttons. */
+.casino-yaml-acts .dash-tile-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.7rem; height: 1.7rem; padding: 0; line-height: 1; font-size: 0.85rem;
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.08);
+  border: 1px solid oklch(from var(--gold) l c h / 0.4); border-radius: 3px;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.casino-yaml-acts .dash-tile-link:hover {
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.16); border-color: var(--gold);
+  box-shadow: 0 0 8px oklch(from var(--gold) l c h / 0.25); filter: none;
+}
+.casino-yaml-acts .dash-tile-link.deny {
+  color: oklch(70% 0.19 25); background: oklch(55% 0.16 25 / 0.1); border-color: oklch(55% 0.16 25 / 0.5);
+}
+.casino-yaml-acts .dash-tile-link.deny:hover {
+  color: oklch(78% 0.2 25); background: oklch(55% 0.16 25 / 0.2); border-color: oklch(66% 0.19 25);
+  box-shadow: 0 0 8px oklch(55% 0.16 25 / 0.3);
+}
+.casino-deny-badge {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.05em;
+  color: oklch(70% 0.19 25); border: 1px solid oklch(from var(--parchment) l c h / 0.001);
+  border-color: oklch(55% 0.16 25 / 0.6); border-radius: 3px; padding: 0.1rem 0.4rem;
+  background: oklch(55% 0.16 25 / 0.12); white-space: nowrap;
+}
 .admin-count-input {
   width: 64px; padding: 0.25rem 0.4rem;
   background: oklch(16% 0.04 75); border: 1px solid var(--border-glow);
@@ -1790,6 +1836,30 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   transition: filter 0.15s; color: inherit;
 }
 .dash-tile-link:hover { filter: brightness(1.4); }
+
+/* Generic admin-dashboard action button — a gold-leaf ghost that fits the
+   parchment theme (Cinzel small-caps, soft gold border/wash, glow on hover). Add
+   `.danger` for destructive actions. Inline font-size/padding still override for
+   compact contexts (e.g. inline confirm buttons). */
+.dash-action-btn {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.07em;
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.08);
+  border: 1px solid oklch(from var(--gold) l c h / 0.45); border-radius: 3px;
+  padding: 0.3rem 0.65rem; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.dash-action-btn:hover:not(:disabled) {
+  background: oklch(from var(--gold) l c h / 0.16); border-color: var(--gold);
+  box-shadow: 0 0 10px oklch(from var(--gold) l c h / 0.25);
+}
+.dash-action-btn:disabled { opacity: 0.5; cursor: default; }
+.dash-action-btn.danger {
+  color: oklch(70% 0.19 25); background: oklch(55% 0.16 25 / 0.1); border-color: oklch(55% 0.16 25 / 0.5);
+}
+.dash-action-btn.danger:hover:not(:disabled) {
+  background: oklch(55% 0.16 25 / 0.2); border-color: oklch(66% 0.19 25);
+  box-shadow: 0 0 10px oklch(55% 0.16 25 / 0.3);
+}
 .dash-copy-room-btn {
   font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
   padding: 0.14rem 0.5rem; border-radius: 2px; cursor: pointer; flex-shrink: 0;

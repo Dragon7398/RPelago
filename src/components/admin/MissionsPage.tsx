@@ -5,9 +5,10 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman, MISSION_DEFS } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminGetCasinoYamls, adminDenyCasinoYaml, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
+import { zipSync } from 'fflate';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -42,6 +43,9 @@ function MissionParticipantSlots({
     <div className="admin-slot-adv">
       <div className="admin-slot-adv-header">
         <span className="admin-slot-adv-name">{participant.playerName}</span>
+        {isCasino && participant.yamlDenied && (
+          <span className="casino-deny-badge" title="Config denied — awaiting the player's resubmit">⛔ resubmit pending</span>
+        )}
         {confirmKick ? (
           <span style={{ display: 'flex', gap: '0.3rem' }}>
             <button
@@ -212,6 +216,123 @@ function CasinoAuditLog({ mission }: { mission: GMMission }) {
             ))}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// ── Casino: download the seats' uploaded Slot-Fill YAMLs ─────────────────────
+
+function sanitizeFile(name: string): string {
+  return name.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'player';
+}
+
+function downloadBlob(fileName: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadText(fileName: string, text: string): void {
+  downloadBlob(fileName, new Blob([text], { type: 'text/yaml' }));
+}
+
+// Give each seat a distinct `<player>.yaml` filename, disambiguating any two
+// players whose names sanitize to the same slug (…, …_2, …_3).
+function yamlFileNames(yamls: CasinoYaml[]): string[] {
+  const seen = new Map<string, number>();
+  return yamls.map(y => {
+    const base = sanitizeFile(y.playerName);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return `${base}${n > 1 ? `_${n}` : ''}.yaml`;
+  });
+}
+
+// The host verifies + generates the Archipelago room from these. Fetched on demand
+// (admin-only callable, which reads the owner-scoped bucket via the Admin SDK).
+// Deliberately kept as separate files — YAMLs are verified one at a time and later
+// replayed individually by other players — so downloads are per-seat or a .zip of
+// all seats, never a combined single file.
+function CasinoYamlDownload({ missionId, label }: { missionId: string; label: string }) {
+  const { addToast } = useToast();
+  const [yamls, setYamls]     = useState<CasinoYaml[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [confirmDeny, setConfirmDeny] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setYamls(await adminGetCasinoYamls(missionId));
+    } catch (err) {
+      addToast(`Could not load YAMLs: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Deny invalidates the stored config and flags the seat so the player must
+  // resubmit. The file is gone afterwards, so drop it from the list.
+  const deny = async (uid: string) => {
+    try {
+      await adminDenyCasinoYaml(missionId, uid);
+      setYamls(list => (list ?? []).filter(y => y.uid !== uid));
+      setConfirmDeny(null);
+      addToast('Config denied — the player must resubmit.', 'success');
+    } catch (err) {
+      addToast(`Deny failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  };
+
+  // A .zip of the individual per-seat files (still separate inside the archive),
+  // for grabbing a whole table at once without collapsing them into one document.
+  const downloadZip = () => {
+    if (!yamls?.length) return;
+    const names = yamlFileNames(yamls);
+    const enc = new TextEncoder();
+    const files: Record<string, Uint8Array> = {};
+    yamls.forEach((y, i) => { files[names[i]] = enc.encode(y.text); });
+    downloadBlob(`casino-${sanitizeFile(label)}-yamls.zip`, new Blob([zipSync(files)], { type: 'application/zip' }));
+  };
+
+  const names = yamls ? yamlFileNames(yamls) : [];
+
+  return (
+    <div className="casino-yaml-block">
+      {yamls === null ? (
+        <button className="dash-action-btn" disabled={loading} onClick={load}>
+          {loading ? 'Loading…' : '⬇ Player YAMLs'}
+        </button>
+      ) : yamls.length === 0 ? (
+        <span className="dash-empty" style={{ padding: 0 }}>No YAMLs uploaded yet.</span>
+      ) : (
+        <div className="casino-yaml-list">
+          <div className="casino-yaml-head">
+            <span>{yamls.length} YAML{yamls.length === 1 ? '' : 's'} uploaded</span>
+            <button className="dash-action-btn" onClick={downloadZip}>⬇ All (.zip)</button>
+          </div>
+          {yamls.map((y, i) => (
+            <div key={y.uid} className="casino-yaml-row">
+              <span className="casino-yaml-name">{y.playerName}</span>
+              <span className="casino-yaml-acts">
+                {/* ︎ = text-presentation selector: renders the glyph monochrome so it takes the CSS tint. */}
+                <button className="dash-tile-link" title={`Download ${names[i]}`}
+                        onClick={() => downloadText(names[i], y.text)}>{'⬇︎'}</button>
+                {confirmDeny === y.uid ? (
+                  <span className="casino-yaml-deny-confirm">
+                    <button className="dash-action-btn danger" onClick={() => deny(y.uid)}>Deny</button>
+                    <button className="dash-action-btn" onClick={() => setConfirmDeny(null)}>Cancel</button>
+                  </span>
+                ) : (
+                  <button className="dash-tile-link deny" title="Deny — invalidate this config and require a resubmit"
+                          onClick={() => setConfirmDeny(y.uid)}>{'⛔︎'}</button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -434,6 +555,9 @@ function MissionCard({ mission }: { mission: GMMission }) {
       {/* Casino: audit trail of every money-moving/outcome event, for pot verification */}
       {mission.type === 'casino' && <CasinoAuditLog mission={mission} />}
 
+      {/* Casino: download the seats' uploaded Slot-Fill YAMLs (host verify / room gen) */}
+      {mission.type === 'casino' && <CasinoYamlDownload missionId={mission.id} label={missionDisplayLabel(mission)} />}
+
       {/* Room link + settings — inprogress only */}
       {mission.state === 'inprogress' && (
         <>
@@ -531,7 +655,13 @@ function MissionCard({ mission }: { mission: GMMission }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-export default function MissionsPage() {
+// Casino and non-casino missions now live in separate admin tabs (permanent
+// split — casino gets its own tab in every season). One component serves both,
+// filtered by mission type; each MissionCard already renders casino vs map
+// details from `mission.type`.
+type MissionFilter = 'casino' | 'noncasino' | 'all';
+
+export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilter }) {
   const { gameState } = useGameState();
   const { addToast }  = useToast();
   const [seeding, setSeeding] = useState(false);
@@ -540,9 +670,17 @@ export default function MissionsPage() {
   // archived season is winding down (mirrors gmSpawnAllowed server-side).
   const { season } = useSeason();
   const seedAllowed = season?.status === 'draft' || season?.status === 'active';
+  // The seed/open button belongs on the tab that matches the season's native
+  // mission kind: the Casino tab in a casino season, the Missions tab in a map
+  // season. (S2's casino-in-a-map-season seeding is a separate future concern.)
+  const nativeFilter: MissionFilter = season?.shell === 'casino' ? 'casino' : 'noncasino';
+  const canSeedHere = filter === 'all' || filter === nativeFilter;
+  const isCasinoTab = filter === 'casino';
 
   const missions = gameState?.missions ?? {};
-  const active   = Object.values(missions).filter(m => m.state !== 'complete');
+  const matchesFilter = (m: GMMission) =>
+    filter === 'all' ? true : filter === 'casino' ? m.type === 'casino' : m.type !== 'casino';
+  const active   = Object.values(missions).filter(m => m.state !== 'complete' && matchesFilter(m));
   const forming  = active.filter(m => m.state === 'forming')   .sort((a, b) => (a.createdAt  ?? 0) - (b.createdAt  ?? 0));
   const inprog   = active.filter(m => m.state === 'inprogress').sort((a, b) => (a.deployedAt ?? 0) - (b.deployedAt ?? 0));
 
@@ -567,7 +705,7 @@ export default function MissionsPage() {
 
   return (
     <div className="dash-page">
-      <h2 className="dash-page-title">⚜ Guildmaster Missions</h2>
+      <h2 className="dash-page-title">{isCasinoTab ? '🂡 Casino Tables' : '⚜ Guildmaster Missions'}</h2>
 
       <div className="dash-challenges-cols">
         <div className="dash-col">
@@ -577,14 +715,14 @@ export default function MissionsPage() {
           </div>
           {forming.length === 0 ? (
             <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
-              <span>No forming missions.</span>
-              {active.length === 0 && (
+              <span>No forming {isCasinoTab ? 'tables' : 'missions'}.</span>
+              {active.length === 0 && canSeedHere && (
                 seedAllowed ? (
                   <button className="dash-action-btn" disabled={seeding} onClick={handleSeed}>
                     {seeding ? '…' : season?.shell === 'casino' ? '🂡 Open Casino Tables' : '⚜ Seed Initial Missions'}
                   </button>
                 ) : (
-                  <span className="dash-empty" style={{ padding: 0 }}>New missions are closed for this season.</span>
+                  <span className="dash-empty" style={{ padding: 0 }}>New {isCasinoTab ? 'tables are' : 'missions are'} closed for this season.</span>
                 )
               )}
             </div>

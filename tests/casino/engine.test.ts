@@ -16,7 +16,7 @@ import {
 import { handStake as clientHandStake } from '../../src/lib/casinoSlots';
 import { applyDeckBoost as clientApplyDeckBoost } from '../../src/lib/casinoSlots';
 import {
-  GAMBIT_DEFS, makeGambitDeck, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
+  GAMBIT_DEFS, makeGambitDeck, gambitOfferable, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
 } from '../../src/lib/casinoGambits';
 import {
   casinoEntryCosts, pickNextCasinoGame, freshCasinoTable, casinoPotShares, casinoSeatPaid,
@@ -262,6 +262,38 @@ describe('shared gambit deck draws 3 unique and depletes', () => {
       expect(offer.length).toBe(3);
       expect(new Set(offer.map(c => c.defId)).size).toBe(3); // unique-within-offer
       expect(deck.remaining()).toBe(54 - seat * 3);          // depletes; never runs dry (8×3 < 54)
+    }
+  });
+});
+
+describe('gambitOfferable — withhold gambits that would drive a stat below 0', () => {
+  const stats = { release: 60, collect: 4, hint: 0.5, xp: 50 };
+  const def = (stat: 'release' | 'collect' | 'hint', delta: number) =>
+    GAMBIT_DEFS.find(d => d.stat === stat && d.delta === delta)!;
+
+  it('withholds Collect penalties that would go negative (4% collect)', () => {
+    expect(gambitOfferable(stats, def('collect', -5))).toBe(false); // 4 − 5 < 0
+    expect(gambitOfferable(stats, def('collect', -7))).toBe(false); // 4 − 7 < 0
+    expect(gambitOfferable(stats, def('collect', -3))).toBe(true);  // 4 − 3 = 1
+  });
+
+  it('withholds Hint bonuses that would go negative (0.5% hint)', () => {
+    expect(gambitOfferable(stats, def('hint', -1))).toBe(false);    // 0.5 − 1 < 0
+    expect(gambitOfferable(stats, def('hint', -0.5))).toBe(true);   // 0.5 − 0.5 = 0
+    expect(gambitOfferable(stats, def('hint', 1.5))).toBe(true);    // raising is always fine
+  });
+
+  it('never withholds an improving direction that stays in range', () => {
+    expect(gambitOfferable(stats, def('release', 7))).toBe(true);   // 60 + 7 fine
+    expect(gambitOfferable(stats, def('collect', 5))).toBe(true);
+  });
+
+  it('drawOffer(allow) only offers cards that pass the filter', () => {
+    const deck  = makeGambitDeck();
+    const allow = (c: { stat: 'release' | 'collect' | 'hint'; delta: number }) => gambitOfferable(stats, c);
+    for (let i = 0; i < 6; i++) {
+      const offer = deck.drawOffer(3, allow);
+      for (const c of offer) expect(allow(c)).toBe(true);
     }
   });
 });

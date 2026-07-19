@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
-import type { AdvSlot, GMMission, GMParticipant, SlotStatus } from '../../types';
-import type { CasinoGame, DeckCard } from '../../lib/casinoData';
-import { CASINO_GAMES } from '../../lib/casinoData';
+import type { GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
+import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
+import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
 import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
@@ -12,6 +12,53 @@ type View = 'lounge' | 'floor';
 
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
 const initial = (name: string): string => (name.trim()[0] ?? '?').toUpperCase();
+
+// Card-type visuals: suit from CARD_TYPES, hue mirroring CardFace's TYPE_META.
+const CARD_HUE: Record<CardTypeKey, number> = { wild: 75, broad: 200, platform: 295, franchise: 30, narrow: 150 };
+const suitOf = (t: CardTypeKey | undefined) => (t ? CARD_TYPES[t].suit : '✦');
+const hueOf  = (t: CardTypeKey | undefined) => (t ? CARD_HUE[t] : 75);
+
+// SlotStatus → the design's status-pill class.
+const STATUS_CLS: Record<SlotStatus, string> = {
+  'Unstarted': 'unstarted', 'In-Progress': 'inprog', '100%': 'full', 'Goaled': 'goal', 'Done': 'done',
+};
+
+// One committed game at the table: the slot's real game (once filled) paired with
+// the card it came from (suit/hue/flavour) via the persisted lockedCards.
+interface SeatGame { slot: string; game: string; cardName: string; type?: CardTypeKey; status: SlotStatus; }
+function seatGames(seat: GMParticipant): SeatGame[] {
+  const slots = seat.slots ?? [];
+  const cards = seat.lockedCards ?? [];
+  return slots.map((s, i) => ({
+    slot:     s.name?.trim() || `Seat ${i + 1}`,
+    game:     s.game?.trim() || cards[i]?.name || 'Unfilled',
+    cardName: cards[i]?.name ?? '',
+    type:     cards[i]?.type,
+    status:   s.status ?? 'Unstarted',
+  }));
+}
+
+function StatusPill({ status }: { status: SlotStatus }) {
+  return <span className={`mp-st ${STATUS_CLS[status]}`}><span className="dot" />{status}</span>;
+}
+
+function NetBadge({ n, big }: { n: number; big?: boolean }) {
+  const cls = n > 0 ? 'pos' : n < 0 ? 'neg' : 'even';
+  const str = n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '±0';
+  return <span className={`st-net ${cls}${big ? ' big' : ''}`}>{str}<small>g</small></span>;
+}
+
+function GameChip({ g }: { g: SeatGame }) {
+  const goaled = isGoaled(g.status);
+  return (
+    <span className={`st-chip${goaled ? ' goaled' : ''}`} style={{ '--th': hueOf(g.type) } as React.CSSProperties}
+          title={`${g.cardName || g.game} · ${g.status}`}>
+      <span className="st-chip-suit">{suitOf(g.type)}</span>
+      <span className="st-chip-game">{g.game}</span>
+      {goaled && <span className="st-chip-tick">✓</span>}
+    </span>
+  );
+}
 // Blackjack is the lone "Casino"-family game; the rest are poker variants whose
 // committed cards are a deliberate take, hence the different stake wording.
 const stakeLabel = (g: CasinoGame): string => (g === 'blackjack' ? "You're playing for" : 'Your committed take');
@@ -54,29 +101,6 @@ function Panel({ kick, name, sub, children }: { kick: string; name: string; sub?
       </div>
       {children}
     </div>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: ReactNode; tone?: 'gold' | 'pos' | 'neg' }) {
-  return (
-    <div className="rl-mini">
-      <span className="rl-mini-lbl">{label}</span>
-      <span className={`rl-mini-val${tone ? ` ${tone}` : ''}`}>{value}</span>
-    </div>
-  );
-}
-
-const gold = (n: number) => <>{n}<small>g</small></>;
-const signed = (n: number) => <>{n >= 0 ? '+' : '−'}{Math.abs(n)}<small>g</small></>;
-
-function SlotPill({ slot }: { slot: AdvSlot }) {
-  const done = isGoaled(slot.status);
-  return (
-    <span className={`rl-slotpill${done ? ' goaled' : ''}`} title={slot.details || undefined}>
-      {done && <span className="rl-tick" aria-hidden>✓</span>}
-      <span className="rl-slotpill-game">{slot.game?.trim() || 'Unfilled'}</span>
-      {slot.status && <span className="rl-slotpill-st">{slot.status}</span>}
-    </span>
   );
 }
 
@@ -185,6 +209,25 @@ function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
   );
 }
 
+// Host denied this seat's config — the player must head to the table and resubmit.
+// Shown in both Seated (forming) and Board (in-progress), since a denial can land
+// at either state and is the only case where an in-progress seat must act.
+function DenyNotice({ seat, href }: { seat: GMParticipant; href: string | null }) {
+  if (!seat.yamlDenied) return null;
+  return (
+    <div className="rl-deny">
+      <span className="rl-deny-icon">⛔</span>
+      <div className="rl-deny-txt">
+        <b>Your config was denied.</b>
+        <span>{seat.yamlDeniedReason || 'Your host asked you to resubmit your Archipelago config.'}</span>
+      </div>
+      {href && (
+        <a className="rl-btn primary" href={href} target="_blank" rel="noopener noreferrer">Resubmit config →</a>
+      )}
+    </div>
+  );
+}
+
 function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
   m: GMMission; uid: string; now: number; seasonId: string; view: View; onLeave: () => void;
 }) {
@@ -225,6 +268,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
     return (
       <div className="rl-ct lounge">
         {head}
+        <DenyNotice seat={seat} href={href} />
         {hand}
         {seat.played && <Stake amount={seat.goldSwing ?? 0} label={stakeLabel(game)} />}
         {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
@@ -242,6 +286,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
         {head}
         <span className={`rl-badge ${ready ? 'ready' : 'seated'}`}>{ready ? 'Ready to deploy' : 'Your seat'}</span>
       </div>
+      <DenyNotice seat={seat} href={href} />
       <SeatGrid m={m} uid={uid} max={max} />
       <div className="rl-ct-cols">
         <div>
@@ -261,110 +306,227 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
 
 // ── Board (mission in progress) ───────────────────────────────────────────────
 
-function allSlots(m: GMMission): { seat: GMParticipant; slots: AdvSlot[] }[] {
-  return Object.values(m.participants ?? {}).map(seat => ({ seat, slots: seat.slots ?? [] }));
+// The Archipelago room — how players actually play their games to finish the
+// table — plus the optional Cheesetracker for richer progress detail. Both are
+// admin-set after deploy, so each appears only once available. Mirrors the map
+// mission card (link) and agenda drawer (🧀 tracker).
+function ChallengeLinks({ m }: { m: GMMission }) {
+  if (!m.link && !m.cheese) return null;
+  return (
+    <div className="rl-chlinks">
+      {m.link && (
+        <a className="rl-btn primary rl-chlink-play" href={m.link} target="_blank" rel="noopener noreferrer">
+          🗺 Open Archipelago Game →
+        </a>
+      )}
+      {m.cheese && (
+        <a className="rl-chlink-cheese" title="Open Cheesetracker — challenge progress"
+           href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${m.cheese}`}
+           target="_blank" rel="noopener noreferrer">🧀 Tracker</a>
+      )}
+    </div>
+  );
+}
+
+// A player's committed game, tagged with its owner — for the board's tile grids.
+interface OwnedGame extends SeatGame { ownerName: string; you: boolean; ownerHue: number; }
+
+function Completion({ goaled, total }: { goaled: number; total: number }) {
+  const pct  = total ? Math.round((goaled / total) * 100) : 0;
+  const done = total > 0 && goaled === total;
+  return (
+    <div className="mp-complete-wrap">
+      <div className="mp-complete">
+        <span className="big">{goaled}</span><span className="of">/ {total}</span>
+        <span className="lab">slots goaled · {pct}%</span>
+      </div>
+      <div className={`mp-meter${done ? ' done' : ''}`}><div className="mp-meter-fill" style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+function rollTag(t: TriState) {
+  if (t === 'on')  return <span className="mp-roll on">On</span>;
+  if (t === 'off') return <span className="mp-roll off">Off</span>;
+  return <span className="mp-roll pending">to roll</span>;
+}
+
+function Telemetry({ m, elapsed }: { m: GMMission; elapsed: string }) {
+  const s = m.casinoStats;
+  return (
+    <div className="mp-tele">
+      <div className="mp-tele-item">
+        <span className="mp-tele-val" style={{ '--oh': 200 } as React.CSSProperties}>{s?.release ?? '—'}<small>%</small></span>
+        <span className="mp-tele-lbl">Release {rollTag(m.release)}</span>
+      </div>
+      <div className="mp-tele-item">
+        <span className="mp-tele-val" style={{ '--oh': 295 } as React.CSSProperties}>{s?.collect ?? '—'}<small>%</small></span>
+        <span className="mp-tele-lbl">Collect {rollTag(m.collect)}</span>
+      </div>
+      <div className="mp-tele-item">
+        <span className="mp-tele-val" style={{ '--oh': 30 } as React.CSSProperties}>{m.hint}<small>%</small></span>
+        <span className="mp-tele-lbl">Hint cost</span>
+      </div>
+      <div className="mp-tele-item">
+        <span className="mp-tele-val" style={{ '--oh': 75 } as React.CSSProperties}>{elapsed}</span>
+        <span className="mp-tele-lbl">Elapsed</span>
+      </div>
+    </div>
+  );
+}
+
+// Spatial card tiles — one per committed game, coloured by its card's suit.
+function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
+  return (
+    <div className="mp-board">
+      {tiles.map((t, i) => (
+        <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
+             style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
+          <div className="mp-tile-top">
+            <span className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</span>
+            <StatusPill status={t.status} />
+          </div>
+          <div className="mp-tile-game">{t.game}</div>
+          <div className="mp-tile-owner">
+            <span className="mp-pav" style={{ '--ph': t.ownerHue } as React.CSSProperties}>{initial(t.ownerName)}</span>
+            {t.you ? 'You' : t.ownerName} · {t.slot}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: number; seasonId: string }) {
-  const rows    = allSlots(m);
-  const slots   = rows.flatMap(r => r.slots);
-  const goaled  = slots.filter(s => isGoaled(s.status)).length;
-  const pct     = slots.length ? Math.round((goaled / slots.length) * 100) : 0;
-  const elapsed = m.deployedAt ? fmtClock((now - m.deployedAt) / 1000) : '—';
-  const mine    = rows.find(r => r.seat.playerId === uid);
-  const others  = rows.filter(r => r.seat.playerId !== uid);
-  const href    = tableHref(m, seasonId);
+  const mine: OwnedGame[] = [];
+  const others: OwnedGame[] = [];
+  Object.values(m.participants ?? {}).forEach((p, idx) => {
+    const you = p.playerId === uid;
+    const hue = seatHue(idx);
+    for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, you, ownerHue: hue });
+  });
+  const all       = [...mine, ...others];
+  const goaled    = all.filter(g => isGoaled(g.status)).length;
+  const myGoaled  = mine.filter(g => isGoaled(g.status)).length;
+  const elapsed   = m.deployedAt ? fmtClock((now - m.deployedAt) / 1000) : '—';
+  const href      = tableHref(m, seasonId);
+  const seat      = m.participants?.[uid];
 
   return (
-    <Panel kick="Your table · in progress" name={missionDisplayLabel(m)}
-           sub="Every seat has played. Now the room races the board.">
-      <div className="rl-meter" role="img" aria-label={`${goaled} of ${slots.length} slots goaled`}>
-        <div className="rl-meter-fill" style={{ width: `${pct}%` }} />
-        <span className="rl-meter-lbl">{goaled}/{slots.length} goaled</span>
+    <div className="mp-ct">
+      <div className="mp-ct-rim" />
+      <div className="mp-ct-head">
+        <div>
+          <div className="mp-ct-kick">Your table · live</div>
+          <div className="mp-ct-name">{missionDisplayLabel(m)}</div>
+          <div className="mp-ct-room">{CASINO_GAMES[tableGame(m)].label} · deployed {elapsed} ago</div>
+        </div>
+        <span className="mp-phase-chip inprogress">In progress</span>
       </div>
 
-      <div className="rl-phase-stats">
-        <Stat label="Release" value={m.release === 'on' ? 'On' : 'Off'} tone={m.release === 'on' ? 'pos' : undefined} />
-        <Stat label="Collect" value={m.collect === 'on' ? 'On' : 'Off'} tone={m.collect === 'on' ? 'pos' : undefined} />
-        <Stat label="Hint cost" value={<>{m.hint}<small>%</small></>} />
-        <Stat label="Elapsed" value={elapsed} />
-        <Stat label="On the table" value={gold(m.pot ?? 0)} tone="gold" />
-      </div>
+      <div className="mp-ct-body">
+        {seat && <DenyNotice seat={seat} href={href} />}
+        <div className="mp-row" style={{ gap: '1.6rem', alignItems: 'flex-start' }}>
+          <Completion goaled={goaled} total={all.length} />
+          <Telemetry m={m} elapsed={elapsed} />
+        </div>
 
-      {mine && (
-        <div className="rl-mine">
-          <div className="rl-mini-lbl">Your games</div>
-          <div className="rl-slotwrap">
-            {mine.slots.length
-              ? mine.slots.map((s, i) => <SlotPill key={i} slot={s} />)
-              : <span className="rl-muted">No games recorded for your seat.</span>}
+        <ChallengeLinks m={m} />
+
+        <div className="mp-mine">
+          <div className="mp-cell-lbl">Your games <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span></div>
+          {mine.length
+            ? <TileGrid tiles={mine} />
+            : <span className="mp-muted">No games recorded for your seat yet.</span>}
+        </div>
+
+        {others.length > 0 && (
+          <div>
+            <div className="mp-cell-lbl">The rest of the table</div>
+            <TileGrid tiles={others} />
           </div>
-        </div>
-      )}
+        )}
 
-      {others.map(r => (
-        <div key={r.seat.playerId} className="rl-seatslots">
-          <div className="rl-mini-lbl">{r.seat.playerName}</div>
-          <div className="rl-slotwrap">{r.slots.map((s, i) => <SlotPill key={i} slot={s} />)}</div>
-        </div>
-      ))}
-
-      {href && (
-        <div className="rl-phase-acts">
-          <a className="rl-btn" href={href} target="_blank" rel="noopener noreferrer">View the table →</a>
-        </div>
-      )}
-    </Panel>
+        {href && (
+          <div className="mp-row">
+            <a className="rl-btn" href={href} target="_blank" rel="noopener noreferrer">View the table →</a>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 // ── Ledger (settled) ──────────────────────────────────────────────────────────
 
+const rollText = (t: TriState) => (t === 'on' ? 'On' : t === 'off' ? 'Off' : '—');
+
 function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismiss: () => void }) {
   const rows = Object.values(m.participants ?? {})
-    .map(seat => ({
+    .map((seat, i) => ({
       seat,
-      hand: seat.goldSwing ?? 0,
-      pot:  seat.potShare  ?? 0,
+      hue:     seatHue(i),
+      hand:    seat.goldSwing ?? 0,
+      pot:     seat.potShare  ?? 0,
+      entries: casinoSeatPaid(m, seat.playerId),
       // `net` is stamped at settle; the fallback keeps pre-stamp tables readable.
-      net:  seat.net ?? (seat.goldSwing ?? 0) + (seat.potShare ?? 0) - casinoSeatPaid(m, seat.playerId),
+      net:     seat.net ?? (seat.goldSwing ?? 0) + (seat.potShare ?? 0) - casinoSeatPaid(m, seat.playerId),
+      games:   seatGames(seat),
     }))
     .sort((a, b) => b.net - a.net);
 
-  const best  = rows.length ? rows[0].net : 0;
-  const yours = rows.find(r => r.seat.playerId === uid);
+  const winner = rows[0];
 
   return (
-    <Panel kick="Settled" name={missionDisplayLabel(m)}
-           sub={yours ? `You walked away ${yours.net >= 0 ? 'up' : 'down'} ${Math.abs(yours.net)}g.` : undefined}>
-      <div className="rl-ledger">
+    <div className="rl-settled-wrap">
+      <div className="st-head">
+        <div className="st-seal">🂡</div>
+        <div className="st-kick">The night is settled</div>
+        <div className="st-title">{missionDisplayLabel(m)}</div>
+        <div className="st-sub">{CASINO_GAMES[tableGame(m)].label}</div>
+        <div className="st-facts">
+          <span>Pot <b>{m.pot ?? 0}g</b></span>
+          <span className="st-dot">·</span>
+          <span>Release <b className={m.release === 'on' ? 'on' : 'off'}>{rollText(m.release)}</b></span>
+          <span className="st-dot">·</span>
+          <span>Collect <b className={m.collect === 'on' ? 'on' : 'off'}>{rollText(m.collect)}</b></span>
+          {winner && (
+            <>
+              <span className="st-dot">·</span>
+              <span>Best night <b className="gold">{winner.seat.playerId === uid ? 'You' : winner.seat.playerName}</b>{' '}
+                {winner.net >= 0 ? '+' : '−'}{Math.abs(winner.net)}g</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="st-ledger">
+        <div className="st-lcols">
+          <span>Player</span><span>Games brought</span>
+          <span className="num">Hand</span><span className="num">Pot</span><span className="num">Entries</span><span className="num">Net</span>
+        </div>
         {rows.map(r => {
-          const you    = r.seat.playerId === uid;
-          const winner = r.net === best && best > 0;
+          const you = r.seat.playerId === uid;
           return (
-            <div key={r.seat.playerId} className={`rl-ledger-row${you ? ' you' : ''}${winner ? ' winner' : ''}`}>
-              <div className="rl-ledger-who">
-                <span className="rl-roster-name">
-                  {r.seat.playerName}
-                  {you && <span className="rl-you">you</span>}
-                  {winner && <span className="rl-crown" title="Biggest win">♛</span>}
-                </span>
-                <div className="rl-slotwrap">{(r.seat.slots ?? []).map((s, i) => <SlotPill key={i} slot={s} />)}</div>
-              </div>
-              <div className="rl-ledger-nums">
-                <Stat label="Hand" value={gold(r.hand)} />
-                <Stat label="Pot" value={gold(r.pot)} />
-                <Stat label="Entries" value={gold(casinoSeatPaid(m, r.seat.playerId))} />
-                <Stat label="Net" value={signed(r.net)} tone={r.net >= 0 ? 'pos' : 'neg'} />
-              </div>
+            <div key={r.seat.playerId} className={`st-lrow${you ? ' you' : ''}`}>
+              <span className="st-lname">
+                <span className="st-pav sm" style={{ '--ph': r.hue } as React.CSSProperties}>{initial(r.seat.playerName)}</span>
+                {you ? 'You' : r.seat.playerName}
+              </span>
+              <span className="st-chips">{r.games.map((g, i) => <GameChip key={i} g={g} />)}</span>
+              <span className="st-lnum">{r.hand}g</span>
+              <span className="st-lnum">+{r.pot}g</span>
+              <span className="st-lnum neg">−{r.entries}g</span>
+              <span className="st-lnum"><NetBadge n={r.net} /></span>
             </div>
           );
         })}
       </div>
-      <div className="rl-phase-acts">
+
+      <div className="rl-ct-acts" style={{ justifyContent: 'center' }}>
         <button className="rl-btn" onClick={onDismiss}>Clear the felt</button>
       </div>
-    </Panel>
+    </div>
   );
 }
 

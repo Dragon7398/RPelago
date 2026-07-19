@@ -14,6 +14,7 @@
     "econ": "vite-node scripts/econ.ts"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "firebase": "^12.12.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

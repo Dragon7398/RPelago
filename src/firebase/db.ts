@@ -877,6 +877,26 @@ export async function adminKickMissionParticipant(missionId: string, playerId: s
   await httpsCallable(functions!, 'adminKickMissionParticipant')({ missionId, playerId, seasonId: getCurrentSeason() });
 }
 
+export interface CasinoYaml { uid: string; playerName: string; text: string }
+
+// Admin: fetch a casino mission's uploaded Slot-Fill YAMLs (via the Admin SDK,
+// which bypasses the owner-only Storage rules). For host verification / AP room
+// generation. Works for live or settled missions.
+export async function adminGetCasinoYamls(missionId: string): Promise<CasinoYaml[]> {
+  assertFunctions();
+  const res = await httpsCallable<{ missionId: string; seasonId: string }, { yamls: CasinoYaml[] }>(
+    functions!, 'adminGetCasinoYamls',
+  )({ missionId, seasonId: getCurrentSeason() });
+  return res.data.yamls;
+}
+
+// Admin: deny a casino seat's uploaded config — invalidates the stored YAML and
+// flags the seat so the player is prompted to resubmit (forming or in-progress).
+export async function adminDenyCasinoYaml(missionId: string, playerId: string, reason?: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminDenyCasinoYaml')({ missionId, playerId, reason: reason ?? null, seasonId: getCurrentSeason() });
+}
+
 export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'claimMissionSlot')({ missionId, slotKey, seasonId: getCurrentSeason() });
@@ -925,6 +945,12 @@ function archivedMission(mission: GMMission, potShares: Map<string, number>): GM
 export async function completeMission(
   mission: GMMission,
   players: Record<string, Player>,
+  // The active season's shell decides whether XP is a live reward. A casino-only
+  // season (S1.5) is gold-only — XP is inert, so no mission awards it. A map
+  // season (S2) awards XP for every mission, casino ones included. Keyed on the
+  // shell (not on the player's `xp` field) so it stays correct even if casino
+  // records later carry a uniform `xp: 0`, per the season-architecture plan.
+  shell: 'map' | 'casino',
   confirmed?: boolean,
 ): Promise<{ warned?: boolean; unfinishedSlots?: number }> {
   assertDb();
@@ -953,7 +979,17 @@ export async function completeMission(
     const player = players[pid];
     if (!player) continue;
 
-    // Feat bonuses — same calculation as tile rewards
+    const isCasino = mission.type === 'casino';
+
+    // A folded / never-played casino seat wins nothing — just free it.
+    if (isCasino && !participant.played) {
+      updates[sPath(`players/${pid}/activeMission`)] = null;
+      continue;
+    }
+
+    // Feat bonuses (mentor/treasurer) — same calculation as tile rewards. They
+    // apply to a mission's fixed XP/GP reward, NOT to casino winnings (card
+    // values + pot are never feat-multiplied).
     const otherIds = ownerIds.filter(id => id !== pid);
     const isMentor    = Object.values(player.feats ?? {}).includes('mentor');
     const isTreasurer = Object.values(player.feats ?? {}).includes('treasurer');
@@ -962,31 +998,13 @@ export async function completeMission(
     const xpMultiplier   = 1 + otherMentors    * 0.05 + (isMentor    ? otherIds.length * 0.01 : 0);
     const goldMultiplier = 1 + otherTreasurers * 0.10 + (isTreasurer ? otherIds.length * 0.03 : 0);
 
-    let earnedXP: number;
+    // Gold source differs by mission kind; XP is the (possibly gambit-raised)
+    // mission floor for both. For casino, gold = card values + pot share.
+    let earnedXP:   number;
     let earnedGold: number;
-
-    if (mission.type === 'casino') {
-      // Folded players (never played) receive nothing; just free them from the mission.
-      if (!participant.played) {
-        updates[sPath(`players/${pid}/activeMission`)] = null;
-        continue;
-      }
-      // XP: mission.xp was locked at deploy to casinoStats.xp; feat multipliers apply.
-      earnedXP = Math.round(mission.xp * xpMultiplier);
-      // Gold: gambling winnings (goldSwing + pot share); no feat multiplier on gambling.
+    if (isCasino) {
+      earnedXP   = Math.round((mission.xp ?? 0) * xpMultiplier);
       earnedGold = (participant.goldSwing ?? 0) + (potShares.get(pid) ?? 0);
-
-      // Coat earn path: mark this game type completed; grant the Coat once the
-      // player has successfully completed a table of all four game types.
-      if (mission.casinoGame) {
-        updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
-        const completed = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
-        const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
-        const hasCoat    = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
-        if (hasAllFour && !hasCoat) {
-          updates[sPath(`players/${pid}/inventory/coat_of_many_colors`)] = 1;
-        }
-      }
     } else {
       earnedXP   = Math.round(mission.xp * xpMultiplier);
       earnedGold = Math.round(mission.gp * goldMultiplier);
@@ -996,27 +1014,51 @@ export async function completeMission(
       }
     }
 
-    const prevLevel     = calcLevel(player.xp);
-    const newXp         = player.xp + earnedXP;
-    const newLevel      = calcLevel(newXp);
-    const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
-
-    updates[sPath(`players/${pid}/xp`)]           = newXp;
-    updates[sPath(`players/${pid}/gold`)]          = player.gold + earnedGold;
-    updates[sPath(`players/${pid}/adventurers`)]   = updatedPlayer.adventurers;
+    // Gold and mission-release are written for everyone.
+    updates[sPath(`players/${pid}/gold`)]          = (player.gold ?? 0) + earnedGold;
     updates[sPath(`players/${pid}/activeMission`)] = null;
+
+    // XP, level-grants and completion history are only written in a season that
+    // awards XP (map). A casino-only season (S1.5) is gold-only — XP is inert
+    // (gambit XP is paid as gold) and its players carry no adventurers, so this
+    // whole block is skipped. In a MAP season (S2), casino participants DO earn
+    // XP from their gambit-raised floor and can level up, like any other mission.
+    if (shell !== 'casino') {
+      const baseXp        = player.xp ?? 0;
+      const prevLevel     = calcLevel(baseXp);
+      const newXp         = baseXp + earnedXP;
+      const newLevel      = calcLevel(newXp);
+      const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
+
+      updates[sPath(`players/${pid}/xp`)]         = newXp;
+      updates[sPath(`players/${pid}/adventurers`)] = updatedPlayer.adventurers;
+
+      const entryKey = push(sRef(db!, `players/${pid}/completedChallenges`)).key!;
+      updates[sPath(`players/${pid}/completedChallenges/${entryKey}`)] = {
+        coord:       'D3',
+        name:        label,
+        xpAwarded:   earnedXP,
+        goldAwarded: earnedGold,
+        completedAt: now,
+      };
+    }
+
+    // Casino Coat earn path: mark this game type completed; grant the Coat once
+    // the player has successfully completed a table of all four game types. Works
+    // in either season — the tracking is the same.
+    if (isCasino && mission.casinoGame) {
+      updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
+      const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
+      const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
+      const hasCoat    = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
+      if (hasAllFour && !hasCoat) {
+        updates[sPath(`players/${pid}/inventory/coat_of_many_colors`)] = 1;
+      }
+    }
+
     if (mission.type === 'basic') {
       updates[sPath(`players/${pid}/basicTrainingDone`)] = true;
     }
-
-    const entryKey = push(sRef(db!, `players/${pid}/completedChallenges`)).key!;
-    updates[sPath(`players/${pid}/completedChallenges/${entryKey}`)] = {
-      coord:       'D3',
-      name:        label,
-      xpAwarded:   earnedXP,
-      goldAwarded: earnedGold,
-      completedAt: now,
-    };
   }
 
   updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares);

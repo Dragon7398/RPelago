@@ -4,9 +4,10 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getDatabase, ServerValue } from 'firebase-admin/database';
+import { getStorage } from 'firebase-admin/storage';
 import { defineSecret } from 'firebase-functions/params';
 import {
-  type DeckCard, type CasinoStats, type GambitDef, type CasinoDeckChoice, type CasinoGame,
+  type DeckCard, type CasinoStats, type GambitDef, type GambitCard, type CasinoDeckChoice, type CasinoGame,
   CASINO_MIN_ENLIST_GOLD, CASINO_POT_SEED,
   CASINO_START_STATS,
   CASINO_GAMES, CASINO_GAME_ORDER, potContribution, drawCommunity, rollTableSetup,
@@ -14,6 +15,7 @@ import {
   GAMBIT_DEFS_BY_ID, DECK_VARIANTS,
   buildDeck, shuffle, makeDrawableDeck,
   handStake, applyGambit, rollCasinoOdds, cardsToSlots,
+  makeGambitDeck, gambitOfferable, buildGambitDeck,
   deckChoiceOf, applyDeckBoost,
 } from './casinoEngine';
 import {
@@ -674,6 +676,10 @@ interface GMParticipant {
   lockedCards?: DeckCard[];               // the committed cards, made public at lock for the landing
   casinoXp?:   number;                    // XP this seat contributed via gambits
   gambitPlayed?: boolean;                  // true once the gambit phase is resolved for this seat
+  gambitOffer?:  string[];                 // the gambit defIds dealt to this seat from the shared deck
+  yamlDenied?:       boolean;              // host denied this seat's config; stored YAML deleted, awaiting resubmit
+  yamlDeniedReason?: string;
+  yamlDeniedAt?:     number;
   gameType?:    'poker' | 'blackjack';     // which game was chosen (for session recovery)
   rerolled?:    boolean;                   // true once the poker reroll has been used
   deck?:        DeckCard[];               // server-held remaining draw deck (cleared at lock)
@@ -1012,6 +1018,27 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
   });
 }
 
+// A seat's SECRET hand/deck live outside the mission (seasonSecrets/), so removing
+// the public participant does NOT clear them. Any path that empties a seat — leave,
+// kick — must null these too, or an orphaned hand blocks the seat: `mustCasinoSeat`
+// still sees a hand and reports "Finish or fold your current hand first." Enlisting
+// clears them defensively as well, so a fresh seat always starts clean.
+function clearSeatSecrets(seasonId: string, missionId: string, uid: string): Record<string, null> {
+  return {
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
+  };
+}
+
+// Delete a seat's uploaded Slot-Fill config from Storage. Any path that removes the
+// seat's owner — a willing stand-down, an admin kick — or invalidates the submission
+// (deny) drops the file, so the host never builds the room from a config whose owner
+// has left the table or been rejected. Storage lives outside the RTDB update, so this
+// is awaited separately; `ignoreNotFound` makes it a safe no-op when nothing was uploaded.
+async function deleteSeatYaml(seasonId: string, missionId: string, uid: string): Promise<void> {
+  await casinoBucket().file(`casino/${seasonId}/${missionId}/${uid}.yaml`).delete({ ignoreNotFound: true });
+}
+
 // ── Player callables ──────────────────────────────────────────────────────────
 
 export const enlistInMission = onCall(async (request) => {
@@ -1056,6 +1083,8 @@ export const enlistInMission = onCall(async (request) => {
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${uid}`)]: participant,
     [sp(seasonId, `players/${uid}/activeMission`)]:              missionId,
+    // A fresh seat starts with no dealt hand — clears any orphan from a prior sit.
+    ...clearSeatSecrets(seasonId, missionId, uid),
   };
   if (mission.firstJoinAt == null) {
     updates[sp(seasonId, `missions/${missionId}/firstJoinAt`)] = now;
@@ -1095,6 +1124,8 @@ export const standDownFromMission = onCall(async (request) => {
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${uid}`)]: null,
     [sp(seasonId, `players/${uid}/activeMission`)]:              null,
+    // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
+    ...clearSeatSecrets(seasonId, missionId, uid),
   };
 
   const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
@@ -1103,6 +1134,8 @@ export const standDownFromMission = onCall(async (request) => {
   }
 
   await db.ref().update(updates);
+  // Leaving invalidates any submitted config — the seat's owner is gone.
+  if (mission.type === 'casino') await deleteSeatYaml(seasonId, missionId, uid);
   return { success: true };
 });
 
@@ -1449,8 +1482,59 @@ export const casinoFold = onCall(async (request) => {
   return { startBy: now + 3_600_000 };
 });
 
-// Play a gambit. Validates the defId, applies it to the shared mission.casinoStats,
-// deducts any gold cost from the player, adds to the pot. One gambit per seat.
+// Deal this seat its gambit offer from the mission's SHARED, depleting deck.
+// The deck is server-only (seasonSecrets) so its order can't be read ahead; the
+// offer this returns is the ONLY set playCasinoGambit will accept. Idempotent per
+// seat: an undrawn offer already on the seat is returned unchanged, so a reload
+// or the Hold 'Em recovery path never re-draws and never depletes the deck twice.
+// Gambits that would drive a stat below 0 are withheld (returned to circulation),
+// mirroring the client guard — but here it's authoritative.
+export const dealGambitOffer = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { mission, seat } = await mustCasinoSeat(db, seasonId, missionId, uid);
+
+  if (seat.gambitPlayed) throw new HttpsError('failed-precondition', 'Gambit phase already resolved.');
+  if (!seat.hand || seat.hand.length === 0) throw new HttpsError('failed-precondition', 'No committed hand.');
+
+  const asCards = (ids: string[]): GambitCard[] =>
+    ids.map(id => GAMBIT_DEFS_BY_ID[id])
+       .filter((d): d is GambitDef => !!d)
+       .map((d, i) => ({ ...d, uid: `gam_${uid}_${i}` }));
+
+  // Idempotent — hand back the offer already dealt to this seat, if any.
+  if (seat.gambitOffer && seat.gambitOffer.length > 0) {
+    return { offer: asCards(seat.gambitOffer) };
+  }
+
+  const stats: CasinoStats = mission.casinoStats ?? { ...CASINO_START_STATS };
+
+  // Draw from the shared per-mission deck under a transaction, so concurrent seats
+  // deplete one common deck (variety across the table) without clobbering it.
+  // Rebuild when the deck is missing or too short to fill an offer.
+  let offer: GambitCard[] = [];
+  await db.ref(secret(seasonId, `missions/${missionId}/gambitDeck`)).transaction(
+    (current: GambitCard[] | null) => {
+      const handle = makeGambitDeck(current && current.length >= 3 ? current : buildGambitDeck());
+      offer = handle.drawOffer(3, card => gambitOfferable(stats, card));
+      return handle.toArray();
+    },
+  );
+
+  await db.ref(sp(seasonId, `missions/${missionId}/participants/${uid}/gambitOffer`))
+    .set(offer.map(c => c.defId));
+
+  return { offer };
+});
+
+// Play a gambit. Validates the defId against the seat's dealt offer, applies it
+// to the shared mission.casinoStats, deducts any gold cost, adds to the pot.
+// One gambit per seat.
 export const playCasinoGambit = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
@@ -1466,11 +1550,17 @@ export const playCasinoGambit = onCall(async (request) => {
 
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${uid}/gambitPlayed`)]: true,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/gambitOffer`)]:  null,  // consumed
   };
 
   if (gambitDefId) {
     const gambitDef = GAMBIT_DEFS_BY_ID[gambitDefId] as GambitDef | undefined;
     if (!gambitDef) throw new HttpsError('invalid-argument', 'Unknown gambit.');
+    // The offer is authoritative: a seat may only play a gambit the server dealt
+    // it from the shared deck (dealGambitOffer). This is what makes the random-3
+    // offer and the negative-guard tamper-proof rather than client-side UX.
+    if (!seat.gambitOffer?.includes(gambitDefId))
+      throw new HttpsError('failed-precondition', 'That gambit was not offered to you.');
 
     const currentStats: CasinoStats = mission.casinoStats ?? { ...CASINO_START_STATS };
     const result = applyGambit(currentStats, gambitDef);
@@ -1532,9 +1622,13 @@ export const playCasinoGambit = onCall(async (request) => {
 export const lockCasinoResult = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
-  const { missionId, keepUids, seasonId: reqSeason } = request.data as {
+  const { missionId, keepUids, manifest, seasonId: reqSeason } = request.data as {
     missionId?: string;
     keepUids?: number[] | null;   // cards to commit (≤ pickMax); omit to commit the whole hand
+    // Slot-Fill manifest: the game (and optional slot name) the player named for
+    // each committed card, keyed by card uid so it's order-independent. Every
+    // committed card must carry a game — the manifest IS the submission.
+    manifest?: Record<string, { game?: string; name?: string }>;
     seasonId?: string;
   };
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
@@ -1560,9 +1654,31 @@ export const lockCasinoResult = onCall(async (request) => {
   if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
   const hand = sel.committed;
 
+  // The Slot-Fill config is the submission: a seat cannot fully lock in without
+  // an attached Archipelago YAML. It is uploaded (owner-scoped) client-side before
+  // this call, so enforce its presence here the same way the manifest games are.
+  const yamlPath = `casino/${seasonId}/${missionId}/${uid}.yaml`;
+  const [yamlExists] = await casinoBucket().file(yamlPath).exists();
+  if (!yamlExists)
+    throw new HttpsError('failed-precondition', 'Attach your Archipelago config (.yaml) before you can lock in.');
+
   const choice    = deckChoiceOf(seat);
   const goldSwing = applyDeckBoost(handStake(hand), choice);
   const slots     = cardsToSlots(hand);
+
+  // Stamp the Slot-Fill manifest onto the slots. Keyed by card uid, so it's
+  // independent of the committed order. Free text (the host reviews every game
+  // against its card), so trim and cap. Every committed card must carry a game —
+  // the manifest is the player's submission, gated the same way client-side.
+  const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
+  hand.forEach((card, i) => {
+    const m    = manifest?.[String(card.uid)];
+    const game = clip(m?.game, 120);
+    const name = clip(m?.name, 80);
+    if (!game) throw new HttpsError('failed-precondition', 'Every committed card needs a game before you can lock in.');
+    slots[i].game = game;
+    if (name) slots[i].name = name;
+  });
 
   const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
     uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
@@ -1591,6 +1707,71 @@ export const lockCasinoResult = onCall(async (request) => {
   }
 
   return { goldSwing, slots };
+});
+
+// Replace a locked seat's uploaded config. The new file is uploaded (owner-scoped)
+// client-side first; this validates that a resubmit is allowed and clears any deny
+// flag. Allowed while the table is still FORMING (a self-initiated setting tweak),
+// or any time the host has DENIED the current config — even once the table is in
+// progress, which is the only way a denied player can make their seat whole again.
+export const resubmitCasinoYaml = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, manifest, seasonId: reqSeason } = request.data as {
+    missionId?: string;
+    // Re-stamps the committed cards' games/names onto the existing slots, so a
+    // player who reordered games while resubmitting has that order take effect.
+    // Omit to leave the slots untouched (a config-only replacement).
+    manifest?: Record<string, { game?: string; name?: string }>;
+    seasonId?: string;
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = snap.val() as GMMission;
+  if (mission.type !== 'casino') throw new HttpsError('failed-precondition', 'Not a casino mission.');
+  if (mission.state === 'complete') throw new HttpsError('failed-precondition', 'This table has already settled.');
+  const seat = mission.participants?.[uid];
+  if (!seat) throw new HttpsError('permission-denied', 'Not seated at this table.');
+  if (!seat.played) throw new HttpsError('failed-precondition', 'Lock your hand in before submitting a config.');
+
+  const denied = seat.yamlDenied === true;
+  if (mission.state !== 'forming' && !denied)
+    throw new HttpsError('failed-precondition', 'This table is locked in — only a denied config can be resubmitted.');
+
+  const yamlPath = `casino/${seasonId}/${missionId}/${uid}.yaml`;
+  const [exists] = await casinoBucket().file(yamlPath).exists();
+  if (!exists) throw new HttpsError('failed-precondition', 'Attach your Archipelago config (.yaml) to resubmit.');
+
+  const updates: Record<string, unknown> = {
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/yamlDenied`)]:       null,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/yamlDeniedReason`)]: null,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/yamlDeniedAt`)]:     null,
+  };
+
+  // Re-stamp the slots from the (possibly reordered) manifest. Slots map 1:1 to the
+  // committed cards by index; only game/name change — details, status and bonuses
+  // set during play are preserved. Every committed card still needs a game.
+  if (manifest) {
+    const cards = seat.lockedCards ?? [];
+    const slots = seat.slots ?? [];
+    const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
+    const nextSlots = slots.map((s, i) => {
+      const card = cards[i];
+      const m    = card ? manifest[String(card.uid)] : undefined;
+      const game = clip(m?.game, 120);
+      const name = clip(m?.name, 80);
+      if (!game) throw new HttpsError('failed-precondition', 'Every committed card needs a game before you can resubmit.');
+      return { ...s, game, name };
+    });
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)] = nextSlots;
+  }
+
+  await db.ref().update(updates);
+  return { ok: true };
 });
 
 // ── Texas Hold 'Em (two-sitting) ──────────────────────────────────────────────
@@ -1820,6 +2001,86 @@ async function requireAdmin(uid: string): Promise<void> {
     throw new HttpsError('permission-denied', 'Admin only.');
 }
 
+// The Storage bucket, resolved from the Functions runtime config (initializeApp()
+// carries no storageBucket option, so ask for it explicitly).
+function casinoBucket() {
+  try {
+    const cfg = JSON.parse(process.env.FIREBASE_CONFIG ?? '{}') as { storageBucket?: string };
+    return cfg.storageBucket ? getStorage().bucket(cfg.storageBucket) : getStorage().bucket();
+  } catch {
+    return getStorage().bucket();
+  }
+}
+
+// Admin: fetch every uploaded Slot-Fill YAML for a mission so the host can verify
+// and generate the Archipelago room. Storage rules are owner-only (they can't
+// read the RTDB adminId), so admin access goes through the Admin SDK here, which
+// bypasses those rules. Works for a live OR settled mission (names come from
+// missions, then missionsHistory). Returns file text (each ≤64KB, a few per table).
+export const adminGetCasinoYamls = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+
+  const [mSnap, hSnap] = await Promise.all([
+    db.ref(sp(seasonId, `missions/${missionId}`)).get(),
+    db.ref(sp(seasonId, `missionsHistory/${missionId}`)).get(),
+  ]);
+  const mission = (mSnap.exists() ? mSnap.val() : hSnap.exists() ? hSnap.val() : null) as GMMission | null;
+  const nameOf = (uid: string) => mission?.participants?.[uid]?.playerName ?? uid;
+
+  const prefix = `casino/${seasonId}/${missionId}/`;
+  const [files] = await casinoBucket().getFiles({ prefix });
+
+  const yamls: { uid: string; playerName: string; text: string }[] = [];
+  for (const f of files) {
+    if (!f.name.endsWith('.yaml')) continue;
+    const uid = f.name.slice(prefix.length).replace(/\.yaml$/, '');
+    const [buf] = await f.download();
+    yamls.push({ uid, playerName: nameOf(uid), text: buf.toString('utf8') });
+  }
+  yamls.sort((a, b) => a.playerName.localeCompare(b.playerName));
+  return { yamls };
+});
+
+// Admin: deny a seat's config. Invalidates it (deletes the stored file so the host
+// can't accidentally build the room from a rejected YAML) and flags the seat so the
+// player is prompted to resubmit — works whether the table is forming or already in
+// progress. The player fixes it via resubmitCasinoYaml, which clears the flag.
+export const adminDenyCasinoYaml = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, playerId, reason, seasonId: reqSeason } = request.data as {
+    missionId?: string; playerId?: string; reason?: string; seasonId?: string;
+  };
+  if (!missionId || !playerId) throw new HttpsError('invalid-argument', 'Missing parameters.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = snap.val() as GMMission;
+  if (mission.type !== 'casino') throw new HttpsError('failed-precondition', 'Not a casino mission.');
+  if (mission.state === 'complete') throw new HttpsError('failed-precondition', 'This table has already settled.');
+  if (!mission.participants?.[playerId]) throw new HttpsError('not-found', 'Player not seated at this table.');
+
+  await deleteSeatYaml(seasonId, missionId, playerId);
+
+  const reasonTxt = typeof reason === 'string' ? reason.trim().slice(0, 200) : '';
+  await db.ref().update({
+    [sp(seasonId, `missions/${missionId}/participants/${playerId}/yamlDenied`)]:       true,
+    [sp(seasonId, `missions/${missionId}/participants/${playerId}/yamlDeniedReason`)]: reasonTxt || null,
+    [sp(seasonId, `missions/${missionId}/participants/${playerId}/yamlDeniedAt`)]:     Date.now(),
+  });
+  return { ok: true };
+});
+
 
 export const adminKickMissionParticipant = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
@@ -1845,6 +2106,8 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
     [sp(seasonId, `players/${playerId}/activeMission`)]:             null,
+    // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
+    ...clearSeatSecrets(seasonId, missionId, playerId),
     [sp(seasonId, `players/${playerId}/warnings/${warnRef.key}`)]: {
       timestamp: Date.now(),
       message:   `Removed from ${label} by admin.`,
@@ -1872,6 +2135,8 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   }
 
   await db.ref().update(updates);
+  // A kicked player is no longer the seat's owner — drop their submitted config.
+  if (mission.type === 'casino') await deleteSeatYaml(seasonId, missionId, playerId);
   return { success: true };
 });
 

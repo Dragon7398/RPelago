@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
-import { useIsAdmin } from '../contexts/SeasonContext';
+import { useIsAdmin, useSeason } from '../contexts/SeasonContext';
 import { currentMaxSlots } from '../lib/missionLogic';
 import ChallengesPage from './admin/ChallengesPage';
 import PlayersPage from './admin/PlayersPage';
@@ -11,16 +11,22 @@ import MissionsPage from './admin/MissionsPage';
 import KmkPage from './admin/kmk/KmkPage';
 import SeasonSwitcher from './SeasonSwitcher';
 
-type DashPage = 'challenges' | 'players' | 'shops' | 'orbs' | 'map' | 'missions' | 'kmk';
+type DashPage = 'challenges' | 'missions' | 'casino' | 'players' | 'shops' | 'orbs' | 'map' | 'kmk';
+type Shell = 'map' | 'casino';
 
-const PAGES: { id: DashPage; label: string }[] = [
-  { id: 'challenges', label: '⚔ Challenges' },
-  { id: 'missions',   label: '⚜ Missions'   },
-  { id: 'kmk',        label: '🗝 Keep'       },
-  { id: 'map',        label: '🗺 Map'        },
-  { id: 'players',    label: '👥 Players'    },
-  { id: 'shops',      label: '🛒 Shops'      },
-  { id: 'orbs',       label: '⚗ Orbs'       },
+// The visible tab set is season-driven (see season-architecture-plan.md's tab
+// matrix). Casino gets its own tab in EVERY season — the Casino/Missions split
+// is permanent, not an S1.5 hack. A casino season hides the map-only tabs
+// (Challenges/Missions/Map/Shops/Orbs); a map season shows everything plus Casino.
+const ALL_PAGES: { id: DashPage; label: string; shells: Shell[] }[] = [
+  { id: 'challenges', label: '⚔ Challenges', shells: ['map'] },
+  { id: 'missions',   label: '⚜ Missions',   shells: ['map'] },
+  { id: 'casino',     label: '🂡 Casino',     shells: ['map', 'casino'] },
+  { id: 'kmk',        label: '🗝 Keep',       shells: ['map', 'casino'] },
+  { id: 'map',        label: '🗺 Map',        shells: ['map'] },
+  { id: 'players',    label: '👥 Players',    shells: ['map', 'casino'] },
+  { id: 'shops',      label: '🛒 Shops',      shells: ['map'] },
+  { id: 'orbs',       label: '⚗ Orbs',       shells: ['map'] },
 ];
 
 export default function AdminDashboard() {
@@ -45,6 +51,11 @@ export default function AdminDashboard() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = useIsAdmin();
+  const shell: Shell = (useSeason().season?.shell ?? 'map') as Shell;
+  const PAGES = ALL_PAGES.filter(p => p.shells.includes(shell));
+  // If the stored page isn't available in this season's shell (a casino season
+  // has no Challenges tab, etc.), fall back to the first visible tab.
+  const activePage: DashPage = PAGES.some(p => p.id === page) ? page : (PAGES[0]?.id ?? 'players');
 
   const challengeWarnCount = gameState ? Object.values(gameState.tiles).filter(tile => {
     const advCount = Object.keys(tile.adventurers ?? {}).length;
@@ -60,7 +71,9 @@ export default function AdminDashboard() {
     return false;
   }).length : 0;
 
-  const missionWarnCount = gameState ? Object.values(gameState.missions ?? {}).filter(m => {
+  // Missions needing admin attention, split by type so the Missions and Casino
+  // tabs each carry their own badge.
+  const warnMissions = gameState ? Object.values(gameState.missions ?? {}).filter(m => {
     if (m.state === 'complete') return false;
     const filled = Object.keys(m.participants ?? {}).length;
     const max = currentMaxSlots(m, now);
@@ -74,7 +87,9 @@ export default function AdminDashboard() {
       });
     }
     return false;
-  }).length : 0;
+  }) : [];
+  const missionWarnCount = warnMissions.filter(m => m.type !== 'casino').length;
+  const casinoWarnCount  = warnMissions.filter(m => m.type === 'casino').length;
 
   useEffect(() => {
     const prev = document.title;
@@ -123,11 +138,13 @@ export default function AdminDashboard() {
         <SeasonSwitcher />
         <nav className="dash-tabs">
           {PAGES.map(p => {
-            const badge = p.id === 'challenges' ? challengeWarnCount : p.id === 'missions' ? missionWarnCount : 0;
+            const badge = p.id === 'challenges' ? challengeWarnCount
+              : p.id === 'missions' ? missionWarnCount
+              : p.id === 'casino' ? casinoWarnCount : 0;
             return (
               <button
                 key={p.id}
-                className={`dash-tab${page === p.id ? ' active' : ''}`}
+                className={`dash-tab${activePage === p.id ? ' active' : ''}`}
                 onClick={() => { setPage(p.id); setMapInitCoord(undefined); }}
               >
                 {p.label}
@@ -149,7 +166,7 @@ export default function AdminDashboard() {
               {PAGES.map(p => (
                 <button
                   key={p.id}
-                  className={`dash-menu-item${page === p.id ? ' active' : ''}`}
+                  className={`dash-menu-item${activePage === p.id ? ' active' : ''}`}
                   onClick={() => { setPage(p.id); setMapInitCoord(undefined); setMenuOpen(false); }}
                 >
                   {p.label}
@@ -160,13 +177,14 @@ export default function AdminDashboard() {
         </div>
       </header>
       <main className="dash-main">
-        {page === 'challenges' && <ChallengesPage navigateToMap={navigateToMap} />}
-        {page === 'missions'   && <MissionsPage />}
-        {page === 'kmk'        && <KmkPage />}
-        {page === 'map'        && <MapPage initialCoord={mapInitCoord} />}
-        {page === 'players'    && <PlayersPage />}
-        {page === 'shops'      && <ShopsPage />}
-        {page === 'orbs'       && <OrbsPage />}
+        {activePage === 'challenges' && <ChallengesPage navigateToMap={navigateToMap} />}
+        {activePage === 'missions'   && <MissionsPage filter="noncasino" />}
+        {activePage === 'casino'     && <MissionsPage filter="casino" />}
+        {activePage === 'kmk'        && <KmkPage />}
+        {activePage === 'map'        && <MapPage initialCoord={mapInitCoord} />}
+        {activePage === 'players'    && <PlayersPage />}
+        {activePage === 'shops'      && <ShopsPage />}
+        {activePage === 'orbs'       && <OrbsPage />}
       </main>
     </div>
   );

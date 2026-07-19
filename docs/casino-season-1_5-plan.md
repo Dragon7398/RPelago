@@ -553,9 +553,12 @@ structure, copy/tone, theming hooks, and interaction rules.
 7. Profile settle writes + profile-site handoff.
 8. Launch flip (arch plan step 7).
 
-## Build status (as of 2026-07-17)
+## Build status (as of 2026-07-18)
 
-**Done:** steps 1–4 in full, plus most of 5 and 7.
+**Done:** steps 1–7 in full; the Admin Casino tab (first cut); the config
+submission workflow hardened end-to-end (YAML required · player resubmit · host
+deny · leave-invalidates · admin download). Remaining: step 8 (launch flip), plus
+the smaller Admin gold-top-up audit view and optional polish.
 
 - **Steps 1–3** — season architecture, canonical engine (both copies, parity-tested),
   Hold 'Em cohort sync + community draw.
@@ -563,17 +566,100 @@ structure, copy/tone, theming hooks, and interaction rules.
   to `goldTopUpLog`), and the per-seat settle ledger. `completeMission` stamps
   `potShare` + `net` onto the archived copy; `casinoSeatPaid` reads Entries off
   the audit log.
-- **Step 5** — DONE. Config-driven shell, landing, table cards (with the odds
-  trio), the three-phase panel (Seated / Board / Ledger), the `CasinoTable`
-  mini-app rebuild, and the landing polish (Lounge/Floor divergence, activity
-  feed, profile stats + Coat-gated name colors, sit flash).
-- **Step 6** — `src/lib/apYaml.ts` is written and verified against real S1 YAMLs.
-  Nothing consumes it yet; the Manifest UI is unbuilt.
+- **Step 5** — DONE. Config-driven shell, landing, table cards (odds trio + drift),
+  the `CasinoTable` mini-app rebuild, and the phase panel — Seated (Lounge/Floor
+  variants), Board, and Ledger all rebuilt to the design bundle (see below).
+- **Step 6** — DONE (+ hardened, see "Config submission workflow" below). Slot Fill
+  (Manifest) is a new `manifest` phase in the casino table (`gambit → manifest →
+  locked`): per-committed-card rows (genre badge + optional slot name + required
+  game), a Mission Manifest summary, and **Attach config (.yaml)** that parses
+  in-browser via `parseApYaml`, prefills top-to-bottom, and shows broken-file /
+  wrong-world-count / randomized warnings. **↑/↓ arrows move a game between slots**
+  so a mis-ordered file needn't be re-edited. The **YAML is now required** to lock
+  in (client gate + server existence check). `lockCasinoResult` takes the manifest
+  (keyed by card uid), requires a game per card, and stamps game/name into the slots.
+  The YAML text is uploaded to Storage at `casino/{seasonId}/{missionId}/{uid}.yaml`
+  (owner-scoped, ≤64KB — `storage.rules` + the `storage` block in `firebase.json`).
 - **Step 7** — `onMissionComplete` writes the casino-flavoured profile event
-  (gold / handsPlayed / games) and the handoff doc is written. Needs a
-  verification pass, not a build.
+  (gold / handsPlayed / games); `completeMission` is now gold-only in a casino
+  season and awards XP only in a map season (S2-ready — see below). Verified.
 - **Economy is LOCKED** — ×3 antes, 500 GP start / 250 GP floor, `4×seats²` pot
   base + `2×(120−R−C)` flat premium. Re-check with `npm run econ` after any change.
+
+### ✅ Config submission workflow (2026-07-18 — YAML required · resubmit · deny)
+
+The Slot-Fill YAML is now the **first-class submission**, not an optional aid, with a
+full host review loop. All functions-side; **deploy functions before the frontend.**
+
+- **YAML required to lock in.** The manifest Submit is gated on both every card
+  having a game *and* a config attached; `lockCasinoResult` independently verifies
+  the file exists in Storage before locking (owner uploads client-side first).
+- **Player resubmit.** New `resubmitCasinoYaml` callable. "Reopen my slots" drops
+  the player back into the **Manifest view** (not a bare file-picker) — seeded from
+  the committed cards + current slots — so they can **reorder games (↑/↓)** or attach
+  an updated file, then resubmit. Allowed while the table is still **forming** (a
+  self-tweak, config kept if not re-attached) *or* any time the host has **denied**
+  the config (even in-progress — the only way a denied seat is made whole). The
+  server re-stamps only game/name onto the existing slots (status / details / bonuses
+  preserved). A `resubmitting` guard holds the Manifest phase against mission ticks.
+- **Host deny.** New `adminDenyCasinoYaml` callable — a ⛔ button per player in the
+  admin **⬇ Player YAMLs** list. Deletes the stored file (so the room is never built
+  from a rejected config) and sets `participant.yamlDenied` (+ optional reason);
+  works forming or in-progress. A "⛔ resubmit pending" badge marks the seat in
+  admin; the landing surfaces a red **"Your config was denied — Resubmit config →"**
+  notice (Seated + Board) so an in-progress player actually sees it.
+- **Leaving invalidates the config.** `deleteSeatYaml` is called on every
+  seat-removal path — stand-down, kick, deny — so an empty seat never leaves a stale
+  YAML for the host to build from. Pairs with `clearSeatSecrets` (the orphaned
+  secret-hand fix), which nulls the seat's secret hand/deck on the same paths so a
+  re-sit isn't blocked by *"Finish or fold your current hand first."*
+- **Admin YAML download.** `adminGetCasinoYamls` (admin-only callable, Admin SDK
+  reads the owner-scoped bucket) powers per-seat `.yaml` downloads and a **.zip of
+  all seats** (via `fflate`, files kept separate inside) on the casino mission card,
+  for host verification / AP room generation. Deliberately **never a single combined
+  file** — each YAML is verified one at a time and later replayed individually by
+  another player. Filenames dedupe on name collisions (`…`, `…_2`).
+- **Small fixes:** removed the vestigial "Your slots on …" strip under the table
+  (the picker already shows them); `PlayerCard` no longer crashes on casino players
+  with no `xp`/`gold` (coerced to 0); **Grant Adventurers** button hidden in casino
+  seasons (an empty roster isn't a gap to fix there).
+
+### ✅ Since 2026-07-17
+
+- **Admin Casino tab (first cut).** `AdminDashboard`'s tab set is now season-driven
+  (`ALL_PAGES` filtered by shell, per the arch-plan matrix): a casino season shows
+  **Casino · Keep · Players**; a map season adds the Casino tab to the full set.
+  The Casino/Missions split is one component — `MissionsPage` takes a
+  `filter` prop (`casino` | `noncasino`), reusing all its casino detail (pot,
+  rosters, per-seat slots, gambit odds, `CasinoAuditLog`, table link). Warn badges
+  split by type. **Remainder:** the season-level gold-top-up audit view
+  (`goldTopUpLog`) isn't surfaced yet — the per-table `CasinoAuditLog` is.
+- **Board + Settled rebuilt to the design** (`landing/progress.jsx` `CBoard`,
+  `settled.jsx` `WrapHead`+`CLedger`): completion headline + roll-tag telemetry +
+  spatial card tiles (Board); celebratory header + formal ledger with card-suit
+  game chips + net badges (Settled). Both read the persisted `lockedCards`.
+- **Archipelago room link + 🧀 Cheesetracker** on the Board (from `m.link` /
+  `m.cheese`, admin-set post-deploy).
+- **Casino settle is gold-only + S2-safe.** `completeMission` splits on
+  `mission.type === 'casino'` (gold source + Coat) vs `shell !== 'casino'`
+  (whether XP / level-ups / history are written). Fixes a NaN (casino players have
+  no `xp` field) and makes casino missions in a **map** season (S2) award XP like
+  any other. Shell is threaded from `GameStateProvider`.
+- **Gambit offer is server-authoritative (shared deck).** `dealGambitOffer`
+  draws a seat's 3 from the mission's **shared, depleting** deck in
+  `seasonSecrets/{season}/missions/{id}/gambitDeck` (a transaction, so concurrent
+  seats deplete one common deck → variety across the table). Idempotent per seat
+  (reload / Hold 'Em recovery never re-draws). The negative-guard (withhold a
+  gambit that would drive a stat below 0) runs here; `playCasinoGambit` rejects any
+  `gambitDefId` not in the seat's stored `gambitOffer`. Clients can neither read the
+  secret deck nor write `gambitOffer`, so it's tamper-proof.
+  > **Accepted edge case:** two seats drawing offers before either plays can still
+  > *additively* push a stat negative; the 0-clamp bounds the harm to a slightly
+  > cheaper gambit reward. Not worth serializing draws to prevent.
+- **Two card-commit fixes:** Five Card Draw can commit fewer than five (marked
+  cards reroll *or* drop); Blackjack enforces at-most-one discard (push-your-luck).
+- Earlier landing fixes: decay visibility on table cards, gambit-drift `+/−` on the
+  landing odds, the `?seasonId=` link, the `keepUids` lock contract.
 
 ### ✅ Done: the `CasinoTable` mini-app rebuild
 
@@ -636,6 +722,16 @@ All four remaining landing items are built in `CasinoShell.tsx` / `landing.css`:
   map 1:1 to the public slots, so nothing secret is exposed.
   (An earlier build had this backwards — cards as horizontal `FloorRow` strips
   and a single seated panel; that was scrapped for the design's model.)
+- **Board (in progress)** and **Settled (ledger)** rebuilt to the design's
+  `CBoard` and `WrapHead`+`CLedger` (`landing/progress.jsx`, `settled.jsx`,
+  ported `mp-*`/`st-*` CSS): the Board is a completion headline + room telemetry
+  (Release/Collect with On/Off/to-roll tags, Hint, Elapsed) + spatial **card
+  tiles** for your games and the rest of the table, suit/hue-coded from the
+  persisted `lockedCards`; the Settled view is a celebratory "night is settled"
+  header (seal, pot, rolls, best-night winner) + a formal ledger table with
+  card-suit game chips and net badges. The **Archipelago room link + Cheesetracker
+  icon** (`m.link` / `m.cheese`, admin-set post-deploy) sit under the Board's
+  completion meter.
 - **Activity feed** — a ☷ nav button opens `FeedModal`, rendering the per-season
   `activityLog` newest-first with relative timestamps. **No unread badge** (by
   design — casino players are less affected by each other's activity).
@@ -653,26 +749,31 @@ All four remaining landing items are built in `CasinoShell.tsx` / `landing.css`:
 > table), so the profile shows the count once as "Tables played" rather than as
 > two identical stats.
 
-### Not started
+### Not started / remaining
 
-- **Admin Casino tab** — `AdminDashboard`'s `PAGES` is still static, so all seven
-  tabs render regardless of season. Needs the season-driven visibility matrix
-  (hide Missions/Map/Orbs/Shops for a casino season) and the Casino tab itself.
-  The `goldTopUpLog` its audit needs already exists.
-- **Step 6 remainder** — Manifest UI, `storage.rules`, and the `storage` block in
-  `firebase.json`. **Enabling the bucket is the operator's action.**
-- **Step 8** — launch flip.
+- **Admin Casino tab — gold-top-up audit.** The tab exists (above); what's missing
+  is the **season-level** money-in view (`goldTopUpLog` + pot injections), so the
+  audit can see money entering the economy — the per-table `CasinoAuditLog` is
+  per-mission only.
+- **Step 8** — launch flip. (Bucket is enabled; `storage.rules` still needs a
+  `firebase deploy --only storage`.)
+- **Optional polish:** Profile modal + sit flash still use earlier copy/classes
+  rather than the design's exact `rl-pstats`/`rl-flash` treatment (functional,
+  and the profile is correctly Coat-gated). The 36h decay window is longer than a
+  test session — shorten or make configurable if faster playtest decay is wanted.
 
 ### Ops notes
 
 - **`reseed-casino`** (`functions/scripts/season-migrate.mjs`) wipes the draft's
   tables / history / series counters / log / secrets and resets player gold,
   keeping identity + inventory. Draft-only with no `--force` override; needs
-  `--force` to commit. Emulator-tested. Run it, then **Admin → Missions → Open
+  `--force` to commit. Emulator-tested. Run it, then **Admin → Casino → Open
   Casino Tables** — tables bank their economy at creation, so anything rolled
   under old constants keeps those numbers forever.
-- `ensureSeasonPlayer` is deployed. The settle-ledger change is client-side, so
-  it needs no functions deploy.
+- **Deploy discipline:** the gambit shared-deck (`dealGambitOffer` + the
+  `playCasinoGambit` offer check), the settle NaN fix's server half, and
+  `casinoOpenStats` all live in functions — **deploy functions before the
+  frontend** so a new client never calls a callable the server lacks.
 
 ## Admin: the Casino tab
 
