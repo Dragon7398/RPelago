@@ -492,12 +492,6 @@ export function CasinoTable() {
 
   // ── Slot Fill (Manifest) ────────────────────────────────────────────────────
 
-  const updateManifest = (uidKey: number, field: 'name' | 'game', value: string) =>
-    setManifest(m => {
-      const prev = m[uidKey] ?? { name: '', game: '' };
-      return { ...m, [uidKey]: { ...prev, [field]: value } };
-    });
-
   // Move a committed card's named game (+ slot name) up or down among the manifest
   // rows — so an out-of-order YAML import (Hollow Knight landing on a Puzzle card)
   // can be realigned to the right card without editing the file.
@@ -534,11 +528,12 @@ export function CasinoTable() {
         });
         return next;
       });
+      // World-count mismatch is derived in render as a hard block (below), not a
+      // soft warning here — a too-many-worlds file would otherwise fill every card
+      // and slip past the submit gate.
       const warn = [...errors];
-      const wc = checkWorldCount(parsed.length, { count: committedCards.length });
-      if (wc) warn.push(wc);
       if (parsed.some(p => p.randomized))
-        warn.push('One or more games are a weighted / randomized choice — set the real game by hand.');
+        warn.push('One or more games are a weighted / randomized choice — your host resolves the actual game from your config.');
       setYamlText(text);
       setYamlInfo({ name: file.name, docs: parsed.length, filled: Math.min(parsed.length, committedCards.length) });
       setYamlWarn(warn);
@@ -554,7 +549,11 @@ export function CasinoTable() {
   // host deleted the old file). A forming self-resubmit keeps the stored file, so a
   // reorder-only pass with no new attach is allowed. Every slot must still be named.
   const attachRequired = !resubmitting || yamlDenied;
-  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired);
+  // A wrong world count is a HARD block: too many worlds would fill every card and
+  // slip past the manifestReady gate. Only checkable when a config was attached this
+  // session (yamlInfo present); a reorder-only resubmit keeps its already-valid file.
+  const countErr = yamlInfo ? checkWorldCount(yamlInfo.docs, { count: committedCards.length }) : null;
+  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr;
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
   // (already-locked). The per-card manifest is keyed by card uid, so reordering the
@@ -1003,23 +1002,38 @@ export function CasinoTable() {
               <div className="cz-stage-title">{resubmitting ? 'Reopen your slots' : 'Fill your slots'}</div>
               <div className="cz-stage-note">
                 {resubmitting
-                  ? 'Reorder games with the ↑/↓ arrows, or attach an updated config to re-map them. Your committed cards and gambit are unchanged.'
-                  : "Name the game you'll play for each committed card. Your host reviews every submission and may reject a game that doesn't fit its card."}
+                  ? 'Attach an updated config, or use the ↑/↓ arrows to re-map games to cards. Your committed cards and gambit are unchanged.'
+                  : "Attach your Archipelago config below — we read each world's game and slot name and map them to your committed cards in order. Use ↑/↓ to line a game up with the right card. Your host reviews every submission."}
               </div>
 
-              {/* Mission Manifest summary + YAML attach */}
+              {/* Mission Manifest — per-card mapping (display-only, from the config) + YAML attach */}
               <div className="sf-panel">
                 <div className="sf-panel-title">Mission Manifest</div>
-                <div className="sf-mlist">
-                  {committedCards.map(c => {
-                    const v = manifest[c.uid];
+                <div className="sf-manifest">
+                  {committedCards.map((c, i) => {
+                    const v  = manifest[c.uid];
                     const nm = v?.name?.trim();
                     const gm = v?.game?.trim();
                     return (
-                      <div className="sf-mline" key={c.uid}>
-                        <span className={`sf-mline-slot${nm ? '' : ' empty'}`}>{nm || '(from config)'}</span>
-                        <span className="sf-mline-arrow">→</span>
-                        <span className={`sf-mline-game${gm ? '' : ' empty'}`}>{gm || 'game required'}</span>
+                      <div className="sf-mrow" key={c.uid} style={{ '--th': CARD_HUE[c.type] } as React.CSSProperties}>
+                        <div className="sf-cat">
+                          <span className="sf-suit">{CARD_TYPES[c.type].suit}</span>
+                          <span className="sf-cat-txt">
+                            <span className="sf-cat-type">{CARD_TYPES[c.type].label}</span>
+                            <span className="sf-cat-name">{c.name}</span>
+                          </span>
+                        </div>
+                        <div className="sf-mrow-map">
+                          <span className={`sf-mline-slot${nm ? '' : ' empty'}`}>{nm || '(from config)'}</span>
+                          <span className="sf-mline-arrow">→</span>
+                          <span className={`sf-mline-game${gm ? '' : ' empty'}`}>{gm || 'awaiting config'}</span>
+                        </div>
+                        <div className="sf-move">
+                          <button className="sf-movebtn" title="Move up" disabled={busy || i === 0}
+                                  onClick={() => moveManifest(i, -1)}>↑</button>
+                          <button className="sf-movebtn" title="Move down" disabled={busy || i === committedCards.length - 1}
+                                  onClick={() => moveManifest(i, 1)}>↓</button>
+                        </div>
                       </div>
                     );
                   })}
@@ -1037,59 +1051,23 @@ export function CasinoTable() {
                     <div className={`sf-yaml-file${yamlInfo.filled ? '' : ' none'}`}>
                       {yamlInfo.filled
                         ? <>✓ {yamlInfo.name} — filled <b>{yamlInfo.filled}</b> slot{yamlInfo.filled === 1 ? '' : 's'} from {yamlInfo.docs} world{yamlInfo.docs === 1 ? '' : 's'}</>
-                        : <>⚠ {yamlInfo.name} — no usable worlds found; fill the slots by hand</>}
+                        : <>⚠ {yamlInfo.name} — no <code>name</code>/<code>game</code> fields found; check the file.</>}
+                    </div>
+                  )}
+                  {countErr && (
+                    <div className="sf-yaml-err">
+                      ⛔ {countErr} Attach a config with exactly {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
                     </div>
                   )}
                   {yamlWarn.map((w, i) => <div className="sf-yaml-warn" key={i}>⚠ {w}</div>)}
-                  <div className="sf-yaml-hint">
-                    Parsed in your browser — we read each world's <code>name</code> and <code>game</code> to prefill the
-                    slots in order. Use the ↑/↓ arrows to move a game to the right card. The file is stored for your
-                    host{attachRequired ? <> and is <b>required</b> to {resubmitting ? 'resubmit' : 'lock in'}.</> : '.'}
-                  </div>
                 </div>
-              </div>
-
-              {/* Per-card rows */}
-              <div className="sf-list">
-                {committedCards.map((c, i) => {
-                  const v = manifest[c.uid] ?? { name: '', game: '' };
-                  const hue = CARD_HUE[c.type];
-                  const ok = v.game.trim().length > 0;
-                  return (
-                    <div className="sf-lrow" key={c.uid}>
-                      <div className="sf-cat" style={{ '--th': hue } as React.CSSProperties}>
-                        <span className="sf-suit">{CARD_TYPES[c.type].suit}</span>
-                        <span className="sf-cat-txt">
-                          <span className="sf-cat-type">{CARD_TYPES[c.type].label}</span>
-                          <span className="sf-cat-name">{c.name}</span>
-                        </span>
-                      </div>
-                      <div className="sf-field">
-                        <span className="sf-flabel">Slot name <span className="opt">optional</span></span>
-                        <input className="sf-input" value={v.name} disabled={busy}
-                               onChange={e => updateManifest(c.uid, 'name', e.target.value)} />
-                      </div>
-                      <div className="sf-field">
-                        <span className="sf-flabel">Game <span className="req">✳ required</span></span>
-                        <input className={`sf-input${ok ? ' ok' : ' need'}`} value={v.game} disabled={busy}
-                               placeholder={`A ${CARD_TYPES[c.type].label.toLowerCase()} game`}
-                               onChange={e => updateManifest(c.uid, 'game', e.target.value)} />
-                      </div>
-                      <div className="sf-move">
-                        <button className="sf-movebtn" title="Move up" disabled={busy || i === 0}
-                                onClick={() => moveManifest(i, -1)}>↑</button>
-                        <button className="sf-movebtn" title="Move down" disabled={busy || i === committedCards.length - 1}
-                                onClick={() => moveManifest(i, 1)}>↓</button>
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
 
               <div className="sf-foot">
                 <span className={`sf-ready${canSubmit ? ' go' : ''}`}>
                   {canSubmit ? '✓ ' : ''}<b>{manifestReady}</b>/{committedCards.length} slots ready
                   {attachRequired && !yamlText && <> · <span className="sf-ready-need">config required</span></>}
+                  {countErr && <> · <span className="sf-ready-need">wrong game count</span></>}
                 </span>
                 <div className="sf-foot-acts">
                   {resubmitting && (

@@ -298,12 +298,25 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .sf-mline-game { font-family:'Crimson Pro',serif; color: var(--parchment); font-size: 0.92rem; }
 .sf-mline-game.empty { color: oklch(from var(--gold-dim) l c h / 0.6); font-style: italic; }
 
+/* Merged manifest rows — card badge + display-only slot→game mapping + reorder.
+   Values come from the attached config (display-only); ↑/↓ remaps them to cards. */
+.sf-manifest { display: flex; flex-direction: column; margin-bottom: 0.9rem; }
+.sf-mrow { display: grid; grid-template-columns: minmax(0, auto) 1fr auto; align-items: center; gap: 0.9rem; padding: 0.6rem 0; border-bottom: 1px dashed oklch(from var(--border) l c h / 0.6); }
+.sf-mrow:last-child { border-bottom: none; }
+.sf-mrow-map { display: flex; align-items: baseline; gap: 0.55rem; flex-wrap: wrap; min-width: 0; }
+@media (max-width: 620px) {
+  .sf-mrow { grid-template-columns: 1fr auto; gap: 0.45rem 0.8rem; }
+  .sf-mrow-map { grid-column: 1 / -1; }
+}
+
 .sf-yaml { margin-top: 0.9rem; border: 1px dashed var(--border-glow); border-radius: 9px; padding: 0.7rem 0.8rem; }
 .sf-yaml-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
 .sf-yaml-lbl { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); }
 .sf-yaml-file { font-family:'Crimson Pro',serif; font-size: 0.82rem; color: var(--pos); margin-top: 0.4rem; }
 .sf-yaml-file.none { color: oklch(78% 0.13 85); }
 .sf-yaml-warn { font-family:'Crimson Pro',serif; font-size: 0.8rem; color: oklch(78% 0.13 85); margin-top: 0.25rem; }
+/* Blocking error (e.g. wrong world count) — distinct red, gates the submit. */
+.sf-yaml-err { font-family:'Crimson Pro',serif; font-size: 0.84rem; color: var(--neg); margin-top: 0.35rem; padding: 0.4rem 0.55rem; border: 1px solid oklch(from var(--neg) l c h / 0.5); border-radius: 6px; background: oklch(from var(--neg) l c h / 0.1); }
 .sf-yaml-hint { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--ink-soft); margin-top: 0.4rem; }
 
 .sf-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); }
