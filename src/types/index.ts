@@ -253,7 +253,19 @@ export interface GameState {
   orbState: Record<string, OrbAcquisition>;
   orbConfig: OrbConfig;
   shops:    Record<string, Shop>;
+  // Casino-season audit trail of weekly gold-floor top-ups — the one place outside
+  // gold enters the economy. Absent (→ {}) in map seasons. Written by weeklyGoldTopUp.
+  goldTopUpLog: Record<string, GoldTopUpEntry>;
   meta:     GameMeta;
+}
+
+// One weekly gold-floor top-up: a player below the floor was raised to it.
+export interface GoldTopUpEntry {
+  ts:               number;  // epoch ms of the top-up
+  uid:              string;
+  playerName:       string;
+  granted:          number;  // gold added (floor − prior balance)
+  resultingBalance: number;  // always the floor
 }
 
 export interface AuthUser {
@@ -353,6 +365,10 @@ export interface GMMission {
   // release/collect (rollTableSetup), so drift can only be measured against this
   // — not against CASINO_START_STATS, which is merely where the roll centres.
   casinoOpenStats?: CasinoStats;
+  // The pot this table OPENED with (rollTableSetup), frozen. The opening pot is
+  // variable (4×seats² + difficulty + premium) and is never logged as a potAdd, so
+  // the audit needs it banked to reconcile the pot and to sum injected money.
+  casinoOpenPot?:  number;
   casinoLog?:      Record<string, CasinoLogEntry>;  // audit trail of money-moving/outcome events
   casinoGame?:     CasinoGame;                      // which game this table is pinned to (multi-table)
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards (post-reveal)

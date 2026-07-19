@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
-import { SLOT_STATUSES, toRoman, MISSION_DEFS } from '../../lib/constants';
+import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminGetCasinoYamls, adminDenyCasinoYaml, type CasinoYaml } from '../../firebase/db';
@@ -193,9 +193,12 @@ function CasinoAuditLog({ mission }: { mission: GMMission }) {
   if (entries.length === 0) return null;
 
   const loggedTotal = entries.reduce((s, [, e]) => s + (e.potAdd ?? 0), 0);
-  const seed        = MISSION_DEFS.casino?.potSeed ?? 0;
-  const expected    = seed + loggedTotal;
   const actual      = mission.pot ?? 0;
+  // The opening pot is variable (rollTableSetup) and banked at creation. Tables
+  // created before casinoOpenPot existed fall back to (actual − logged), which
+  // can't detect drift but won't raise a false alarm.
+  const opening     = mission.casinoOpenPot ?? (actual - loggedTotal);
+  const expected    = opening + loggedTotal;
   const mismatch    = expected !== actual;
 
   return (
@@ -207,7 +210,7 @@ function CasinoAuditLog({ mission }: { mission: GMMission }) {
       {open && (
         <>
           <div className={`casino-log-check${mismatch ? ' warn' : ' ok'}`}>
-            Pot check: {seed}g seed + {loggedTotal}g logged = {expected}g expected vs {actual}g actual
+            Pot check: {opening}g open + {loggedTotal}g logged = {expected}g expected vs {actual}g actual
             {mismatch ? ' ⚠ mismatch' : ' ✓'}
           </div>
           <div className="casino-log-list">
@@ -261,6 +264,9 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
   const [yamls, setYamls]     = useState<CasinoYaml[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDeny, setConfirmDeny] = useState<string | null>(null);
+  const [denyReason, setDenyReason]   = useState('');
+
+  const openDeny = (uid: string) => { setConfirmDeny(uid); setDenyReason(''); };
 
   const load = async () => {
     setLoading(true);
@@ -277,7 +283,7 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
   // resubmit. The file is gone afterwards, so drop it from the list.
   const deny = async (uid: string) => {
     try {
-      await adminDenyCasinoYaml(missionId, uid);
+      await adminDenyCasinoYaml(missionId, uid, denyReason.trim() || undefined);
       setYamls(list => (list ?? []).filter(y => y.uid !== uid));
       setConfirmDeny(null);
       addToast('Config denied — the player must resubmit.', 'success');
@@ -294,7 +300,7 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
     const enc = new TextEncoder();
     const files: Record<string, Uint8Array> = {};
     yamls.forEach((y, i) => { files[names[i]] = enc.encode(y.text); });
-    downloadBlob(`casino-${sanitizeFile(label)}-yamls.zip`, new Blob([zipSync(files)], { type: 'application/zip' }));
+    downloadBlob(`${sanitizeFile(label)}.zip`, new Blob([zipSync(files)], { type: 'application/zip' }));
   };
 
   const names = yamls ? yamlFileNames(yamls) : [];
@@ -322,12 +328,16 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
                         onClick={() => downloadText(names[i], y.text)}>{'⬇︎'}</button>
                 {confirmDeny === y.uid ? (
                   <span className="casino-yaml-deny-confirm">
+                    <input className="casino-yaml-reason" placeholder="Reason (optional — shown to player)"
+                           value={denyReason} autoFocus
+                           onChange={e => setDenyReason(e.target.value)}
+                           onKeyDown={e => { if (e.key === 'Enter') deny(y.uid); if (e.key === 'Escape') setConfirmDeny(null); }} />
                     <button className="dash-action-btn danger" onClick={() => deny(y.uid)}>Deny</button>
                     <button className="dash-action-btn" onClick={() => setConfirmDeny(null)}>Cancel</button>
                   </span>
                 ) : (
                   <button className="dash-tile-link deny" title="Deny — invalidate this config and require a resubmit"
-                          onClick={() => setConfirmDeny(y.uid)}>{'⛔︎'}</button>
+                          onClick={() => openDeny(y.uid)}>{'⛔︎'}</button>
                 )}
               </span>
             </div>
@@ -653,6 +663,59 @@ function MissionCard({ mission }: { mission: GMMission }) {
   );
 }
 
+// ── Season-level money-in audit ─────────────────────────────────────────────────
+// The per-table CasinoAuditLog only sees one mission. This is the season view of
+// gold ENTERING the economy: weekly floor top-ups (logged) + pot seeds (each table
+// starts with a seeded pot, so every table ever opened injected that much).
+function GoldTopUpAudit() {
+  const { gameState } = useGameState();
+  const [open, setOpen] = useState(false);
+
+  const entries = Object.entries(gameState?.goldTopUpLog ?? {}).sort((a, b) => b[1].ts - a[1].ts);
+  const topupTotal = entries.reduce((s, [, e]) => s + (e.granted ?? 0), 0);
+  const players    = new Set(entries.map(([, e]) => e.uid)).size;
+
+  // Pot seeds are variable per table (rollTableSetup), banked as casinoOpenPot at
+  // creation. Sum the actual opening pots — the injected-via-pot money — across
+  // every casino table ever opened (live + settled).
+  const casinoTables = [...Object.values(gameState?.missions ?? {}), ...Object.values(gameState?.missionsHistory ?? {})]
+    .filter(m => m.type === 'casino');
+  const tableCount   = casinoTables.length;
+  const potSeedTotal = casinoTables.reduce((s, m) => s + (m.casinoOpenPot ?? 0), 0);
+
+  const fmtWhen = (ts: number) =>
+    new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="casino-topup-block">
+      <div className="casino-log-toggle" onClick={() => setOpen(o => !o)}>
+        <span>💰 Season money-in · {(topupTotal + potSeedTotal).toLocaleString()}g</span>
+        <span>{open ? '▾' : '▸'}</span>
+      </div>
+      {open && (
+        <>
+          <div className="casino-topup-sums">
+            <span>Gold-floor top-ups: <b>{topupTotal.toLocaleString()}g</b> · {entries.length} event{entries.length === 1 ? '' : 's'} · {players} player{players === 1 ? '' : 's'}</span>
+            <span>Pot seeds: <b>{potSeedTotal.toLocaleString()}g</b> · opening pots across {tableCount} table{tableCount === 1 ? '' : 's'}</span>
+          </div>
+          <div className="casino-log-list">
+            {entries.length === 0
+              ? <div className="casino-log-row casino-topup-empty">No floor top-ups yet — nobody has dipped below the gold floor.</div>
+              : entries.map(([id, e]) => (
+                  <div key={id} className="casino-log-row casino-topup-row">
+                    <span className="casino-topup-when">{fmtWhen(e.ts)}</span>
+                    <span className="casino-topup-name">{e.playerName}</span>
+                    <span className="casino-topup-amt">+{e.granted.toLocaleString()}g</span>
+                    <span className="casino-topup-bal">→ {e.resultingBalance.toLocaleString()}g</span>
+                  </div>
+                ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 // Casino and non-casino missions now live in separate admin tabs (permanent
@@ -706,6 +769,8 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
   return (
     <div className="dash-page">
       <h2 className="dash-page-title">{isCasinoTab ? '🂡 Casino Tables' : '⚜ Guildmaster Missions'}</h2>
+
+      {isCasinoTab && <GoldTopUpAudit />}
 
       <div className="dash-challenges-cols">
         <div className="dash-col">

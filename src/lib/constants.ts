@@ -403,7 +403,9 @@ export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
       { label: 'Blackjack ante', gold: 30 },
       { label: 'Reroll',         gold: 20 },
     ],
-    potSeed: 50,
+    // No flat potSeed: casino tables roll a variable opening pot in freshCasinoTable
+    // (rollTableSetup). The `potSeed` field stays on the type for other mission
+    // kinds that want a fixed starting pot.
   },
 };
 

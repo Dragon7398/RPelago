@@ -379,7 +379,18 @@
 .rl-prof-stat {
   display: flex; flex-direction: column; gap: 0.15rem; padding: 0.7rem 0.8rem;
   border: 1px solid var(--line); border-radius: 9px; background: oklch(from var(--bg-card) l c h / 0.5);
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+  animation: rlStatIn 0.32s ease both;
 }
+.rl-prof-grid .rl-prof-stat:nth-child(2) { animation-delay: 0.04s; }
+.rl-prof-grid .rl-prof-stat:nth-child(3) { animation-delay: 0.08s; }
+.rl-prof-grid .rl-prof-stat:nth-child(4) { animation-delay: 0.12s; }
+.rl-prof-stat:hover { transform: translateY(-1px); border-color: var(--line-glow); box-shadow: 0 4px 14px #0004; }
+.rl-prof-stat--pos { border-color: oklch(from var(--pos) l c h / 0.4); background: oklch(from var(--pos) l c h / 0.09); }
+.rl-prof-stat--pos:hover { border-color: oklch(from var(--pos) l c h / 0.65); }
+.rl-prof-stat--neg { border-color: oklch(from var(--neg) l c h / 0.4); background: oklch(from var(--neg) l c h / 0.09); }
+.rl-prof-stat--neg:hover { border-color: oklch(from var(--neg) l c h / 0.65); }
+@keyframes rlStatIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .rl-prof-statval { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.35rem; color: var(--gold); }
 .rl-prof-statval small { font-size: 0.5em; color: var(--gold-dim); font-weight: 600; }
 .rl-prof-sec { margin-top: 1.1rem; }
@@ -421,9 +432,19 @@
   animation: rlSitPop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 .rl-sitflash-chip {
+  position: relative;
   width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; color: var(--bg-deep);
   background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(54% 0.12 66));
   box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), 0 2px 8px #0008;
+}
+/* Soft gold ring that expands out of the chip as the seat is claimed. */
+.rl-sitflash-chip::after {
+  content: ''; position: absolute; inset: -0.35rem; border-radius: 50%;
+  border: 2px solid oklch(from var(--gold) l c h / 0.55); animation: rlSitRing 0.9s ease-out forwards;
+}
+@keyframes rlSitRing {
+  from { opacity: 0.8; transform: scale(0.7); }
+  to   { opacity: 0; transform: scale(1.5); }
 }
 .rl-sitflash-kick { font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-sitflash-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); }
@@ -562,7 +583,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-prof-swatch,
-  .mp-ct, .rl-settled-wrap { animation: none !important; transition: none !important; }
+  .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-sitflash-chip::after,
+  .rl-prof-swatch, .rl-prof-stat, .mp-ct, .rl-settled-wrap { animation: none !important; transition: none !important; }
+  .rl-sitflash-chip::after { display: none; }
   .mp-meter-fill { transition: none !important; }
 }

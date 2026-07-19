@@ -139,6 +139,7 @@ function normalizeGameState(raw: GameState): GameState {
     missionsHistory: raw.missionsHistory ?? {},
     orbState: raw.orbState ?? {},
     shops:    raw.shops    ?? {},
+    goldTopUpLog: raw.goldTopUpLog ?? {},
   };
 }
 

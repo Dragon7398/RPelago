@@ -563,7 +563,6 @@ const MISSION_DEFS = {
             { label: 'Blackjack ante', gold: 30 },
             { label: 'Reroll', gold: 20 },
         ],
-        potSeed: casinoEngine_1.CASINO_POT_SEED,
     },
 };
 function toRoman(n) {
@@ -624,13 +623,9 @@ function gmFreshMission(type, series, now) {
     };
     if (def.traits)
         result.traits = { ...def.traits };
-    if (type === 'casino') {
-        result.variableReward = true;
-        result.tableUrl = def.tableUrl;
-        result.entryCosts = def.entryCosts ? [...def.entryCosts] : [];
-        result.pot = casinoEngine_1.CASINO_POT_SEED;
-        result.casinoStats = { ...casinoEngine_1.CASINO_START_STATS };
-    }
+    // Casino tables are NOT built here — they route through gmFreshCasinoTable
+    // (rollTableSetup rolls a variable pot/odds per table). gmFreshMission only ever
+    // builds the non-casino cohorts (basic / patrol), which carries into S2 unchanged.
     return result;
 }
 function gmMissionLabel(m) {
@@ -684,9 +679,10 @@ function gmFreshCasinoTable(game, series, now, rng = Math.random) {
         entryCosts: gmCasinoEntryCosts(game),
         pot: setup.pot,
         casinoStats: setup.stats,
-        // Frozen copy of the same roll — gambits mutate casinoStats, so drift is
-        // only measurable against this. Mirror of freshCasinoTable.
+        // Frozen copies of the same roll — gambits mutate casinoStats and antes grow
+        // the pot, so both the odds drift and the pot audit measure against these.
         casinoOpenStats: { ...setup.stats },
+        casinoOpenPot: setup.pot,
     };
 }
 // Next per-game cohort number — a persisted counter, transaction-incremented so

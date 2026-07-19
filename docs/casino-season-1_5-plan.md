@@ -302,9 +302,11 @@ at **room creation** (the Seated → In-progress transition).
    `randInt(0, 30)` at the most generous (70+50) — never negative.
    *Rationale: lower Release/Collect chances (a harder room) pay a bigger pot.*
 
-This replaces the constant `CASINO_POT_SEED` — `gmFreshMission` must compute
-the pot **dynamically at table creation** from the rolled seats + R + C, and
-persist `R`/`C` on the mission so room creation can roll against them.
+This **replaced** the flat `CASINO_POT_SEED` (now removed): `freshCasinoTable` /
+`gmFreshCasinoTable` compute the pot **dynamically at table creation** from the
+rolled seats + R + C (`rollTableSetup`), persist `R`/`C` for the deploy roll, and
+bank the opening pot as `casinoOpenPot` (the audit's baseline, since antes later
+grow the pot and the opening amount is never logged).
 
 **At room creation (deploy):** roll Release On/Off against `R`, Collect On/Off
 against `C`. Before that, the UI reads "to roll."
@@ -749,18 +751,30 @@ All four remaining landing items are built in `CasinoShell.tsx` / `landing.css`:
 > table), so the profile shows the count once as "Tables played" rather than as
 > two identical stats.
 
+### ✅ Done 2026-07-18 (config review polish, audit, deny reason)
+
+- **Season money-in audit** (`GoldTopUpAudit`) sits at the top of the Casino tab: a
+  collapsible panel showing total gold entering the economy — weekly floor top-ups
+  (from `goldTopUpLog`, a newly-typed field on `GameState`, already arriving with the
+  season subscription) plus pot seeds (sum of each table's banked `casinoOpenPot`),
+  with a dated per-top-up list. Complements the per-mission `CasinoAuditLog`.
+- **Deny reason.** The host's ⛔ deny now opens an inline reason field (Enter/Escape
+  to confirm/cancel); the reason flows through `adminDenyCasinoYaml` to
+  `participant.yamlDeniedReason` and is shown to the player on the landing + table.
+- **YAML panel + admin button styling.** `.dash-action-btn` is now a global gold-leaf
+  ghost button (was unstyled → white); per-row download/deny are themed icon buttons
+  with text-presentation glyphs; per-seat + `.zip` (via `fflate`) downloads, never a
+  combined file.
+- **Profile modal + sit-flash polish.** Stat cards are tone-tinted (win/loss reads at
+  a glance) with a staggered entrance + hover lift; the sit-flash chip gains a soft
+  gold ring. All reduced-motion-guarded.
+
 ### Not started / remaining
 
-- **Admin Casino tab — gold-top-up audit.** The tab exists (above); what's missing
-  is the **season-level** money-in view (`goldTopUpLog` + pot injections), so the
-  audit can see money entering the economy — the per-table `CasinoAuditLog` is
-  per-mission only.
 - **Step 8** — launch flip. (Bucket is enabled; `storage.rules` still needs a
   `firebase deploy --only storage`.)
-- **Optional polish:** Profile modal + sit flash still use earlier copy/classes
-  rather than the design's exact `rl-pstats`/`rl-flash` treatment (functional,
-  and the profile is correctly Coat-gated). The 36h decay window is longer than a
-  test session — shorten or make configurable if faster playtest decay is wanted.
+- **Decay window** — the 36h window is longer than a test session; the host tweaks
+  Firebase timestamps directly for faster playtest cycles (no code change wanted).
 
 ### Ops notes
 

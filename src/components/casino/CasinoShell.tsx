@@ -195,7 +195,7 @@ interface ProfileStats { gold: number; net: number; tablesPlayed: number; bigges
 
 function ProfStat({ label, value, tone }: { label: string; value: ReactNode; tone?: 'pos' | 'neg' }) {
   return (
-    <div className="rl-prof-stat">
+    <div className={`rl-prof-stat${tone ? ` rl-prof-stat--${tone}` : ''}`}>
       <div className="rl-mini-lbl">{label}</div>
       <div className="rl-prof-statval" style={tone ? { color: `var(--${tone})` } : undefined}>{value}</div>
     </div>
@@ -357,6 +357,9 @@ export default function CasinoShell() {
   // in-progress without the panel tracking phase itself.
   const seatedAt   = activeMission ? gameState?.missions?.[activeMission] ?? null : null;
   const lastSettled = useLastSettled(gameState?.missionsHistory, user?.id ?? null);
+  // Dismissed-ledger id lives here (not in PhasePanel) so the tables heading below
+  // and the panel agree on whether the Ledger is showing.
+  const [dismissedSettled, setDismissedSettled] = useState<string | null>(null);
 
   const locked    = !!activeMission;
   const lockLabel = 'Seated elsewhere';
@@ -375,6 +378,16 @@ export default function CasinoShell() {
   };
 
   const isFloor = view === 'floor';
+
+  // The tables grid retitles with the player's seat phase, closing the loop per the
+  // design: it invites you back once you're mid-room or just settled up. Mirrors
+  // PhasePanel's Board (in-progress) / Ledger (settled, not yet dismissed) states.
+  const showingLedger = !seatedAt && !!lastSettled && lastSettled.id !== dismissedSettled;
+  const tablesTitle =
+    seatedAt?.state === 'inprogress' ? 'Other Tables Forming'
+    : showingLedger                  ? 'Your Seat Is Free — Pull Up Again'
+    : isFloor                        ? 'The Floor'
+    :                                  "Tonight's Tables";
 
   return (
     <div className="rl-root">
@@ -424,11 +437,12 @@ export default function CasinoShell() {
       <PhasePanel
         mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now} view={view}
         onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
+        dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
       />
 
       <div className="rl-sec">
         <div className="rl-sec-head">
-          <span className="rl-sec-title">{isFloor ? 'The Floor' : "Tonight's Tables"}</span>
+          <span className="rl-sec-title">{tablesTitle}</span>
           <span className="rl-sec-note">{tables.length} table{tables.length === 1 ? '' : 's'} taking seats</span>
         </div>
         {tables.length === 0

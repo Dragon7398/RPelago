@@ -542,15 +542,17 @@ interface Props {
   /** Landing view — only the Seated panel diverges (lounge = cozy, floor = rail). */
   view: View;
   onLeave: (m: GMMission) => void;
+  /** Dismissed-ledger id, lifted to the shell so the tables heading stays in sync. */
+  dismissedId: string | null;
+  onDismiss: (id: string) => void;
 }
 
-export default function PhasePanel({ mission, settled, uid, now, view, onLeave }: Props) {
+export default function PhasePanel({ mission, settled, uid, now, view, onLeave, dismissedId, onDismiss }: Props) {
   const seasonId = useSeason().season?.id ?? '';
-  const [dismissed, setDismissed] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
   const seat = uid && mission ? mission.participants?.[uid] : undefined;
-  const showLedger = !mission && settled && settled.id !== dismissed;
+  const showLedger = !mission && settled && settled.id !== dismissedId;
 
   if (mission && uid && seat) {
     const played = !!seat.played;
@@ -585,7 +587,7 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave }
   }
 
   if (showLedger && settled && uid) {
-    return <LedgerView m={settled} uid={uid} onDismiss={() => setDismissed(settled.id)} />;
+    return <LedgerView m={settled} uid={uid} onDismiss={() => onDismiss(settled.id)} />;
   }
 
   return (

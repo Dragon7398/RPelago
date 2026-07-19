@@ -1005,6 +1005,26 @@ header p {
 }
 .casino-log-row { font-family: 'Crimson Pro', serif; font-size: 0.7rem; color: var(--parchment); }
 
+/* Casino: season-level money-in audit (top of the Casino tab) */
+.casino-topup-block {
+  margin: 0 0 1rem; padding: 0.6rem 0.8rem;
+  background: oklch(14% 0.04 75 / 0.5); border: 1px solid var(--border); border-radius: 4px;
+}
+.casino-topup-block .casino-log-toggle { font-size: 0.66rem; color: var(--gold); }
+.casino-topup-sums {
+  display: flex; flex-direction: column; gap: 0.15rem; margin: 0.5rem 0 0.45rem;
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem; color: var(--text-muted);
+}
+.casino-topup-sums b { color: var(--gold); }
+.casino-topup-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: baseline;
+}
+.casino-topup-when { color: var(--gold-dim); font-size: 0.66rem; white-space: nowrap; }
+.casino-topup-name { color: var(--parchment); overflow: hidden; text-overflow: ellipsis; }
+.casino-topup-amt  { color: oklch(72% 0.18 145); text-align: right; white-space: nowrap; }
+.casino-topup-bal  { color: var(--gold-dim); text-align: right; white-space: nowrap; }
+.casino-topup-empty { color: var(--gold-dim); font-style: italic; }
+
 /* Casino: admin YAML download */
 .casino-yaml-block { margin-top: 0.5rem; }
 .casino-yaml-list { margin-top: 0.4rem; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
@@ -1015,9 +1035,17 @@ header p {
   border-bottom: 1px solid var(--border);
 }
 .casino-yaml-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
   padding: 0.32rem 0.6rem; border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
 }
+.casino-yaml-reason {
+  width: 15rem; max-width: 46vw; padding: 0.28rem 0.5rem;
+  background: oklch(16% 0.04 75); border: 1px solid var(--border-glow); border-radius: 2px;
+  color: var(--parchment); font-family: 'Crimson Pro', serif; font-size: 0.8rem;
+  outline: none; transition: border-color 0.15s;
+}
+.casino-yaml-reason:focus { border-color: var(--gold); }
+.casino-yaml-reason::placeholder { color: oklch(from var(--gold-dim) l c h / 0.7); font-style: italic; }
 .casino-yaml-row:last-child { border-bottom: none; }
 .casino-yaml-name { font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment); }
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }

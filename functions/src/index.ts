@@ -8,7 +8,7 @@ import { getStorage } from 'firebase-admin/storage';
 import { defineSecret } from 'firebase-functions/params';
 import {
   type DeckCard, type CasinoStats, type GambitDef, type GambitCard, type CasinoDeckChoice, type CasinoGame,
-  CASINO_MIN_ENLIST_GOLD, CASINO_POT_SEED,
+  CASINO_MIN_ENLIST_GOLD,
   CASINO_START_STATS,
   CASINO_GAMES, CASINO_GAME_ORDER, potContribution, drawCommunity, rollTableSetup,
   initialDealCount, selectCommitted, gambitCasinoGold,
@@ -717,6 +717,7 @@ interface GMMission {
   pot?:            number;
   casinoStats?:    CasinoStats;
   casinoOpenStats?: CasinoStats;                    // the odds rolled at creation, frozen
+  casinoOpenPot?:  number;                          // the pot rolled at creation, frozen (for the audit)
   casinoLog?:      Record<string, CasinoLogEntry>;
   casinoGame?:     CasinoGame;                      // which game this table is pinned to
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards
@@ -809,7 +810,6 @@ const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
       { label: 'Blackjack ante', gold: 30 },
       { label: 'Reroll',         gold: 20 },
     ],
-    potSeed: CASINO_POT_SEED,
   },
 };
 
@@ -868,13 +868,9 @@ function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<
     participants: {},
   };
   if (def.traits) result.traits = { ...def.traits };
-  if (type === 'casino') {
-    result.variableReward = true;
-    result.tableUrl       = def.tableUrl;
-    result.entryCosts     = def.entryCosts ? [...def.entryCosts] : [];
-    result.pot            = CASINO_POT_SEED;
-    result.casinoStats    = { ...CASINO_START_STATS };
-  }
+  // Casino tables are NOT built here — they route through gmFreshCasinoTable
+  // (rollTableSetup rolls a variable pot/odds per table). gmFreshMission only ever
+  // builds the non-casino cohorts (basic / patrol), which carries into S2 unchanged.
   return result;
 }
 
@@ -933,9 +929,10 @@ function gmFreshCasinoTable(game: CasinoGame, series: number, now: number, rng: 
     entryCosts:     gmCasinoEntryCosts(game),
     pot:            setup.pot,
     casinoStats:    setup.stats,
-    // Frozen copy of the same roll — gambits mutate casinoStats, so drift is
-    // only measurable against this. Mirror of freshCasinoTable.
+    // Frozen copies of the same roll — gambits mutate casinoStats and antes grow
+    // the pot, so both the odds drift and the pot audit measure against these.
     casinoOpenStats: { ...setup.stats },
+    casinoOpenPot:   setup.pot,
   };
 }
 

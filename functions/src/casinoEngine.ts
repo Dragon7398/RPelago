@@ -66,7 +66,6 @@ export interface GambitResult {
 // Mirror of CASINO_MIN_ENLIST_GOLD and CASINO_START_STATS in src/lib/constants.ts
 
 export const CASINO_MIN_ENLIST_GOLD = 90;  // = the cheapest ante (Hold 'Em)
-export const CASINO_POT_SEED        = 50;
 export const CASINO_POT_CUT_PCT     = 0.40;
 export const CASINO_START_STATS: CasinoStats = { release: 60, collect: 30, hint: 10, xp: 50 };
 

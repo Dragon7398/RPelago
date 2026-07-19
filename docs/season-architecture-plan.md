@@ -421,8 +421,9 @@ tab set becomes season-driven** (same config-driven principle as the shell).
 > Casino/Missions split is `MissionsPage` with a `filter` prop (`casino` |
 > `noncasino`) — the Casino tab reuses all its casino detail (pot, rosters,
 > per-seat slots, gambit odds, `CasinoAuditLog`, spectate link); warn badges split
-> by type. **Remaining:** the season-level gold-top-up audit view (`goldTopUpLog`)
-> is not surfaced yet — only the per-table `CasinoAuditLog` is.
+> by type. The season-level money-in audit (`GoldTopUpAudit` — floor top-ups from
+> `goldTopUpLog` + pot seeds) sits at the top of the Casino tab, complementing the
+> per-table `CasinoAuditLog`.
 
 **Tab evolution:**
 
