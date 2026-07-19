@@ -543,6 +543,12 @@ export function CasinoTable() {
 
   const mySeat     = uid ? mission?.participants?.[uid] : undefined;
   const yamlDenied = mySeat?.yamlDenied === true;
+  // A locked player may re-select their cards on a resubmit only while the table is
+  // still FORMING and the dealt hand is still preserved — single-sitting games only
+  // (Hold 'Em's play-on already collapsed its pool; deploy clears the hand). The
+  // gambit is never re-openable.
+  const canChangeCards = !!mySeat?.played && mission?.state === 'forming'
+    && game !== 'holdem' && (secretHand?.length ?? 0) > 0;
 
   const manifestReady = committedCards.filter(c => (manifest[c.uid]?.game ?? '').trim().length > 0).length;
   // A new attach is REQUIRED for an initial submit and for a denied resubmit (the
@@ -566,7 +572,12 @@ export function CasinoTable() {
     }]));
 
     if (resubmitting) {
-      await call<object, unknown>('resubmitCasinoYaml')({ missionId, manifest: manifestPayload });
+      // Send the (possibly re-selected) committed cards so the server can re-lock
+      // and recompute the reward; omit when card-change isn't allowed (YAML only).
+      await call<object, unknown>('resubmitCasinoYaml')({
+        missionId, manifest: manifestPayload,
+        ...(canChangeCards ? { keepUids: committedCards.map(c => c.uid) } : {}),
+      });
       setResubmitting(false);
       doFlash('Config resubmitted to your host.');
       setPhase(mission?.state === 'forming' ? 'locked' : 'deployed');
@@ -584,14 +595,27 @@ export function CasinoTable() {
   }, 'Submit failed. Please try again.');
 
   // Reopen a locked config in the Manifest view so the player can reorder games or
-  // attach an updated file. Seeds the manifest from the committed cards + current
-  // slots so nothing is lost if they only want to tweak the order.
+  // attach an updated file. When card-change is allowed, the FULL dealt hand is
+  // loaded (with the current commit pre-selected) so "← Change cards" can re-select;
+  // otherwise only the committed cards are loaded. Seeds the manifest from the
+  // current slots so a YAML-only tweak loses nothing.
   const startResubmit = () => {
     const cards = mySeat?.lockedCards ?? [];
     const slots = mySeat?.slots ?? [];
-    setHand(cards);
-    setKeep(new Set(cards.map(c => c.uid)));
-    setReject(new Set());
+    const fullHand = canChangeCards ? secretHand! : cards;
+    setHand(fullHand);
+    const committed = new Set(cards.map(c => c.uid));
+    if (game === 'five_card_draw') {
+      // FCD commits the un-rejected cards, so reject everything NOT currently committed.
+      setReject(new Set(fullHand.filter(c => !committed.has(c.uid)).map(c => c.uid)));
+      setKeep(new Set());
+    } else {
+      setKeep(committed);
+      setReject(new Set());
+    }
+    // No re-drawing on a resubmit — the hand is fixed, only the commit is re-picked.
+    // stood=true so Blackjack shows its commit button (its draw phase is over).
+    setStood(true);
     const seeded: Record<number, ManifestVal> = {};
     cards.forEach((c, i) => { seeded[c.uid] = { name: slots[i]?.name ?? '', game: slots[i]?.game ?? '' }; });
     setManifest(seeded);
@@ -599,6 +623,10 @@ export function CasinoTable() {
     setResubmitting(true);
     setPhase('manifest');
   };
+
+  // Play-phase forward: initial flow deals the gambit; a resubmit skips straight
+  // to the Manifest (the gambit is locked and never re-openable).
+  const advanceFromPlay = () => { if (resubmitting) setPhase('manifest'); else toGambit(); };
 
   const cancelResubmit = () => {
     setResubmitting(false);
@@ -765,6 +793,7 @@ export function CasinoTable() {
               <div className="cz-stage-title">Your turn — {cfg.label}</div>
               <div className="cz-stage-note">{GAME_BLURB[game]}</div>
               <div className="cz-actions">
+                <button className="cz-btn ghost" onClick={() => setPhase('deckselect')} disabled={busy}>← Change deck</button>
                 <button className="cz-btn primary" onClick={doAnte} disabled={busy}>
                   {game === 'holdem'
                     ? `Ante ${cfg.ante}g · take two hole cards`
@@ -785,10 +814,16 @@ export function CasinoTable() {
           {phase === 'play' && (
             <>
               <div className="cz-stage-title">
-                {cfg.label}
-                {game === 'five_card_draw' && rerolled ? ' · reroll spent' : ''}
-                {game === 'blackjack' ? ` · ${hand.length}/${cfg.maxDraw} drawn` : ''}
+                {resubmitting ? 'Re-pick your cards' : cfg.label}
+                {!resubmitting && game === 'five_card_draw' && rerolled ? ' · reroll spent' : ''}
+                {!resubmitting && game === 'blackjack' ? ` · ${hand.length}/${cfg.maxDraw} drawn` : ''}
               </div>
+              {resubmitting && (
+                <div className="cz-stage-note">
+                  Choose which of your dealt cards to commit — drop one you've cooled on, or add one to be
+                  bolder. Your gambit stays as it is; you'll re-attach your config after.
+                </div>
+              )}
 
               <div className="cz-hand">
                 {hand.map(c => {
@@ -839,12 +874,15 @@ export function CasinoTable() {
               <PokerReadout cards={committedCards} spent={spent} deckChoice={effectiveDeckChoice} />
 
               <div className="cz-actions">
-                {cfg.reroll && (
+                {resubmitting && (
+                  <button className="cz-btn" onClick={() => setPhase('manifest')} disabled={busy}>← Back to config</button>
+                )}
+                {cfg.reroll && !resubmitting && (
                   <button className="cz-btn" onClick={doReroll} disabled={busy || rerolled || reject.size === 0}>
                     Reroll {reject.size > 0 ? `${reject.size} ` : ''}({cfg.rerollCost}g)
                   </button>
                 )}
-                {game === 'blackjack' && !stood && (
+                {game === 'blackjack' && !stood && !resubmitting && (
                   <>
                     <button className="cz-btn" onClick={doHit} disabled={busy || hand.length >= cfg.maxDraw}>
                       Hit ({hand.length}/{cfg.maxDraw})
@@ -852,14 +890,16 @@ export function CasinoTable() {
                     <button className="cz-btn primary" onClick={() => setStood(true)} disabled={busy}>Stand</button>
                   </>
                 )}
-                {!(game === 'blackjack' && !stood) && (
-                  <button className="cz-btn primary" onClick={toGambit} disabled={busy || !canCommit}>
+                {(resubmitting || !(game === 'blackjack' && !stood)) && (
+                  <button className="cz-btn primary" onClick={advanceFromPlay} disabled={busy || !canCommit}>
                     {overPick
                       ? `Drop ${committedCards.length - cfg.pickMax} to commit`
-                      : `Commit ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'} · ${applyDeckBoost(handStake(committedCards), effectiveDeckChoice)}g`}
+                      : resubmitting
+                        ? `Use these ${committedCards.length} ${committedCards.length === 1 ? 'card' : 'cards'} →`
+                        : `Commit ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'} · ${applyDeckBoost(handStake(committedCards), effectiveDeckChoice)}g`}
                   </button>
                 )}
-                <button className="cz-btn danger" onClick={doFold} disabled={busy}>Fold</button>
+                {!resubmitting && <button className="cz-btn danger" onClick={doFold} disabled={busy}>Fold</button>}
               </div>
               <div className="cz-flash">{flash}</div>
             </>
@@ -979,6 +1019,9 @@ export function CasinoTable() {
                       })}
                 </div>
                 <div className="cz-actions">
+                  <button className="cz-btn ghost" onClick={() => setPhase(game === 'holdem' ? 'holdplay' : 'play')} disabled={busy}>
+                    ← Back to cards
+                  </button>
                   <button className="cz-btn primary" onClick={() => setPhase('manifest')} disabled={busy || loadingOffer}>
                     {loadingOffer ? 'Drawing…' : gOffer.length === 0 ? 'Continue →' : gPick ? 'Play this gambit & continue →' : 'Skip & continue →'}
                   </button>
@@ -1002,7 +1045,9 @@ export function CasinoTable() {
               <div className="cz-stage-title">{resubmitting ? 'Reopen your slots' : 'Fill your slots'}</div>
               <div className="cz-stage-note">
                 {resubmitting
-                  ? 'Attach an updated config, or use the ↑/↓ arrows to re-map games to cards. Your committed cards and gambit are unchanged.'
+                  ? (canChangeCards
+                      ? 'Attach an updated config, re-map games with the ↑/↓ arrows, or ← Change cards to re-pick which games you commit to. Your gambit is locked in and unchanged.'
+                      : 'Attach an updated config, or use the ↑/↓ arrows to re-map games to cards. Your committed cards and gambit are unchanged.')
                   : "Attach your Archipelago config below — we read each world's game and slot name and map them to your committed cards in order. Use ↑/↓ to line a game up with the right card. Your host reviews every submission."}
               </div>
 
@@ -1070,8 +1115,13 @@ export function CasinoTable() {
                   {countErr && <> · <span className="sf-ready-need">wrong game count</span></>}
                 </span>
                 <div className="sf-foot-acts">
-                  {resubmitting && (
-                    <button className="cz-btn" disabled={busy} onClick={cancelResubmit}>Cancel</button>
+                  {resubmitting ? (
+                    <>
+                      {canChangeCards && <button className="cz-btn" disabled={busy} onClick={() => setPhase('play')}>← Change cards</button>}
+                      <button className="cz-btn" disabled={busy} onClick={cancelResubmit}>Cancel</button>
+                    </>
+                  ) : (
+                    <button className="cz-btn" disabled={busy} onClick={() => setPhase('gambit')}>← Back</button>
                   )}
                   <button className="cz-btn primary" disabled={busy || !canSubmit} onClick={doSubmit}>
                     {busy ? 'Submitting…' : resubmitting ? 'Resubmit to guildmaster →' : 'Submit to guildmaster →'}

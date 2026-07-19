@@ -989,9 +989,11 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
     updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
     updates[sp(seasonId, `missions/${missionId}/hint`)]    = m.casinoStats.hint;
     updates[sp(seasonId, `missions/${missionId}/xp`)]      = m.casinoStats.xp;
-    // Secrets live outside the season tree — clear the draw deck there.
+    // Secrets live outside the season tree — clear the draw deck AND the hand now
+    // that the table is live (cards are locked into the room; no more re-selecting).
     for (const uid of Object.keys(m.participants ?? {})) {
       updates[secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)] = null;
+      updates[secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)] = null;
     }
   }
 
@@ -1689,8 +1691,11 @@ export const lockCasinoResult = onCall(async (request) => {
     // 1:1 to the slots above (same genre + value), so this exposes nothing the
     // slots don't already; the secret hand/deck below are still cleared.
     [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)]: hand,
-    // Clear the secret hand/deck now that the seat is locked.
-    [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]:  null,
+    // Clear the draw DECK (seeing the remaining cards lets a player engineer their
+    // hand). The HAND is deliberately KEPT — it's owner-read-only, and while the
+    // table is still forming it lets the player re-select cards on a resubmit
+    // ("cold feet" / "be bolder"). It is cleared at deploy (deployMission) and on
+    // fold / leave / kick (clearSeatSecrets).
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:  null,
     [logPath]: logEntry,
   };
@@ -1714,12 +1719,16 @@ export const lockCasinoResult = onCall(async (request) => {
 export const resubmitCasinoYaml = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   const uid = request.auth.uid;
-  const { missionId, manifest, seasonId: reqSeason } = request.data as {
+  const { missionId, manifest, keepUids, seasonId: reqSeason } = request.data as {
     missionId?: string;
     // Re-stamps the committed cards' games/names onto the existing slots, so a
     // player who reordered games while resubmitting has that order take effect.
     // Omit to leave the slots untouched (a config-only replacement).
     manifest?: Record<string, { game?: string; name?: string }>;
+    // Card-change re-lock: the new committed selection out of the still-preserved
+    // dealt hand. Only honored while FORMING for single-sitting games. Recomputes
+    // goldSwing / lockedCards / slots. The gambit is NEVER touched.
+    keepUids?: number[] | null;
     seasonId?: string;
   };
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
@@ -1749,13 +1758,54 @@ export const resubmitCasinoYaml = onCall(async (request) => {
     [sp(seasonId, `missions/${missionId}/participants/${uid}/yamlDeniedAt`)]:     null,
   };
 
-  // Re-stamp the slots from the (possibly reordered) manifest. Slots map 1:1 to the
-  // committed cards by index; only game/name change — details, status and bonuses
-  // set during play are preserved. Every committed card still needs a game.
-  if (manifest) {
+  const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
+
+  if (keepUids) {
+    // ── Card-change re-lock ──────────────────────────────────────────────────
+    // Re-select the committed cards from the still-preserved dealt hand, then
+    // recompute the reward and rebuild the slots. Forming + single-sitting only:
+    // deploy clears the hand, and Hold 'Em's play-on already collapsed its pool.
+    if (mission.state !== 'forming')
+      throw new HttpsError('failed-precondition', 'Cards can only be changed while the table is still forming.');
+    if (mission.casinoGame === 'holdem')
+      throw new HttpsError('failed-precondition', "Hold 'Em hands can't be re-selected.");
+
+    const handSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
+    const rawHand  = (handSnap.val() as DeckCard[] | null) ?? [];
+    if (rawHand.length === 0)
+      throw new HttpsError('failed-precondition', 'Your dealt hand is no longer available to re-select.');
+
+    const pickMax = mission.casinoGame ? CASINO_GAMES[mission.casinoGame].pickMax : 5;
+    const minKeep = mission.casinoGame === 'blackjack' ? Math.max(1, rawHand.length - 1) : 1;
+    const sel = selectCommitted(rawHand, keepUids, pickMax, minKeep);
+    if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
+    const committed = sel.committed;
+
+    const choice    = deckChoiceOf(seat);
+    const goldSwing = applyDeckBoost(handStake(committed), choice);
+    const slots     = cardsToSlots(committed);
+    committed.forEach((card, i) => {
+      const m    = manifest?.[String(card.uid)];
+      const game = clip(m?.game, 120);
+      const name = clip(m?.name, 80);
+      if (!game) throw new HttpsError('failed-precondition', 'Every committed card needs a game before you can resubmit.');
+      slots[i].game = game;
+      if (name) slots[i].name = name;
+    });
+
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = committed;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]   = goldSwing;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]       = slots;
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+      uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
+    });
+    updates[logPath] = logEntry;
+  } else if (manifest) {
+    // ── Config-only: re-stamp the (possibly reordered) manifest onto existing slots.
+    // Slots map 1:1 to the committed cards by index; only game/name change — details,
+    // status and bonuses set during play are preserved. Every card still needs a game.
     const cards = seat.lockedCards ?? [];
     const slots = seat.slots ?? [];
-    const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
     const nextSlots = slots.map((s, i) => {
       const card = cards[i];
       const m    = card ? manifest[String(card.uid)] : undefined;

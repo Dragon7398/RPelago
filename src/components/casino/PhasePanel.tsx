@@ -257,7 +257,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
     <>
       {href && (
         <a className="rl-btn primary" href={href} target="_blank" rel="noopener noreferrer">
-          {seat.played ? 'Review your hand →' : 'Return to the table →'}
+          {seat.played ? 'Review your hand →' : 'Head to the table →'}
         </a>
       )}
       <button className="rl-btn" onClick={onLeave}>Leave your seat</button>
