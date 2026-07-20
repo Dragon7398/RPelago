@@ -2,11 +2,17 @@
    Themed through casino/themes.css tokens (--gold, --panel, --felt, …).
    Everything is scoped under .rl-root. */
 
+/* The main app's body is `display:flex; align-items:center`, which shrink-wraps
+   #root (the flex item) to its content width — so .rl-root's max-width/auto-margins
+   never engage. Give #root full width in the casino landing so it centers to the
+   real max-width. Scoped to casino-scope, so the map layout is untouched. */
+body.casino-scope #root { width: 100%; }
+
 .rl-root {
   --line: var(--border);
   --line-glow: var(--border-glow);
   position: relative; z-index: 1;
-  max-width: 1180px; margin: 0 auto; padding: 0 1rem 5rem;
+  max-width: 1500px; margin: 0 auto; padding: 0 1rem 5rem; width: 100%;
   display: flex; flex-direction: column; gap: 1.4rem;
   color: var(--parchment);
   min-height: 100dvh;
@@ -215,6 +221,9 @@
   font-family:'Cinzel',serif; font-weight: 700; font-size: 0.72rem; color: oklch(18% 0.03 70);
   background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75)));
 }
+/* Discord-avatar variant of any seat circle (rl-seat-av / mp-pav / st-pav): the
+   base class supplies the size + 50% radius; the image just fills it. */
+.rl-av-img { display: block; object-fit: cover; background: none; border: none; }
 .rl-seat.empty .rl-seat-av { background: none; border: 1.5px dashed var(--line-glow); color: var(--gold-dim); }
 .rl-seat-txt { display: flex; flex-direction: column; line-height: 1.1; }
 .rl-seat-nm { font-family:'Cinzel',serif; font-size: 0.72rem; color: var(--parchment); }
@@ -524,14 +533,14 @@
 }
 .mp-mine-count { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--pos); margin-left: 0.4rem; text-transform: none; }
 .mp-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.9rem; }
-.mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.55rem; }
+.mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
 .mp-tile.goaled { border-top-color: var(--pos); box-shadow: 0 0 0 1px oklch(from var(--pos) l c h / 0.25); }
 .mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
-.mp-tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.4rem; }
+/* Status on its own line at the top (left-aligned, sized to content) so the genre
+   label below gets the full width — no cramping when the font scale is bumped up. */
+.mp-tile-status { display: flex; }
 .mp-tile-game { font-family:'Crimson Pro',serif; font-size: 0.92rem; color: var(--parchment); line-height: 1.2; }
-/* min-width:0 + overflow-wrap let the genre label shrink/wrap so the fixed-width
-   status pill (flex-shrink:0) always keeps its place instead of spilling out. */
-.mp-tile-slot { font-family:'Cinzel',serif; font-size: 0.6rem; color: var(--gold); min-width: 0; overflow-wrap: anywhere; }
+.mp-tile-slot { font-family:'Cinzel',serif; font-size: 0.6rem; color: var(--gold); overflow-wrap: anywhere; }
 .mp-tile-owner { display: flex; align-items: center; gap: 0.35rem; font-family:'Crimson Pro',serif; font-size: 0.74rem; font-style: italic; color: var(--gold-dim); }
 .mp-tile-owner .mp-pav { width: 1.15rem; height: 1.15rem; font-size: 0.5rem; }
 

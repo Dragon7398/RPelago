@@ -74,6 +74,12 @@
                   // table UI can recover after a reload. Writes are server-only.
                   ".read":  "auth != null && auth.uid === $uid",
                   ".write": false
+                },
+                "hole": {
+                  // Hold 'Em: the seat's 2 hole cards, kept past play-on so a forming
+                  // resubmit can rebuild the pool. Owner-read only, like `hand`.
+                  ".read":  "auth != null && auth.uid === $uid",
+                  ".write": false
                 }
               }
             }

@@ -736,6 +736,7 @@ async function deployMission(seasonId, missionId, m, now) {
         for (const uid of Object.keys(m.participants ?? {})) {
             updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)] = null;
             updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)] = null;
+            updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)] = null;
         }
     }
     // Notify each enrolled participant via push-keyed notification
@@ -764,6 +765,7 @@ function clearSeatSecrets(seasonId, missionId, uid) {
     return {
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)]: null,
     };
 }
 // Delete a seat's uploaded Slot-Fill config from Storage. Any path that removes the
@@ -811,6 +813,7 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
         playerId: uid,
         playerName: player.displayName,
         joinedAt: now,
+        ...(player.avatarHash ? { avatarHash: player.avatarHash } : {}),
         ...(mission.type === 'casino' ? { startBy: now + 3_600_000 } : {}),
     };
     const updates = {
@@ -1430,15 +1433,23 @@ exports.resubmitCasinoYaml = (0, https_1.onCall)(async (request) => {
     const clip = (s, n) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
     if (keepUids) {
         // ── Card-change re-lock ──────────────────────────────────────────────────
-        // Re-select the committed cards from the still-preserved dealt hand, then
-        // recompute the reward and rebuild the slots. Forming + single-sitting only:
-        // deploy clears the hand, and Hold 'Em's play-on already collapsed its pool.
+        // Re-select the committed cards from the still-preserved pool, then recompute
+        // the reward and rebuild the slots. Forming only — deploy clears the secrets.
+        // Hold 'Em's pool is its persisted hole cards + the PUBLIC community (its
+        // sitting 2 is a subset-select just like Seven Card Stud); every other game
+        // selects from its full dealt hand.
         if (mission.state !== 'forming')
             throw new https_1.HttpsError('failed-precondition', 'Cards can only be changed while the table is still forming.');
-        if (mission.casinoGame === 'holdem')
-            throw new https_1.HttpsError('failed-precondition', "Hold 'Em hands can't be re-selected.");
-        const handSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
-        const rawHand = handSnap.val() ?? [];
+        let rawHand;
+        if (mission.casinoGame === 'holdem') {
+            const holeSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)).get();
+            const hole = holeSnap.val() ?? [];
+            rawHand = [...hole, ...(mission.community ?? [])];
+        }
+        else {
+            const handSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
+            rawHand = handSnap.val() ?? [];
+        }
         if (rawHand.length === 0)
             throw new https_1.HttpsError('failed-precondition', 'Your dealt hand is no longer available to re-select.');
         const pickMax = mission.casinoGame ? casinoEngine_1.CASINO_GAMES[mission.casinoGame].pickMax : 5;
@@ -1572,6 +1583,10 @@ exports.dealHoldemHole = (0, https_1.onCall)(async (request) => {
     });
     await db.ref().update({
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: hole,
+        // A SECOND, persistent copy of the hole cards: play-on overwrites `hand` with
+        // the chosen ≤5, so `hole` is what lets a forming resubmit rebuild the pool
+        // (hole + public community) to re-select from. Cleared at deploy / leave.
+        [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)]: hole,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/holeLocked`)]: true,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),

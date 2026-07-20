@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
+import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
@@ -12,6 +13,19 @@ type View = 'lounge' | 'floor';
 
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
 const initial = (name: string): string => (name.trim()[0] ?? '?').toUpperCase();
+
+// The player's Discord avatar in a seat circle, falling back to the letter avatar
+// when they have no custom avatar or the image fails to load.
+function PlayerAvatar({ cls, playerId, avatarHash, name, hue }: {
+  cls: string; playerId: string; avatarHash?: string | null; name: string; hue: number;
+}) {
+  const url = discordAvatarUrl(playerId, avatarHash);
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) {
+    return <img className={`${cls} rl-av-img`} src={url} alt="" loading="lazy" onError={() => setFailed(true)} />;
+  }
+  return <span className={cls} style={{ '--ph': hue } as React.CSSProperties}>{initial(name)}</span>;
+}
 
 // Card-type visuals: suit from CARD_TYPES, hue mirroring CardFace's TYPE_META.
 const CARD_HUE: Record<CardTypeKey, number> = { wild: 75, broad: 200, platform: 295, franchise: 30, narrow: 150 };
@@ -168,7 +182,7 @@ function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }
     <div className="rl-roster">
       {seats.map((s, i) => (
         <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
-          <span className="rl-seat-av" style={{ '--ph': seatHue(i) } as React.CSSProperties}>{initial(s.playerName)}</span>
+          <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
           <div className="rl-seat-txt">
             <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g locked` : 'seated · to play'}</span>
@@ -199,7 +213,7 @@ function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
         );
         return (
           <div className={`rl-railseat${s.playerId === uid ? ' you' : ''}`} key={i}>
-            <span className="rl-seat-av" style={{ '--ph': seatHue(i) } as React.CSSProperties}>{initial(s.playerName)}</span>
+            <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
             <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g` : 'to play'}</span>
           </div>
@@ -329,7 +343,7 @@ function ChallengeLinks({ m }: { m: GMMission }) {
 }
 
 // A player's committed game, tagged with its owner — for the board's tile grids.
-interface OwnedGame extends SeatGame { ownerName: string; you: boolean; ownerHue: number; }
+interface OwnedGame extends SeatGame { ownerName: string; ownerId: string; ownerAvatar?: string | null; you: boolean; ownerHue: number; }
 
 function Completion({ goaled, total }: { goaled: number; total: number }) {
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
@@ -382,13 +396,11 @@ function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
       {tiles.map((t, i) => (
         <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
              style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
-          <div className="mp-tile-top">
-            <span className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</span>
-            <StatusPill status={t.status} />
-          </div>
+          <div className="mp-tile-status"><StatusPill status={t.status} /></div>
+          <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
           <div className="mp-tile-game">{t.game}</div>
           <div className="mp-tile-owner">
-            <span className="mp-pav" style={{ '--ph': t.ownerHue } as React.CSSProperties}>{initial(t.ownerName)}</span>
+            <PlayerAvatar cls="mp-pav" playerId={t.ownerId} avatarHash={t.ownerAvatar} name={t.ownerName} hue={t.ownerHue} />
             {t.you ? 'You' : t.ownerName} · {t.slot}
           </div>
         </div>
@@ -403,7 +415,7 @@ function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: 
   Object.values(m.participants ?? {}).forEach((p, idx) => {
     const you = p.playerId === uid;
     const hue = seatHue(idx);
-    for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, you, ownerHue: hue });
+    for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, you, ownerHue: hue });
   });
   const all       = [...mine, ...others];
   const goaled    = all.filter(g => isGoaled(g.status)).length;
@@ -510,7 +522,7 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
           return (
             <div key={r.seat.playerId} className={`st-lrow${you ? ' you' : ''}`}>
               <span className="st-lname">
-                <span className="st-pav sm" style={{ '--ph': r.hue } as React.CSSProperties}>{initial(r.seat.playerName)}</span>
+                <PlayerAvatar cls="st-pav sm" playerId={r.seat.playerId} avatarHash={r.seat.avatarHash} name={r.seat.playerName} hue={r.hue} />
                 {you ? 'You' : r.seat.playerName}
               </span>
               <span className="st-chips">{r.games.map((g, i) => <GameChip key={i} g={g} />)}</span>

@@ -1,9 +1,23 @@
 // Seat rail, pot chip, challenge panel, readout, gauge, and reveal row components.
 
+import { useState } from 'react';
 import type { DeckCard } from '../lib/casinoData';
 import type { CasinoStats, CasinoDeckChoice } from '../types';
 import type { GambitDef } from '../lib/casinoGambits';
 import { applyDeckBoost } from '../lib/casinoSlots';
+import { discordAvatarUrl } from '../lib/discordAvatar';
+
+// A seat avatar: the player's Discord avatar, falling back to the letter circle.
+function SeatAvatar({ cls, playerId, avatarHash, name, style }: {
+  cls: string; playerId?: string | null; avatarHash?: string | null; name: string | null; style?: React.CSSProperties;
+}) {
+  const url = discordAvatarUrl(playerId, avatarHash);
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) {
+    return <img className={`${cls} cz-av-img`} src={url} alt="" loading="lazy" style={style} onError={() => setFailed(true)} />;
+  }
+  return <div className={cls} style={style}>{name ? name[0].toUpperCase() : '?'}</div>;
+}
 
 // ── Pot display ───────────────────────────────────────────────────────────────
 
@@ -31,6 +45,8 @@ type SeatStatus = 'empty' | 'waiting' | 'deadline' | 'playing' | 'locked';
 
 interface SeatProps {
   name: string | null;
+  playerId?: string | null;
+  avatarHash?: string | null;
   status: SeatStatus;
   isMe: boolean;
   stake?: number;         // gold they're playing for (once locked)
@@ -53,20 +69,19 @@ const STATUS_TEXT: Record<SeatStatus, string> = {
   locked:   'Locked in',
 };
 
-export function Seat({ name, status, isMe, stake, startByLabel }: SeatProps) {
+export function Seat({ name, playerId, avatarHash, status, isMe, stake, startByLabel }: SeatProps) {
   const cls = ['cz-seat'];
   if (isMe)           cls.push('you');
   if (status === 'playing') cls.push('active');
   if (status === 'empty')   cls.push('empty');
 
-  const initial = name ? name[0].toUpperCase() : '?';
   const dot     = STATUS_DOT[status];
   const text    = STATUS_TEXT[status];
 
   return (
     <div className={cls.join(' ')}>
       <div className="cz-seat-head">
-        <div className="cz-seat-av">{initial}</div>
+        <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} />
         <div className="cz-seat-id">
           <span className="cz-seat-name">{name ?? '—'}</span>
         </div>
@@ -217,20 +232,22 @@ export function BlackjackGauge({ shownCards, allCards, deckChoice }: BlackjackGa
 
 interface ResultRowProps {
   name: string;
+  playerId?: string | null;
+  avatarHash?: string | null;
   isMe: boolean;
   played: boolean;
   stake: number;         // sum of card values from slots
   gambit?: GambitDef | null;
 }
 
-export function ResultRow({ name, isMe, played, stake, gambit }: ResultRowProps) {
+export function ResultRow({ name, playerId, avatarHash, isMe, played, stake, gambit }: ResultRowProps) {
   const cls = ['cz-result-row'];
   if (isMe)   cls.push('you');
   if (played) cls.push('win'); else cls.push('fold');
 
   return (
     <div className={cls.join(' ')}>
-      <div className="cz-seat-av" style={{ width: '1.7rem', height: '1.7rem' }}>{name[0]?.toUpperCase()}</div>
+      <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} style={{ width: '1.7rem', height: '1.7rem' }} />
       <div className="cz-rr-name">{name}</div>
       <div className="cz-rr-mid">
         {played

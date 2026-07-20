@@ -666,6 +666,7 @@ interface CasinoLogEntry {
 interface GMParticipant {
   playerId:     string;
   playerName:   string;
+  avatarHash?:  string | null;   // Discord avatar hash, stamped at enlist
   joinedAt:     number;
   slots?:       GMSlot[];
   statusNote?:  { text: string; timestamp: number };
@@ -994,6 +995,7 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
     for (const uid of Object.keys(m.participants ?? {})) {
       updates[secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)] = null;
       updates[secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)] = null;
+      updates[secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)] = null;
     }
   }
 
@@ -1026,6 +1028,7 @@ function clearSeatSecrets(seasonId: string, missionId: string, uid: string): Rec
   return {
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)]: null,
   };
 }
 
@@ -1059,7 +1062,7 @@ export const enlistInMission = onCall(async (request) => {
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
 
-  const player  = playerSnap.val() as { displayName: string; gold: number; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const player  = playerSnap.val() as { displayName: string; gold: number; avatarHash?: string | null; activeMission?: string | null; basicTrainingDone?: boolean; disabled?: boolean };
   const mission = missionSnap.val() as GMMission;
 
   if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
@@ -1076,6 +1079,7 @@ export const enlistInMission = onCall(async (request) => {
     playerId:   uid,
     playerName: player.displayName,
     joinedAt:   now,
+    ...(player.avatarHash ? { avatarHash: player.avatarHash } : {}),
     ...(mission.type === 'casino' ? { startBy: now + 3_600_000 } : {}),
   };
 
@@ -1762,16 +1766,23 @@ export const resubmitCasinoYaml = onCall(async (request) => {
 
   if (keepUids) {
     // ── Card-change re-lock ──────────────────────────────────────────────────
-    // Re-select the committed cards from the still-preserved dealt hand, then
-    // recompute the reward and rebuild the slots. Forming + single-sitting only:
-    // deploy clears the hand, and Hold 'Em's play-on already collapsed its pool.
+    // Re-select the committed cards from the still-preserved pool, then recompute
+    // the reward and rebuild the slots. Forming only — deploy clears the secrets.
+    // Hold 'Em's pool is its persisted hole cards + the PUBLIC community (its
+    // sitting 2 is a subset-select just like Seven Card Stud); every other game
+    // selects from its full dealt hand.
     if (mission.state !== 'forming')
       throw new HttpsError('failed-precondition', 'Cards can only be changed while the table is still forming.');
-    if (mission.casinoGame === 'holdem')
-      throw new HttpsError('failed-precondition', "Hold 'Em hands can't be re-selected.");
 
-    const handSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
-    const rawHand  = (handSnap.val() as DeckCard[] | null) ?? [];
+    let rawHand: DeckCard[];
+    if (mission.casinoGame === 'holdem') {
+      const holeSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)).get();
+      const hole = (holeSnap.val() as DeckCard[] | null) ?? [];
+      rawHand = [...hole, ...(mission.community ?? [])];
+    } else {
+      const handSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
+      rawHand = (handSnap.val() as DeckCard[] | null) ?? [];
+    }
     if (rawHand.length === 0)
       throw new HttpsError('failed-precondition', 'Your dealt hand is no longer available to re-select.');
 
@@ -1907,6 +1918,10 @@ export const dealHoldemHole = onCall(async (request) => {
 
   await db.ref().update({
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]:   hole,
+    // A SECOND, persistent copy of the hole cards: play-on overwrites `hand` with
+    // the chosen ≤5, so `hole` is what lets a forming resubmit rebuild the pool
+    // (hole + public community) to re-select from. Cleared at deploy / leave.
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)]:   hole,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/holeLocked`)]: true,
     [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]:    null,
     [sp(seasonId, `missions/${missionId}/pot`)]: ServerValue.increment(potCut),

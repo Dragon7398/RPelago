@@ -87,9 +87,14 @@ export function secretRef(d: Database, sub = ''): DatabaseReference {
   return ref(d, secretPath(sub));
 }
 
-/** Path to a participant's own hand (the only secret a client may read). */
+/** Path to a participant's own hand (a secret a client may read). */
 export function ownHandPath(missionId: string, uid: string): string {
   return secretPath(`missions/${missionId}/participants/${uid}/hand`);
+}
+
+/** Path to a Hold 'Em seat's own hole cards — kept past play-on for a resubmit pool rebuild. */
+export function ownHolePath(missionId: string, uid: string): string {
+  return secretPath(`missions/${missionId}/participants/${uid}/hole`);
 }
 
 // ── Config resolution ────────────────────────────────────────────────────────

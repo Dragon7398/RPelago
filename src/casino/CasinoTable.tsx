@@ -3,7 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
-import { setCurrentSeason, sRef, ownHandPath } from '../firebase/season';
+import { setCurrentSeason, sRef, ownHandPath, ownHolePath } from '../firebase/season';
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
@@ -120,6 +120,7 @@ export function CasinoTable() {
   const [shell, setShell]         = useState<'map' | 'casino'>('casino');
   // Read from seasonSecrets/, never from the mission — see the subscription below.
   const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
+  const [secretHole, setSecretHole]   = useState<DeckCard[] | null>(null);
   const [phase, setPhase]         = useState<Phase>('loading');
   const [hand, setHand]           = useState<DeckCard[]>([]);
   // Two DIFFERENT selection models, one per game family:
@@ -229,6 +230,15 @@ export function CasinoTable() {
     if (!db || !uid || !missionId || !seasonReady) return;
     return onValue(ref(db, ownHandPath(missionId, uid)), snap => {
       setSecretHand(snap.exists() ? (snap.val() as DeckCard[]) : null);
+    });
+  }, [uid, missionId, seasonReady]);
+
+  // Hold 'Em only: the seat's hole cards, kept past play-on so a forming resubmit
+  // can rebuild the pool (hole + public community) to re-select from.
+  useEffect(() => {
+    if (!db || !uid || !missionId || !seasonReady) return;
+    return onValue(ref(db, ownHolePath(missionId, uid)), snap => {
+      setSecretHole(snap.exists() ? (snap.val() as DeckCard[]) : null);
     });
   }, [uid, missionId, seasonReady]);
 
@@ -544,11 +554,16 @@ export function CasinoTable() {
   const mySeat     = uid ? mission?.participants?.[uid] : undefined;
   const yamlDenied = mySeat?.yamlDenied === true;
   // A locked player may re-select their cards on a resubmit only while the table is
-  // still FORMING and the dealt hand is still preserved — single-sitting games only
-  // (Hold 'Em's play-on already collapsed its pool; deploy clears the hand). The
-  // gambit is never re-openable.
+  // still FORMING and the pool is still preserved (deploy clears the secrets). The
+  // pool is the full dealt hand for single-sitting games, or the persisted hole
+  // cards + the PUBLIC community for Hold 'Em (its sitting 2 is a subset-select just
+  // like Seven Card Stud). The gambit is never re-openable.
+  const resubmitPool: DeckCard[] = game === 'holdem'
+    ? [...(secretHole ?? []), ...(mission?.community ?? [])]
+    : (secretHand ?? []);
   const canChangeCards = !!mySeat?.played && mission?.state === 'forming'
-    && game !== 'holdem' && (secretHand?.length ?? 0) > 0;
+    && (game === 'holdem' ? (secretHole?.length ?? 0) > 0 && (mission?.community?.length ?? 0) > 0
+                          : (secretHand?.length ?? 0) > 0);
 
   const manifestReady = committedCards.filter(c => (manifest[c.uid]?.game ?? '').trim().length > 0).length;
   // A new attach is REQUIRED for an initial submit and for a denied resubmit (the
@@ -602,7 +617,7 @@ export function CasinoTable() {
   const startResubmit = () => {
     const cards = mySeat?.lockedCards ?? [];
     const slots = mySeat?.slots ?? [];
-    const fullHand = canChangeCards ? secretHand! : cards;
+    const fullHand = canChangeCards ? resubmitPool : cards;
     setHand(fullHand);
     const committed = new Set(cards.map(c => c.uid));
     if (game === 'five_card_draw') {
@@ -725,6 +740,8 @@ export function CasinoTable() {
             <Seat
               key={id}
               name={p?.playerName ?? null}
+              playerId={id}
+              avatarHash={p?.avatarHash}
               status={isMe && phase !== 'locked' && phase !== 'deployed' ? 'playing' : status}
               isMe={isMe}
               stake={stake}
@@ -1165,6 +1182,8 @@ export function CasinoTable() {
                   <ResultRow
                     key={id}
                     name={p.playerName}
+                    playerId={id}
+                    avatarHash={p.avatarHash}
                     isMe={id === uid}
                     played={!!p.played}
                     stake={p.goldSwing ?? handStakeFromSlots(p.slots)}

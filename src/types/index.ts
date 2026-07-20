@@ -301,6 +301,7 @@ export interface CasinoLogEntry {
 export interface GMParticipant {
   playerId:    string;
   playerName:  string;
+  avatarHash?: string | null;   // Discord avatar hash, stamped at enlist (for the seat icon)
   joinedAt:    number;
   slots?:      AdvSlot[];
   statusNote?: AdvStatusNote;
