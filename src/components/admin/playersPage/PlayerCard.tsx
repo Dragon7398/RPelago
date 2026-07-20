@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../../../contexts/GameStateContext';
 import { useToast } from '../../../contexts/ToastContext';
+import { useSeason } from '../../../contexts/SeasonContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings, adventurerCountForLevel } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
@@ -19,6 +20,9 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           adminAddWarning, adminDeleteWarning, adminClearWarnings,
           adminGrantMissingAdventurers } = useGameState();
   const { addToast } = useToast();
+  // The adventurer roster is a map-season concept — a casino-season player having
+  // no adventurers isn't a gap to fix, so the grant action is hidden there.
+  const isCasino = useSeason().season?.shell === 'casino';
   const [addingWarning, setAddingWarning] = useState(false);
   const [warningDraft, setWarningDraft]   = useState('');
   const [resetting, setResetting]         = useState(false);
@@ -30,7 +34,11 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const isAdmin        = player.id === adminId;
   const activeMission  = player.activeMission && missions ? missions[player.activeMission] : null;
   const activeMLabel   = activeMission ? missionDisplayLabel(activeMission) : null;
-  const level             = calcLevel(player.xp);
+  // Casino-season players carry no `xp`/`gold` off the map economy, so treat a
+  // missing value as 0 rather than crashing on `.toLocaleString()`.
+  const xp                = player.xp ?? 0;
+  const gold              = player.gold ?? 0;
+  const level             = calcLevel(xp);
   const missingAdventurers = adventurerCountForLevel(level) - Object.keys(player.adventurers ?? {}).length;
   const featWarnings   = getFeatWarnings(player, tiles);
   const playerWarnings = Object.entries(player.warnings ?? {})
@@ -61,7 +69,7 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           )}
         </div>
         <div className="dash-player-stats">
-          LV {level} · ✨ {player.xp.toLocaleString()} XP · 🪙 {player.gold.toLocaleString()} G
+          LV {level} · ✨ {xp.toLocaleString()} XP · 🪙 {gold.toLocaleString()} G
           · {Object.keys(player.adventurers ?? {}).length} adv
           {(player.xpHistory?.length ?? 0) > 0 && (
             <span className="dash-player-history">
@@ -171,7 +179,7 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
       )}
 
       <div className="dash-player-actions">
-        {missingAdventurers > 0 && (
+        {!isCasino && missingAdventurers > 0 && (
           <button
             className="dash-player-grant-adv"
             disabled={granting}

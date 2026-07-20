@@ -2,7 +2,10 @@
 // Ported from the prototype's casino/data.js.
 // This module is imported by both the browser client and Cloud Functions.
 
-import type { CasinoDeckChoice } from '../types';
+import type { CasinoDeckChoice, CasinoGame } from '../types';
+
+// Re-exported so existing importers can keep pulling CasinoGame from casinoData.
+export type { CasinoGame };
 
 export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
 
@@ -31,12 +34,15 @@ export interface DeckCard extends CardDef {
   copyIndex: number;
 }
 
+// Gold ranges are the S1 values ×2 — see docs/casino-season-1_5-plan.md
+// "Economy tuning". Cards, antes, the pot and the starting stake all doubled so
+// the (unchanged) gambit payouts stop out-earning the hand itself.
 export const CARD_TYPES: Readonly<Record<CardTypeKey, CardTypeDef>> = {
-  wild:      { key: 'wild',      label: 'Wild',      suit: '✦', copies: 5, range: null,     order: 0 },
-  broad:     { key: 'broad',     label: 'Broad',     suit: '♦', copies: 3, range: [15, 30], order: 1 },
-  platform:  { key: 'platform',  label: 'Platform',  suit: '♠', copies: 2, range: [20, 35], order: 2 },
-  franchise: { key: 'franchise', label: 'Franchise', suit: '♥', copies: 1, range: [25, 40], order: 3 },
-  narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [25, 50], order: 4 },
+  wild:      { key: 'wild',      label: 'Wild',      suit: '✦', copies: 5, range: null,      order: 0 },
+  broad:     { key: 'broad',     label: 'Broad',     suit: '♦', copies: 3, range: [30, 60],  order: 1 },
+  platform:  { key: 'platform',  label: 'Platform',  suit: '♠', copies: 2, range: [40, 70],  order: 2 },
+  franchise: { key: 'franchise', label: 'Franchise', suit: '♥', copies: 1, range: [50, 80],  order: 3 },
+  narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [50, 100], order: 4 },
 };
 
 // Raw category data: [name, type, gameCount]
@@ -112,7 +118,7 @@ export const WILD_DEF: CardDef = {
   name:  'Wild',
   type:  'wild',
   count: null,
-  value: 10,
+  value: 20,
   copies: 5,
   blurb: 'Choose any game you like.',
 };
@@ -188,3 +194,82 @@ export function shuffle<T>(arr: readonly T[]): T[] {
 
 // Total number of cards in a full deck
 export const DECK_TOTAL = CARD_DEFS.reduce((n, d) => n + d.copies, 0);
+
+// ── Casino game variants (canonical — carries to S2) ─────────────────────────
+// S1.5 retires S1's single in-table poker/blackjack selector: each table is
+// pinned to exactly ONE of these four games. Costs here are FINAL and become
+// S2's casino baseline. Mirror any change in functions/src/casinoEngine.ts.
+
+export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
+  'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
+];
+
+export interface CasinoGameDef {
+  key:        CasinoGame;
+  label:      string;
+  sittings:   1 | 2;      // Hold 'Em plays across two sittings; all others resolve in one.
+  hole:       number;     // cards dealt privately to the seat (Blackjack draws these one at a time).
+  community:  number;     // shared face-up cards (Hold 'Em only); 0 otherwise.
+  maxDraw:    number;     // hard cap on cards a seat may hold before it must trim to pickMax.
+  pickMax:    number;     // most cards a seat may commit (reward = Σ of committed values). Always ≤5.
+  reroll:     boolean;    // may the seat pay rerollCost to redraw?
+  ante:       number;     // gold to sit / first commitment.
+  rerollCost: number;     // 0 when reroll is false.
+  playOn:     number;     // Hold 'Em second-sitting cost; 0 otherwise.
+  // A "best possible" gauge (the reused Blackjack gauge, UI-only) is meaningful
+  // only when the seat picks a ≤pickMax subset from a pool LARGER than pickMax.
+  subsetSelect: boolean;
+}
+
+// Entry costs are the S1 values ×3, against ×2 on cards/pot/stake. Deliberately
+// steeper than the rest of the inflation: it tightens margins (leaving room for
+// a future entry-cost reduction to matter), roughly halves what the house injects
+// per table, and makes a bonus gambit a real sacrifice rather than small change.
+//   Five Card Draw 180g (+90g reroll) · Seven Card Stud 225g · Hold 'Em 90g ante
+//   + 150g play-on (240g total) · Blackjack 120g.
+// 240g is the priciest MANDATORY full round, which is why the weekly floor sits
+// at 250 — a topped-up player can always afford a full round of any game.
+export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
+  five_card_draw: {
+    key: 'five_card_draw', label: 'Five Card Draw',
+    sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
+    reroll: true, ante: 180, rerollCost: 90, playOn: 0,
+    subsetSelect: false,   // hold 5, commit ≤5 — no larger pool to optimise.
+  },
+  seven_card_stud: {
+    key: 'seven_card_stud', label: 'Seven Card Stud',
+    sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
+    reroll: false, ante: 225, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // pick the best 5 of 7.
+  },
+  holdem: {
+    key: 'holdem', label: "Texas Hold 'Em",
+    sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
+    reroll: false, ante: 90, rerollCost: 0, playOn: 150,
+    subsetSelect: true,    // pick the best 5 of 2 hole + 5 community.
+  },
+  blackjack: {
+    key: 'blackjack', label: 'Blackjack',
+    sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
+    reroll: false, ante: 120, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
+  },
+};
+
+// The cheapest ante across all games — the gold a player must hold to sit at
+// SOME table. Supersedes the hardcoded CASINO_MIN_ENLIST_GOLD once the
+// multi-table flow lands. (= Hold 'Em's 30g ante.)
+export function minCasinoAnte(): number {
+  return Math.min(...CASINO_GAME_ORDER.map(g => CASINO_GAMES[g].ante));
+}
+
+// Total gold a seat spends in one table, given which optional costs it incurred.
+// spent = ante (+ reroll if used) (+ play-on if the seat played on after a
+// Hold 'Em reveal). Net swing = reward − seatSpend.
+export function seatSpend(game: CasinoGame, opts: { rerolled?: boolean; playedOn?: boolean } = {}): number {
+  const g = CASINO_GAMES[game];
+  let spent = g.ante;
+  if (opts.rerolled && g.reroll) spent += g.rerollCost;
+  if (opts.playedOn && g.playOn) spent += g.playOn;
+  return spent;
+}

@@ -1,60 +1,101 @@
-export default function SectionCasino() {
+import { CASINO_GAMES, CASINO_GAME_ORDER, type CasinoGame } from '../../lib/casinoData';
+
+// Costs are read from the engine's cost model rather than retyped, so this page
+// can never drift from what the table actually charges.
+function costLine(g: CasinoGame): string {
+  const c = CASINO_GAMES[g];
+  return [
+    `${c.ante}g ante`,
+    c.reroll ? `${c.rerollCost}g reroll` : '',
+    c.playOn ? `${c.playOn}g play-on` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+const GAME_ICON: Record<CasinoGame, string> = {
+  five_card_draw:  '♦',
+  seven_card_stud: '♠',
+  holdem:          '♥',
+  blackjack:       '♣',
+};
+
+const GAME_BLURB: Record<CasinoGame, string> = {
+  five_card_draw:
+    'Dealt 5 cards. You may reroll once to replace the cards you reject. Commit up to 5 — ' +
+    'rejecting a card simply drops it from your reward.',
+  seven_card_stud:
+    'Dealt 7 cards and no reroll. A bigger pool to choose from, but you still commit only ' +
+    'your best 5, so two cards always go unplayed.',
+  holdem:
+    "The only game played across two sittings. Ante for 2 hole cards and lock them in; once " +
+    'every seat is dealt in, five shared community cards are revealed to the whole table. ' +
+    'Then either pay the play-on and commit your best 5 from your hole cards plus the ' +
+    'community, or fold — folding forfeits your ante and leaves the seat empty.',
+  blackjack:
+    'Push your luck: draw one card at a time, up to 6, then keep your best 5. No reroll — ' +
+    'every card you take is a card you may have to play.',
+};
+
+export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | 'casino' }) {
+  const casino = variant === 'casino';
+
   return (
     <div className="help-section">
-      <h3>Casino Missions</h3>
+      <h3>The Casino</h3>
       <p>
-        <strong>Casino</strong> cohorts also appear in the{' '}
-        <strong>Centralia Guild Hall</strong> (tile D3). These work differently from standard
-        missions — instead of submitting a YAML and waiting for results, you sit down at a
-        card table and play a quick minigame to determine your own slots and gold reward.
+        {casino
+          ? 'The floor runs several tables at once, and each table is pinned to a single card game — so choosing a table is choosing the game.'
+          : 'Casino tables run alongside the other missions. Each table is pinned to a single card game — so choosing a table is choosing the game.'}{' '}
+        They work differently from a standard mission: instead of picking your games and
+        submitting a YAML, you sit down, pay an <strong>ante</strong>, and play a hand to
+        decide which games you'll bring.
       </p>
       <p>
-        When a casino cohort deploys, each participant pays an <strong>ante</strong> and is
-        dealt a hand of cards. Each card represents a game category — a genre, franchise, or
-        platform. The cards you <strong>commit</strong> become your mission slots; their gold
-        values set your reward. You then submit your YAML as normal for each committed slot.
+        Each card represents a game category — a genre, franchise, or platform. The cards you{' '}
+        <strong>commit</strong> become your slots, and their gold values set your reward. You
+        then fill in the real games and submit your YAML for the slots you won.
       </p>
 
       <h4>The Games</h4>
       <div className="help-tile-list">
-        <div className="help-tile-row">
-          <span className="help-tile-icon">♥</span>
-          <div>
-            <strong>Poker (40g ante)</strong> — Dealt 5 cards. You may <em>reroll</em> once
-            for 20g to replace your hand. Reject any cards you don't want to play; the rest
-            become your slots.
+        {CASINO_GAME_ORDER.map(g => (
+          <div className="help-tile-row" key={g}>
+            <span className="help-tile-icon">{GAME_ICON[g]}</span>
+            <div>
+              <strong>{CASINO_GAMES[g].label} ({costLine(g)})</strong> — {GAME_BLURB[g]}
+            </div>
           </div>
-        </div>
-        <div className="help-tile-row">
-          <span className="help-tile-icon">♠</span>
-          <div>
-            <strong>Blackjack (30g ante)</strong> — Dealt cards one at a time. Discard one
-            before locking in. Your goal is to keep the best combination of cards you can.
-            Higher risk, but a lower cost, and can be just as rewarding with the right hand.
-          </div>
-        </div>
+        ))}
       </div>
+
+      <h4>Your Deck</h4>
+      <p>
+        Before you're dealt in, you choose the <strong>deck</strong> you draw from.{' '}
+        <strong>Purist</strong> keeps every card and pays <strong>+10%</strong> on your own
+        reward for the flexibility. <strong>Unconsoled</strong> strips every Platform card, and{' '}
+        <strong>Indie</strong> strips every Franchise card — no bonus, but no cards you'd
+        rather not play.
+      </p>
 
       <h4>Gambits</h4>
       <p>
-        Before locking in, you'll face a <strong>Gambit</strong> — a card that tweaks the
-        cohort's shared challenge stats (Release Odds, Collect Odds, Hint Cost). Bonus gambits
-        improve the odds but cost gold; penalty gambits hurt the odds but reward you with extra
-        XP and pot contributions. You can always skip the gambit entirely.
+        After you lock your hand you're offered a <strong>Gambit</strong> — a card that shifts
+        the table's shared stats (Release Odds, Collect Odds, Hint Cost) for{' '}
+        <em>everyone</em> seated. <strong>Bonus</strong> gambits improve the odds but cost you
+        gold; <strong>penalty</strong> gambits worsen them, but pay you gold and feed the pot.
+        You can always decline and play no gambit at all.
       </p>
 
       <h4>The Pot</h4>
       <p>
-        40% of every ante feeds a <strong>shared pot</strong>. When the cohort reveals, every
-        non-folded seat splits it evenly — so even a modest hand can come out ahead.
-        Players who fold keep nothing and receive no slots.
+        40% of every fee — antes, rerolls and play-ons — feeds the table's{' '}
+        <strong>shared pot</strong>. When the table settles, every seat that played splits it
+        evenly, on top of the gold their own hand earned. A folded seat takes nothing.
       </p>
 
       <h4>Card Types</h4>
       <p>
-        Cards are drawn from a shared deck and come in five types, ranging from broad
-        categories (easier to fill) to narrow ones (harder to fill but generally worth more
-        gold):
+        Cards come in five types, ranging from broad categories (easier to fill) to narrow ones
+        (harder to fill, but generally worth more gold):
       </p>
       <div className="help-tile-list">
         <div className="help-tile-row">
@@ -80,11 +121,11 @@ export default function SectionCasino() {
       </div>
 
       <div className="help-callout">
-        <span className="help-callout-icon">🃏</span>
+        <span className="help-callout-icon">🧥</span>
         <span>
-          Casino missions pay best when you can commit <strong>2 or more cards</strong>. If
-          you tend to play a few specific games or are in a particular mood, a standard Patrol is
-          likely a safer choice.
+          {casino
+            ? <>Successfully complete a table of <strong>all four games</strong> to earn the <strong>Coat of Many Colors</strong> and unlock your name colour.</>
+            : <>Casino tables pay best when you can commit <strong>2 or more cards</strong>. If you only play a few specific games, a standard Patrol is likely the safer choice.</>}
         </span>
       </div>
     </div>

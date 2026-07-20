@@ -1,5 +1,7 @@
-import type { GMMission, GMMissionType, GMParticipant, AdvSlot } from '../types';
-import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, CASINO_ANTE, toRoman } from './constants';
+import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } from '../types';
+import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, toRoman } from './constants';
+import { CASINO_GAMES, CASINO_GAME_ORDER } from './casinoData';
+import { rollTableSetup } from './casinoEngine';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -31,6 +33,16 @@ export function currentMaxSlots(m: GMMission, now: number): number {
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / decayWindowMs(m));
   return Math.max(1, m.baseMax - steps);
+}
+
+// Time until the next seat closes (decay lowers max-slots by one), or null when
+// decay hasn't started (no first join yet) or the floor of 1 seat is reached.
+// Keeps the decay-window constant in one place for any UI that shows a countdown.
+export function msToNextDecay(m: GMMission, now: number): number | null {
+  if (m.firstJoinAt == null || m.state !== 'forming') return null;
+  if (currentMaxSlots(m, now) <= 1) return null;
+  const w = decayWindowMs(m);
+  return w - (Math.max(0, now - m.firstJoinAt) % w);
 }
 
 export function filledCount(m: GMMission): number {
@@ -113,7 +125,7 @@ export function computeMissionCard(
   } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
     disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
   } else if (m.type === 'casino' && playerGold != null && playerGold < CASINO_MIN_ENLIST_GOLD && !youIn) {
-    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up. The cheapest game (Blackjack) costs ${CASINO_ANTE.blackjack}g to play.`;
+    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up — that's the cheapest table on the floor.`;
     insufficientGold = true;
   } else if (youIn) {
     doneLabel = 'YOU ARE ENLISTED';
@@ -168,6 +180,111 @@ export function freshMission(
     ...(def.potSeed != null ? { pot:           def.potSeed            } : {}),
     ...(type === 'casino'  ? { casinoStats:    { ...CASINO_START_STATS } } : {}),
   };
+}
+
+// ── Casino multi-table model (canonical) ─────────────────────────────────────
+// A casino season runs several single-game tables at once (see CASINO_OPEN_TABLES).
+// Each table is a mission of type 'casino' pinned to one `casinoGame`. Mirror any
+// change in functions/src/index.ts (gm* variants).
+
+// The house-cut note shown on a table card, derived from the game's cost model.
+export function casinoEntryCosts(game: CasinoGame): { label: string; gold: number }[] {
+  const g = CASINO_GAMES[game];
+  const costs: { label: string; gold: number }[] = [{ label: 'Ante', gold: g.ante }];
+  if (g.reroll) costs.push({ label: 'Reroll',  gold: g.rerollCost });
+  if (g.playOn) costs.push({ label: 'Play-on', gold: g.playOn });
+  return costs;
+}
+
+// Pick the game type for the next table to open: at random among the type(s)
+// with the FEWEST currently-forming tables. A type that hits zero is the sole
+// minimum and is guaranteed next, so no game can be starved (which would make
+// the all-four-games Coat unearnable). Only `forming` tables count.
+export function pickNextCasinoGame(
+  missions: Record<string, GMMission> | undefined,
+  rng: () => number = Math.random,
+): CasinoGame {
+  const counts: Record<CasinoGame, number> = {
+    five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
+  };
+  for (const m of Object.values(missions ?? {})) {
+    if (m.type === 'casino' && m.state === 'forming' && m.casinoGame) counts[m.casinoGame]++;
+  }
+  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts[g]));
+  const candidates = CASINO_GAME_ORDER.filter(g => counts[g] === min);
+  return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
+}
+
+// Build a fresh casino table pinned to one game, with seats / odds / pot rolled
+// at creation (rollTableSetup). Release/Collect are 'special' — rolled against
+// the odds table at deploy. `series` is the per-game cohort number.
+export function freshCasinoTable(
+  game: CasinoGame,
+  series: number,
+  now: number,
+  rng: () => number = Math.random,
+): Omit<GMMission, 'id'> {
+  const setup = rollTableSetup(rng);
+  return {
+    type:           'casino',
+    casinoGame:     game,
+    series,
+    label:          CASINO_GAMES[game].label,
+    state:          'forming',
+    baseMax:        setup.seats,
+    xp:             setup.stats.xp,
+    gp:             0,
+    release:        'special',
+    collect:        'special',
+    hint:           setup.stats.hint,
+    firstJoinAt:    null,
+    createdAt:      now,
+    participants:   {},
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts:     casinoEntryCosts(game),
+    pot:            setup.pot,
+    casinoStats:    setup.stats,
+    // Frozen copies of the same roll: gambits mutate casinoStats and antes grow the
+    // pot, so the opening odds AND opening pot are banked or they're unrecoverable
+    // (the drift display and the pot audit both diff against these).
+    casinoOpenStats: { ...setup.stats },
+    casinoOpenPot:   setup.pot,
+  };
+}
+
+// Split a casino pot evenly among the winning (played) seats at settle. The
+// floor-division remainder (0..winners−1 gold) goes to one seat chosen at random
+// so the whole pot is always paid out and never leaks. Empty winners → no split.
+export function casinoPotShares(
+  pot: number,
+  winnerIds: string[],
+  rng: () => number = Math.random,
+): Map<string, number> {
+  const shares = new Map<string, number>();
+  const n = winnerIds.length;
+  if (n === 0 || pot <= 0) {
+    for (const id of winnerIds) shares.set(id, 0);
+    return shares;
+  }
+  const base = Math.floor(pot / n);
+  const rem  = pot - base * n;
+  const remIdx = Math.min(n - 1, Math.floor(rng() * n));
+  winnerIds.forEach((id, i) => shares.set(id, base + (i === remIdx ? rem : 0)));
+  return shares;
+}
+
+// What a seat actually paid at this table, read back off the audit log rather
+// than re-derived from `seatSpend`: the log is the only record that captures the
+// optional spends (reroll, Hold 'Em play-on) *and* gambit gold — including a
+// penalty gambit's payout, which arrives as a negative `amount` and correctly
+// reduces the total. Used for the settle ledger's Entries column.
+export function casinoSeatPaid(m: GMMission, uid: string): number {
+  let paid = 0;
+  for (const e of Object.values(m.casinoLog ?? {})) {
+    if (e.uid === uid) paid += e.amount ?? 0;
+  }
+  return paid;
 }
 
 export function fmtClock(totalSec: number): string {

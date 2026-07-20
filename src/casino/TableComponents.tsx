@@ -1,9 +1,23 @@
 // Seat rail, pot chip, challenge panel, readout, gauge, and reveal row components.
 
+import { useState } from 'react';
 import type { DeckCard } from '../lib/casinoData';
 import type { CasinoStats, CasinoDeckChoice } from '../types';
 import type { GambitDef } from '../lib/casinoGambits';
 import { applyDeckBoost } from '../lib/casinoSlots';
+import { discordAvatarUrl } from '../lib/discordAvatar';
+
+// A seat avatar: the player's Discord avatar, falling back to the letter circle.
+function SeatAvatar({ cls, playerId, avatarHash, name, style }: {
+  cls: string; playerId?: string | null; avatarHash?: string | null; name: string | null; style?: React.CSSProperties;
+}) {
+  const url = discordAvatarUrl(playerId, avatarHash);
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) {
+    return <img className={`${cls} cz-av-img`} src={url} alt="" loading="lazy" style={style} onError={() => setFailed(true)} />;
+  }
+  return <div className={cls} style={style}>{name ? name[0].toUpperCase() : '?'}</div>;
+}
 
 // ── Pot display ───────────────────────────────────────────────────────────────
 
@@ -31,6 +45,8 @@ type SeatStatus = 'empty' | 'waiting' | 'deadline' | 'playing' | 'locked';
 
 interface SeatProps {
   name: string | null;
+  playerId?: string | null;
+  avatarHash?: string | null;
   status: SeatStatus;
   isMe: boolean;
   stake?: number;         // gold they're playing for (once locked)
@@ -53,20 +69,19 @@ const STATUS_TEXT: Record<SeatStatus, string> = {
   locked:   'Locked in',
 };
 
-export function Seat({ name, status, isMe, stake, startByLabel }: SeatProps) {
+export function Seat({ name, playerId, avatarHash, status, isMe, stake, startByLabel }: SeatProps) {
   const cls = ['cz-seat'];
   if (isMe)           cls.push('you');
   if (status === 'playing') cls.push('active');
   if (status === 'empty')   cls.push('empty');
 
-  const initial = name ? name[0].toUpperCase() : '?';
   const dot     = STATUS_DOT[status];
   const text    = STATUS_TEXT[status];
 
   return (
     <div className={cls.join(' ')}>
       <div className="cz-seat-head">
-        <div className="cz-seat-av">{initial}</div>
+        <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} />
         <div className="cz-seat-id">
           <span className="cz-seat-name">{name ?? '—'}</span>
         </div>
@@ -96,21 +111,25 @@ const CH_ROWS = [
   { key: 'hint'    as keyof CasinoStats, label: 'Hint Cost',    hue: 30  },
 ];
 
-const BASE_STATS: CasinoStats = { release: 60, collect: 30, hint: 10, xp: 50 };
-
 interface ChallengePanelProps {
   stats: CasinoStats;
+  // The odds this table ROLLED at creation. Drift is measured against it, not
+  // against a fixed 60/30 — every table rolls its own opening odds, so a fixed
+  // baseline reported drift on tables where no gambit had been played at all.
+  // Absent (tables opened before it was banked) → no drift shown.
+  open?: CasinoStats | null;
   roll?: { releaseOn: boolean; collectOn: boolean } | null;
+  showXp?: boolean;   // false in a casino season, where XP is inert
 }
 
-export function ChallengePanel({ stats, roll }: ChallengePanelProps) {
+export function ChallengePanel({ stats, open, roll, showXp = true }: ChallengePanelProps) {
   return (
     <div className="cz-challenge">
       <div className="cz-ch-head">The Archipelago Challenge</div>
       <div className="cz-ch-stats">
         {CH_ROWS.map(r => {
           const v    = stats[r.key] as number;
-          const base = BASE_STATS[r.key] as number;
+          const base = open ? (open[r.key] as number) : v;
           const diff = Math.round((v - base) * 10) / 10;
           const on   = roll && r.key !== 'hint'
             ? (r.key === 'release' ? roll.releaseOn : roll.collectOn)
@@ -127,13 +146,15 @@ export function ChallengePanel({ stats, roll }: ChallengePanelProps) {
             </div>
           );
         })}
-        <div className="cz-ch-stat xp">
-          <span className="cz-ch-label">Reward</span>
-          <span className="cz-ch-val">{stats.xp}<small> XP</small></span>
-          {stats.xp !== BASE_STATS.xp
-            ? <span className="cz-ch-diff up">+{stats.xp - BASE_STATS.xp}</span>
-            : <span className="cz-ch-diff flat">each</span>}
-        </div>
+        {showXp && (
+          <div className="cz-ch-stat xp">
+            <span className="cz-ch-label">Reward</span>
+            <span className="cz-ch-val">{stats.xp}<small> XP</small></span>
+            {open && stats.xp !== open.xp
+              ? <span className="cz-ch-diff up">+{stats.xp - open.xp}</span>
+              : <span className="cz-ch-diff flat">each</span>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -211,20 +232,22 @@ export function BlackjackGauge({ shownCards, allCards, deckChoice }: BlackjackGa
 
 interface ResultRowProps {
   name: string;
+  playerId?: string | null;
+  avatarHash?: string | null;
   isMe: boolean;
   played: boolean;
   stake: number;         // sum of card values from slots
   gambit?: GambitDef | null;
 }
 
-export function ResultRow({ name, isMe, played, stake, gambit }: ResultRowProps) {
+export function ResultRow({ name, playerId, avatarHash, isMe, played, stake, gambit }: ResultRowProps) {
   const cls = ['cz-result-row'];
   if (isMe)   cls.push('you');
   if (played) cls.push('win'); else cls.push('fold');
 
   return (
     <div className={cls.join(' ')}>
-      <div className="cz-seat-av" style={{ width: '1.7rem', height: '1.7rem' }}>{name[0]?.toUpperCase()}</div>
+      <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} style={{ width: '1.7rem', height: '1.7rem' }} />
       <div className="cz-rr-name">{name}</div>
       <div className="cz-rr-mid">
         {played

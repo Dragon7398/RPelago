@@ -42,7 +42,7 @@
   background: linear-gradient(135deg, oklch(from var(--acc) calc(l - 0.30) c h / 0.30) 0%, transparent 55%),
               linear-gradient(160deg, oklch(from var(--acc) 16% 0.06 h) 0%, oklch(from var(--acc) 11% 0.04 h) 100%);
   border: 1px solid oklch(from var(--acc) calc(l - 0.10) c h / 0.7);
-  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.25), 0 14px 34px #000a;
+  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.25), 0 14px 34px var(--card-drop);
   color: var(--pc-parch); padding: var(--pad); display: flex; flex-direction: column;
 }
 .look-sigil .sg-corner { position: absolute; color: oklch(from var(--acc) l c h / 0.6); font-size: calc(var(--cw)*0.07); z-index: 3; }
@@ -75,7 +75,7 @@
 .look-court {
   background: radial-gradient(120% 80% at 50% 0%, oklch(96% 0.02 82) 0%, oklch(90% 0.035 80) 100%);
   border: 1px solid oklch(from var(--acc) calc(l - 0.06) c h / 0.55);
-  box-shadow: 0 0 0 calc(var(--cw)*0.012) oklch(95% 0.02 82) inset, 0 0 0 calc(var(--cw)*0.020) oklch(from var(--acc) calc(l - 0.05) c h / 0.5) inset, 0 14px 30px #000a;
+  box-shadow: 0 0 0 calc(var(--cw)*0.012) oklch(95% 0.02 82) inset, 0 0 0 calc(var(--cw)*0.020) oklch(from var(--acc) calc(l - 0.05) c h / 0.5) inset, 0 14px 30px var(--card-drop);
   color: oklch(28% 0.03 60);
 }
 .look-court .crt-corner { position: absolute; display: flex; flex-direction: column; align-items: center; line-height: 0.9; color: var(--acc); z-index: 3; }
@@ -93,7 +93,7 @@
 .look-arcana {
   background: linear-gradient(165deg, oklch(from var(--acc) 15% 0.05 h) 0%, oklch(8% 0.02 70) 100%);
   border: 1px solid oklch(from var(--acc) calc(l - 0.04) c h / 0.6);
-  box-shadow: 0 16px 36px #000b, inset 0 0 24px oklch(from var(--acc) calc(l - 0.30) c h / 0.3);
+  box-shadow: 0 16px 36px var(--card-drop), inset 0 0 24px oklch(from var(--acc) calc(l - 0.30) c h / 0.3);
   color: var(--pc-parch); padding: calc(var(--cw)*0.05);
 }
 .look-arcana .arc-frame { position: absolute; inset: calc(var(--cw)*0.045); border: 1px solid oklch(from var(--acc) l c h / 0.45); border-radius: calc(var(--cw)*0.03); box-shadow: inset 0 0 0 2px oklch(from var(--acc) calc(l - 0.20) c h / 0.25); z-index: 2; pointer-events: none; }
@@ -116,7 +116,7 @@
 /* ── Look 4: Minimal Foil ── */
 .look-foil {
   background: linear-gradient(168deg, oklch(17% 0.012 70) 0%, oklch(11% 0.01 70) 100%);
-  border: 1px solid oklch(from var(--acc) 30% 0.05 h / 0.6); box-shadow: 0 14px 32px #000b;
+  border: 1px solid oklch(from var(--acc) 30% 0.05 h / 0.6); box-shadow: 0 14px 32px var(--card-drop);
   color: var(--pc-parch); padding: calc(var(--cw)*0.11); display: flex; flex-direction: column; justify-content: space-between;
 }
 .look-foil .fl-line { height: 2px; width: 38%; background: linear-gradient(90deg, var(--acc), oklch(from var(--acc) calc(l + 0.15) c h), transparent); border-radius: 2px; }
@@ -134,7 +134,7 @@
   --pl-edge: oklch(from var(--acc) calc(l - 0.14) c h);
   background: linear-gradient(158deg, var(--pl-paper1) 0%, var(--pl-paper2) 100%);
   border: 1px solid oklch(from var(--acc) calc(l - 0.16) c h / 0.5);
-  box-shadow: 0 14px 30px #000a, inset 0 0 22px oklch(from var(--acc) calc(l - 0.05) c h / 0.07);
+  box-shadow: 0 14px 30px var(--card-drop), inset 0 0 22px oklch(from var(--acc) calc(l - 0.05) c h / 0.07);
   color: oklch(30% 0.04 60); padding: calc(var(--cw)*0.045); isolation: isolate;
 }
 .look-plate .pl-guilloche {
@@ -168,7 +168,7 @@
 .ck-back {
   background: linear-gradient(135deg, oklch(20% 0.05 75 / 0.6) 0%, transparent 55%), linear-gradient(160deg, oklch(16% 0.04 72) 0%, oklch(10% 0.025 70) 100%);
   border: 1px solid var(--pc-gold-d);
-  box-shadow: inset 0 0 0 calc(var(--cw)*0.018) oklch(40% 0.06 72 / 0.4), inset 0 0 26px oklch(8% 0.02 70 / 0.8), 0 14px 30px #000b;
+  box-shadow: inset 0 0 0 calc(var(--cw)*0.018) oklch(40% 0.06 72 / 0.4), inset 0 0 26px oklch(8% 0.02 70 / 0.8), 0 14px 30px var(--card-drop);
   display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
 }
 .ck-back::before { content: ''; position: absolute; inset: calc(var(--cw)*0.05); border: 1px solid oklch(from var(--pc-gold) l c h / 0.35); border-radius: calc(var(--cw)*0.03); background-image: repeating-linear-gradient(45deg, oklch(from var(--pc-gold) l c h / 0.05) 0 2px, transparent 2px 9px), repeating-linear-gradient(-45deg, oklch(from var(--pc-gold) l c h / 0.05) 0 2px, transparent 2px 9px); }
@@ -188,7 +188,7 @@
 .gambit {
   background: radial-gradient(120% 80% at 50% 16%, oklch(from var(--acc) calc(l - 0.10) c h / 0.30) 0%, transparent 60%), linear-gradient(165deg, oklch(from var(--acc) 17% 0.05 h) 0%, oklch(9% 0.02 70) 100%);
   border: 1px solid oklch(from var(--acc) calc(l - 0.04) c h / 0.7);
-  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.30), 0 14px 32px #000b;
+  box-shadow: inset 0 1px 0 oklch(from var(--acc) l c h / 0.18), inset 0 0 30px oklch(from var(--acc) calc(l - 0.30) c h / 0.30), 0 14px 32px var(--card-drop);
   color: var(--pc-parch); padding: calc(var(--cw)*0.05);
 }
 .gambit .gm-frame { position: absolute; inset: calc(var(--cw)*0.045); border: 1px solid oklch(from var(--acc) l c h / 0.45); border-radius: calc(var(--cw)*0.03); box-shadow: inset 0 0 0 2px oklch(from var(--acc) calc(l - 0.20) c h / 0.22); z-index: 2; pointer-events: none; }

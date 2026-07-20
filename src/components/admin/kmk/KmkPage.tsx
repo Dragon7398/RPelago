@@ -6,7 +6,7 @@ import KmkLedger from './KmkLedger';
 type View = 'list' | 'import';
 
 export default function KmkPage() {
-  const { lists, activeListId, loading, setActiveList, deleteList } = useKmk();
+  const { lists, activeListIds, loading, setListActive, deleteList } = useKmk();
 
   const [view, setView] = useState<View>('list');
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -21,9 +21,10 @@ export default function KmkPage() {
 
   const displayListId = useMemo(() => {
     if (selectedListId && lists[selectedListId]) return selectedListId;
-    if (activeListId && lists[activeListId]) return activeListId;
+    const firstActive = activeListIds.find(id => lists[id]);
+    if (firstActive) return firstActive;
     return listEntries[0]?.[0] ?? null;
-  }, [selectedListId, activeListId, lists, listEntries]);
+  }, [selectedListId, activeListIds, lists, listEntries]);
 
   const handleImportDone = (listId: string) => {
     setSelectedListId(listId);
@@ -37,8 +38,9 @@ export default function KmkPage() {
     await deleteList(listId);
   };
 
-  const handleSetActive = async (listId: string) => {
-    await setActiveList(listId);
+  // Several lists may run at once, so this toggles rather than switching a pointer.
+  const handleToggleActive = async (listId: string, active: boolean) => {
+    await setListActive(listId, active);
   };
 
   if (loading) {
@@ -88,7 +90,7 @@ export default function KmkPage() {
               {/* List switcher strip */}
               <div className="kmk-list-strip">
                 {listEntries.map(([listId, list]) => {
-                  const isActive   = listId === activeListId;
+                  const isActive   = activeListIds.includes(listId);
                   const isSelected = listId === displayListId;
                   const isDeletePending = deleteConfirm === listId;
                   return (
@@ -113,11 +115,10 @@ export default function KmkPage() {
                         </a>
                         <button
                           className="kmk-set-active-btn"
-                          disabled={isActive}
-                          onClick={() => handleSetActive(listId)}
-                          title={isActive ? 'Already active' : 'Set as active'}
+                          onClick={() => handleToggleActive(listId, !isActive)}
+                          title={isActive ? 'Hide from the Trial Board' : 'Show on the Trial Board'}
                         >
-                          Set Active
+                          {isActive ? 'Deactivate' : 'Set Active'}
                         </button>
                         <button
                           className={`kmk-delete-btn${isDeletePending ? ' confirm' : ''}`}

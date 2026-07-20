@@ -8,7 +8,7 @@ import { shuffle } from './casinoData';
 
 export type GambitStatKey = 'release' | 'collect' | 'hint';
 export type GambitKind    = 'bonus' | 'penalty';
-export type GambitSize    = 'small' | 'big';
+export type GambitSize    = 'small' | 'medium' | 'large';
 
 export interface GambitStatDef {
   key:        GambitStatKey;
@@ -60,19 +60,32 @@ function fmtDelta(d: number): string {
 }
 
 // Raw definitions: [stat, delta, size, copies, goldCost, xp, pot]
+// Three sizes per stat per polarity (small ×4 / medium ×3 / large ×2 copies →
+// a 54-card shared deck). Bonuses cost gold to improve the room's shared odds;
+// penalties pay a reward (xp, converted to gold in casino seasons — see
+// CASINO_GAMBIT_XP_TO_GP) plus a pot bump, in exchange for worse shared odds.
 const RAW: readonly [GambitStatKey, number, GambitSize, number, number, number, number][] = [
-  ['release',  2,    'small', 3,  0, 0,  0 ],
-  ['release', -2,    'small', 3,  0, 5,  15],
-  ['release',  5,    'big',   2, 15, 0,  0 ],
-  ['release', -5,    'big',   2,  0, 10, 30],
-  ['collect',  2,    'small', 3,  0, 0,  0 ],
-  ['collect', -2,    'small', 3,  0, 5,  15],
-  ['collect',  5,    'big',   2, 15, 0,  0 ],
-  ['collect', -5,    'big',   2,  0, 10, 30],
-  ['hint',    -0.5,  'small', 3,  0, 0,  0 ],
-  ['hint',     0.5,  'small', 3,  0, 3,  15],
-  ['hint',    -1,    'big',   2, 10, 0,  0 ],
-  ['hint',     1,    'big',   2,  0, 5,  30],
+  // Release — bonus (+) improves odds, penalty (−) worsens them.
+  ['release',  3,    'small',  4,  0,  0,  0 ],
+  ['release',  5,    'medium', 3, 15,  0,  0 ],
+  ['release',  7,    'large',  2, 30,  0,  0 ],
+  ['release', -3,    'small',  4,  0, 10, 20],
+  ['release', -5,    'medium', 3,  0, 15, 30],
+  ['release', -7,    'large',  2,  0, 20, 40],
+  // Collect — same shape as Release.
+  ['collect',  3,    'small',  4,  0,  0,  0 ],
+  ['collect',  5,    'medium', 3, 15,  0,  0 ],
+  ['collect',  7,    'large',  2, 30,  0,  0 ],
+  ['collect', -3,    'small',  4,  0, 10, 20],
+  ['collect', -5,    'medium', 3,  0, 15, 30],
+  ['collect', -7,    'large',  2,  0, 20, 40],
+  // Hint — bonus (−) lowers cost, penalty (+) raises it. Smaller magnitudes.
+  ['hint',    -0.5,  'small',  4,  0,  0,  0 ],
+  ['hint',    -1,    'medium', 3, 10,  0,  0 ],
+  ['hint',    -1.5,  'large',  2, 20,  0,  0 ],
+  ['hint',     0.5,  'small',  4,  0,  5, 20],
+  ['hint',     1,    'medium', 3,  0, 10, 30],
+  ['hint',     1.5,  'large',  2,  0, 15, 40],
 ];
 
 export const GAMBIT_DEFS: readonly GambitDef[] = RAW.map((r, i) => {
@@ -92,6 +105,18 @@ export const GAMBIT_DEFS_BY_ID: Readonly<Record<string, GambitDef>> = Object.fro
   GAMBIT_DEFS.map(d => [d.defId, d]),
 );
 
+// A penalty gambit's `xp` is inert in a casino-only season (no RPG layer), so a
+// casino season pays it to the player as GOLD instead, at this rate. In a map
+// season the XP is awarded normally and no conversion happens — the field is
+// season-proof either way. Bonuses have xp 0, so they convert to 0.
+export const CASINO_GAMBIT_XP_TO_GP = 2;
+
+// Personal gold a penalty gambit pays the player in a CASINO season (xp × rate).
+// The callable uses this to pay the player and leaves the (inert) XP unawarded.
+export function gambitCasinoGold(card: GambitDef): number {
+  return card.xp * CASINO_GAMBIT_XP_TO_GP;
+}
+
 export function buildGambitDeck(): GambitCard[] {
   const deck: GambitCard[] = [];
   let uid = 0;
@@ -103,10 +128,23 @@ export function buildGambitDeck(): GambitCard[] {
   return shuffle(deck);
 }
 
+// A gambit may be offered to a player only if applying it wouldn't drive its
+// stat below 0 — e.g. a −5% or −7% Collect penalty is withheld when Collect is
+// already at 4%. The server clamps at 0 regardless; this keeps a gambit whose
+// effect would be (partly) wasted out of the player's offer in the first place.
+export function gambitOfferable(stats: CasinoStats, card: GambitDef): boolean {
+  const current = card.stat === 'release' ? stats.release
+    : card.stat === 'collect' ? stats.collect
+    : stats.hint;
+  return round1(current + card.delta) >= 0;
+}
+
 export interface GambitDeckHandle {
   remaining(): number;
   // Draw up to n cards with DISTINCT defId (no duplicate type in one offer).
-  drawOffer(n: number): GambitCard[];
+  // `allow`, when given, filters out cards that fail it (e.g. would-go-negative
+  // gambits) — they're returned to circulation like duplicates.
+  drawOffer(n: number, allow?: (card: GambitCard) => boolean): GambitCard[];
   toArray(): GambitCard[];
 }
 
@@ -114,17 +152,17 @@ export function makeGambitDeck(cards?: GambitCard[]): GambitDeckHandle {
   let remaining = cards ? cards.slice() : buildGambitDeck();
   return {
     remaining: () => remaining.length,
-    drawOffer(n: number): GambitCard[] {
+    drawOffer(n: number, allow?: (card: GambitCard) => boolean): GambitCard[] {
       const offer: GambitCard[] = [];
       const used  = new Set<string>();
       const skipped: GambitCard[] = [];
       while (offer.length < n && remaining.length > 0) {
         const card = remaining.shift()!;
-        if (used.has(card.defId)) { skipped.push(card); continue; }
+        if (used.has(card.defId) || (allow && !allow(card))) { skipped.push(card); continue; }
         used.add(card.defId);
         offer.push(card);
       }
-      // Return skipped duplicates to the bottom so they stay in circulation
+      // Return skipped duplicates / filtered cards to the bottom so they stay in circulation
       remaining = remaining.concat(skipped);
       return offer;
     },

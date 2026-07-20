@@ -1,5 +1,5 @@
 /* RPelago Casino — theme token layer (all 10 site themes).
-   Imported by src/casino/main.tsx. casino-table.html applies body.theme-*
+   Imported by src/casino/main.tsx. casino-table.html applies body.casino-scope.theme-*
    from localStorage 'realm_theme' so the player's preference carries over.
 
    bg/gold/parchment/border values mirror src/index.css exactly.
@@ -13,13 +13,28 @@
    Gilded Hearth and the remaining themes keep equal-lightness hues.
 */
 
+/* The table is a standalone document that does NOT load index.css, so it needs its
+   own copy of the main app's text-size scaling: main.tsx sets --font-scale on
+   documentElement from `realm_font_scale`, and this drives the root font size, so
+   all the casino rem units track the slider exactly like the map/landing. */
+:root { --font-scale: 1; }
+html { font-size: calc(16px * var(--font-scale, 1)); }
+
+/* Theme-aware card drop shadow: a darker shade of the current felt rather than
+   near-black, so cards lift off a dark table AND don't pool a heavy dark blob on a
+   light-theme felt. Defined once — it resolves var(--felt) per active theme. */
+body.casino-scope { --card-drop: oklch(from var(--felt) calc(l - 0.30) c h / 0.4); }
+
 /* ══════════════════════════════════════════════════════════════
    DARK THEMES
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Gilded Hearth (default / primary) ───────────────────────────────────── */
-:root,
-body.theme-gilded {
+/* Scoped to `body.casino-scope` so this whole casino palette applies ONLY in
+   the casino contexts (landing + table mini-app), never the map. Gilded is the
+   theme-less default, so `body.casino-scope` (no theme-* class) matches it. */
+body.casino-scope,
+body.casino-scope.theme-gilded {
   --bg-deep:     #141009;
   --bg-mid:      #1e1a0c;
   --bg-card:     #252010;
@@ -56,7 +71,7 @@ body.theme-gilded {
 }
 
 /* ── Moonlit Codex (dark · Deutan/Protan-safe · cool slate) ─────────────── */
-body.theme-moonlit {
+body.casino-scope.theme-moonlit {
   --bg-deep:     oklch(12% 0.02 250);
   --bg-mid:      oklch(15% 0.025 248);
   --bg-card:     oklch(20% 0.04 248);
@@ -93,7 +108,7 @@ body.theme-moonlit {
 }
 
 /* ── Verdant Hollow (dark · deep forest green) ───────────────────────────── */
-body.theme-verdant {
+body.casino-scope.theme-verdant {
   --bg-deep:     oklch(13% 0.03 145);
   --bg-mid:      oklch(16% 0.04 140);
   --bg-card:     oklch(19% 0.05 140);
@@ -132,7 +147,7 @@ body.theme-verdant {
 /* ── Aether Bloom (dark · mystical violet shift) ─────────────────────────── */
 /* Aether uses Gilded bg/gold/parchment; only tile hues rotate. The casino
    receives a violet-tinted felt and aetheric card accents. */
-body.theme-aether {
+body.casino-scope.theme-aether {
   --bg-deep:     #141009;
   --bg-mid:      #1e1a0c;
   --bg-card:     #252010;
@@ -171,7 +186,7 @@ body.theme-aether {
 /* ── Obsidian Contrast (dark · max accessibility · achromatic) ───────────── */
 /* Near-black base with maximum contrast. CB-safe lightness ladder on card
    types. Saturated yellow gold for bright-line legibility. */
-body.theme-obsidian {
+body.casino-scope.theme-obsidian {
   --bg-deep:     oklch(10% 0 0);
   --bg-mid:      oklch(14% 0 0);
   --bg-card:     oklch(18% 0 0);
@@ -206,7 +221,7 @@ body.theme-obsidian {
 }
 
 /* ── Tidepool Atlas (dark · Deutan/Protan-safe · blue–yellow axis) ──────── */
-body.theme-tidepool {
+body.casino-scope.theme-tidepool {
   --bg-deep:     oklch(13% 0.035 215);
   --bg-mid:      oklch(17% 0.045 213);
   --bg-card:     oklch(20% 0.055 212);
@@ -250,7 +265,7 @@ body.theme-tidepool {
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Parchment Day (light · warm cream · amber chrome) ──────────────────── */
-body.theme-parchment {
+body.casino-scope.theme-parchment {
   --bg-deep:     oklch(95% 0.025 85);
   --bg-mid:      oklch(91% 0.035 80);
   --bg-card:     oklch(87% 0.045 80);
@@ -284,10 +299,10 @@ body.theme-parchment {
   --ambient: none;
   --noise-op: 0;
 }
-body.theme-parchment { background: var(--bg-deep) !important; }
+body.casino-scope.theme-parchment { background: var(--bg-deep) !important; }
 
 /* ── Sakura Scroll (light · rose-blush Japanese paper) ──────────────────── */
-body.theme-sakura {
+body.casino-scope.theme-sakura {
   --bg-deep:     oklch(96% 0.025 12);
   --bg-mid:      oklch(93% 0.030 12);
   --bg-card:     oklch(89% 0.035 12);
@@ -319,10 +334,10 @@ body.theme-sakura {
   --ambient: none;
   --noise-op: 0;
 }
-body.theme-sakura { background: var(--bg-deep) !important; }
+body.casino-scope.theme-sakura { background: var(--bg-deep) !important; }
 
 /* ── Mint Library (light · cool mint reading room) ───────────────────────── */
-body.theme-mint {
+body.casino-scope.theme-mint {
   --bg-deep:     oklch(94% 0.025 150);
   --bg-mid:      oklch(90% 0.030 150);
   --bg-card:     oklch(86% 0.035 150);
@@ -354,10 +369,10 @@ body.theme-mint {
   --ambient: none;
   --noise-op: 0;
 }
-body.theme-mint { background: var(--bg-deep) !important; }
+body.casino-scope.theme-mint { background: var(--bg-deep) !important; }
 
 /* ── Dunes & Lapis (light · CB-friendlier · warm sand + lapis) ──────────── */
-body.theme-lapis {
+body.casino-scope.theme-lapis {
   --bg-deep:     oklch(94% 0.035 75);
   --bg-mid:      oklch(90% 0.045 72);
   --bg-card:     oklch(86% 0.055 70);
@@ -391,4 +406,4 @@ body.theme-lapis {
   --ambient: none;
   --noise-op: 0;
 }
-body.theme-lapis { background: var(--bg-deep) !important; }
+body.casino-scope.theme-lapis { background: var(--bg-deep) !important; }

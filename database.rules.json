@@ -1,5 +1,187 @@
 {
   "rules": {
+    // ═══════════════════════════════════════════════════════════════════════
+    // config — global, season-independent
+    //
+    // A season is PUBLICLY READABLE if and only if it has an entry in
+    // config/seasonList. Draft seasons are deliberately ABSENT from that
+    // (public) list and are instead described in config/draftSeasons, which
+    // only admin + alpha users may read — so players cannot even discover that
+    // an unlaunched season exists, let alone read its content.
+    // ═══════════════════════════════════════════════════════════════════════
+    "config": {
+      "adminId": {
+        ".read":  true,
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "activeSeasonId": {
+        ".read":  true,
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "minClientVersion": {
+        // Version gate: client force-reloads when its build is older than this.
+        ".read":  true,
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "seasonList": {
+        // PUBLIC. Holds only active / closing / archived seasons — never drafts.
+        // { label, shell: "map"|"casino", status: "active"|"closing"|"archived" }
+        ".read":  true,
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "draftSeasons": {
+        // PRIVATE. { label, shell } for unlaunched seasons. Admin + alpha only.
+        ".read":  "auth != null && (root.child('config/adminId').val() === auth.uid || root.child('config/alphaUsers').child(auth.uid).exists())",
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "alphaUsers": {
+        // PRIVATE. Allowlist of uids that may read AND playtest draft seasons.
+        ".read":  "auth != null && (root.child('config/adminId').val() === auth.uid || root.child('config/alphaUsers').child(auth.uid).exists())",
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // seasonSecrets — server-owned data that must NEVER be publicly readable.
+    //
+    // ⚠️ THIS NODE EXISTS BECAUSE RTDB READ RULES CASCADE DOWNWARD.
+    // A `.read: true` at an ancestor CANNOT be revoked by a descendant. The
+    // season tree is world-readable, so ANY secret placed inside it is exposed
+    // (this is exactly how the casino deck/hand leak happened under `game/`).
+    //
+    // Therefore: NO `.read` or `.write` is granted at this node or any node
+    // above the leaves below. Default-deny stands, and only the specific leaf
+    // grants apply. Cloud Functions use the Admin SDK, which bypasses rules
+    // entirely, so the server retains full access.
+    //
+    // RULE OF THUMB: if it must not be public, it CANNOT live under seasons/.
+    // ═══════════════════════════════════════════════════════════════════════
+    "seasonSecrets": {
+      "$seasonId": {
+        "missions": {
+          "$missionId": {
+            "participants": {
+              "$uid": {
+                "deck": {
+                  // The remaining draw deck. Readable by NOBODY on the client —
+                  // not even its owner. Seeing it would let a player engineer
+                  // their hand. Server-only.
+                  ".read":  false,
+                  ".write": false
+                },
+                "hand": {
+                  // The player's own cards, readable only by that player so the
+                  // table UI can recover after a reload. Writes are server-only.
+                  ".read":  "auth != null && auth.uid === $uid",
+                  ".write": false
+                },
+                "hole": {
+                  // Hold 'Em: the seat's 2 hole cards, kept past play-on so a forming
+                  // resubmit can rebuild the pool. Owner-read only, like `hand`.
+                  ".read":  "auth != null && auth.uid === $uid",
+                  ".write": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // seasons — one subtree per season. Public read once listed in seasonList.
+    // ═══════════════════════════════════════════════════════════════════════
+    "seasons": {
+      "$seasonId": {
+        // Readable if the season is public (listed), or you are admin/alpha.
+        ".read": "root.child('config/seasonList').child($seasonId).exists() || (auth != null && (root.child('config/adminId').val() === auth.uid || root.child('config/alphaUsers').child(auth.uid).exists()))",
+        // Admin may write any season in any status (authoring drafts, fixing archives).
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid",
+
+        // Player-level writes are allowed when the season is LIVE (active|closing),
+        // or when it is a DRAFT and you are admin/alpha (playtesting).
+        // Archived seasons are read-only to everyone but admin.
+
+        "tiles": {
+          "$coord": {
+            "adventurers": {
+              "$advId": {
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && (newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid)))",
+                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('seasons').child($seasonId).child('tiles').child($coord).child('state').val() !== 'inprogress' || root.child('seasons').child($seasonId).child('tiles').child($coord).child('claimableSlots').exists()))",
+                "statusNote": {
+                  ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
+                }
+              }
+            },
+            "claimableSlots": {
+              "$slotKey": {
+                // Any eligible player may DELETE (claim) an existing slot, never create one.
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && !newData.exists() && data.exists()))"
+              }
+            }
+          }
+        },
+
+        "players": {
+          "$playerId": {
+            ".validate": "root.child('config/adminId').val() === auth.uid || (newData.child('xp').val() === data.child('xp').val() && newData.child('gold').val() === data.child('gold').val())",
+
+            "adventurers": {
+              "$advId": {
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))"
+              }
+            },
+
+            "nameColor": {
+              ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))"
+            },
+
+            "feats": {
+              "$slot": {
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))",
+                // A feat slot may be filled once and never re-selected.
+                ".validate": "newData.isString() && newData.val().length > 0 && (!data.exists() || root.child('config/adminId').val() === auth.uid)"
+              }
+            },
+
+            "xp":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "gold": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+
+            "inventory": {
+              "$itemId": { ".validate": "newData.isNumber() && newData.val() >= 0" }
+            }
+          }
+        },
+
+        "missions": {
+          "$missionId": {
+            "claimableSlots": {
+              "$slotKey": {
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && !newData.exists() && data.exists()))"
+              }
+            }
+          }
+        },
+
+        "notifications": {
+          "$uid": {
+            // Client deletes its own entries on receipt.
+            ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $uid && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))"
+          }
+        }
+      }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LEGACY — the pre-season `game/` tree. Retained read-only-ish while S1's
+    // final cohorts finish. Scheduled for deletion once S1 is archived under
+    // seasons/rpelago_s1. Do not add to it.
+    //
+    // KNOWN DEFECT (tracked, currently unexploitable — no live casino tables):
+    // `game/.read: true` cascades over missions/participants, so the
+    // `.read: false` on deck/hand below is an INERT NO-OP. Fixed properly by
+    // seasonSecrets above. Deleted with this block.
+    // ═══════════════════════════════════════════════════════════════════════
     "profiles": {
       "players": {
         "$uid": {
@@ -157,7 +339,7 @@
 
       "$listId": {
         // Admin may create, modify, or delete any list.
-        ".write": "auth != null && root.child('game/meta/adminId').val() === auth.uid",
+        ".write": "auth != null && root.child('config/adminId').val() === auth.uid",
 
         "areas": {
           "$areaId": {
@@ -169,8 +351,8 @@
                 //   Resume     → Verifying → Pending    (status only)
                 //   Abandon    → Pending|Verifying → Incomplete (clears player fields)
                 // Claim (Incomplete → Pending) goes through kmkClaimTrial Cloud Function (admin SDK).
-                ".write": "auth != null && (root.child('game/meta/adminId').val() === auth.uid || (data.child('playerId').val() === auth.uid && data.child('status').val() !== 'Complete'))",
-                ".validate": "root.child('game/meta/adminId').val() === auth.uid || (newData.child('trial').val() === data.child('trial').val() && newData.child('desc').val() === data.child('desc').val() && newData.child('order').val() === data.child('order').val() && ((newData.child('status').val() === 'Incomplete' && newData.child('playerId').val() === null && newData.child('playerName').val() === null && newData.child('claimedAt').val() === null) || ((newData.child('status').val() === 'Pending' || newData.child('status').val() === 'Verifying') && newData.child('playerId').val() === auth.uid)))"
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (data.child('playerId').val() === auth.uid && data.child('status').val() !== 'Complete'))",
+                ".validate": "root.child('config/adminId').val() === auth.uid || (newData.child('trial').val() === data.child('trial').val() && newData.child('desc').val() === data.child('desc').val() && newData.child('order').val() === data.child('order').val() && ((newData.child('status').val() === 'Incomplete' && newData.child('playerId').val() === null && newData.child('playerName').val() === null && newData.child('claimedAt').val() === null) || ((newData.child('status').val() === 'Pending' || newData.child('status').val() === 'Verifying') && newData.child('playerId').val() === auth.uid)))"
               }
             }
           }

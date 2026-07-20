@@ -1,0 +1,604 @@
+/* RPelago Casino — landing styles (recreated from the design bundle).
+   Themed through casino/themes.css tokens (--gold, --panel, --felt, …).
+   Everything is scoped under .rl-root. */
+
+/* The main app's body is `display:flex; align-items:center`, which shrink-wraps
+   #root (the flex item) to its content width — so .rl-root's max-width/auto-margins
+   never engage. Give #root full width in the casino landing so it centers to the
+   real max-width. Scoped to casino-scope, so the map layout is untouched. */
+body.casino-scope #root { width: 100%; }
+
+.rl-root {
+  --line: var(--border);
+  --line-glow: var(--border-glow);
+  position: relative; z-index: 1;
+  max-width: 1500px; margin: 0 auto; padding: 0 1rem 5rem; width: 100%;
+  display: flex; flex-direction: column; gap: 1.4rem;
+  color: var(--parchment);
+  min-height: 100dvh;
+}
+
+/* Soft ambient wash behind everything.
+   z-index MUST be negative: .rl-root is a stacking context (position:relative +
+   z-index:1) and the page content is statically positioned, so a positioned
+   backdrop at z-index 0 would paint OVER all of it (a full-viewport blackout). */
+.rl-ambient {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(ellipse 90% 60% at 50% 0%, oklch(from var(--gold) l c h / 0.06), transparent 60%), var(--bg-deep);
+}
+
+/* ══ Top bar ══ */
+.rl-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; padding-top: 1.6rem;
+}
+@media (max-width: 560px){ .rl-top { padding-top: 1.2rem; } }
+
+.rl-brand { display: flex; flex-direction: column; line-height: 1; }
+.rl-brand .rl-kick { font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.34em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-brand h1 {
+  font-family:'Cinzel',serif; font-weight: 800; font-size: clamp(1.3rem, 3.2vw, 1.85rem);
+  color: var(--gold); letter-spacing: 0.05em; margin: 0.15rem 0 0;
+  text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.35);
+}
+.rl-brand .rl-sub { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.9rem; margin-top: 0.1rem; }
+.rl-top-right { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+
+/* ── View toggle (Lounge / Floor) ── */
+.rl-viewtoggle {
+  display: inline-flex; padding: 0.22rem; gap: 0.15rem;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h / 0.8);
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.rl-vt {
+  font-family:'Cinzel',serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.42rem 0.9rem; border-radius: 999px; cursor: pointer;
+  background: transparent; border: none; color: var(--gold-dim); transition: all 0.15s;
+}
+.rl-vt:hover { color: var(--gold); }
+.rl-vt.on { color: var(--bg-deep); background: var(--gold); font-weight: 700; box-shadow: 0 1px 6px oklch(from var(--gold) l c h / 0.35); }
+
+/* ── Gold balance ── */
+.rl-gold {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: radial-gradient(ellipse at 50% 0%, oklch(from var(--gold) l c h / 0.16), var(--panel));
+  border: 1px solid var(--line-glow); border-radius: 999px; padding: 0.45rem 1.1rem 0.45rem 0.55rem;
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 6px 18px #0007;
+}
+.rl-gold-ico {
+  width: 2rem; height: 2rem; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 1rem;
+  background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(54% 0.12 66));
+  box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), 0 1px 2px #0007;
+}
+.rl-gold-info { display: flex; flex-direction: column; line-height: 1.02; }
+.rl-gold-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-gold-amt { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.35rem; color: var(--gold); }
+.rl-gold-amt small { font-size: 0.55em; color: var(--gold-dim); font-weight: 600; }
+.rl-gold-net { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; margin-left: 0.2rem; }
+.rl-gold-net.pos { color: var(--pos); }
+.rl-gold-net.neg { color: var(--neg); }
+
+/* ── nav icon buttons ── */
+.rl-nav { display: flex; gap: 0.4rem; }
+.rl-navbtn {
+  width: 2.5rem; height: 2.5rem; border-radius: 9px; cursor: pointer;
+  display: grid; place-items: center; font-size: 1.05rem;
+  background: var(--panel); border: 1px solid var(--line); color: var(--gold-dim);
+  transition: all 0.15s; font-family:'Cinzel',serif; text-decoration: none;
+}
+.rl-navbtn:hover { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 12px oklch(from var(--gold) l c h / 0.15); }
+
+/* ══ Section header ══ */
+.rl-sec { display: flex; flex-direction: column; gap: 0.9rem; }
+.rl-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+.rl-sec-title { font-family:'Cinzel',serif; font-size: 0.92rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+.rl-sec-note { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+
+/* odds trio (Release / Collect / Hint) — hues match the casino table's
+   ChallengePanel (release 200 · collect 295 · hint 30) so the two read alike */
+.rl-odds { display: flex; gap: 0.4rem 1.1rem; flex-wrap: wrap; }
+.rl-odd { display: flex; flex-direction: column; line-height: 1.05; }
+.rl-odd-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-odd-val { font-family:'Cinzel',serif; font-weight: 800; font-size: 1rem; color: oklch(var(--stat-l, 82%) 0.12 var(--oh, 200)); }
+.rl-odd-val small { font-size: 0.55em; color: var(--gold-dim); font-weight: 600; }
+/* Gambit-driven drift from the table's opening roll (+N / −N). */
+.rl-odd-diff { font-size: 0.6em; font-weight: 700; margin-left: 0.28rem; letter-spacing: 0.02em; }
+.rl-odd-diff.up { color: var(--pos); }
+.rl-odd-diff.down { color: var(--neg); }
+
+/* seat pips */
+.rl-pips { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+.rl-pip {
+  width: 1.5rem; height: 1.5rem; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-family:'Cinzel',serif; font-weight: 700;
+  font-size: 0.62rem; color: oklch(18% 0.03 70);
+  background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75)));
+}
+.rl-pip.you { box-shadow: 0 0 0 2px var(--gold), 0 0 10px oklch(from var(--gold) l c h / 0.4); }
+.rl-pip.unplayed { opacity: 0.55; }
+.rl-pip.empty { background: none; border: 1.5px dashed var(--line-glow); color: transparent; }
+/* A seat lost to decay (past the current max), and the next one about to go. */
+.rl-pip.closed { background: none; border: 1.5px dashed var(--line); opacity: 0.35; }
+.rl-pip.empty.decaying { border-color: oklch(from var(--neg) l c h / 0.7); animation: rlDecayPulse 1.6s ease-in-out infinite; }
+@keyframes rlDecayPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; box-shadow: 0 0 8px oklch(from var(--neg) l c h / 0.4); } }
+
+/* Decay countdown line under the pips. */
+.rl-decay { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; color: oklch(from var(--neg) l c h / 0.85); }
+.rl-decay.closed { color: var(--gold-dim); }
+
+/* ══ Table card grid — identical cards in both views; Floor just runs tighter ══ */
+.rl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.1rem; }
+.rl-grid.rl-grid-tight { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 0.9rem; }
+.rl-tcard {
+  position: relative; text-align: left;
+  border-radius: 12px; border: 1px solid var(--line); overflow: hidden;
+  background: linear-gradient(162deg, oklch(from var(--bg-card) l c h / 0.95), oklch(from var(--bg-card) calc(l - 0.03) c h / 0.95));
+  display: flex; flex-direction: column;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.rl-tcard:hover { border-color: var(--line-glow); transform: translateY(-3px); box-shadow: 0 14px 30px #0008; }
+.rl-tcard.seated-here { border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+.rl-tcard.locked { opacity: 0.62; }
+.rl-tcard.locked:hover { transform: none; border-color: var(--line); box-shadow: none; }
+.rl-tcard-felt {
+  padding: 0.9rem 1.1rem; position: relative;
+  background: radial-gradient(ellipse 80% 100% at 30% 0%, oklch(from var(--felt) calc(l + 0.07) c h), var(--felt) 75%);
+  border-bottom: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.4);
+}
+.rl-tcard-tag { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-tcard-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-top: 0.1rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.rl-tcard-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.86rem; margin-top: 0.1rem; }
+.rl-tcard-body { padding: 0.9rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; flex: 1; }
+.rl-tcard-stats { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+.rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 0.7rem; margin-top: auto; flex-wrap: wrap; }
+/* Long lock labels ("Seated elsewhere") must break rather than overrun the card
+   (which clips via overflow:hidden) at larger font sizes. */
+.rl-tcard-foot .rl-btn { white-space: normal; text-align: center; min-width: 0; }
+
+.rl-mini { display: flex; flex-direction: column; line-height: 1.1; }
+.rl-mini-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-mini-val { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.95rem; color: var(--parchment); }
+.rl-mini-val.gold { color: var(--gold); }
+
+.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; }
+.rl-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.15rem; }
+.rl-pot .u { font-size: 0.6rem; color: var(--gold-dim); }
+
+.rl-entry { display: flex; gap: 0.5rem; flex-wrap: wrap; font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.04em; color: var(--gold-dim); }
+.rl-entry b { color: var(--parchment); }
+
+.rl-badge { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.16rem 0.5rem; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.rl-badge.ready { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.16); }
+.rl-badge.open { color: var(--gold-dim); border-color: var(--line); }
+.rl-badge.seated { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.55); background: oklch(from var(--gold) l c h / 0.14); }
+
+/* Config-denied notice — the player must resubmit at the table. */
+.rl-deny {
+  display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+  margin: 0.6rem 0; padding: 0.65rem 0.8rem; border-radius: 5px;
+  border: 1px solid oklch(from var(--neg) l c h / 0.6); background: oklch(from var(--neg) l c h / 0.13);
+}
+.rl-deny-icon { font-size: 1.3rem; line-height: 1; }
+.rl-deny-txt { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 12ch; }
+.rl-deny-txt b { font-family:'Cinzel',serif; font-size: 0.62rem; letter-spacing: 0.05em; color: oklch(from var(--neg) l c h / 0.95); }
+.rl-deny-txt span { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.82rem; color: var(--ink-soft); }
+
+.rl-time { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--gold-dim); }
+
+/* ══ Phase panel — one felt-topped panel, three phases (Seated / Board / Ledger) ══ */
+.rl-phase {
+  border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.5);
+  background: radial-gradient(ellipse 80% 70% at 50% 0%, oklch(from var(--felt) calc(l + 0.06) c h) 0%, var(--felt) 72%), var(--felt);
+  box-shadow: inset 0 0 60px oklch(from var(--felt) calc(l - 0.16) c h / 0.45), 0 18px 46px oklch(from var(--felt) calc(l - 0.32) c h / 0.4);
+  border-radius: 14px; padding: 1.5rem 1.4rem;
+  display: flex; flex-direction: column; gap: 1rem;
+}
+.rl-phase-head { display: flex; flex-direction: column; gap: 0.3rem; text-align: center; }
+.rl-ct-kick { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.26em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-ct-name { font-family:'Cinzel',serif; font-weight: 700; font-size: clamp(1.1rem, 2.6vw, 1.4rem); color: var(--gold); letter-spacing: 0.03em; }
+.rl-fine { font-size: 0.76rem; text-align: center; }
+
+.rl-phase-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 0.5rem;
+  background: oklch(from var(--bg-card) l c h / 0.5); border: 1px solid var(--line);
+  border-radius: 10px; padding: 0.7rem 0.8rem;
+}
+.rl-phase-acts { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+.rl-phase-acts .rl-btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* Roster — avatar chips (Lounge) and shared name/you/crown bits (Board/Ledger) */
+.rl-roster { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.rl-seat {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.4rem 0.7rem 0.4rem 0.45rem;
+}
+.rl-seat.you { border-color: var(--line-glow); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+.rl-seat.empty { border-style: dashed; opacity: 0.6; }
+.rl-seat-av {
+  width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  font-family:'Cinzel',serif; font-weight: 700; font-size: 0.72rem; color: oklch(18% 0.03 70);
+  background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75)));
+}
+/* Discord-avatar variant of any seat circle (rl-seat-av / mp-pav / st-pav): the
+   base class supplies the size + 50% radius; the image just fills it. */
+.rl-av-img { display: block; object-fit: cover; background: none; border: none; }
+.rl-seat.empty .rl-seat-av { background: none; border: 1.5px dashed var(--line-glow); color: var(--gold-dim); }
+.rl-seat-txt { display: flex; flex-direction: column; line-height: 1.1; }
+.rl-seat-nm { font-family:'Cinzel',serif; font-size: 0.72rem; color: var(--parchment); }
+.rl-seat-st { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.rl-seat-st.played { color: var(--pos); }
+.rl-seat-st.wait { color: var(--gold-dim); }
+.rl-seat-st.open { color: var(--gold-dim); font-style: italic; text-transform: none; letter-spacing: 0; font-family:'Crimson Pro',serif; }
+.rl-roster-name { font-family:'Cinzel',serif; font-size: 0.78rem; color: var(--parchment); display: flex; align-items: center; gap: 0.4rem; }
+.rl-you {
+  font-size: 0.48rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold);
+  border: 1px solid oklch(from var(--gold) l c h / 0.5); border-radius: 999px; padding: 0.05rem 0.35rem;
+}
+.rl-crown { color: var(--gold); font-size: 0.9rem; }
+
+/* ══ Seated current-table panel — the Lounge/Floor divergence lives here ══ */
+.rl-ct { position: relative; border-radius: 14px; overflow: hidden; }
+.rl-ct-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.9rem; margin-top: 0.1rem; }
+.rl-ct-cell-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.3rem; }
+.rl-ct-acts { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.rl-ct-acts .rl-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.rl-spread { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+
+/* Lounge — cozy, centered, large */
+.rl-ct.lounge {
+  border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.5);
+  background: radial-gradient(ellipse 80% 70% at 50% 0%, oklch(from var(--felt) calc(l + 0.08) c h) 0%, var(--felt) 72%), var(--felt);
+  box-shadow: inset 0 0 70px oklch(from var(--felt) calc(l - 0.16) c h / 0.45), 0 22px 54px oklch(from var(--felt) calc(l - 0.34) c h / 0.42);
+  padding: 2rem 1.6rem 1.7rem; display: flex; flex-direction: column; align-items: center; gap: 1.1rem; text-align: center;
+}
+.rl-ct.lounge .rl-hand, .rl-ct.lounge .rl-roster, .rl-ct.lounge .rl-odds, .rl-ct.lounge .rl-ct-acts { justify-content: center; }
+.rl-ct.lounge .rl-deploy, .rl-ct.lounge .rl-stakewrap { align-items: center; }
+
+/* Floor (rail) — sleek panel with a compact seat grid */
+.rl-ct.rail {
+  border: 1px solid var(--line-glow); background: var(--panel);
+  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem;
+}
+.rl-seatgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem; }
+@media (max-width: 640px){ .rl-seatgrid { grid-template-columns: repeat(3, 1fr); } }
+.rl-railseat {
+  background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.55rem 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; text-align: center;
+}
+.rl-railseat.you { border-color: var(--gold); box-shadow: 0 0 14px oklch(from var(--gold) l c h / 0.2); }
+.rl-railseat.empty { border-style: dashed; opacity: 0.6; }
+.rl-railseat .rl-seat-av { width: 2rem; height: 2rem; }
+.rl-ct-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1rem 1.2rem; align-items: start; }
+@media (max-width: 560px){ .rl-ct-cols { grid-template-columns: 1fr; } }
+.rl-ct-col { display: flex; flex-direction: column; gap: 0.7rem; }
+
+/* Locked hand (CardFaces) + stake + empty note, shared by both variants */
+.rl-hand { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+/* Softer, felt-derived drop shadow so the hand doesn't cast a heavy dark pool on a
+   light-theme felt (the default #000a plate shadow reads as a blob near the text). */
+.rl-hand .look-plate { box-shadow: 0 8px 18px oklch(from var(--felt) calc(l - 0.30) c h / 0.45), inset 0 0 22px oklch(from var(--acc) calc(l - 0.05) c h / 0.07); }
+.rl-hand-empty { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+.rl-stakewrap { display: flex; flex-direction: column; gap: 0.1rem; margin-top: 0.45rem; }
+.rl-stake { display: inline-flex; align-items: baseline; gap: 0.25rem; font-family:'Cinzel',serif; }
+.rl-stake .n { font-weight: 800; color: var(--gold); font-size: 1.05rem; }
+.rl-stake .u { font-size: 0.6rem; color: var(--gold-dim); }
+.rl-stake-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); }
+
+/* Deploy-progress bar */
+.rl-deploy { display: flex; flex-direction: column; gap: 0.3rem; }
+.rl-deploy-head { display: flex; justify-content: space-between; gap: 0.6rem; font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-deploy-head b { color: var(--parchment); font-weight: 700; }
+.rl-deploy-track { height: 8px; border-radius: 999px; background: oklch(from var(--bg-card) calc(l - 0.05) c h); border: 1px solid var(--line); overflow: hidden; position: relative; }
+.rl-deploy-filled { position: absolute; inset: 0 auto 0 0; background: oklch(from var(--gold) l c h / 0.25); }
+.rl-deploy-played { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, oklch(from var(--gold) calc(l - 0.1) c h), var(--gold)); }
+.rl-deploy.ready .rl-deploy-played { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.14) c h), var(--pos)); }
+
+/* Board — Archipelago room + Cheesetracker links (in progress) */
+.rl-chlinks { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.rl-chlink-play { text-decoration: none; display: inline-flex; align-items: center; }
+.rl-chlink-cheese {
+  display: inline-flex; align-items: center; gap: 0.3rem; text-decoration: none;
+  font-family:'Cinzel',serif; font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gold-dim); border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.7rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+.rl-chlink-cheese:hover { color: var(--gold); border-color: var(--line-glow); }
+
+/* Board */
+.rl-meter {
+  position: relative; height: 1.5rem; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--line); background: oklch(from var(--bg-deep) l c h / 0.6);
+}
+.rl-meter-fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, oklch(from var(--gold) l c h / 0.35), oklch(from var(--gold) l c h / 0.7));
+  transition: width 0.4s ease;
+}
+.rl-meter-lbl {
+  position: relative; display: grid; place-items: center; height: 100%;
+  font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--parchment);
+}
+.rl-mine {
+  border: 1px solid oklch(from var(--gold) l c h / 0.55); background: oklch(from var(--gold) l c h / 0.07);
+  border-radius: 10px; padding: 0.7rem 0.8rem; display: flex; flex-direction: column; gap: 0.45rem;
+}
+.rl-seatslots { display: flex; flex-direction: column; gap: 0.35rem; padding: 0 0.2rem; }
+.rl-slotwrap { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.rl-slotpill {
+  display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%;
+  padding: 0.2rem 0.55rem; border-radius: 999px;
+  border: 1px solid var(--line); background: oklch(from var(--bg-card) l c h / 0.7);
+  font-family:'Crimson Pro',serif; font-size: 0.78rem; color: var(--parchment);
+}
+.rl-slotpill.goaled { border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.12); }
+.rl-slotpill-game { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-slotpill-st { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-tick { color: var(--pos); font-size: 0.7rem; }
+
+/* Ledger */
+.rl-ledger { display: flex; flex-direction: column; gap: 0.5rem; }
+.rl-ledger-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.7rem;
+  padding: 0.6rem 0.8rem; border-radius: 10px;
+  border: 1px solid var(--line); background: oklch(from var(--bg-card) l c h / 0.45);
+}
+.rl-ledger-row.you { border-color: oklch(from var(--gold) l c h / 0.5); background: oklch(from var(--gold) l c h / 0.08); }
+.rl-ledger-row.winner { box-shadow: 0 0 14px oklch(from var(--gold) l c h / 0.18); }
+.rl-ledger-who { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; flex: 1 1 14rem; }
+.rl-ledger-nums { display: grid; grid-template-columns: repeat(4, minmax(58px, auto)); gap: 0.6rem; }
+.rl-mini-val.pos { color: var(--pos); }
+.rl-mini-val.neg { color: var(--neg); }
+
+/* ══ Buttons (mirror the casino table's .cz-btn) ══ */
+.rl-btn {
+  font-family:'Cinzel',serif; font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+  padding: 0.55rem 1rem; border-radius: 6px; white-space: nowrap;
+  background: oklch(from var(--bg-card) l c h / 0.85); border: 1px solid var(--line); color: var(--gold-dim);
+  transition: all 0.15s;
+}
+.rl-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--line-glow); }
+.rl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rl-btn.primary { color: var(--bg-deep); background: var(--gold); border-color: var(--gold); font-weight: 700; }
+.rl-btn.primary:hover:not(:disabled) { color: var(--bg-deep); box-shadow: 0 0 16px oklch(from var(--gold) l c h / 0.4); }
+
+/* ══ Modal shell (content fleshed out in a later slice) ══ */
+.rl-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 1.2rem;
+  background: oklch(8% 0.01 70 / 0.72); backdrop-filter: blur(4px); animation: rlFadeIn 0.2s ease; }
+@keyframes rlFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.rl-modal {
+  width: min(460px, 96vw); max-height: 88vh; overflow-y: auto; position: relative;
+  background: linear-gradient(180deg, var(--bg-card), oklch(from var(--bg-card) calc(l - 0.02) c h));
+  border: 1px solid var(--line-glow); border-radius: 14px; padding: 1.6rem 1.5rem;
+  box-shadow: 0 30px 70px #000c;
+}
+.rl-modal-close { position: absolute; top: 0.9rem; right: 0.9rem; width: 2rem; height: 2rem; border-radius: 50%;
+  background: oklch(from var(--bg-card) l c h / 0.8); border: 1px solid var(--line); color: var(--gold-dim); cursor: pointer; font-size: 0.9rem; }
+.rl-modal-close:hover { color: var(--gold); border-color: var(--line-glow); }
+.rl-modal-name { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.5rem; letter-spacing: 0.03em; color: var(--parchment); }
+.rl-modal-tag { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); margin: 0.2rem 0 1.2rem; }
+
+.rl-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+
+/* ══ Profile modal ══ */
+.rl-prof-namerow { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 1rem; }
+.rl-prof-name { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.05rem; letter-spacing: 0.06em; }
+.rl-prof-ext { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 8px;
+  border: 1px solid var(--line); color: var(--gold-dim); flex-shrink: 0; transition: all 0.15s; }
+.rl-prof-ext:hover { color: var(--gold); border-color: var(--line-glow); }
+.rl-prof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.rl-prof-stat {
+  display: flex; flex-direction: column; gap: 0.15rem; padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line); border-radius: 9px; background: oklch(from var(--bg-card) l c h / 0.5);
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+  animation: rlStatIn 0.32s ease both;
+}
+.rl-prof-grid .rl-prof-stat:nth-child(2) { animation-delay: 0.04s; }
+.rl-prof-grid .rl-prof-stat:nth-child(3) { animation-delay: 0.08s; }
+.rl-prof-grid .rl-prof-stat:nth-child(4) { animation-delay: 0.12s; }
+.rl-prof-stat:hover { transform: translateY(-1px); border-color: var(--line-glow); box-shadow: 0 4px 14px #0004; }
+.rl-prof-stat--pos { border-color: oklch(from var(--pos) l c h / 0.4); background: oklch(from var(--pos) l c h / 0.09); }
+.rl-prof-stat--pos:hover { border-color: oklch(from var(--pos) l c h / 0.65); }
+.rl-prof-stat--neg { border-color: oklch(from var(--neg) l c h / 0.4); background: oklch(from var(--neg) l c h / 0.09); }
+.rl-prof-stat--neg:hover { border-color: oklch(from var(--neg) l c h / 0.65); }
+@keyframes rlStatIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.rl-prof-statval { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.35rem; color: var(--gold); }
+.rl-prof-statval small { font-size: 0.5em; color: var(--gold-dim); font-weight: 600; }
+.rl-prof-sec { margin-top: 1.1rem; }
+.rl-prof-sec-head { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.5rem; }
+.rl-prof-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.rl-prof-swatch { width: 1.7rem; height: 1.7rem; border-radius: 50%; cursor: pointer; border: 2px solid transparent; box-shadow: inset 0 1px 2px #0006; transition: transform 0.12s; }
+.rl-prof-swatch:hover { transform: scale(1.12); }
+.rl-prof-swatch.on { border-color: var(--gold); box-shadow: 0 0 8px oklch(from var(--gold) l c h / 0.5); }
+.rl-prof-coat { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.7rem 0.8rem; border: 1px dashed var(--line-glow); border-radius: 9px; }
+.rl-prof-coatprog { display: flex; align-items: center; gap: 0.3rem; }
+.rl-prof-coatpip {
+  width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center;
+  font-family:'Cinzel',serif; font-size: 0.7rem; border: 1px solid var(--line); color: var(--gold-dim);
+}
+.rl-prof-coatpip.on { border-color: oklch(from var(--pos) l c h / 0.6); background: oklch(from var(--pos) l c h / 0.15); color: var(--pos); }
+.rl-full { width: 100%; }
+
+/* ══ Activity feed modal ══ */
+.rl-feed { display: flex; flex-direction: column; gap: 0.4rem; }
+.rl-feed-row {
+  display: grid; grid-template-columns: 1.6rem 1fr auto; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.6rem; border-radius: 8px;
+  border: 1px solid var(--line); background: oklch(from var(--bg-card) l c h / 0.4);
+}
+.rl-feed-ico { font-size: 1rem; text-align: center; }
+.rl-feed-msg { font-family:'Crimson Pro',serif; font-size: 0.9rem; color: var(--parchment); }
+.rl-feed-time { font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.06em; color: var(--gold-dim); white-space: nowrap; }
+
+/* ══ Sit flash ══ */
+.rl-sitflash {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; pointer-events: auto;
+  background: oklch(8% 0.01 70 / 0.55); backdrop-filter: blur(2px); animation: rlFadeIn 0.2s ease;
+}
+.rl-sitflash-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.5rem; text-align: center;
+  padding: 1.8rem 2.4rem; border-radius: 16px;
+  background: radial-gradient(ellipse at 50% 0%, oklch(from var(--gold) l c h / 0.18), var(--bg-card));
+  border: 1px solid var(--line-glow); box-shadow: 0 24px 60px #000b;
+  animation: rlSitPop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.rl-sitflash-chip {
+  position: relative;
+  width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; color: var(--bg-deep);
+  background: radial-gradient(circle at 38% 32%, oklch(90% 0.13 86), oklch(70% 0.14 72) 62%, oklch(54% 0.12 66));
+  box-shadow: inset 0 1px 1px oklch(95% 0.08 90 / 0.7), 0 2px 8px #0008;
+}
+/* Soft gold ring that expands out of the chip as the seat is claimed. */
+.rl-sitflash-chip::after {
+  content: ''; position: absolute; inset: -0.35rem; border-radius: 50%;
+  border: 2px solid oklch(from var(--gold) l c h / 0.55); animation: rlSitRing 0.9s ease-out forwards;
+}
+@keyframes rlSitRing {
+  from { opacity: 0.8; transform: scale(0.7); }
+  to   { opacity: 0; transform: scale(1.5); }
+}
+.rl-sitflash-kick { font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-sitflash-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); }
+@keyframes rlSitPop { from { opacity: 0; transform: scale(0.9) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   In-progress Board (mp-*) and Settled wrap-up (st-*) — ported from the design
+   bundle (progress.css / settled.css). Rendered inside .rl-root, whose tokens
+   (--line etc.) alias the base casino tokens these rules use directly.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Board panel shell ── */
+.mp-ct {
+  position: relative; border-radius: 14px; overflow: hidden; animation: mpIn 0.4s cubic-bezier(0.3,1,0.4,1);
+  border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.55);
+  background: radial-gradient(ellipse 70% 90% at 25% 0%, oklch(from var(--felt) calc(l + 0.07) c h) 0%, var(--felt) 72%), var(--felt);
+  box-shadow: inset 0 0 60px #0006, 0 18px 46px #000a; padding: 1.4rem 1.5rem;
+}
+@keyframes mpIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.mp-ct-rim { position: absolute; inset: 0.5rem; border: 1px solid oklch(from var(--felt) calc(l + 0.16) c h / 0.3); border-radius: 10px; pointer-events: none; }
+.mp-ct-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.mp-ct-kick { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--gold-dim); }
+.mp-ct-name { font-family:'Cinzel',serif; font-weight: 700; font-size: clamp(1.1rem,2.6vw,1.5rem); color: var(--gold); letter-spacing: 0.03em; }
+.mp-ct-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.92rem; }
+.mp-ct-body { margin-top: 1.1rem; display: flex; flex-direction: column; gap: 1rem; }
+.mp-cell-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.34rem; }
+.mp-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.mp-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+
+.mp-phase-chip { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.24rem 0.66rem; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.mp-phase-chip.inprogress { color: oklch(78% 0.13 235); border-color: oklch(78% 0.13 235 / 0.5); background: oklch(78% 0.13 235 / 0.12); }
+
+/* headline completion + meter */
+.mp-complete-wrap { display: flex; flex-direction: column; gap: 0.5rem; min-width: 220px; flex: 1; }
+.mp-complete { display: flex; align-items: baseline; gap: 0.5rem; }
+.mp-complete .big { font-family:'Cinzel',serif; font-weight: 800; font-size: 2rem; color: var(--gold); line-height: 1; }
+.mp-complete .of { font-family:'Cinzel',serif; color: var(--gold-dim); font-size: 1rem; }
+.mp-complete .lab { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); }
+.mp-meter { height: 10px; border-radius: 999px; background: oklch(from var(--bg-card) calc(l - 0.05) c h); border: 1px solid var(--line); overflow: hidden; position: relative; }
+.mp-meter-fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, oklch(from var(--gold) calc(l - 0.1) c h), var(--gold)); transition: width 0.5s ease; }
+.mp-meter.done .mp-meter-fill { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.14) c h), var(--pos)); }
+
+/* room telemetry */
+.mp-tele { display: flex; gap: 1.6rem; flex-wrap: wrap; }
+.mp-tele-item { display: flex; flex-direction: column; line-height: 1.1; }
+.mp-tele-val { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.1rem; color: oklch(82% 0.12 var(--oh,200)); }
+.mp-tele-val small { font-size: 0.5em; color: var(--gold-dim); }
+.mp-tele-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-dim); display: inline-flex; align-items: center; gap: 0.3rem; }
+.mp-roll { font-family:'Cinzel',serif; font-size: 0.46rem; letter-spacing: 0.08em; padding: 0.08rem 0.34rem; border-radius: 999px; border: 1px solid; }
+.mp-roll.on { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.6); background: oklch(from var(--pos) l c h / 0.16); }
+.mp-roll.off { color: var(--neg); border-color: oklch(from var(--neg) l c h / 0.55); background: oklch(from var(--neg) l c h / 0.14); }
+.mp-roll.pending { color: var(--gold-dim); border-color: var(--line); }
+
+/* status pill */
+.mp-st { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.18rem 0.55rem; border-radius: 999px; border: 1px solid; white-space: nowrap; display: inline-flex; align-items: center; gap: 0.28rem; flex-shrink: 0; }
+.mp-st .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+.mp-st.unstarted { color: var(--gold-dim); border-color: var(--line); }
+.mp-st.unstarted .dot { background: var(--gold-dim); opacity: 0.5; }
+.mp-st.inprog { color: oklch(80% 0.12 235); border-color: oklch(80% 0.12 235 / 0.5); background: oklch(80% 0.12 235 / 0.1); }
+.mp-st.inprog .dot { background: oklch(80% 0.12 235); }
+.mp-st.full { color: oklch(80% 0.13 85); border-color: oklch(80% 0.13 85 / 0.5); background: oklch(80% 0.13 85 / 0.1); }
+.mp-st.full .dot { background: oklch(80% 0.13 85); }
+.mp-st.goal, .mp-st.done { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.6); background: oklch(from var(--pos) l c h / 0.16); }
+.mp-st.goal .dot, .mp-st.done .dot { background: var(--pos); }
+
+/* avatar chip (shared) */
+.mp-pav { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center; font-family:'Cinzel',serif; font-weight: 700; font-size: 0.62rem; color: oklch(18% 0.03 70); background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75))); }
+
+/* board tiles */
+.mp-mine {
+  border: 1px solid oklch(from var(--gold) l c h / 0.32); border-radius: 12px;
+  background: radial-gradient(ellipse 80% 120% at 20% 0%, oklch(from var(--gold) l c h / 0.08), transparent 70%);
+  padding: 0.85rem 0.9rem 1rem;
+}
+.mp-mine-count { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--pos); margin-left: 0.4rem; text-transform: none; }
+.mp-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.9rem; }
+.mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.mp-tile.goaled { border-top-color: var(--pos); box-shadow: 0 0 0 1px oklch(from var(--pos) l c h / 0.25); }
+.mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+/* Status on its own line at the top (left-aligned, sized to content) so the genre
+   label below gets the full width — no cramping when the font scale is bumped up. */
+.mp-tile-status { display: flex; }
+.mp-tile-game { font-family:'Crimson Pro',serif; font-size: 0.92rem; color: var(--parchment); line-height: 1.2; }
+.mp-tile-slot { font-family:'Cinzel',serif; font-size: 0.6rem; color: var(--gold); overflow-wrap: anywhere; }
+.mp-tile-owner { display: flex; align-items: center; gap: 0.35rem; font-family:'Crimson Pro',serif; font-size: 0.74rem; font-style: italic; color: var(--gold-dim); }
+.mp-tile-owner .mp-pav { width: 1.15rem; height: 1.15rem; font-size: 0.5rem; }
+
+/* ── Settled wrap-up ── */
+.rl-settled-wrap { display: flex; flex-direction: column; gap: 1.3rem; animation: mpIn 0.4s cubic-bezier(0.3,1,0.4,1); }
+.st-head { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.st-seal { font-size: 2.4rem; color: var(--gold); text-shadow: 0 0 28px oklch(from var(--gold) l c h / 0.5); }
+.st-kick { font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.34em; text-transform: uppercase; color: var(--gold-dim); margin-top: 0.3rem; }
+.st-title { font-family:'Cinzel',serif; font-weight: 800; font-size: clamp(1.5rem, 3.4vw, 2.1rem); color: var(--gold); letter-spacing: 0.04em; }
+.st-sub { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.96rem; }
+.st-facts { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: center; margin-top: 0.7rem; font-family:'Cinzel',serif; font-size: 0.64rem; letter-spacing: 0.04em; color: var(--gold-dim); }
+.st-facts b { color: var(--parchment); }
+.st-facts b.gold { color: var(--gold); }
+.st-facts b.on { color: var(--pos); }
+.st-facts b.off { color: var(--neg); }
+.st-dot { opacity: 0.5; }
+
+.st-pav { width: 2rem; height: 2rem; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-family:'Cinzel',serif; font-weight: 700; font-size: 0.82rem; color: oklch(18% 0.03 70); background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75))); }
+.st-pav.sm { width: 1.4rem; height: 1.4rem; font-size: 0.6rem; }
+
+.st-net { font-family:'Cinzel',serif; font-weight: 800; font-size: 1rem; }
+.st-net small { font-size: 0.55em; opacity: 0.7; }
+.st-net.pos { color: var(--pos); }
+.st-net.neg { color: var(--neg); }
+.st-net.even { color: var(--gold-dim); }
+.st-net.big { font-size: 1.7rem; }
+
+.st-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.st-chip { display: inline-flex; align-items: center; gap: 0.34rem; font-family:'Crimson Pro',serif; font-size: 0.82rem; color: var(--ink-soft); background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-left: 2px solid oklch(72% 0.14 var(--th,75) / 0.6); border-radius: 6px; padding: 0.2rem 0.55rem; }
+.st-chip.goaled { color: var(--parchment); border-color: oklch(from var(--pos) l c h / 0.4); border-left-color: var(--pos); }
+.st-chip-suit { color: oklch(72% 0.14 var(--th,75)); font-size: 0.9em; }
+.st-chip-tick { color: var(--pos); font-size: 0.8em; }
+
+.st-ledger { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.st-lcols, .st-lrow { display: grid; grid-template-columns: 8rem 1fr 4rem 4rem 4.5rem 5rem; gap: 0.8rem; align-items: center; padding: 0.7rem 1rem; }
+.st-lcols { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-dim); border-bottom: 1px solid var(--line); background: oklch(from var(--bg-card) calc(l - 0.02) c h / 0.5); }
+.st-lcols .num, .st-lnum { text-align: right; }
+.st-lrow { border-bottom: 1px solid var(--line); }
+.st-lrow:last-child { border-bottom: none; }
+.st-lrow.you { background: oklch(from var(--gold) l c h / 0.06); box-shadow: inset 3px 0 0 var(--gold); }
+.st-lname { display: flex; align-items: center; gap: 0.45rem; font-family:'Cinzel',serif; font-size: 0.82rem; color: var(--parchment); }
+.st-lrow.you .st-lname { color: var(--gold); }
+.st-lnum { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.84rem; color: var(--parchment); }
+.st-lnum.neg { color: var(--neg); }
+@media (max-width: 720px) {
+  .st-lcols { display: none; }
+  .st-lrow { grid-template-columns: 1fr auto; row-gap: 0.5rem; }
+  .st-lrow .st-chips { grid-column: 1 / 3; }
+  .st-lnum::before { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); margin-right: 0.4rem; }
+  .st-lnum:nth-of-type(3)::before { content: 'Hand'; }
+  .st-lnum:nth-of-type(4)::before { content: 'Pot'; }
+  .st-lnum:nth-of-type(5)::before { content: 'Entries'; }
+  .st-lnum:nth-of-type(6)::before { content: 'Net'; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-sitflash-chip::after,
+  .rl-prof-swatch, .rl-prof-stat, .mp-ct, .rl-settled-wrap { animation: none !important; transition: none !important; }
+  .rl-sitflash-chip::after { display: none; }
+  .mp-meter-fill { transition: none !important; }
+}

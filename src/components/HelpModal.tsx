@@ -16,6 +16,8 @@ import './HelpModal.css';
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Which season shell is asking — a casino season has no map/orbs/feats to explain. */
+  variant?: 'map' | 'casino';
 }
 
 type Section = 'overview' | 'map' | 'adventurers' | 'challenges' | 'yaml' | 'feats' | 'traits' | 'orbs' | 'boss' | 'shop' | 'missions' | 'casino';
@@ -35,8 +37,20 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'casino',     label: 'Casino',            icon: '🂡' },
 ];
 
-export default function HelpModal({ open, onClose }: Props) {
+// A casino season has no map, adventurers, tiles, feats, orbs, boss or shop to
+// explain — but players still need the casino game reference and the YAML rules
+// in effect. Order follows SECTIONS.
+const CASINO_SECTIONS: Section[] = ['overview', 'casino', 'yaml'];
+
+export default function HelpModal({ open, onClose, variant = 'map' }: Props) {
   const [section, setSection] = useState<Section>('overview');
+
+  const sections = variant === 'casino'
+    ? SECTIONS.filter(s => CASINO_SECTIONS.includes(s.id))
+    : SECTIONS;
+
+  // Never leave a section selected that this shell doesn't offer.
+  const active = sections.some(s => s.id === section) ? section : sections[0].id;
 
   return (
     <div
@@ -51,10 +65,10 @@ export default function HelpModal({ open, onClose }: Props) {
         </div>
         <div className="help-body">
           <nav className="help-nav">
-            {SECTIONS.map(s => (
+            {sections.map(s => (
               <button
                 key={s.id}
-                className={`help-nav-btn ${section === s.id ? 'active' : ''}`}
+                className={`help-nav-btn ${active === s.id ? 'active' : ''}`}
                 onClick={() => setSection(s.id)}
               >
                 <span className="help-nav-icon">{s.icon}</span>
@@ -63,18 +77,18 @@ export default function HelpModal({ open, onClose }: Props) {
             ))}
           </nav>
           <div className="help-content">
-            {section === 'overview'    && <SectionOverview />}
-            {section === 'map'         && <SectionMap />}
-            {section === 'adventurers' && <SectionAdventurers />}
-            {section === 'challenges'  && <SectionChallenges />}
-            {section === 'yaml'        && <SectionYaml />}
-            {section === 'feats'       && <SectionFeats />}
-            {section === 'traits'      && <SectionTraits />}
-            {section === 'orbs'        && <SectionOrbs />}
-            {section === 'boss'        && <SectionBoss />}
-            {section === 'shop'        && <SectionShop />}
-            {section === 'missions'    && <SectionMissions />}
-            {section === 'casino'     && <SectionCasino />}
+            {active === 'overview'    && <SectionOverview variant={variant} />}
+            {active === 'map'         && <SectionMap />}
+            {active === 'adventurers' && <SectionAdventurers />}
+            {active === 'challenges'  && <SectionChallenges />}
+            {active === 'yaml'        && <SectionYaml variant={variant} />}
+            {active === 'feats'       && <SectionFeats />}
+            {active === 'traits'      && <SectionTraits />}
+            {active === 'orbs'        && <SectionOrbs />}
+            {active === 'boss'        && <SectionBoss />}
+            {active === 'shop'        && <SectionShop />}
+            {active === 'missions'    && <SectionMissions />}
+            {active === 'casino'      && <SectionCasino variant={variant} />}
           </div>
         </div>
       </div>

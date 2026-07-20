@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react';
-import { AuthProvider } from './contexts/AuthContext';
-import { GameStateProvider } from './contexts/GameStateContext';
-import { ToastProvider } from './contexts/ToastContext';
+import { useState } from 'react';
+import { AuthProvider } from './contexts/AuthProvider';
+import { GameStateProvider } from './contexts/GameStateProvider';
+import { ToastProvider } from './contexts/ToastProvider';
 import { useAuth } from './contexts/AuthContext';
 import { useGameState } from './contexts/GameStateContext';
+import { SeasonProvider } from './contexts/SeasonProvider';
+import { useIsAdmin, useSeason } from './contexts/SeasonContext';
+import CasinoShell from './components/casino/CasinoShell';
+import SettingsPanel from './components/SettingsPanel';
 import { firebaseReady } from './firebase/config';
 import Header from './components/Header';
 import PlayerHUD from './components/PlayerHUD';
@@ -17,185 +21,11 @@ import PrivacyModal from './components/PrivacyModal';
 import AdminDashboard from './components/AdminDashboard';
 import ActivityFeed from './components/ActivityFeed';
 import KmkBoard from './components/kmk/KmkBoard';
-import { KmkProvider } from './contexts/KmkContext';
+import { KmkProvider } from './contexts/KmkProvider';
 import AgendaLauncher from './components/agenda/AgendaLauncher';
 import AgendaDrawer from './components/agenda/AgendaDrawer';
 import { deriveAgendaData } from './components/agenda/agendaHelpers';
 import { currentMaxSlots } from './lib/missionLogic';
-
-function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
-  const [val, setVal] = useState(() => {
-    const s = localStorage.getItem(key);
-    return s === null ? def : s === 'true';
-  });
-  const set = (v: boolean) => {
-    setVal(v);
-    localStorage.setItem(key, String(v));
-  };
-  return [val, set];
-}
-
-const THEMES = [
-  { id: 'gilded',    label: 'Gilded Hearth' },
-  { id: 'moonlit',   label: 'Moonlit Codex' },
-  { id: 'verdant',   label: 'Verdant Hollow' },
-  { id: 'aether',    label: 'Aether Bloom' },
-  { id: 'obsidian',  label: 'Obsidian Contrast' },
-  { id: 'tidepool',  label: 'Tidepool Atlas' },
-  { id: 'parchment', label: 'Parchment Day' },
-  { id: 'sakura',    label: 'Sakura Scroll' },
-  { id: 'mint',      label: 'Mint Library' },
-  { id: 'lapis',     label: 'Dunes & Lapis' },
-] as const;
-type ThemeId = typeof THEMES[number]['id'];
-
-function useStringSetting<T extends string>(key: string, def: T): [T, (v: T) => void] {
-  const [val, setVal] = useState<T>(() => {
-    const s = localStorage.getItem(key);
-    return (s ?? def) as T;
-  });
-  const set = (v: T) => {
-    setVal(v);
-    localStorage.setItem(key, v);
-  };
-  return [val, set];
-}
-
-function SettingsPanel() {
-  const [open, setOpen] = useState(false);
-  const [size, setSize] = useState(() => {
-    const saved = localStorage.getItem('realm_tile_size');
-    return saved ? parseInt(saved, 10) : 94;
-  });
-  const [fontScale, setFontScale] = useState(() => {
-    const saved = localStorage.getItem('realm_font_scale');
-    return saved ? parseFloat(saved) : 1.0;
-  });
-  const [showLabels,    setShowLabels]    = useBoolSetting('realm_show_labels',     true);
-  const [highlightAdvs, setHighlightAdvs] = useBoolSetting('realm_highlight_advs',  false);
-  const [reduceMotion,  setReduceMotion]  = useBoolSetting('realm_reduce_motion',   false);
-  const [theme,         setTheme]         = useStringSetting<ThemeId>('realm_theme', 'gilded');
-  const [statePatterns, setStatePatterns] = useBoolSetting('realm_state_patterns',  false);
-
-  type TileNameMode = 'off' | 'hover' | 'always';
-  const [tileNames, setTileNames] = useStringSetting<TileNameMode>('realm_tile_names', 'hover');
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--tile-user-size', `${size}px`);
-    localStorage.setItem('realm_tile_size', String(size));
-  }, [size]);
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--font-scale', String(fontScale));
-    localStorage.setItem('realm_font_scale', String(fontScale));
-  }, [fontScale]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('no-tile-labels',    !showLabels);
-  }, [showLabels]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('highlight-my-advs', highlightAdvs);
-  }, [highlightAdvs]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('reduce-motion',     reduceMotion);
-  }, [reduceMotion]);
-
-  useEffect(() => {
-    const body = document.body;
-    THEMES.forEach(t => body.classList.remove(`theme-${t.id}`));
-    if (theme !== 'gilded') body.classList.add(`theme-${theme}`);
-  }, [theme]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('state-patterns', statePatterns);
-  }, [statePatterns]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('tilenames-off',    tileNames === 'off');
-    root.classList.toggle('tilenames-hover',  tileNames === 'hover');
-    root.classList.toggle('tilenames-always', tileNames === 'always');
-  }, [tileNames]);
-
-  return (
-    <>
-      <div className={`settings-popout ${open ? 'open' : ''}`}>
-        <div className="settings-title">⚙ SETTINGS</div>
-        <div className="settings-theme-block">
-          <span className="settings-label settings-section-label">THEME</span>
-          <div className="settings-theme-options">
-            {THEMES.map(t => (
-              <button
-                key={t.id}
-                className={`settings-theme-btn ${theme === t.id ? 'selected' : ''}`}
-                onClick={() => setTheme(t.id)}
-                aria-pressed={theme === t.id}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="settings-row settings-row--tile-size">
-          <span className="settings-label">FONT SIZE</span>
-          <input
-            type="range" min={1.0} max={1.4} step={0.1}
-            value={fontScale}
-            onChange={e => setFontScale(parseFloat(e.target.value))}
-            className="settings-slider"
-          />
-          <span className="settings-value">{Math.round(fontScale * 100)}%</span>
-        </div>
-        <div className="settings-row settings-row--tile-size">
-          <span className="settings-label">TILE SIZE</span>
-          <input
-            type="range" min={64} max={120} step={4}
-            value={size}
-            onChange={e => setSize(parseInt(e.target.value, 10))}
-            className="settings-slider"
-          />
-          <span className="settings-value">{size}px</span>
-        </div>
-        <label className="settings-row settings-check-row">
-          <input type="checkbox" className="settings-check" checked={showLabels} onChange={e => setShowLabels(e.target.checked)} />
-          <span className="settings-label">SHOW TILE LABELS</span>
-        </label>
-        <label className="settings-row settings-check-row">
-          <input type="checkbox" className="settings-check" checked={highlightAdvs} onChange={e => setHighlightAdvs(e.target.checked)} />
-          <span className="settings-label">HIGHLIGHT MY ADVENTURERS</span>
-        </label>
-        <label className="settings-row settings-check-row">
-          <input type="checkbox" className="settings-check" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />
-          <span className="settings-label">REDUCE ANIMATIONS</span>
-        </label>
-        <label className="settings-row settings-check-row">
-          <input type="checkbox" className="settings-check" checked={statePatterns} onChange={e => setStatePatterns(e.target.checked)} />
-          <span className="settings-label">STATE PATTERNS</span>
-        </label>
-        <div className="settings-row settings-segmented-row">
-          <span className="settings-label">TILE NAMES</span>
-          <div className="settings-segmented">
-            {(['off', 'hover', 'always'] as const).map(id => (
-              <button
-                key={id}
-                className={`settings-seg-btn${tileNames === id ? ' selected' : ''}`}
-                onClick={() => setTileNames(id)}
-                aria-pressed={tileNames === id}
-              >
-                {id === 'off' ? 'Off' : id === 'hover' ? 'Hover' : 'Always'}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      <button className="settings-toggle" onClick={() => setOpen(o => !o)}>
-        ⚙ SETTINGS
-      </button>
-    </>
-  );
-}
 
 function LoadingScreen() {
   return (
@@ -214,13 +44,17 @@ function AppContent() {
   const [helpOpen,     setHelpOpen]     = useState(false);
   const [privacyOpen,  setPrivacyOpen]  = useState(() => window.location.hash === '#privacy');
   const [agendaOpen,   setAgendaOpen]   = useState(false);
+  // Captured once at mount rather than read during render (the decay it feeds
+  // only shifts every 24h, so a live clock would just be an impure render read).
+  const [now] = useState(() => Date.now());
 
   const { user }              = useAuth();
   const { gameState, loading } = useGameState();
-  const isAdmin = !!user && !!gameState && user.id === gameState.meta?.adminId;
+  const isAdmin = useIsAdmin();
+  const { season } = useSeason();
 
   const adminWarnCount = isAdmin && gameState ? (() => {
-    const tileWarn = Object.values(gameState.tiles).filter(tile => {
+    const tileWarn = Object.values(gameState.tiles ?? {}).filter(tile => {
       const advCount = Object.keys(tile.adventurers ?? {}).length;
       if (tile.state === 'available') return tile.required > 0 && advCount >= tile.required;
       if (tile.state === 'inprogress') {
@@ -233,7 +67,6 @@ function AppContent() {
       }
       return false;
     }).length;
-    const now = Date.now();
     const missionWarn = Object.values(gameState.missions ?? {}).filter(m => {
       if (m.state === 'complete') return false;
       const filled = Object.keys(m.participants ?? {}).length;
@@ -254,12 +87,11 @@ function AppContent() {
 
   if (window.location.hash === '#admin') return <AdminDashboard />;
 
-  if (window.location.hash.startsWith('#keep/')) {
-    const listId = window.location.hash.slice('#keep/'.length);
-    return <KmkBoard listId={listId} />;
-  }
-
   if (loading) return <LoadingScreen />;
+
+  // Config-driven shell: a casino season renders the casino landing instead of
+  // the map/tile app. Map seasons (S1, S2) fall through to the existing UI.
+  if (season?.shell === 'casino') return <CasinoShell />;
 
   return (
     <div className="page-content">
@@ -336,15 +168,38 @@ function FirebaseBanner() {
 }
 
 export default function App() {
+  // Keymaster's Keep is GLOBAL and shell-independent — not season-scoped. It
+  // renders on its own route above the Season/GameState providers so it works
+  // under any season shell (map or casino) and even if the active season never
+  // resolves. KmkProvider subscribes straight to `kmkEvents/`; it needs neither.
+  if (window.location.hash.startsWith('#keep/')) {
+    const listId = window.location.hash.slice('#keep/'.length);
+    return (
+      <AuthProvider>
+        <ToastProvider>
+          <KmkProvider>
+            <FirebaseBanner />
+            <KmkBoard listId={listId} />
+          </KmkProvider>
+        </ToastProvider>
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <ToastProvider>
-        <GameStateProvider>
-          <KmkProvider>
-            <FirebaseBanner />
-            <AppContent />
-          </KmkProvider>
-        </GameStateProvider>
+        {/* SeasonProvider must sit ABOVE GameStateProvider: it resolves which
+            season to read and publishes it to the db.ts path helpers, which
+            throw until it has. */}
+        <SeasonProvider>
+          <GameStateProvider>
+            <KmkProvider>
+              <FirebaseBanner />
+              <AppContent />
+            </KmkProvider>
+          </GameStateProvider>
+        </SeasonProvider>
       </ToastProvider>
     </AuthProvider>
   );

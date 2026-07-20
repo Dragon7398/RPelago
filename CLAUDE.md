@@ -23,6 +23,20 @@ cd functions && npm run build   # tsc → functions/lib/
 firebase deploy --only functions
 ```
 
+### Tests
+
+```bash
+npm run test:unit            # vitest run tests/casino tests/lib (pure logic — no emulator)
+npm run test:rules           # database.rules.json against the RTDB emulator (demo-rpelago)
+npm run econ                 # model casino table economics from live engine values
+npx vitest run tests/casino/engine.test.ts          # single file
+npx vitest run tests/casino -t "blackjack"          # single test by name
+```
+
+`test:unit` is the fast gate that runs everywhere; `test:rules` needs the Firebase
+emulator (`firebase emulators:exec` wraps it). **Re-run `npm run econ` after touching
+any casino ante / card value / pot formula** — the economy is balanced as a whole.
+
 ## Styling
 
 When creating styling for new features, review the existing themes and ensure the style works for all themes, reusing or defining new theme-aware colors as necessary. This is particularly important for the color-blind friendly styles and the light-mode styles.
@@ -35,18 +49,28 @@ This project runs on Windows: use PowerShell-compatible syntax in all scripts an
 
 **RPelago** is a real-time collaborative metagame overlay for Archipelago randomizer sessions. Players log in via Discord, send adventurers to tiles on a grid map, and an admin controls tile progression. All state lives in Firebase Realtime Database.
 
+### Season architecture (read this first)
+
+The app is **multi-season**. All game data lives under `seasons/{seasonId}/…`, never at a top-level `game/` node. A season has a **shell** — `map` (the tile game described below) or `casino` (the casino-only interim season) — that drives which UI and admin tabs render.
+
+- **Path helpers** ([src/firebase/season.ts](src/firebase/season.ts)): the active seasonId is held in module state (`setCurrentSeason`), so `db.ts` functions don't thread it. `sPath`/`sRef` resolve `seasons/{active}/…`; getters **throw** if no season is set. `whenSeasonReady()` awaits the first resolution for callers that may run pre-config (e.g. AuthContext).
+- **`SeasonProvider` / `useSeason`** ([src/contexts/SeasonContext.tsx](src/contexts/SeasonContext.tsx)): resolves `config/` (`activeSeasonId`, `seasonList`, `draftSeasons`) into a `ResolvedSeason` and calls `setCurrentSeason`. Admin/alpha users can `previewSeason(draftId)` to playtest a draft that's invisible to everyone else. `season.writable` gates writes (archived = frozen).
+- **Global admin**: admin is **`config/adminId`** (one global admin, NOT per-season). Client reads it via `useIsAdmin()`; Cloud Functions enforce it via `requireAdmin`. The old `gameState.meta.adminId` comparison is legacy.
+- **Secrets tree**: RTDB read rules cascade downward, so anything secret **cannot** live under the world-readable `seasons/{id}/`. Secrets (casino hands/decks, gambit decks) live in a parallel `seasonSecrets/{seasonId}/…` tree — clients may read only their own hand; decks are server-only (`secretPath`/`secretRef` client-side, `secret()` in functions). See [docs/season-architecture-plan.md](docs/season-architecture-plan.md).
+- **Firebase Storage**: casino config YAMLs live in the Storage bucket at `casino/{seasonId}/{missionId}/{uid}.yaml` (owner-scoped, see `storage.rules`) — not in RTDB.
+
 ### Data flow
 
 ```
-Firebase RTDB (game/)
+Firebase RTDB (seasons/{active}/)
   └─ subscribeToGame() ─→ GameStateContext ─→ all components
 ```
 
-`GameStateContext` is the single source of truth for UI. It subscribes to the full `game/` node via `onValue` and re-renders on any change. All mutations go through the context's exported callbacks, which call `db.ts` functions that write to Firebase.
+`GameStateContext` is the single source of truth for map/mission UI. It subscribes to the whole active-season node via `onValue` and re-renders on any change (so children like `goldTopUpLog` arrive for free even when untyped). All mutations go through the context's exported callbacks, which call `db.ts` functions that write via the season path helpers.
 
 ### Key invariants
 
-- **Admin identity**: `gameState.meta.adminId === currentUser.uid`. No token claims — derived inline in components by comparing `user.id` to `gameState.meta.adminId`. `AuthUser` has no `isAdmin` field.
+- **Admin identity**: global `config/adminId` (see Season architecture). Client: `useIsAdmin()`; server: `requireAdmin`. `AuthUser` has no `isAdmin` field.
 - **Tile state machine**: `hidden → available → inprogress → complete`. The `available` set is always derived from adjacency to `complete` tiles. Any time a `complete` tile is un-completed, `computeRecalcUpdates()` (in `gameLogic.ts`, imported into `GameStateContext`) re-derives all `available` states and writes them atomically via `setTilesAvailability()`.
 - **`adminOverride` flag**: When admin manually edits tile stats, `updateTileAdmin()` sets `adminOverride: true`. Regen Stats (`resetTileStats()`) clears it to `false` by re-applying seeded defaults.
 - **Seeded map generation**: `gameState.meta.seed` drives everything in `tileGen.ts`. `initializeGrid(seed)` populates a module-level grid array used by `getTypeKey(r, c)`. This must be called before any type lookups; it's called automatically in `subscribeToGame` when the state first loads.
@@ -128,6 +152,12 @@ All in `functions/src/index.ts`:
 | `adminForceDeploy` | Callable | Admin-forces a forming mission into `inprogress`. |
 | `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. |
 | `tickGuildmasterMissions` | Scheduled every 15 minutes | Auto-deploys any forming mission whose decay has reduced max slots to the current fill count. |
+
+> DB triggers now watch the **season-scoped** paths (`seasons/{id}/…`), not the legacy top-level `game/…` shown above.
+
+The **casino/season** functions (also in `index.ts`) are the money-and-secret-authoritative half — clients are never trusted with hands, decks, gold, or the pot. Key ones: `dealCasinoHand` / `dealHoldemHole` / `holdemPlayOn` / `holdemFold` / `casinoFold` (deal & seat lifecycle), `dealGambitOffer` + `playCasinoGambit` (server-authoritative shared gambit deck), `lockCasinoResult` (commit → slots + gold), `resubmitCasinoYaml` / `adminDenyCasinoYaml` / `adminGetCasinoYamls` (config workflow), `weeklyGoldTopUp` (Sat 06:00 America/Chicago floor top-up → `goldTopUpLog`), and `resolveWriteSeason` (the shared seasonId resolver every casino callable runs first). **Deploy functions before the frontend** so a new client never calls a callable the server lacks.
+
+> **Disable is a two-part kill-switch.** `adminSetPlayerDisabled` (what `setPlayerDisabled` → the admin Players toggle calls) sets the per-season RTDB flag `players/{uid}/disabled` **and** disables the Firebase Auth account (+ `revokeRefreshTokens`). The RTDB flag alone can't stop the direct client→Storage YAML upload — Storage rules can't read RTDB — so the Auth disable is the only thing that gates uploads (an already-issued ID token lingers up to ~1h). It refuses to disable the caller's own account.
 
 > **Admin SDK pitfall**: When using `admin.database().ref(path).transaction()`, passing a child path (e.g. `profiles/{uid}/gold`) instead of the parent node can cause the transaction callback to receive `null` on the first invocation — even when data exists. Always verify the transaction ref resolves to a node that exists, and after fixing a null-transaction bug in one function, audit sibling functions (e.g. `purchaseShopItem` and `purchaseShopOrb`) for the same pattern.
 
@@ -236,7 +266,11 @@ All Firebase config is in `.env` as `VITE_FIREBASE_*` variables. The app degrade
 
 A separate mini-app (`casino/table.html`) where players select their Guildmaster Mission game slots by playing card games. It is a standalone Vite entry point that shares Firebase auth and the same RTDB mission state but has its own CSS theming (`themes.css`, `cards.css`, `play.css`).
 
-**Phase flow**: `loading → choose → poker|blackjack → gambit → locked → deployed`
+> **The table link MUST carry `?seasonId=`.** The mini-app has no `SeasonProvider`, so the URL is the only way it learns its season; without the param it falls back to `config/activeSeasonId` and looks for the mission in the wrong season, reporting "Mission not found or unavailable." Both link builders pass it: `PhasePanel.tableHref` and `GuildmasterMissions.CasinoTableLink`.
+
+> **`lockCasinoResult` takes `keepUids` — the cards to COMMIT, not discards.** `selectCommitted` reads a missing/null `keepUids` as "commit the whole hand", so a wrong-shaped payload doesn't error, it silently overpays the seat.
+
+**Phase flow** (backend-owned; `CasinoTable.tsx` mirrors mission state into it): `deckselect → ante → play | (holdwait → holdplay) → gambit → manifest → locked → deployed`, with `folded` off `play`/`holdplay`. The game is pinned per-table in `mission.casinoGame` (no in-table game choice). A `resubmitting` flag reuses the `manifest` phase for post-lock config edits (see below).
 
 Two card games are offered:
 - **Poker** — player commits cards; reward = sum of committed card values (no combo multiplier).
@@ -244,13 +278,27 @@ Two card games are offered:
 
 After locking a hand, the player is dealt **gambit cards** that shift shared `casinoStats` (release %, collect %, hint cost) for the entire mission cohort. Bonus gambits cost gold; penalty gambits add XP and pot to the mission.
 
-Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSlots.ts`): each card becomes a slot with blank `name`/`game` and the card's genre + gold value stamped into `details` (format: `"Genre · Ng"`). Players fill in the real game info later via the normal slot-editing flow.
+Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSlots.ts`): each card becomes a slot with blank `name`/`game` and the card's genre + gold value stamped into `details` (format: `"Genre · Ng"`).
+
+**Config (YAML) submission workflow** — the manifest phase is the submission, gated end-to-end:
+- **Required to lock in.** The `manifest` phase collects a game per committed card AND an attached Archipelago `.yaml` (uploaded owner-scoped to Storage). `lockCasinoResult` independently verifies both server-side.
+- **Player resubmit** (`resubmitCasinoYaml`): reopens the `manifest` view seeded from the seat's `lockedCards` + slots, so the player can reorder games (↑/↓) or attach a new file. Allowed while **forming** (self-tweak) or whenever **denied** (even in-progress). Re-stamps only game/name onto existing slots.
+- **Card re-selection on resubmit** (`resubmitCasinoYaml` with `keepUids`): while **forming**, a locked player can also change *which* cards they commit (← Change cards → the `play` phase, no reroll/hit/fold). The gambit is never re-openable. This is why `lockCasinoResult` **keeps the dealt hand** (clears only the draw deck) and `deployMission` clears `hand`/`deck`/`hole` — the preserved hand is the re-selection pool. Hold 'Em's pool is a persisted `hole` secret (play-on overwrites `hand`) + the public `community`. The server recomputes `goldSwing`/`lockedCards`/`slots` from the new selection.
+- **Host deny** (`adminDenyCasinoYaml`): ⛔ in the admin Casino tab. Deletes the stored file and sets `participant.yamlDenied` (+ optional reason). The landing surfaces a resubmit notice; a badge marks the seat in admin.
+- **Leave invalidates**: `deleteSeatYaml` runs on stand-down / kick / deny; `clearSeatSecrets` nulls the seat's secret hand/deck/hole on those same paths (an orphaned secret would otherwise block re-sitting with *"Finish or fold your current hand first"*).
+- **Admin download** (`adminGetCasinoYamls`, admin-only callable via Admin SDK): per-seat `.yaml` and a `.zip` of all seats (via `fflate`) — deliberately never a single combined file.
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
 
-`CASINO_START_STATS`, `CASINO_ANTE`, `CASINO_REROLL_COST`, and `CASINO_MIN_ENLIST_GOLD` are defined in `constants.ts`.
+**Entry costs are per-variant and live in `CASINO_GAMES` (`casinoData.ts`)**, not in `constants.ts` — each game carries its own `ante` / `rerollCost` / `playOn`, summed for a seat by `seatSpend(game, { rerolled, playedOn })`. `CASINO_START_STATS`, `CASINO_MIN_ENLIST_GOLD`, `CASINO_START_GOLD`, `CASINO_GOLD_FLOOR`, and `CASINO_OPEN_TABLES` are in `constants.ts`. (`CASINO_ANTE` / `CASINO_REROLL_COST`, the old family-keyed model, are now dead — defined in `constants.ts` but referenced nowhere; remove once nothing imports them.)
 
-> **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus `CASINO_POT_SEED` and `CASINO_POT_CUT_PCT` constants that only live server-side. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
+> **Odds drift baselines against the table's OWN roll.** Each table rolls its own release/collect at creation (`rollTableSetup`), so `mission.casinoStats` is meaningless to diff against a fixed 60/30. `freshCasinoTable` / `gmFreshCasinoTable` bank a frozen `casinoOpenStats` copy of that roll; `ChallengePanel` diffs against it (via the `open` prop) and hides the XP/Reward row in a casino season (`showXp={shell !== 'casino'}`, since gambit XP is paid out as gold there). Both builders — client and functions — must set `casinoOpenStats`.
+
+The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
+
+> **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus the server-only `CASINO_POT_CUT_PCT` constant. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
+
+> **Pot is variable, banked at creation.** Casino tables roll their opening pot in `rollTableSetup` (`4×seats² + randInt(0,150−R−C) + 2×(120−R−C)`) — there is no flat pot seed. Both table builders (`freshCasinoTable` client / `gmFreshCasinoTable` server) bank it as `casinoOpenPot` alongside `casinoOpenStats`, because the pot then grows via ante cuts and the opening amount is never logged. The admin pot-check and the season money-in audit diff against `casinoOpenPot`. Non-casino missions still route through `freshMission`/`gmFreshMission` (which honour an optional flat `def.potSeed`); casino never does.
 
 ### Keymaster's Keep
 
@@ -274,10 +322,13 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards` |
 | `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `computeMissionCard`, `freshMission` |
 | `src/lib/slotHelpers.ts` | Slot normalization utilities (`normalizeSlots`, `slotsFromEntry`) |
-| `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions` |
-| `src/firebase/db.ts` | All RTDB read/write functions |
+| `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
+| `src/firebase/season.ts` | Season path helpers (`sPath`/`sRef`/`secretPath`), `setCurrentSeason`, season resolution |
+| `src/firebase/casinoYaml.ts` | `uploadCasinoYaml` → owner-scoped Storage |
+| `src/firebase/db.ts` | All RTDB read/write functions (season-scoped via `season.ts`) |
 | `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert |
-| `src/contexts/GameStateContext.tsx` | Game subscription, all action callbacks |
+| `src/contexts/SeasonContext.tsx` / `SeasonProvider.tsx` | Season resolution, `useSeason`/`useIsAdmin`, draft preview |
+| `src/contexts/GameStateContext.tsx` | Active-season subscription, all action callbacks |
 | `src/contexts/KmkContext.tsx` | Keymaster's Keep subscription and action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
 | `src/components/Header.tsx` | Site header with nav/branding |
@@ -305,7 +356,11 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
-| `src/casino/CasinoTable.tsx` | Casino table root component; owns phase state machine and Firebase subscription |
+| `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`) |
+| `src/components/casino/PhasePanel.tsx` | Current-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger) |
+| `src/components/casino/OddsTrio.tsx` | Rolled Release/Collect/Hint display, shared by table cards and the phase panel |
+| `src/components/casino/useLastSettled.ts` | Finds the player's most recent settled table in `missionsHistory` (the Ledger's subject) |
+| `src/casino/CasinoTable.tsx` | Casino table root component; owns the phase state machine (`deckselect → ante → play\|(holdwait→holdplay) → gambit → locked → deployed`) and Firebase subscription. Game is read from `mission.casinoGame`; costs from `CASINO_GAMES`/`seatSpend`. |
 | `src/casino/CardFace.tsx` | Single playing card render |
 | `src/casino/GambitCardFace.tsx` | Gambit card render |
 | `src/casino/TableComponents.tsx` | PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow |

@@ -52,6 +52,8 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-seat-head { display: flex; align-items: center; gap: 0.45rem; }
 .cz-seat-av { width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; color: oklch(18% 0.03 70); background: linear-gradient(150deg, oklch(80% 0.11 var(--seat-hue,75)), oklch(58% 0.12 var(--seat-hue,75))); }
 .cz-seat.you .cz-seat-av { background: linear-gradient(150deg, oklch(86% 0.13 86), oklch(66% 0.13 70)); box-shadow: 0 0 10px oklch(from var(--gold) l c h / 0.4); }
+/* Discord-avatar variant of the seat circle: base class gives size + 50% radius. */
+.cz-av-img { display: block; object-fit: cover; background: none; }
 .cz-seat-id { display: flex; flex-direction: column; line-height: 1.05; min-width: 0; }
 .cz-seat-name { font-size: 0.72rem; letter-spacing: 0.04em; color: var(--parch); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cz-seat-stake { display: flex; align-items: center; gap: 0.25rem; margin-top: 0.2rem; }
@@ -86,7 +88,7 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-felt {
   background: radial-gradient(ellipse 65% 80% at 50% 22%, oklch(from var(--felt) calc(l + 0.06) c h) 0%, var(--felt) 72%), var(--felt);
   border: 1px solid oklch(from var(--felt) calc(l + 0.12) c h / 0.6); border-radius: 14px;
-  box-shadow: inset 0 0 70px #0007, inset 0 2px 0 oklch(100% 0 0 / 0.05), 0 20px 50px #000a;
+  box-shadow: inset 0 0 70px oklch(from var(--felt) calc(l - 0.16) c h / 0.45), inset 0 2px 0 oklch(100% 0 0 / 0.05), 0 20px 50px var(--card-drop);
   padding: 1.6rem; min-height: 340px; position: relative;
 }
 .cz-felt-rim { position: absolute; inset: 0.6rem; border: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.35); border-radius: 10px; pointer-events: none; }
@@ -123,7 +125,7 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-preview-panel {
   width: min(720px, 100%); max-height: 84vh; overflow-y: auto;
   background: var(--bg-mid); border: 1px solid var(--line-glow); border-radius: 12px;
-  padding: 1.2rem 1.4rem 1.5rem; box-shadow: 0 20px 60px #000a;
+  padding: 1.2rem 1.4rem 1.5rem; box-shadow: 0 20px 60px var(--card-drop);
 }
 .cz-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
 .cz-preview-head h2 { margin: 0; font-family: 'Cinzel', serif; font-size: 1.1rem; color: var(--gold); letter-spacing: 0.05em; }
@@ -197,7 +199,7 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-gambit-pick { cursor: pointer; transition: transform 0.16s ease; display: flex; flex-direction: column; align-items: center; }
 .cz-gambit-pick:hover { transform: translateY(-6px); }
 .cz-gambit-pick.selected { transform: translateY(-8px); }
-.cz-gambit-pick.selected .ck { box-shadow: 0 0 0 2px var(--gold), 0 0 24px oklch(from var(--gold) l c h / 0.45), 0 14px 32px #000b; }
+.cz-gambit-pick.selected .ck { box-shadow: 0 0 0 2px var(--gold), 0 0 24px oklch(from var(--gold) l c h / 0.45), 0 14px 32px var(--card-drop); }
 .cz-gambit-pick.unaffordable { opacity: 0.45; cursor: not-allowed; }
 .cz-gambit-pick.unaffordable:hover { transform: none; }
 
@@ -232,6 +234,19 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-flash { font-family: 'Crimson Pro', serif; font-style: italic; color: var(--neg); font-size: 0.86rem; min-height: 1.2em; text-align: center; }
 .cz-ap-banner { text-align: center; }
 .cz-ap-banner .cz-ap-icon { font-size: 2.4rem; color: var(--gold); text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.5); }
+
+/* Post-lock config resubmit (forming tweak, or after a host denial). */
+.cz-resubmit {
+  display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+  margin-top: 0.9rem; padding: 0.8rem 1rem; max-width: 44ch;
+  border: 1px solid var(--border); border-radius: 5px; background: var(--panel);
+}
+.cz-resubmit.denied { border-color: oklch(55% 0.16 25 / 0.7); background: oklch(from var(--neg) l c h / 0.14); }
+.cz-resub-head { display: flex; flex-direction: column; gap: 0.15rem; text-align: center; }
+.cz-resub-head b { font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--parchment); }
+.cz-resubmit.denied .cz-resub-head b { color: oklch(74% 0.18 25); }
+.cz-resub-head span { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.86rem; color: var(--ink-soft); }
+.cz-resub-ok { font-family: 'Crimson Pro', serif; font-size: 0.82rem; color: var(--gold-dim); }
 @media (prefers-reduced-motion: reduce) { .cz-card-slot .ck, .cz-result-row, .cz-pot-amt.bump { animation: none !important; } }
 
 /* ── Mission bar ── */
@@ -265,3 +280,80 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-center { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60dvh; gap: 1rem; color: var(--gold-dim); font-family: 'Crimson Pro', serif; font-style: italic; font-size: 1.1rem; }
 .cz-center .cz-spin { font-size: 1.6rem; animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ══ Slot Fill (Manifest) — the post-gambit "name your games" step ══
+   Ported from the design bundle (landing/slotfill.css), plus move-between-slots
+   arrows and non-blocking YAML warnings. Uses the casino theme tokens. */
+.sf-steps { display: inline-flex; align-items: center; gap: 0.5rem; font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); align-self: center; }
+.sf-steps .done { color: var(--pos); }
+.sf-steps .now { color: var(--gold); }
+.sf-steps .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border-glow); display: inline-block; }
+
+.sf-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.1rem; }
+.sf-panel-title { font-family:'Cinzel',serif; font-size: 0.6rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.8rem; }
+.sf-mlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.1rem 1.4rem; margin-bottom: 0.4rem; }
+.sf-mline { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px dashed oklch(from var(--border) l c h / 0.6); }
+.sf-mline:last-of-type { border-bottom: none; }
+.sf-mline-slot { font-family:'Cinzel',serif; font-size: 0.66rem; color: var(--gold); min-width: 5.2rem; }
+.sf-mline-slot.empty { color: oklch(from var(--gold-dim) l c h / 0.6); font-style: italic; font-family:'Crimson Pro',serif; }
+.sf-mline-arrow { color: var(--gold-dim); }
+.sf-mline-game { font-family:'Crimson Pro',serif; color: var(--parchment); font-size: 0.92rem; }
+.sf-mline-game.empty { color: oklch(from var(--gold-dim) l c h / 0.6); font-style: italic; }
+
+/* Merged manifest rows — card badge + display-only slot→game mapping + reorder.
+   Values come from the attached config (display-only); ↑/↓ remaps them to cards. */
+.sf-manifest { display: flex; flex-direction: column; margin-bottom: 0.9rem; }
+.sf-mrow { display: grid; grid-template-columns: minmax(0, auto) 1fr auto; align-items: center; gap: 0.9rem; padding: 0.6rem 0; border-bottom: 1px dashed oklch(from var(--border) l c h / 0.6); }
+.sf-mrow:last-child { border-bottom: none; }
+.sf-mrow-map { display: flex; align-items: baseline; gap: 0.55rem; flex-wrap: wrap; min-width: 0; }
+@media (max-width: 620px) {
+  .sf-mrow { grid-template-columns: 1fr auto; gap: 0.45rem 0.8rem; }
+  .sf-mrow-map { grid-column: 1 / -1; }
+}
+
+.sf-yaml { margin-top: 0.9rem; border: 1px dashed var(--border-glow); border-radius: 9px; padding: 0.7rem 0.8rem; }
+.sf-yaml-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+.sf-yaml-lbl { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); }
+.sf-yaml-file { font-family:'Crimson Pro',serif; font-size: 0.82rem; color: var(--pos); margin-top: 0.4rem; }
+.sf-yaml-file.none { color: oklch(78% 0.13 85); }
+.sf-yaml-warn { font-family:'Crimson Pro',serif; font-size: 0.8rem; color: oklch(78% 0.13 85); margin-top: 0.25rem; }
+/* Blocking error (e.g. wrong world count) — distinct red, gates the submit. */
+.sf-yaml-err { font-family:'Crimson Pro',serif; font-size: 0.84rem; color: var(--neg); margin-top: 0.35rem; padding: 0.4rem 0.55rem; border: 1px solid oklch(from var(--neg) l c h / 0.5); border-radius: 6px; background: oklch(from var(--neg) l c h / 0.1); }
+.sf-yaml-hint { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--ink-soft); margin-top: 0.4rem; }
+
+.sf-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.sf-lrow { display: grid; grid-template-columns: 1.2fr 1.1fr 1.5fr auto; gap: 1rem; align-items: center; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
+.sf-lrow:last-child { border-bottom: none; }
+@media (max-width: 680px) { .sf-lrow { grid-template-columns: 1fr auto; gap: 0.6rem 0.8rem; padding: 0.9rem 1rem; } .sf-lrow .sf-field { grid-column: 1 / -1; } }
+
+.sf-cat { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* Theme-aware: surface derives from --bg-card (light in light themes), the suit is
+   a mid-lightness hue that reads on both, and the hue lives in the border/glyph. */
+.sf-suit { width: 1.6rem; height: 1.6rem; border-radius: 6px; display: grid; place-items: center; flex-shrink: 0; font-size: 0.9rem; color: oklch(58% 0.19 var(--th,75)); background: oklch(from var(--bg-card) l c h / 0.65); border: 1px solid oklch(62% 0.13 var(--th,75) / 0.55); }
+.sf-cat-txt { display: flex; flex-direction: column; line-height: 1.1; }
+.sf-cat-type { font-family:'Cinzel',serif; font-size: 0.46rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.sf-cat-name { font-family:'Cinzel',serif; font-size: 0.82rem; color: var(--parchment); }
+
+.sf-field { display: flex; flex-direction: column; gap: 0.28rem; }
+.sf-flabel { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
+.sf-flabel .req { color: var(--neg); }
+.sf-flabel .opt { color: var(--gold-dim); font-style: italic; text-transform: none; letter-spacing: 0; font-family:'Crimson Pro',serif; }
+.sf-input { width: 100%; font-family:'Crimson Pro',serif; font-size: 0.98rem; color: var(--parchment); background: oklch(from var(--bg-card) calc(l - 0.04) c h / 0.85); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; transition: border-color 0.15s, box-shadow 0.15s; }
+.sf-input::placeholder { color: oklch(from var(--gold-dim) l c h / 0.6); font-style: italic; }
+.sf-input:focus { outline: none; border-color: var(--border-glow); box-shadow: 0 0 0 3px oklch(from var(--gold) l c h / 0.12); }
+.sf-input.need { border-color: oklch(60% 0.13 30 / 0.6); }
+.sf-input.ok { border-color: oklch(from var(--pos) l c h / 0.55); }
+
+.sf-move { display: flex; flex-direction: column; gap: 0.2rem; }
+.sf-movebtn { width: 1.7rem; height: 1.5rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; line-height: 1; background: oklch(from var(--bg-card) l c h / 0.85); border: 1px solid var(--border); color: var(--gold-dim); transition: color 0.13s, border-color 0.13s; }
+.sf-movebtn:hover:not(:disabled) { color: var(--gold); border-color: var(--border-glow); }
+.sf-movebtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sf-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem 0 0.2rem; margin-top: 1.2rem; border-top: 1px solid var(--border); }
+.sf-foot-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
+.sf-ready { display: inline-flex; align-items: center; gap: 0.5rem; font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-dim); }
+.sf-ready b { color: var(--parchment); }
+.sf-ready.go b { color: var(--pos); }
+.sf-ready-need { color: var(--neg); font-weight: 700; }
+.sf-yaml-lbl .req { color: var(--neg); }
+.sf-yaml-lbl .opt { color: var(--gold-dim); font-style: italic; text-transform: none; letter-spacing: 0; font-family:'Crimson Pro',serif; }
