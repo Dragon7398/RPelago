@@ -395,7 +395,6 @@ export default function CasinoShell() {
         <div className="rl-brand">
           <span className="rl-kick">RPelago · Midseason</span>
           <h1>The Casino</h1>
-          <span className="rl-sub">{isFloor ? 'Walk the floor' : 'A quiet corner of the archipelago'}</span>
         </div>
         <div className="rl-top-right">
           {user ? (
