@@ -76,13 +76,8 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
             <li><YamlVal base={2} bonus={hasPick ? 4 : 0} /> excluded locations per game</li>
             <li>Progression balancing between <YamlVal base={0} bonus={0} /> and <YamlVal base={50} bonus={0} /></li>
             <li>
-              Either <YamlVal base={0} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? '' : 's'} and{' '}
-              <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''} per game, or{' '}
-              <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? 's' : ''} and{' '}
-              <YamlVal base={0} bonus={hasKnow ? 2 : 0} /> hint locations per game
-              <ul className="help-list help-list-sub">
-                <li>Starting hints that affect too many items, such as hinting your primary macguffin [e.g. Yoshi Eggs in SMW] are not allowed.</li>
-              </ul>
+              Either <YamlVal base={1} bonus={hasKnow ? 1 : 0} /> starting hint{hasKnow ? '' : 's'} [targeting a maximum of <YamlVal base={10} bonus={hasKnow ? 10 : 0} /> items] and{' '}
+              <YamlVal base={1} bonus={hasKnow ? 2 : 0} /> hint location{hasKnow ? 's' : ''} per game
             </li>
           </ul>
         </li>
