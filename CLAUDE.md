@@ -23,6 +23,11 @@ cd functions && npm run build   # tsc → functions/lib/
 firebase deploy --only functions
 ```
 
+### Deployment
+
+- **Frontend (hosting)**: the site is hosted on **Netlify** and **auto-deploys on every commit pushed to GitHub** — there is no `firebase deploy --only hosting`. To ship a frontend change, commit and push; Netlify builds and publishes. (A launch step that bumps `minClientVersion` force-reloads clients, so the pushed build must be live on Netlify *before* that flip.)
+- **Backend (functions / database rules / storage rules)**: deploy via the Firebase CLI — `firebase deploy --only functions,database,storage` (or a subset). **Deploy functions before the frontend push** so a new client never calls a callable the server lacks.
+
 ### Tests
 
 ```bash

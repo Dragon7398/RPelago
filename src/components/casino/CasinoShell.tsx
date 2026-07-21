@@ -384,7 +384,6 @@ export default function CasinoShell() {
   const tablesTitle =
     seatedAt?.state === 'inprogress' ? 'Other Tables Forming'
     : showingLedger                  ? 'Your Seat Is Free — Pull Up Again'
-    : isFloor                        ? 'The Floor'
     :                                  "Tonight's Tables";
 
   return (
