@@ -505,7 +505,6 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
         <div className="st-seal">🂡</div>
         <div className="st-kick">The night is settled</div>
         <div className="st-title">{missionDisplayLabel(m)}</div>
-        <div className="st-sub">{CASINO_GAMES[tableGame(m)].label}</div>
         <div className="st-facts">
           <span>Pot <b>{m.pot ?? 0}g</b></span>
           <span className="st-dot">·</span>
