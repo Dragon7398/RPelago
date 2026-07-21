@@ -63,17 +63,11 @@ export interface GambitResult {
 }
 
 // ── Casino mission constants ─────────────────────────────────────────────────
-// Mirror of CASINO_MIN_ENLIST_GOLD and CASINO_START_STATS in src/lib/constants.ts
+// Mirror of CASINO_START_STATS in src/lib/constants.ts. (Enlist gold is the
+// per-table finish cost — seatSpend(game, { playedOn: true }) — not a constant.)
 
-export const CASINO_MIN_ENLIST_GOLD = 90;  // = the cheapest ante (Hold 'Em)
 export const CASINO_POT_CUT_PCT     = 0.40;
 export const CASINO_START_STATS: CasinoStats = { release: 60, collect: 30, hint: 10, xp: 50 };
-
-export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = {
-  poker:     40,
-  blackjack: 30,
-};
-export const CASINO_REROLL_COST = 20;
 
 // ── Casino game variants (canonical — carries to S2) ─────────────────────────
 // Mirror of CasinoGame / CASINO_GAMES in src/lib/casinoData.ts. Each S1.5 table
@@ -105,25 +99,25 @@ export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
   five_card_draw: {
     key: 'five_card_draw', label: 'Five Card Draw',
     sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
-    reroll: true, ante: 180, rerollCost: 90, playOn: 0,
+    reroll: true, ante: 180, rerollCost: 60, playOn: 0,
     subsetSelect: false,
   },
   seven_card_stud: {
     key: 'seven_card_stud', label: 'Seven Card Stud',
     sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 225, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 210, rerollCost: 0, playOn: 0,
     subsetSelect: true,
   },
   holdem: {
     key: 'holdem', label: "Texas Hold 'Em",
     sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 90, rerollCost: 0, playOn: 150,
+    reroll: false, ante: 80, rerollCost: 0, playOn: 120,
     subsetSelect: true,
   },
   blackjack: {
     key: 'blackjack', label: 'Blackjack',
     sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
-    reroll: false, ante: 120, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 150, rerollCost: 0, playOn: 0,
     subsetSelect: true,
   },
 };

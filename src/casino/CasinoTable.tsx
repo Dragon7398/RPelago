@@ -13,7 +13,7 @@ import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import { parseApYaml, checkWorldCount } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
-import { CASINO_START_STATS } from '../lib/constants';
+import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -121,6 +121,9 @@ export function CasinoTable() {
   // Read from seasonSecrets/, never from the mission — see the subscription below.
   const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
   const [secretHole, setSecretHole]   = useState<DeckCard[] | null>(null);
+  // Live name-color per seated player (subscribed by uid), so a mid-mission change
+  // is reflected on the table just like on the landing.
+  const [nameColors, setNameColors]   = useState<Record<string, string | null>>({});
   const [phase, setPhase]         = useState<Phase>('loading');
   const [hand, setHand]           = useState<DeckCard[]>([]);
   // Two DIFFERENT selection models, one per game family:
@@ -241,6 +244,24 @@ export function CasinoTable() {
       setSecretHole(snap.exists() ? (snap.val() as DeckCard[]) : null);
     });
   }, [uid, missionId, seasonReady]);
+
+  // Live name-color for each seated player (narrow per-uid subs, so a gold/pot tick
+  // doesn't re-fire them). Re-subscribes when the set of seated players changes.
+  const seatUidsKey = useMemo(
+    () => Object.keys(mission?.participants ?? {}).sort().join(','),
+    [mission?.participants],
+  );
+  useEffect(() => {
+    if (!db || !seasonReady) return;
+    const database = db;
+    const uids = seatUidsKey ? seatUidsKey.split(',') : [];
+    const unsubs = uids.map(pid =>
+      onValue(sRef(database, `players/${pid}/nameColor`), snap => {
+        setNameColors(m => ({ ...m, [pid]: (snap.val() as string | null) ?? null }));
+      }),
+    );
+    return () => unsubs.forEach(u => u());
+  }, [seatUidsKey, seasonReady]);
 
   // Player's remembered deck preference — seeds the picker's default highlight.
   useEffect(() => {
@@ -742,6 +763,7 @@ export function CasinoTable() {
               name={p?.playerName ?? null}
               playerId={id}
               avatarHash={p?.avatarHash}
+              nameColor={nameColorValue(nameColors[id])}
               status={isMe && phase !== 'locked' && phase !== 'deployed' ? 'playing' : status}
               isMe={isMe}
               stake={stake}
@@ -1184,6 +1206,7 @@ export function CasinoTable() {
                     name={p.playerName}
                     playerId={id}
                     avatarHash={p.avatarHash}
+                    nameColor={nameColorValue(nameColors[id])}
                     isMe={id === uid}
                     played={!!p.played}
                     stake={p.goldSwing ?? handStakeFromSlots(p.slots)}

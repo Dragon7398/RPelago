@@ -35,14 +35,14 @@ card engine/model; do not reinvent it.
   - **Weekly top-up:** any player **below 250 GP** is set **to** 250 GP.
     Players at/above 250 get nothing — so the economy does not inflate.
     250 clears the priciest mandatory full round on the floor (Hold '''Em'''s
-    90g ante + 150g play-on = 240g), so a topped-up player can always afford
+    80g ante + 120g play-on = 200g), so a topped-up player can always afford
     a complete sitting at *any* table.
   - **S2 seed:** `max(final S1.5 balance, 250)`; a player with no S1.5 record
     seeds at 500.
   - A non-gambler never drops below 250, keeps 500, and carries 500 into S2 —
     so no "participant" definition and no season-length dependency is needed.
-  - **Risk is real and bounded:** win → carry >400; lose → floor at 200, worse
-    than never having played, but never below 200.
+  - **Risk is real and bounded:** win → carry >500; lose → floor at 250, worse
+    than never having played, but never below 250.
 - **Retuned numbers are FINAL and canonical** (become S2's casino baseline;
   S2 feats will modify them from the player's side but this is the floor).
 - **Slot Fill interface:** Manifest.
@@ -178,10 +178,10 @@ each becomes its own table type:
 
 | Game | Cost | Deal | Pick | Reroll | Notes |
 |---|---|---|---|---|---|
-| Five Card Draw | 180g (+90g reroll) | 5 | ≤5 | yes | existing |
-| Seven Card Stud | 225g | 7 | ≤5 | no | new — bigger pool, no reroll |
-| Texas Hold 'Em | 90g ante + 150g play-on (240g total) | 2 hole + 5 shared community | ≤5 | no | new — two-phase, cohort-synced |
-| Blackjack | 120g | push-your-luck | keep ≤5 | — | existing |
+| Five Card Draw | 180g (+60g reroll) | 5 | ≤5 | yes | existing |
+| Seven Card Stud | 210g | 7 | ≤5 | no | new — bigger pool, no reroll |
+| Texas Hold 'Em | 80g ante + 120g play-on (200g total) | 2 hole + 5 shared community | ≤5 | no | new — two-phase, cohort-synced |
+| Blackjack | 150g | push-your-luck | keep ≤5 | — | existing |
 
 Costs replace the current family-keyed `CASINO_ANTE` (poker/blackjack) with a
 **per-variant** cost model, including Hold 'Em's split ante + play-on. Mirror in
@@ -242,10 +242,10 @@ duplicates.** Community cards stay available to every seat regardless of who
 "uses" them.
 
 **Sitting 2 — after the reveal**, each seat chooses one of:
-- **Play on:** pay the 150g play-on, finish selecting ≤5 cards from their 2 hole
+- **Play on:** pay the 120g play-on, finish selecting ≤5 cards from their 2 hole
   + 5 community (fewer/lower allowed), pick their gambit, lock in, and submit
   YAML + slots. Sets `played: true`.
-- **Fold:** with a warning that they **forfeit their entry** (the 90g ante is
+- **Fold:** with a warning that they **forfeit their entry** (the 80g ante is
   simply not refunded — 40% already went to the pot, the rest was house take;
   no additional gold moves). The seat is then **left empty** — it is *not*
   reopened for claiming.

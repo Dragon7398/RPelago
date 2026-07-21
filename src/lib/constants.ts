@@ -74,6 +74,11 @@ export const NAME_COLORS: readonly { id: string; label: string; value: string }[
   { id: 'silver',   label: 'Silver',   value: 'oklch(78% 0.04 240)' },
 ];
 
+// The CSS color for a stored nameColor id (defaults to the neutral parchment).
+export function nameColorValue(id: string | null | undefined): string {
+  return NAME_COLORS.find(c => c.id === (id ?? 'default'))?.value ?? NAME_COLORS[0].value;
+}
+
 export interface TraitDef {
   id: string;
   name: string;
@@ -322,14 +327,10 @@ export interface GMMissionDef {
 // ── Casino mission constants ───────────────────────────────────────────────────
 // Starting odds written to casinoStats when a casino cohort is created.
 export const CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 } as const;
-// Minimum gold a player must hold to enlist (= cheapest game ante: blackjack).
-// = the cheapest ante across CASINO_GAMES (Hold 'Em, 90g). Kept as a constant
-// because the server gates enlist on it; see minCasinoAnte() in casinoData.
-export const CASINO_MIN_ENLIST_GOLD = 90;
-// Ante costs by game type.
-export const CASINO_ANTE: Record<'poker' | 'blackjack', number> = { poker: 40, blackjack: 30 };
-// Cost to reroll rejected cards in poker.
-export const CASINO_REROLL_COST = 20;
+// Gold to enlist is NOT a flat constant — it is the per-table FINISH cost
+// (`seatSpend(game, { playedOn: true })`), so a seat can always see its table
+// through: Hold 'Em needs 200 (80 ante + 120 play-on), Blackjack 150, Five Card
+// Draw 180, Seven Card Stud 210. The server and computeMissionCard both gate on it.
 
 // Casino-season gold economy. Mirrored in functions/src/index.ts — keep in sync.
 // A fresh casino player starts at START_GOLD; the weekly top-up brings anyone
@@ -398,11 +399,8 @@ export const MISSION_DEFS: Readonly<Record<string, GMMissionDef>> = {
     repeatable:  true,
     variableReward: true,
     tableUrl:       '/casino/table',
-    entryCosts: [
-      { label: 'Poker ante',     gold: 40 },
-      { label: 'Blackjack ante', gold: 30 },
-      { label: 'Reroll',         gold: 20 },
-    ],
+    // No static entryCosts: each casino table derives them per game from
+    // CASINO_GAMES (casinoEntryCosts / gmCasinoEntryCosts) at creation.
     // No flat potSeed: casino tables roll a variable opening pot in freshCasinoTable
     // (rollTableSetup). The `potSeed` field stays on the type for other mission
     // kinds that want a fixed starting pot.

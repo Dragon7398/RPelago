@@ -225,40 +225,40 @@ export interface CasinoGameDef {
 // steeper than the rest of the inflation: it tightens margins (leaving room for
 // a future entry-cost reduction to matter), roughly halves what the house injects
 // per table, and makes a bonus gambit a real sacrifice rather than small change.
-//   Five Card Draw 180g (+90g reroll) · Seven Card Stud 225g · Hold 'Em 90g ante
-//   + 150g play-on (240g total) · Blackjack 120g.
-// 240g is the priciest MANDATORY full round, which is why the weekly floor sits
+//   Five Card Draw 180g (+60g reroll) · Seven Card Stud 210g · Hold 'Em 80g ante
+//   + 120g play-on (200g total) · Blackjack 150g.
+// 210g is the priciest MANDATORY full round, which is why the weekly floor sits
 // at 250 — a topped-up player can always afford a full round of any game.
 export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
   five_card_draw: {
     key: 'five_card_draw', label: 'Five Card Draw',
     sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
-    reroll: true, ante: 180, rerollCost: 90, playOn: 0,
+    reroll: true, ante: 180, rerollCost: 60, playOn: 0,
     subsetSelect: false,   // hold 5, commit ≤5 — no larger pool to optimise.
   },
   seven_card_stud: {
     key: 'seven_card_stud', label: 'Seven Card Stud',
     sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 225, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 210, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // pick the best 5 of 7.
   },
   holdem: {
     key: 'holdem', label: "Texas Hold 'Em",
     sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
-    reroll: false, ante: 90, rerollCost: 0, playOn: 150,
+    reroll: false, ante: 80, rerollCost: 0, playOn: 120,
     subsetSelect: true,    // pick the best 5 of 2 hole + 5 community.
   },
   blackjack: {
     key: 'blackjack', label: 'Blackjack',
     sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
-    reroll: false, ante: 120, rerollCost: 0, playOn: 0,
+    reroll: false, ante: 150, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
   },
 };
 
 // The cheapest ante across all games — the gold a player must hold to sit at
-// SOME table. Supersedes the hardcoded CASINO_MIN_ENLIST_GOLD once the
-// multi-table flow lands. (= Hold 'Em's 30g ante.)
+// SOME table. Mirrors the hardcoded CASINO_MIN_ENLIST_GOLD; keep them in step.
+// (= Hold 'Em's 80g ante.)
 export function minCasinoAnte(): number {
   return Math.min(...CASINO_GAME_ORDER.map(g => CASINO_GAMES[g].ante));
 }

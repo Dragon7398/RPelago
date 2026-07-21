@@ -3,7 +3,7 @@
 // Keep in sync with: casinoData.ts, casinoEngine.ts, casinoGambits.ts, casinoSlots.ts
 // This file is compiled by functions/tsconfig.json (CommonJS, no Vite).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_REROLL_COST = exports.CASINO_ANTE = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = exports.CASINO_MIN_ENLIST_GOLD = void 0;
+exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = void 0;
 exports.minCasinoAnte = minCasinoAnte;
 exports.seatSpend = seatSpend;
 exports.buildDeck = buildDeck;
@@ -31,15 +31,10 @@ exports.rollTableSetup = rollTableSetup;
 exports.drawCommunity = drawCommunity;
 exports.cardsToSlots = cardsToSlots;
 // ── Casino mission constants ─────────────────────────────────────────────────
-// Mirror of CASINO_MIN_ENLIST_GOLD and CASINO_START_STATS in src/lib/constants.ts
-exports.CASINO_MIN_ENLIST_GOLD = 90; // = the cheapest ante (Hold 'Em)
+// Mirror of CASINO_START_STATS in src/lib/constants.ts. (Enlist gold is the
+// per-table finish cost — seatSpend(game, { playedOn: true }) — not a constant.)
 exports.CASINO_POT_CUT_PCT = 0.40;
 exports.CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 };
-exports.CASINO_ANTE = {
-    poker: 40,
-    blackjack: 30,
-};
-exports.CASINO_REROLL_COST = 20;
 exports.CASINO_GAME_ORDER = [
     'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
@@ -48,25 +43,25 @@ exports.CASINO_GAMES = {
     five_card_draw: {
         key: 'five_card_draw', label: 'Five Card Draw',
         sittings: 1, hole: 5, community: 0, maxDraw: 5, pickMax: 5,
-        reroll: true, ante: 180, rerollCost: 90, playOn: 0,
+        reroll: true, ante: 180, rerollCost: 60, playOn: 0,
         subsetSelect: false,
     },
     seven_card_stud: {
         key: 'seven_card_stud', label: 'Seven Card Stud',
         sittings: 1, hole: 7, community: 0, maxDraw: 7, pickMax: 5,
-        reroll: false, ante: 225, rerollCost: 0, playOn: 0,
+        reroll: false, ante: 210, rerollCost: 0, playOn: 0,
         subsetSelect: true,
     },
     holdem: {
         key: 'holdem', label: "Texas Hold 'Em",
         sittings: 2, hole: 2, community: 5, maxDraw: 7, pickMax: 5,
-        reroll: false, ante: 90, rerollCost: 0, playOn: 150,
+        reroll: false, ante: 80, rerollCost: 0, playOn: 120,
         subsetSelect: true,
     },
     blackjack: {
         key: 'blackjack', label: 'Blackjack',
         sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
-        reroll: false, ante: 120, rerollCost: 0, playOn: 0,
+        reroll: false, ante: 150, rerollCost: 0, playOn: 0,
         subsetSelect: true,
     },
 };

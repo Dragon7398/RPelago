@@ -558,11 +558,7 @@ const MISSION_DEFS = {
         special: false,
         variableReward: true,
         tableUrl: '/casino/table',
-        entryCosts: [
-            { label: 'Poker ante', gold: 40 },
-            { label: 'Blackjack ante', gold: 30 },
-            { label: 'Reroll', gold: 20 },
-        ],
+        // No static entryCosts: gmFreshCasinoTable derives them per game (gmCasinoEntryCosts).
     },
 };
 function toRoman(n) {
@@ -807,7 +803,10 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', 'basic-training-used');
     if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
         throw new https_1.HttpsError('failed-precondition', 'Mission is full.');
-    if (mission.type === 'casino' && (player.gold ?? 0) < casinoEngine_1.CASINO_MIN_ENLIST_GOLD)
+    // Gate on the table's FULL finish cost — ante + play-on for Hold 'Em — so a seat
+    // can never lock in and then be unable to complete it (and be forced to fold).
+    if (mission.type === 'casino' && mission.casinoGame
+        && (player.gold ?? 0) < (0, casinoEngine_1.seatSpend)(mission.casinoGame, { playedOn: true }))
         throw new https_1.HttpsError('failed-precondition', 'not-enough-gold');
     const participant = {
         playerId: uid,

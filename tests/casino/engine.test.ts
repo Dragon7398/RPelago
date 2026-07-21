@@ -44,10 +44,10 @@ function card(value: number, name = 'X', type = 'broad'): DeckCard {
 // ── Per-variant cost model (FINAL numbers) ───────────────────────────────────
 describe('CASINO_GAMES cost model', () => {
   it('locks the four game antes/rerolls/play-on', () => {
-    expect(CASINO_GAMES.five_card_draw).toMatchObject({ ante: 180, rerollCost: 90, reroll: true,  playOn: 0,   sittings: 1 });
-    expect(CASINO_GAMES.seven_card_stud).toMatchObject({ ante: 225, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
-    expect(CASINO_GAMES.holdem).toMatchObject({          ante: 90,  rerollCost: 0, reroll: false, playOn: 150, sittings: 2 });
-    expect(CASINO_GAMES.blackjack).toMatchObject({       ante: 120, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
+    expect(CASINO_GAMES.five_card_draw).toMatchObject({ ante: 180, rerollCost: 60, reroll: true,  playOn: 0,   sittings: 1 });
+    expect(CASINO_GAMES.seven_card_stud).toMatchObject({ ante: 210, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
+    expect(CASINO_GAMES.holdem).toMatchObject({          ante: 80,  rerollCost: 0, reroll: false, playOn: 120, sittings: 2 });
+    expect(CASINO_GAMES.blackjack).toMatchObject({       ante: 150, rerollCost: 0, reroll: false, playOn: 0,   sittings: 1 });
   });
 
   it('never lets a seat commit more than 5 cards', () => {
@@ -63,17 +63,17 @@ describe('CASINO_GAMES cost model', () => {
     expect(CASINO_GAMES.blackjack.subsetSelect).toBe(true);
   });
 
-  it('minCasinoAnte is the cheapest ante (Hold \'Em, 90g)', () => {
-    expect(minCasinoAnte()).toBe(90);
+  it('minCasinoAnte is the cheapest ante (Hold \'Em, 80g)', () => {
+    expect(minCasinoAnte()).toBe(80);
   });
 
   it('seatSpend sums ante + optional reroll + optional play-on', () => {
     expect(seatSpend('five_card_draw')).toBe(180);
-    expect(seatSpend('five_card_draw', { rerolled: true })).toBe(270);
-    expect(seatSpend('seven_card_stud', { rerolled: true })).toBe(225); // no reroll → flag ignored
-    expect(seatSpend('holdem')).toBe(90);
-    expect(seatSpend('holdem', { playedOn: true })).toBe(240);
-    expect(seatSpend('blackjack', { rerolled: true, playedOn: true })).toBe(120); // neither applies
+    expect(seatSpend('five_card_draw', { rerolled: true })).toBe(240);
+    expect(seatSpend('seven_card_stud', { rerolled: true })).toBe(210); // no reroll → flag ignored
+    expect(seatSpend('holdem')).toBe(80);
+    expect(seatSpend('holdem', { playedOn: true })).toBe(200);
+    expect(seatSpend('blackjack', { rerolled: true, playedOn: true })).toBe(150); // neither applies
   });
 });
 
@@ -383,10 +383,10 @@ const formingTable = (game: CasinoGame): GMMission =>
 
 describe('casinoEntryCosts', () => {
   it('derives the house-cut note from each game\'s cost model', () => {
-    expect(casinoEntryCosts('five_card_draw')).toEqual([{ label: 'Ante', gold: 180 }, { label: 'Reroll', gold: 90 }]);
-    expect(casinoEntryCosts('seven_card_stud')).toEqual([{ label: 'Ante', gold: 225 }]);
-    expect(casinoEntryCosts('holdem')).toEqual([{ label: 'Ante', gold: 90 }, { label: 'Play-on', gold: 150 }]);
-    expect(casinoEntryCosts('blackjack')).toEqual([{ label: 'Ante', gold: 120 }]);
+    expect(casinoEntryCosts('five_card_draw')).toEqual([{ label: 'Ante', gold: 180 }, { label: 'Reroll', gold: 60 }]);
+    expect(casinoEntryCosts('seven_card_stud')).toEqual([{ label: 'Ante', gold: 210 }]);
+    expect(casinoEntryCosts('holdem')).toEqual([{ label: 'Ante', gold: 80 }, { label: 'Play-on', gold: 120 }]);
+    expect(casinoEntryCosts('blackjack')).toEqual([{ label: 'Ante', gold: 150 }]);
   });
 });
 
@@ -448,7 +448,7 @@ describe('casinoSeatPaid', () => {
   const mission = {
     casinoLog: {
       a1: log('a', 'deal', 180),
-      a2: log('a', 'reroll', 90),
+      a2: log('a', 'reroll', 60),
       a3: log('a', 'gambit', 30),
       b1: log('b', 'deal', 180),
       // A penalty gambit PAYS the seat in a casino season — a negative `amount`
@@ -459,7 +459,7 @@ describe('casinoSeatPaid', () => {
   } as unknown as GMMission;
 
   it('sums what a seat paid, including the optional spends', () => {
-    expect(casinoSeatPaid(mission, 'a')).toBe(300);
+    expect(casinoSeatPaid(mission, 'a')).toBe(270);   // 180 ante + 60 reroll + 30 gambit
   });
 
   it('lets a penalty gambit payout offset the entry', () => {
@@ -485,7 +485,7 @@ describe('freshCasinoTable', () => {
     expect(t.collect).toBe('special');
     expect(t.baseMax).toBeGreaterThanOrEqual(5);
     expect(t.baseMax).toBeLessThanOrEqual(8);
-    expect(t.entryCosts).toEqual([{ label: 'Ante', gold: 90 }, { label: 'Play-on', gold: 150 }]);
+    expect(t.entryCosts).toEqual([{ label: 'Ante', gold: 80 }, { label: 'Play-on', gold: 120 }]);
     expect(t.pot).toBeGreaterThanOrEqual(4 * t.baseMax * t.baseMax);
     expect(t.casinoStats!.xp).toBe(50);
     expect(t.hint).toBe(t.casinoStats!.hint);

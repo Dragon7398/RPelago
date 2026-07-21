@@ -1,8 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
+import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
+
+// The player's chosen name-color, resolved LIVE per playerId so a mid-mission
+// change is reflected everywhere. Provided by the shell (from gameState.players).
+const NameColorCtx = createContext<(playerId: string) => string>(() => nameColorValue(undefined));
+const useNameColor = () => useContext(NameColorCtx);
 import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
@@ -178,13 +184,14 @@ function Stake({ amount, label }: { amount: number; label: string }) {
 // Roster as avatar chips (Lounge) — name + "Ng locked" / "seated · to play".
 function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
   const seats = Object.values(m.participants ?? {});
+  const colorOf = useNameColor();
   return (
     <div className="rl-roster">
       {seats.map((s, i) => (
         <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
           <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
           <div className="rl-seat-txt">
-            <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerId === uid ? 'You' : s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g locked` : 'seated · to play'}</span>
           </div>
         </div>
@@ -202,6 +209,7 @@ function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }
 // Roster as a compact seat grid (Floor/rail) — one small cell per seat.
 function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
   const seats = Object.values(m.participants ?? {});
+  const colorOf = useNameColor();
   return (
     <div className="rl-seatgrid">
       {Array.from({ length: max }, (_, i) => {
@@ -214,7 +222,7 @@ function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
         return (
           <div className={`rl-railseat${s.playerId === uid ? ' you' : ''}`} key={i}>
             <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
-            <span className="rl-seat-nm">{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerId === uid ? 'You' : s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g` : 'to play'}</span>
           </div>
         );
@@ -391,6 +399,7 @@ function Telemetry({ m, elapsed }: { m: GMMission; elapsed: string }) {
 
 // Spatial card tiles — one per committed game, coloured by its card's suit.
 function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
+  const colorOf = useNameColor();
   return (
     <div className="mp-board">
       {tiles.map((t, i) => (
@@ -401,7 +410,7 @@ function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
           <div className="mp-tile-game">{t.game}</div>
           <div className="mp-tile-owner">
             <PlayerAvatar cls="mp-pav" playerId={t.ownerId} avatarHash={t.ownerAvatar} name={t.ownerName} hue={t.ownerHue} />
-            {t.you ? 'You' : t.ownerName} · {t.slot}
+            <span style={{ color: colorOf(t.ownerId) }}>{t.you ? 'You' : t.ownerName}</span> · {t.slot}
           </div>
         </div>
       ))}
@@ -474,6 +483,7 @@ function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: 
 const rollText = (t: TriState) => (t === 'on' ? 'On' : t === 'off' ? 'Off' : '—');
 
 function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismiss: () => void }) {
+  const colorOf = useNameColor();
   const rows = Object.values(m.participants ?? {})
     .map((seat, i) => ({
       seat,
@@ -523,7 +533,7 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
             <div key={r.seat.playerId} className={`st-lrow${you ? ' you' : ''}`}>
               <span className="st-lname">
                 <PlayerAvatar cls="st-pav sm" playerId={r.seat.playerId} avatarHash={r.seat.avatarHash} name={r.seat.playerName} hue={r.hue} />
-                {you ? 'You' : r.seat.playerName}
+                <span style={{ color: colorOf(r.seat.playerId) }}>{you ? 'You' : r.seat.playerName}</span>
               </span>
               <span className="st-chips">{r.games.map((g, i) => <GameChip key={i} g={g} />)}</span>
               <span className="st-lnum">{r.hand}g</span>
@@ -557,9 +567,11 @@ interface Props {
   /** Dismissed-ledger id, lifted to the shell so the tables heading stays in sync. */
   dismissedId: string | null;
   onDismiss: (id: string) => void;
+  /** Live name-color resolver (shell reads it from gameState.players per render). */
+  colorOf: (playerId: string) => string;
 }
 
-export default function PhasePanel({ mission, settled, uid, now, view, onLeave, dismissedId, onDismiss }: Props) {
+export default function PhasePanel({ mission, settled, uid, now, view, onLeave, dismissedId, onDismiss, colorOf }: Props) {
   const seasonId = useSeason().season?.id ?? '';
   const [confirmLeave, setConfirmLeave] = useState(false);
 
@@ -569,7 +581,7 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
   if (mission && uid && seat) {
     const played = !!seat.played;
     return (
-      <>
+      <NameColorCtx.Provider value={colorOf}>
         {mission.state === 'inprogress'
           ? <BoardView m={mission} uid={uid} now={now} seasonId={seasonId} />
           : <SeatedView m={mission} uid={uid} now={now} seasonId={seasonId} view={view} onLeave={() => setConfirmLeave(true)} />}
@@ -594,12 +606,16 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
             </div>
           </div>
         )}
-      </>
+      </NameColorCtx.Provider>
     );
   }
 
   if (showLedger && settled && uid) {
-    return <LedgerView m={settled} uid={uid} onDismiss={() => onDismiss(settled.id)} />;
+    return (
+      <NameColorCtx.Provider value={colorOf}>
+        <LedgerView m={settled} uid={uid} onDismiss={() => onDismiss(settled.id)} />
+      </NameColorCtx.Provider>
+    );
   }
 
   return (
