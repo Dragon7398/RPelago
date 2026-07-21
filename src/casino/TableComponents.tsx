@@ -47,6 +47,7 @@ interface SeatProps {
   name: string | null;
   playerId?: string | null;
   avatarHash?: string | null;
+  nameColor?: string;     // resolved CSS color for the name (live from the player record)
   status: SeatStatus;
   isMe: boolean;
   stake?: number;         // gold they're playing for (once locked)
@@ -69,7 +70,7 @@ const STATUS_TEXT: Record<SeatStatus, string> = {
   locked:   'Locked in',
 };
 
-export function Seat({ name, playerId, avatarHash, status, isMe, stake, startByLabel }: SeatProps) {
+export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stake, startByLabel }: SeatProps) {
   const cls = ['cz-seat'];
   if (isMe)           cls.push('you');
   if (status === 'playing') cls.push('active');
@@ -83,7 +84,7 @@ export function Seat({ name, playerId, avatarHash, status, isMe, stake, startByL
       <div className="cz-seat-head">
         <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} />
         <div className="cz-seat-id">
-          <span className="cz-seat-name">{name ?? '—'}</span>
+          <span className="cz-seat-name" style={nameColor ? { color: nameColor } : undefined}>{name ?? '—'}</span>
         </div>
       </div>
       {stake != null && stake > 0 && (
@@ -234,13 +235,14 @@ interface ResultRowProps {
   name: string;
   playerId?: string | null;
   avatarHash?: string | null;
+  nameColor?: string;
   isMe: boolean;
   played: boolean;
   stake: number;         // sum of card values from slots
   gambit?: GambitDef | null;
 }
 
-export function ResultRow({ name, playerId, avatarHash, isMe, played, stake, gambit }: ResultRowProps) {
+export function ResultRow({ name, playerId, avatarHash, nameColor, isMe, played, stake, gambit }: ResultRowProps) {
   const cls = ['cz-result-row'];
   if (isMe)   cls.push('you');
   if (played) cls.push('win'); else cls.push('fold');
@@ -248,7 +250,7 @@ export function ResultRow({ name, playerId, avatarHash, isMe, played, stake, gam
   return (
     <div className={cls.join(' ')}>
       <SeatAvatar cls="cz-seat-av" playerId={playerId} avatarHash={avatarHash} name={name} style={{ width: '1.7rem', height: '1.7rem' }} />
-      <div className="cz-rr-name">{name}</div>
+      <div className="cz-rr-name" style={nameColor ? { color: nameColor } : undefined}>{name}</div>
       <div className="cz-rr-mid">
         {played
           ? <span className="cz-rr-combo">{stake > 0 ? `${stake}g on the table` : 'no stake'}</span>

@@ -11,7 +11,7 @@ import PhasePanel from './PhasePanel';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
-import { CASINO_START_GOLD, NAME_COLORS } from '../../lib/constants';
+import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import { currentMaxSlots, msToNextDecay, missionDisplayLabel } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player } from '../../types';
@@ -27,8 +27,6 @@ function fmtAgo(ts: number, now: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-const nameColorValue = (id: string | undefined): string =>
-  NAME_COLORS.find(c => c.id === (id ?? 'default'))?.value ?? NAME_COLORS[0].value;
 
 // ── View persistence (Lounge cozy / Floor sleek) ─────────────────────────────
 const VIEW_KEY = 'rpelago.casino.view';
@@ -397,7 +395,6 @@ export default function CasinoShell() {
         <div className="rl-brand">
           <span className="rl-kick">RPelago · Midseason</span>
           <h1>The Casino</h1>
-          <span className="rl-sub">{isFloor ? 'Walk the floor' : 'A quiet corner of the archipelago'}</span>
         </div>
         <div className="rl-top-right">
           {user ? (
@@ -437,6 +434,7 @@ export default function CasinoShell() {
         mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now} view={view}
         onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
         dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
+        colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
       />
 
       <div className="rl-sec">

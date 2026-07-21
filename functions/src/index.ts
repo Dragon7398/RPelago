@@ -8,9 +8,8 @@ import { getStorage } from 'firebase-admin/storage';
 import { defineSecret } from 'firebase-functions/params';
 import {
   type DeckCard, type CasinoStats, type GambitDef, type GambitCard, type CasinoDeckChoice, type CasinoGame,
-  CASINO_MIN_ENLIST_GOLD,
   CASINO_START_STATS,
-  CASINO_GAMES, CASINO_GAME_ORDER, potContribution, drawCommunity, rollTableSetup,
+  CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, potContribution, drawCommunity, rollTableSetup,
   initialDealCount, selectCommitted, gambitCasinoGold,
   GAMBIT_DEFS_BY_ID, DECK_VARIANTS,
   buildDeck, shuffle, makeDrawableDeck,
@@ -806,11 +805,7 @@ const MISSION_DEFS: Record<GMMissionType, MissionDef> = {
     special: false,
     variableReward: true,
     tableUrl:       '/casino/table',
-    entryCosts: [
-      { label: 'Poker ante',     gold: 40 },
-      { label: 'Blackjack ante', gold: 30 },
-      { label: 'Reroll',         gold: 20 },
-    ],
+    // No static entryCosts: gmFreshCasinoTable derives them per game (gmCasinoEntryCosts).
   },
 };
 
@@ -1072,7 +1067,10 @@ export const enlistInMission = onCall(async (request) => {
     throw new HttpsError('failed-precondition', 'basic-training-used');
   if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
     throw new HttpsError('failed-precondition', 'Mission is full.');
-  if (mission.type === 'casino' && (player.gold ?? 0) < CASINO_MIN_ENLIST_GOLD)
+  // Gate on the table's FULL finish cost — ante + play-on for Hold 'Em — so a seat
+  // can never lock in and then be unable to complete it (and be forced to fold).
+  if (mission.type === 'casino' && mission.casinoGame
+      && (player.gold ?? 0) < seatSpend(mission.casinoGame, { playedOn: true }))
     throw new HttpsError('failed-precondition', 'not-enough-gold');
 
   const participant: GMParticipant = {

@@ -1,6 +1,6 @@
 import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } from '../types';
-import { MISSION_DEFS, CASINO_START_STATS, CASINO_MIN_ENLIST_GOLD, toRoman } from './constants';
-import { CASINO_GAMES, CASINO_GAME_ORDER } from './casinoData';
+import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
+import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
 import type { TriState } from '../types';
 
@@ -124,8 +124,11 @@ export function computeMissionCard(
     disabledReason = `You are already undertaking another mission. A guildmaster may only undertake one mission at a time.`;
   } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
     disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
-  } else if (m.type === 'casino' && playerGold != null && playerGold < CASINO_MIN_ENLIST_GOLD && !youIn) {
-    disabledReason = `You need at least ${CASINO_MIN_ENLIST_GOLD}g to ante up — that's the cheapest table on the floor.`;
+  } else if (m.type === 'casino' && m.casinoGame && playerGold != null && !youIn
+             && playerGold < seatSpend(m.casinoGame, { playedOn: true })) {
+    // The FULL cost to finish this table (Hold 'Em counts its play-on), so a seat is
+    // never taken that can't be completed.
+    disabledReason = `You need ${seatSpend(m.casinoGame, { playedOn: true })}g to see this table through.`;
     insufficientGold = true;
   } else if (youIn) {
     doneLabel = 'YOU ARE ENLISTED';
