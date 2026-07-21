@@ -191,7 +191,7 @@ function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }
         <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
           <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
           <div className="rl-seat-txt">
-            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g locked` : 'seated · to play'}</span>
           </div>
         </div>
@@ -222,7 +222,7 @@ function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
         return (
           <div className={`rl-railseat${s.playerId === uid ? ' you' : ''}`} key={i}>
             <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
-            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerId === uid ? 'You' : s.playerName}</span>
+            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerName}</span>
             <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g` : 'to play'}</span>
           </div>
         );
@@ -410,7 +410,7 @@ function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
           <div className="mp-tile-game">{t.game}</div>
           <div className="mp-tile-owner">
             <PlayerAvatar cls="mp-pav" playerId={t.ownerId} avatarHash={t.ownerAvatar} name={t.ownerName} hue={t.ownerHue} />
-            <span style={{ color: colorOf(t.ownerId) }}>{t.you ? 'You' : t.ownerName}</span> · {t.slot}
+            <span style={{ color: colorOf(t.ownerId) }}>{t.ownerName}</span> · {t.slot}
           </div>
         </div>
       ))}
@@ -514,7 +514,7 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
           {winner && (
             <>
               <span className="st-dot">·</span>
-              <span>Best night <b className="gold">{winner.seat.playerId === uid ? 'You' : winner.seat.playerName}</b>{' '}
+              <span>Best night <b className="gold">{winner.seat.playerName}</b>{' '}
                 {winner.net >= 0 ? '+' : '−'}{Math.abs(winner.net)}g</span>
             </>
           )}
@@ -532,7 +532,7 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
             <div key={r.seat.playerId} className={`st-lrow${you ? ' you' : ''}`}>
               <span className="st-lname">
                 <PlayerAvatar cls="st-pav sm" playerId={r.seat.playerId} avatarHash={r.seat.avatarHash} name={r.seat.playerName} hue={r.hue} />
-                <span style={{ color: colorOf(r.seat.playerId) }}>{you ? 'You' : r.seat.playerName}</span>
+                <span style={{ color: colorOf(r.seat.playerId) }}>{r.seat.playerName}</span>
               </span>
               <span className="st-chips">{r.games.map((g, i) => <GameChip key={i} g={g} />)}</span>
               <span className="st-lnum">{r.hand}g</span>
