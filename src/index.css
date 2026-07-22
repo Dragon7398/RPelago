@@ -1244,6 +1244,20 @@ header p {
   display: flex; gap: 0.3rem; margin-top: 0.3rem;
 }
 .admin-slot-add-row .admin-text-input { flex: 1; font-size: 0.6rem; padding: 0.2rem 0.35rem; }
+/* Collapsible SLOTS ledger header — carries the label, caret, and a summary
+   line while collapsed. Styled to read as the .admin-detail-label it replaces. */
+.admin-slots-toggle {
+  display: flex; align-items: center; gap: 0.4rem; min-width: 90px;
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  padding: 0; background: none; border: none; cursor: pointer;
+  color: var(--gold-dim); transition: color 0.15s;
+}
+.admin-slots-toggle:hover { color: var(--gold); }
+.admin-slots-caret { font-size: 0.55rem; width: 0.6rem; text-align: center; }
+.admin-slots-summary {
+  font-family: 'Crimson Pro', serif; font-size: 0.68rem; letter-spacing: 0;
+  color: var(--text-muted); white-space: nowrap;
+}
 .admin-slot-lock-btn {
   font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.08em;
   padding: 0.14rem 0.45rem; border-radius: 2px; cursor: pointer;
@@ -1951,6 +1965,11 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-player-name {
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.1em;
   color: var(--gold); display: flex; align-items: center; gap: 0.5rem;
+}
+/* Discord handle beside the display name — the host organises rooms by handle. */
+.dash-player-handle {
+  font-family: 'Crimson Pro', serif; font-size: 0.68rem; letter-spacing: 0.02em;
+  color: var(--text-muted);
 }
 .dash-feat-warning {
   color: var(--amber); font-size: 0.85rem; cursor: help; line-height: 1;

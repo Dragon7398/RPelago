@@ -410,6 +410,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
     }
   };
   const slotsLocked = mission.slotsLocked ?? false;
+  // The slot ledger is the tallest part of a card, so it collapses. A room that
+  // already has a link is one you're monitoring, not filling in — start it shut.
+  // Mount-time only, deliberately: setting the link on a live panel must not yank
+  // the section closed while the host is still working in it.
+  const [slotsOpen, setSlotsOpen] = useState(() => !mission.link);
   const [now] = useState(() => Date.now());
 
   const label        = missionDisplayLabel(mission);
@@ -423,6 +428,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
     const slots = p.slots ?? [];
     return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
   });
+
+  // Progress at a glance, for the collapsed SLOTS header.
+  const allSlots   = participants.flatMap(([, p]) => p.slots ?? []);
+  const totalSlots = allSlots.length;
+  const doneSlots  = allSlots.filter(s => s.status === 'Done' || s.status === 'Goaled').length;
 
   const nextDecayMs = mission.state === 'forming' && mission.firstJoinAt != null
     ? mission.firstJoinAt + Math.ceil((now - mission.firstJoinAt) / (24 * 3600_000)) * (24 * 3600_000) - now
@@ -638,14 +648,23 @@ function MissionCard({ mission }: { mission: GMMission }) {
         </>
       )}
 
-      {/* Slots — always shown */}
+      {/* Slots — collapsible; the header carries a summary while collapsed */}
       <div className="admin-detail-row" style={{ marginTop: '0.75rem', marginBottom: '0.4rem', alignItems: 'center' }}>
-        <div className="admin-detail-label">SLOTS</div>
+        <button className="admin-slots-toggle" onClick={() => setSlotsOpen(o => !o)} aria-expanded={slotsOpen}>
+          <span className="admin-slots-caret">{slotsOpen ? '▾' : '▸'}</span>
+          SLOTS
+          {!slotsOpen && (
+            <span className="admin-slots-summary">
+              {participants.length} seat{participants.length === 1 ? '' : 's'}
+              {totalSlots > 0 && ` · ${doneSlots}/${totalSlots} done`}
+            </span>
+          )}
+        </button>
         <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`} onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
           {slotsLocked ? '🔒 LOCKED' : '🔓 LOCK'}
         </button>
       </div>
-      {participants.length > 0 ? participants.map(([pid, p]) => (
+      {slotsOpen && (participants.length > 0 ? participants.map(([pid, p]) => (
         <MissionParticipantSlots
           key={pid}
           missionId={mission.id}
@@ -658,7 +677,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
         />
       )) : (
         <div className="dash-empty">No participants yet.</div>
-      )}
+      ))}
     </div>
   );
 }

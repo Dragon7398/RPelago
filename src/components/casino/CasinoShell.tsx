@@ -434,6 +434,7 @@ export default function CasinoShell() {
         onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
         dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
         colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
+        handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
       />
 
       <div className="rl-sec">

@@ -544,6 +544,10 @@ body.casino-scope #root { width: 100%; }
 .mp-tile-slot { font-family:'Cinzel',serif; font-size: 0.6rem; color: var(--gold); overflow-wrap: anywhere; }
 .mp-tile-owner { display: flex; align-items: center; gap: 0.35rem; font-family:'Crimson Pro',serif; font-size: 0.74rem; font-style: italic; color: var(--gold-dim); }
 .mp-tile-owner .mp-pav { width: 1.15rem; height: 1.15rem; font-size: 0.5rem; }
+/* Name + slot on one line, the Discord handle stacked beneath them so the room
+   can be organised on Discord without cross-referencing the admin roster. */
+.mp-tile-who { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.mp-tile-handle { font-style: normal; font-size: 0.66rem; color: oklch(from var(--gold-dim) l c h / 0.8); overflow-wrap: anywhere; }
 
 /* ── Settled wrap-up ── */
 .rl-settled-wrap { display: flex; flex-direction: column; gap: 1.3rem; animation: mpIn 0.4s cubic-bezier(0.3,1,0.4,1); }

@@ -9,6 +9,24 @@ import { discordAvatarUrl } from '../../lib/discordAvatar';
 // change is reflected everywhere. Provided by the shell (from gameState.players).
 const NameColorCtx = createContext<(playerId: string) => string>(() => nameColorValue(undefined));
 const useNameColor = () => useContext(NameColorCtx);
+// The player's Discord handle, resolved the same way. Shown on the game cards so
+// the room can be organised on Discord — the map's tile lightbox did the same.
+const HandleCtx = createContext<(playerId: string) => string | null>(() => null);
+const useHandle = () => useContext(HandleCtx);
+
+// Both player lookups travel together — every view that renders a name may also
+// render its handle, so they're provided as one wrapper.
+function PlayerCtx({ colorOf, handleOf, children }: {
+  colorOf: (playerId: string) => string;
+  handleOf: (playerId: string) => string | null;
+  children: ReactNode;
+}) {
+  return (
+    <NameColorCtx.Provider value={colorOf}>
+      <HandleCtx.Provider value={handleOf}>{children}</HandleCtx.Provider>
+    </NameColorCtx.Provider>
+  );
+}
 import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
@@ -412,21 +430,28 @@ function Telemetry({ m, elapsed }: { m: GMMission; elapsed: string }) {
 
 // Spatial card tiles — one per committed game, coloured by its card's suit.
 function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
-  const colorOf = useNameColor();
+  const colorOf  = useNameColor();
+  const handleOf = useHandle();
   return (
     <div className="mp-board">
-      {tiles.map((t, i) => (
-        <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
-             style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
-          <div className="mp-tile-status"><StatusPill status={t.status} /></div>
-          <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
-          <div className="mp-tile-game">{t.game}</div>
-          <div className="mp-tile-owner">
-            <PlayerAvatar cls="mp-pav" playerId={t.ownerId} avatarHash={t.ownerAvatar} name={t.ownerName} hue={t.ownerHue} />
-            <span style={{ color: colorOf(t.ownerId) }}>{t.ownerName}</span> · {t.slot}
+      {tiles.map((t, i) => {
+        const handle = handleOf(t.ownerId);
+        return (
+          <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
+               style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
+            <div className="mp-tile-status"><StatusPill status={t.status} /></div>
+            <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
+            <div className="mp-tile-game">{t.game}</div>
+            <div className="mp-tile-owner">
+              <PlayerAvatar cls="mp-pav" playerId={t.ownerId} avatarHash={t.ownerAvatar} name={t.ownerName} hue={t.ownerHue} />
+              <span className="mp-tile-who">
+                <span><span style={{ color: colorOf(t.ownerId) }}>{t.ownerName}</span> · {t.slot}</span>
+                {handle && <span className="mp-tile-handle">@{handle}</span>}
+              </span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -586,9 +611,11 @@ interface Props {
   onDismiss: (id: string) => void;
   /** Live name-color resolver (shell reads it from gameState.players per render). */
   colorOf: (playerId: string) => string;
+  /** Live Discord-handle resolver, same source; null when the player has none. */
+  handleOf: (playerId: string) => string | null;
 }
 
-export default function PhasePanel({ mission, settled, uid, now, view, onLeave, dismissedId, onDismiss, colorOf }: Props) {
+export default function PhasePanel({ mission, settled, uid, now, view, onLeave, dismissedId, onDismiss, colorOf, handleOf }: Props) {
   const seasonId = useSeason().season?.id ?? '';
   const [confirmLeave, setConfirmLeave] = useState(false);
 
@@ -598,7 +625,7 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
   if (mission && uid && seat) {
     const played = !!seat.played;
     return (
-      <NameColorCtx.Provider value={colorOf}>
+      <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
         {mission.state === 'inprogress'
           ? <BoardView m={mission} uid={uid} now={now} seasonId={seasonId} />
           : <SeatedView m={mission} uid={uid} now={now} seasonId={seasonId} view={view} onLeave={() => setConfirmLeave(true)} />}
@@ -623,15 +650,15 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
             </div>
           </div>
         )}
-      </NameColorCtx.Provider>
+      </PlayerCtx>
     );
   }
 
   if (showLedger && settled && uid) {
     return (
-      <NameColorCtx.Provider value={colorOf}>
+      <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
         <LedgerView m={settled} uid={uid} onDismiss={() => onDismiss(settled.id)} />
-      </NameColorCtx.Provider>
+      </PlayerCtx>
     );
   }
 

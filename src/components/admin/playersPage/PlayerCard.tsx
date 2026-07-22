@@ -56,6 +56,9 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
       <div className="dash-player-header">
         <div className="dash-player-name">
           {player.displayName}
+          {player.discordHandle && (
+            <span className="dash-player-handle">@{player.discordHandle}</span>
+          )}
           {featWarnings.length > 0 && (
             <span className="dash-feat-warning" title={featWarnings.join('\n')}>⚠</span>
           )}
