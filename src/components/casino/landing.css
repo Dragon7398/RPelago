@@ -534,6 +534,9 @@ body.casino-scope #root { width: 100%; }
 }
 .mp-mine-count { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--pos); margin-left: 0.4rem; text-transform: none; }
 .mp-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.9rem; }
+/* Lounge: fewer, roomier cards. `min(100%, …)` keeps the track from outgrowing a
+   narrow phone — the card still shrinks to the column rather than overflowing. */
+.mp-board-wide { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
 .mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
 .mp-tile.goaled { border-top-color: var(--pos); box-shadow: 0 0 0 1px oklch(from var(--pos) l c h / 0.25); }
 .mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }

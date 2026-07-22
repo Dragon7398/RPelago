@@ -429,11 +429,11 @@ function Telemetry({ m, elapsed }: { m: GMMission; elapsed: string }) {
 }
 
 // Spatial card tiles — one per committed game, coloured by its card's suit.
-function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
+function TileGrid({ tiles, wide }: { tiles: OwnedGame[]; wide?: boolean }) {
   const colorOf  = useNameColor();
   const handleOf = useHandle();
   return (
-    <div className="mp-board">
+    <div className={`mp-board${wide ? ' mp-board-wide' : ''}`}>
       {tiles.map((t, i) => {
         const handle = handleOf(t.ownerId);
         return (
@@ -456,7 +456,10 @@ function TileGrid({ tiles }: { tiles: OwnedGame[] }) {
   );
 }
 
-function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: number; seasonId: string }) {
+function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string; now: number; seasonId: string; view: View }) {
+  // The Lounge has room to breathe, so its game cards get a wider minimum before
+  // the grid adds another column; the Floor keeps its tighter rail.
+  const wide = view === 'lounge';
   const mine: OwnedGame[] = [];
   const others: OwnedGame[] = [];
   Object.values(m.participants ?? {}).forEach((p, idx) => {
@@ -500,14 +503,14 @@ function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: 
         <div className="mp-mine">
           <div className="mp-cell-lbl">Your games <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span></div>
           {mine.length
-            ? <TileGrid tiles={mine} />
+            ? <TileGrid tiles={mine} wide={wide} />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
         </div>
 
         {others.length > 0 && (
           <div>
             <div className="mp-cell-lbl">The rest of the table</div>
-            <TileGrid tiles={others} />
+            <TileGrid tiles={others} wide={wide} />
           </div>
         )}
 
@@ -627,7 +630,7 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
     return (
       <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
         {mission.state === 'inprogress'
-          ? <BoardView m={mission} uid={uid} now={now} seasonId={seasonId} />
+          ? <BoardView m={mission} uid={uid} now={now} seasonId={seasonId} view={view} />
           : <SeatedView m={mission} uid={uid} now={now} seasonId={seasonId} view={view} onLeave={() => setConfirmLeave(true)} />}
         {confirmLeave && (
           <div className="rl-overlay" onClick={() => setConfirmLeave(false)}>
