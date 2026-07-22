@@ -5,7 +5,7 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminGetCasinoYamls, adminDenyCasinoYaml, type CasinoYaml } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
@@ -31,13 +31,34 @@ function MissionParticipantSlots({
   onKick: () => void;
 }) {
   const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
+  const { addToast } = useToast();
   const slots = participant.slots ?? [];
   const [draft, setDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>({
     name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0,
   });
   const [confirmKick, setConfirmKick] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<number | null>(null);
+  const [delBusy, setDelBusy]       = useState(false);
 
   const save = (next: AdvSlot[]) => adminSetParticipantSlots(missionId, playerId, next);
+
+  // A casino slot can't be dropped with a plain `save()`: the seat's lockedCards
+  // (index-aligned, and the only record of each card's gold value) and its stored
+  // goldSwing have to move with it, so removal goes through a callable that does
+  // all three atomically. Every other mission type is a straight slot filter.
+  const removeSlot = async (i: number) => {
+    if (!isCasino) { save(slots.filter((_, j) => j !== i)); setConfirmDel(null); return; }
+    setDelBusy(true);
+    try {
+      const { goldSwing, remaining } = await adminRemoveCasinoSlot(missionId, playerId, i);
+      addToast(`Card struck — ${remaining} slot${remaining === 1 ? '' : 's'} left, reward now ${goldSwing}g.`, 'success');
+      setConfirmDel(null);
+    } catch (err) {
+      addToast(`Could not remove slot: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      setDelBusy(false);
+    }
+  };
 
   return (
     <div className="admin-slot-adv">
@@ -114,7 +135,30 @@ function MissionParticipantSlots({
           >
             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
-          {!locked && <button className="admin-slot-del" title="Remove slot" onClick={() => save(slots.filter((_, j) => j !== i))}>✕</button>}
+          {!locked && (confirmDel === i ? (
+            <span style={{ display: 'flex', gap: '0.3rem' }}>
+              <button
+                className="dash-action-btn danger"
+                style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+                disabled={delBusy}
+                onClick={() => removeSlot(i)}
+              >{delBusy ? '…' : isCasino ? 'Strike card' : 'Remove'}</button>
+              <button
+                className="dash-action-btn"
+                style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+                disabled={delBusy}
+                onClick={() => setConfirmDel(null)}
+              >Cancel</button>
+            </span>
+          ) : (
+            <button
+              className="admin-slot-del"
+              title={isCasino
+                ? 'Strike this card — drops the slot and its card, and recomputes the seat reward'
+                : 'Remove slot'}
+              onClick={() => setConfirmDel(i)}
+            >✕</button>
+          ))}
         </div>
       ))}
 
@@ -182,6 +226,8 @@ function describeCasinoLogEntry(e: CasinoLogEntry): string {
       return `${e.playerName} locked in ${e.game ?? ''} — ${e.goldSwing ?? 0}g${e.deckChoice ? ` (${e.deckChoice})` : ''}`;
     case 'fold':
       return `${e.playerName} folded${e.game ? ` (${e.game})` : ''}`;
+    case 'adminvoid':
+      return `Host struck ${e.cardName ? `${e.cardName} from ` : 'a card from '}${e.playerName} — reward now ${e.goldSwing ?? 0}g`;
     default:
       return e.playerName;
   }

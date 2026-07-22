@@ -664,15 +664,20 @@ export function CasinoTable() {
 
   const mySeat     = uid ? mission?.participants?.[uid] : undefined;
   const yamlDenied = mySeat?.yamlDenied === true;
-  // A locked player may re-select their cards on a resubmit only while the table is
-  // still FORMING and the pool is still preserved (deploy clears the secrets). The
-  // pool is the full dealt hand for single-sitting games, or the persisted hole
+  // A locked player may re-select their cards on a resubmit while the table is still
+  // FORMING (a self-initiated tweak) or, once it is live, ONLY when the host has
+  // DENIED their config — a denied player rebuilding their YAML may be unable to
+  // source a game for a card, so they can drop it or swap in one they passed on.
+  // The pool is the full dealt hand for single-sitting games, or the persisted hole
   // cards + the PUBLIC community for Hold 'Em (its sitting 2 is a subset-select just
-  // like Seven Card Stud). The gambit is never re-openable.
+  // like Seven Card Stud). It is only ever a RE-selection: the draw deck is cleared
+  // at deploy, so there is no reroll/hit/redraw, and the gambit is never re-openable.
+  // The pool survives until the table settles, when onMissionComplete purges it.
   const resubmitPool: DeckCard[] = game === 'holdem'
     ? [...(secretHole ?? []), ...(mission?.community ?? [])]
     : (secretHand ?? []);
-  const canChangeCards = !!mySeat?.played && mission?.state === 'forming'
+  const canChangeCards = !!mySeat?.played
+    && (mission?.state === 'forming' || (mission?.state === 'inprogress' && yamlDenied))
     && (game === 'holdem' ? (secretHole?.length ?? 0) > 0 && (mission?.community?.length ?? 0) > 0
                           : (secretHand?.length ?? 0) > 0);
 

@@ -909,6 +909,21 @@ export async function adminDenyCasinoYaml(missionId: string, playerId: string, r
   await httpsCallable(functions!, 'adminDenyCasinoYaml')({ missionId, playerId, reason: reason ?? null, seasonId: getCurrentSeason() });
 }
 
+// Admin: strike one committed card + its slot from a casino seat. Goes through a
+// callable rather than `adminSetParticipantSlots` because a casino seat is three
+// fields that must move together — slots, the index-aligned lockedCards, and the
+// stored goldSwing that settlement pays. Editing slots alone leaves the seat
+// over-paying and mis-maps games to cards on the player's next resubmit.
+export async function adminRemoveCasinoSlot(
+  missionId: string, playerId: string, slotIndex: number,
+): Promise<{ goldSwing: number; remaining: number }> {
+  assertFunctions();
+  const res = await httpsCallable<object, { ok: boolean; goldSwing: number; remaining: number }>(
+    functions!, 'adminRemoveCasinoSlot',
+  )({ missionId, playerId, slotIndex, seasonId: getCurrentSeason() });
+  return { goldSwing: res.data.goldSwing, remaining: res.data.remaining };
+}
+
 export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'claimMissionSlot')({ missionId, slotKey, seasonId: getCurrentSeason() });

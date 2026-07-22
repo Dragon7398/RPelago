@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminSetPlayerDisabled = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminSetPlayerDisabled = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -727,12 +727,16 @@ async function deployMission(seasonId, missionId, m, now) {
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/hint`)] = m.casinoStats.hint;
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/xp`)] = m.casinoStats.xp;
-        // Secrets live outside the season tree — clear the draw deck AND the hand now
-        // that the table is live (cards are locked into the room; no more re-selecting).
+        // Secrets live outside the season tree — clear the DRAW DECK now that the table
+        // is live: no reroll, no hit, nothing left to draw once deployed.
+        //
+        // `hand` and `hole` are deliberately KEPT. They are the re-selection pool, and a
+        // seat whose config the host DENIES may re-pick its committed cards even while
+        // in progress (resubmitCasinoYaml). Dropping the deck but keeping the hand is
+        // what makes that a re-selection and never a fresh draw. The pool is purged when
+        // the table settles (completeMission drops the whole secret subtree).
         for (const uid of Object.keys(m.participants ?? {})) {
             updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)] = null;
-            updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)] = null;
-            updates[(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)] = null;
         }
     }
     // Notify each enrolled participant via push-keyed notification
@@ -1433,11 +1437,18 @@ exports.resubmitCasinoYaml = (0, https_1.onCall)(async (request) => {
     if (keepUids) {
         // ── Card-change re-lock ──────────────────────────────────────────────────
         // Re-select the committed cards from the still-preserved pool, then recompute
-        // the reward and rebuild the slots. Forming only — deploy clears the secrets.
+        // the reward and rebuild the slots.
         // Hold 'Em's pool is its persisted hole cards + the PUBLIC community (its
         // sitting 2 is a subset-select just like Seven Card Stud); every other game
         // selects from its full dealt hand.
-        if (mission.state !== 'forming')
+        //
+        // Allowed while FORMING (a self-initiated tweak) or, once the table is live,
+        // ONLY on a host DENY. A denied player has to rebuild their config, and a card
+        // they can't source a game for would otherwise strand them — so they may drop
+        // it or swap in one they passed on. It is a re-selection out of the hand they
+        // were already dealt: `deck` is nulled at deploy, so there is no reroll, no hit
+        // and no fresh draw, and the gambit is never reopened.
+        if (mission.state !== 'forming' && !denied)
             throw new https_1.HttpsError('failed-precondition', 'Cards can only be changed while the table is still forming.');
         let rawHand;
         if (mission.casinoGame === 'holdem') {
@@ -1792,6 +1803,71 @@ exports.adminDenyCasinoYaml = (0, https_1.onCall)(async (request) => {
     });
     return { ok: true };
 });
+// Admin: strike one committed card (and its slot) from a casino seat, recomputing
+// the seat's reward in the same atomic write.
+//
+// A casino seat is THREE fields that must agree: `slots` (what the player plays),
+// `lockedCards` (index-aligned 1:1 to the slots, and the only surviving record of
+// each card's gold value), and `goldSwing` (the stored number settlement actually
+// pays — it is NOT re-derived from the slots at completion). Editing `slots` alone
+// through the generic row editor leaves the other two stale: the seat over-pays,
+// and the next resubmit maps games onto the wrong cards because the index-alignment
+// is broken. This callable is the only safe way to shorten a casino seat.
+//
+// Use it when a denied player genuinely cannot source a game for a card and the
+// table is already in progress. While the table is FORMING — or on any deny — the
+// player can re-pick their own cards through resubmitCasinoYaml, which is always
+// preferable to a host edit.
+exports.adminRemoveCasinoSlot = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    await requireAdmin(request.auth.uid);
+    const { missionId, playerId, slotIndex, seasonId: reqSeason } = request.data;
+    if (!missionId || !playerId || typeof slotIndex !== 'number' || !Number.isInteger(slotIndex))
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId, playerId or slotIndex.');
+    const db = (0, database_2.getDatabase)();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(request.auth.uid, reqSeason, db);
+    const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
+    if (!snap.exists())
+        throw new https_1.HttpsError('not-found', 'Mission not found.');
+    const mission = snap.val();
+    if (mission.type !== 'casino')
+        throw new https_1.HttpsError('failed-precondition', 'Not a casino mission.');
+    if (mission.state === 'complete')
+        throw new https_1.HttpsError('failed-precondition', 'This table has already settled.');
+    const seat = mission.participants?.[playerId];
+    if (!seat)
+        throw new https_1.HttpsError('not-found', 'Player not seated at this table.');
+    if (!seat.played)
+        throw new https_1.HttpsError('failed-precondition', 'This seat has not locked a hand yet.');
+    // RTDB serialises these as arrays, and a past hand-repair can leave a null hole
+    // where an element was deleted in place. Compact both before indexing, or the
+    // caller's index means something different to the server than it did in the UI.
+    const cards = (seat.lockedCards ?? []).filter(Boolean);
+    const slots = (seat.slots ?? []).filter(Boolean);
+    if (cards.length !== slots.length)
+        throw new https_1.HttpsError('failed-precondition', `Seat is inconsistent (${cards.length} cards vs ${slots.length} slots) — repair it before removing a slot.`);
+    if (slotIndex < 0 || slotIndex >= slots.length)
+        throw new https_1.HttpsError('invalid-argument', 'Slot index out of range.');
+    if (slots.length <= 1)
+        throw new https_1.HttpsError('failed-precondition', 'A seat must keep at least one slot — kick the player instead of emptying the seat.');
+    const struck = cards[slotIndex];
+    const nextCards = cards.filter((_, i) => i !== slotIndex);
+    const nextSlots = slots.filter((_, i) => i !== slotIndex);
+    const choice = (0, casinoEngine_1.deckChoiceOf)(seat);
+    const goldSwing = (0, casinoEngine_1.applyDeckBoost)((0, casinoEngine_1.handStake)(nextCards), choice);
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+        uid: playerId, playerName: seat.playerName, event: 'adminvoid',
+        game: mission.casinoGame, goldSwing, deckChoice: choice, cardName: struck?.name,
+    });
+    await db.ref().update({
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}/lockedCards`)]: nextCards,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}/slots`)]: nextSlots,
+        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}/goldSwing`)]: goldSwing,
+        [logPath]: logEntry,
+    });
+    return { ok: true, goldSwing, remaining: nextSlots.length };
+});
 // Admin: disable/enable a player as a real kill-switch. Sets the per-season game
 // flag (every other callable gates on `players/{uid}/disabled`) AND the Firebase
 // Auth account — the latter is the ONLY thing that can stop a direct Storage upload,
@@ -1999,6 +2075,12 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('seasons/{seasonId}/m
         return;
     const seasonId = event.params.seasonId;
     const db = (0, database_2.getDatabase)();
+    // Purge the table's secret subtree. Deploy only drops the draw DECK now — the
+    // dealt hands survive so a host-denied seat can re-select its cards while in
+    // progress — so settlement is where the pool finally dies. Unconditional and
+    // ahead of the draft guard: a playtest season's hands need clearing too, and
+    // `completeMission` (client-side) can't do it — the leaves are `.write: false`.
+    await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${event.params.missionId}`)).remove();
     // Never write real player history from a draft season being playtested.
     if (await (0, seasonPaths_1.isDraftSeason)(seasonId, db))
         return;
