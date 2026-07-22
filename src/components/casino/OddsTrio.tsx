@@ -4,10 +4,13 @@ import type { CasinoStats } from '../../types';
 // Rolled per table at creation and shifted live by gambits, so they're the main
 // thing that distinguishes one table from another — hues match the card table's
 // ChallengePanel (release 200 · collect 295 · hint 30).
-const ODDS: { key: 'release' | 'collect' | 'hint'; label: string; hue: number }[] = [
+// `betterDown`: this stat improves when it FALLS. Hint is a cost (% of checks
+// needed to earn a hint), so a lower number is good — its drift colours invert
+// relative to Release/Collect, where a higher chance is good.
+const ODDS: { key: 'release' | 'collect' | 'hint'; label: string; hue: number; betterDown?: boolean }[] = [
   { key: 'release', label: 'Release', hue: 200 },
   { key: 'collect', label: 'Collect', hue: 295 },
-  { key: 'hint',    label: 'Hint',    hue: 30  },
+  { key: 'hint',    label: 'Hint',    hue: 30, betterDown: true },
 ];
 
 /**
@@ -31,7 +34,9 @@ export default function OddsTrio({ stats, open }: { stats: CasinoStats; open?: C
             <span className="rl-odd-val">
               {v}<small>%</small>
               {diff !== 0 && (
-                <span className={`rl-odd-diff ${diff > 0 ? 'up' : 'down'}`}>{diff > 0 ? '+' : '−'}{Math.abs(diff)}</span>
+                // `up`/`down` colour by GOOD/bad (green/red), not literal direction;
+                // the +/− sign still tracks the actual change. Hint inverts (betterDown).
+                <span className={`rl-odd-diff ${(o.betterDown ? diff < 0 : diff > 0) ? 'up' : 'down'}`}>{diff > 0 ? '+' : '−'}{Math.abs(diff)}</span>
               )}
             </span>
           </div>

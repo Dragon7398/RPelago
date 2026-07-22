@@ -109,7 +109,9 @@ export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stak
 const CH_ROWS = [
   { key: 'release' as keyof CasinoStats, label: 'Release Odds', hue: 200 },
   { key: 'collect' as keyof CasinoStats, label: 'Collect Odds', hue: 295 },
-  { key: 'hint'    as keyof CasinoStats, label: 'Hint Cost',    hue: 30  },
+  // Hint is a COST (% of checks to earn a hint) → lower is good, so its drift
+  // colours invert relative to the odds rows above.
+  { key: 'hint'    as keyof CasinoStats, label: 'Hint Cost',    hue: 30, betterDown: true },
 ];
 
 interface ChallengePanelProps {
@@ -141,7 +143,9 @@ export function ChallengePanel({ stats, open, roll, showXp = true }: ChallengePa
               <span className="cz-ch-val">{v}<small>%</small></span>
               {on === null
                 ? (diff
-                    ? <span className={`cz-ch-diff ${diff > 0 ? 'up' : 'down'}`}>{diff > 0 ? '+' : '−'}{Math.abs(diff)}</span>
+                    // `up`/`down` colour by GOOD/bad (green/red), not direction; the
+                    // sign still tracks the change. Hint inverts (betterDown).
+                    ? <span className={`cz-ch-diff ${(r.betterDown ? diff < 0 : diff > 0) ? 'up' : 'down'}`}>{diff > 0 ? '+' : '−'}{Math.abs(diff)}</span>
                     : <span className="cz-ch-diff flat">—</span>)
                 : <span className={`cz-ch-roll ${on ? 'on' : 'off'}`}>{on ? 'ON' : 'OFF'}</span>}
             </div>
