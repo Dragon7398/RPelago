@@ -144,6 +144,15 @@ function seatStanding(m: GMMission, seat: GMParticipant): { badge: string; take:
   return { badge: 'Hand in progress', take: null, note: 'Head back to the table to finish your hand.' };
 }
 
+// A seat's roster status, in three states. Hold 'Em adds an interim "ante paid"
+// once a seat has locked its hole cards but not yet played on; every other game
+// goes straight from seated to played, so `holeLocked` scopes this to Hold 'Em.
+function seatRoster(s: GMParticipant): { cls: string; rail: string; full: string } {
+  if (s.played)     return { cls: 'played', rail: `${s.goldSwing ?? 0}g`, full: `${s.goldSwing ?? 0}g locked` };
+  if (s.holeLocked) return { cls: 'ante',   rail: 'ante paid',           full: 'ante paid' };
+  return { cls: 'wait', rail: 'to play', full: 'seated · to play' };
+}
+
 // Deploy-progress bar: seats filled (soft) over seats played (bright); turns
 // green once the table is ready to deal in. Mirrors the design's DeployBar.
 function DeployBar({ m, max }: { m: GMMission; max: number }) {
@@ -187,15 +196,18 @@ function RosterChips({ m, uid, max }: { m: GMMission; uid: string; max: number }
   const colorOf = useNameColor();
   return (
     <div className="rl-roster">
-      {seats.map((s, i) => (
-        <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
-          <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
-          <div className="rl-seat-txt">
-            <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerName}</span>
-            <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g locked` : 'seated · to play'}</span>
+      {seats.map((s, i) => {
+        const st = seatRoster(s);
+        return (
+          <div key={s.playerId} className={`rl-seat${s.playerId === uid ? ' you' : ''}`}>
+            <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
+            <div className="rl-seat-txt">
+              <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerName}</span>
+              <span className={`rl-seat-st ${st.cls}`}>{st.full}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {Array.from({ length: Math.max(0, max - seats.length) }, (_, i) => (
         <div key={`e${i}`} className="rl-seat empty">
           <span className="rl-seat-av">·</span>
@@ -219,11 +231,12 @@ function SeatGrid({ m, uid, max }: { m: GMMission; uid: string; max: number }) {
             <span className="rl-seat-av">·</span><span className="rl-seat-st open">open</span>
           </div>
         );
+        const st = seatRoster(s);
         return (
           <div className={`rl-railseat${s.playerId === uid ? ' you' : ''}`} key={i}>
             <PlayerAvatar cls="rl-seat-av" playerId={s.playerId} avatarHash={s.avatarHash} name={s.playerName} hue={seatHue(i)} />
             <span className="rl-seat-nm" style={{ color: colorOf(s.playerId) }}>{s.playerName}</span>
-            <span className={`rl-seat-st ${s.played ? 'played' : 'wait'}`}>{s.played ? `${s.goldSwing ?? 0}g` : 'to play'}</span>
+            <span className={`rl-seat-st ${st.cls}`}>{st.rail}</span>
           </div>
         );
       })}

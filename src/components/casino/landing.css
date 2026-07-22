@@ -228,6 +228,7 @@ body.casino-scope #root { width: 100%; }
 .rl-seat-txt { display: flex; flex-direction: column; line-height: 1.1; }
 .rl-seat-nm { font-family:'Cinzel',serif; font-size: 0.72rem; color: var(--parchment); }
 .rl-seat-st { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.rl-seat-st.ante { color: var(--gold); }   /* Hold 'Em: ante paid + hole locked, awaiting play-on */
 .rl-seat-st.played { color: var(--pos); }
 .rl-seat-st.wait { color: var(--gold-dim); }
 .rl-seat-st.open { color: var(--gold-dim); font-style: italic; text-transform: none; letter-spacing: 0; font-family:'Crimson Pro',serif; }
@@ -550,7 +551,6 @@ body.casino-scope #root { width: 100%; }
 .st-seal { font-size: 2.4rem; color: var(--gold); text-shadow: 0 0 28px oklch(from var(--gold) l c h / 0.5); }
 .st-kick { font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.34em; text-transform: uppercase; color: var(--gold-dim); margin-top: 0.3rem; }
 .st-title { font-family:'Cinzel',serif; font-weight: 800; font-size: clamp(1.5rem, 3.4vw, 2.1rem); color: var(--gold); letter-spacing: 0.04em; }
-.st-sub { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.96rem; }
 .st-facts { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: center; margin-top: 0.7rem; font-family:'Cinzel',serif; font-size: 0.64rem; letter-spacing: 0.04em; color: var(--gold-dim); }
 .st-facts b { color: var(--parchment); }
 .st-facts b.gold { color: var(--gold); }
