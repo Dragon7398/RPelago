@@ -58,7 +58,7 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
         </li>
         <li>
           <strong>Check limits:</strong> At least <strong>50 checks</strong> and no more than{' '}
-          <strong>1,500 checks</strong> total, unless otherwise approved.
+          <strong>2,000 checks</strong> total, unless otherwise approved.
         </li>
         <li>
           <strong>Keep it fun!</strong>  Please use your best judgment on games to keep things fun for everyone.
