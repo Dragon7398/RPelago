@@ -14,6 +14,7 @@ import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlot
 import { parseApYaml, checkWorldCount } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
+import { currentMaxSlots } from '../lib/missionLogic';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -142,6 +143,12 @@ export function CasinoTable() {
   const [yamlText, setYamlText]   = useState<string | null>(null);
   const [yamlInfo, setYamlInfo]   = useState<{ name: string; docs: number; filled: number } | null>(null);
   const [yamlWarn, setYamlWarn]   = useState<string[]>([]);
+  // Manifest drag-reorder: the row being dragged, and the row it would land on.
+  const [dragRow, setDragRow]     = useState<number | null>(null);
+  const [dropRow, setDropRow]     = useState<number | null>(null);
+  // A config file being dragged over the attach box (depth counts nested enter/leave).
+  const [yamlDragOver, setYamlDragOver] = useState(false);
+  const yamlDragDepth = useRef(0);
   // True while re-editing an already-locked config (forming self-tweak, or after a
   // host denial): reuses the Manifest phase, but Submit resubmits instead of locking.
   const [resubmitting, setResubmitting] = useState(false);
@@ -409,6 +416,15 @@ export function CasinoTable() {
   // you can't cherry-pick a six-card Blackjack hand down to the two you like.
   const minKeep = game === 'blackjack' ? Math.max(1, hand.length - 1) : 1;
 
+  // Seats the pot is expected to split across. While forming that's the DECAYED
+  // max (open seats still count — a closed one never will); once the table is
+  // running only the seats that actually played can win a share.
+  const potSeats = !mission
+    ? 0
+    : mission.state === 'forming'
+      ? Math.max(1, currentMaxSlots(mission, now))
+      : Math.max(1, allSeats.filter(p => p.played).length);
+
   // Fill empty seats up to baseMax
   const baseMax = mission?.baseMax ?? 6;
   const seatEntries: [string, GMParticipant | null][] =
@@ -537,6 +553,37 @@ export function CasinoTable() {
     }));
   };
 
+  // Same remap by dragging: lift the value at `from` out of the committed order and
+  // drop it at `to`, sliding everything between it along one row (unlike the ↑/↓
+  // swap, a long drag doesn't scramble the rows it passes over).
+  const dropManifest = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    if (from >= committedCards.length || to >= committedCards.length) return;
+    setManifest(m => {
+      const vals = committedCards.map(c => m[c.uid] ?? { name: '', game: '' });
+      const [moved] = vals.splice(from, 1);
+      vals.splice(to, 0, moved);
+      const next = { ...m };
+      committedCards.forEach((c, i) => { next[c.uid] = vals[i]; });
+      return next;
+    });
+  };
+
+  // A file dropped anywhere but the attach box would otherwise make the browser
+  // navigate to it, blowing away the un-submitted hand. Swallow those page-wide.
+  useEffect(() => {
+    const swallow = (e: DragEvent) => {
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, []);
+
   // Attach a YAML: parse in-browser, prefill the manifest in committed order, and
   // surface broken-file / wrong-world-count / randomized warnings (non-blocking).
   const onPickYaml = (file: File | null) => {
@@ -570,6 +617,49 @@ export function CasinoTable() {
       setYamlWarn(warn);
     };
     reader.readAsText(file);
+  };
+
+  // Drop a config straight onto the attach box. Only file drags count — a manifest
+  // row being dragged past the box must not arm it — and the depth counter keeps the
+  // highlight steady as the cursor crosses the box's own children.
+  const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+
+  const onYamlDragEnter = (e: React.DragEvent) => {
+    if (busy || !dragHasFiles(e)) return;
+    e.preventDefault();
+    yamlDragDepth.current += 1;
+    setYamlDragOver(true);
+  };
+  const onYamlDragOver = (e: React.DragEvent) => {
+    if (busy || !dragHasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onYamlDragLeave = (e: React.DragEvent) => {
+    if (busy || !dragHasFiles(e)) return;
+    yamlDragDepth.current = Math.max(0, yamlDragDepth.current - 1);
+    if (yamlDragDepth.current === 0) setYamlDragOver(false);
+  };
+  const onYamlDrop = (e: React.DragEvent) => {
+    if (busy || !dragHasFiles(e)) return;
+    e.preventDefault();
+    yamlDragDepth.current = 0;
+    setYamlDragOver(false);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length === 0) return;
+    // Reject multi-file and non-config drops outright rather than silently picking
+    // one — onPickYaml overwrites the warning list, so a "used the first one" note
+    // wouldn't survive the parse anyway.
+    if (files.length > 1) {
+      setYamlWarn(['Drop a single config file — one .yaml holds all of your worlds.']);
+      return;
+    }
+    const file = files[0];
+    if (!/\.(ya?ml|txt)$/i.test(file.name)) {
+      setYamlWarn([`"${file.name}" isn't a config file — attach a .yaml, .yml, or .txt.`]);
+      return;
+    }
+    onPickYaml(file);
   };
 
   const mySeat     = uid ? mission?.participants?.[uid] : undefined;
@@ -740,7 +830,7 @@ export function CasinoTable() {
               Deck: {DECK_VARIANTS[seatDeckChoice].label}
             </button>
           )}
-          <PotDisplay amount={pot} bump={potBump} />
+          <PotDisplay amount={pot} bump={potBump} seats={potSeats} />
         </div>
       </div>
 
@@ -1085,9 +1175,9 @@ export function CasinoTable() {
               <div className="cz-stage-note">
                 {resubmitting
                   ? (canChangeCards
-                      ? 'Attach an updated config, re-map games with the ↑/↓ arrows, or ← Change cards to re-pick which games you commit to. Your gambit is locked in and unchanged.'
-                      : 'Attach an updated config, or use the ↑/↓ arrows to re-map games to cards. Your committed cards and gambit are unchanged.')
-                  : "Attach your Archipelago config below — we read each world's game and slot name and map them to your committed cards in order. Use ↑/↓ to line a game up with the right card. Your host reviews every submission."}
+                      ? 'Attach an updated config, re-map games by dragging a row or using the ↑/↓ arrows, or ← Change cards to re-pick which games you commit to. Your gambit is locked in and unchanged.'
+                      : 'Attach an updated config, or drag a row (or use the ↑/↓ arrows) to re-map games to cards. Your committed cards and gambit are unchanged.')
+                  : "Attach your Archipelago config below — we read each world's game and slot name and map them to your committed cards in order. Drag a row, or use ↑/↓, to line a game up with the right card. Your host reviews every submission."}
               </div>
 
               {/* Mission Manifest — per-card mapping (display-only, from the config) + YAML attach */}
@@ -1099,7 +1189,30 @@ export function CasinoTable() {
                     const nm = v?.name?.trim();
                     const gm = v?.game?.trim();
                     return (
-                      <div className="sf-mrow" key={c.uid} style={{ '--th': CARD_HUE[c.type] } as React.CSSProperties}>
+                      <div className={`sf-mrow${dragRow === i ? ' dragging' : ''}`
+                             + (dropRow === i && dragRow !== null && dragRow !== i
+                                 ? (dragRow < i ? ' drop-below' : ' drop-above') : '')}
+                           key={c.uid} style={{ '--th': CARD_HUE[c.type] } as React.CSSProperties}
+                           draggable={!busy}
+                           onDragStart={e => {
+                             if (busy) return;
+                             e.dataTransfer.effectAllowed = 'move';
+                             e.dataTransfer.setData('text/plain', String(i));
+                             setDragRow(i);
+                           }}
+                           onDragOver={e => {
+                             if (dragRow === null) return;
+                             e.preventDefault();
+                             e.dataTransfer.dropEffect = 'move';
+                             if (dropRow !== i) setDropRow(i);
+                           }}
+                           onDrop={e => {
+                             e.preventDefault();
+                             const from = dragRow ?? Number(e.dataTransfer.getData('text/plain'));
+                             if (Number.isFinite(from)) dropManifest(from, i);
+                             setDragRow(null); setDropRow(null);
+                           }}
+                           onDragEnd={() => { setDragRow(null); setDropRow(null); }}>
                         <div className="sf-cat">
                           <span className="sf-suit">{CARD_TYPES[c.type].suit}</span>
                           <span className="sf-cat-txt">
@@ -1113,22 +1226,28 @@ export function CasinoTable() {
                           <span className={`sf-mline-game${gm ? '' : ' empty'}`}>{gm || 'awaiting config'}</span>
                         </div>
                         <div className="sf-move">
-                          <button className="sf-movebtn" title="Move up" disabled={busy || i === 0}
-                                  onClick={() => moveManifest(i, -1)}>↑</button>
-                          <button className="sf-movebtn" title="Move down" disabled={busy || i === committedCards.length - 1}
-                                  onClick={() => moveManifest(i, 1)}>↓</button>
+                          <span className="sf-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
+                          <div className="sf-movebtns">
+                            <button className="sf-movebtn" title="Move up" disabled={busy || i === 0}
+                                    onClick={() => moveManifest(i, -1)}>↑</button>
+                            <button className="sf-movebtn" title="Move down" disabled={busy || i === committedCards.length - 1}
+                                    onClick={() => moveManifest(i, 1)}>↓</button>
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-                <div className="sf-yaml">
+                <div className={`sf-yaml${yamlDragOver ? ' dragover' : ''}`}
+                     onDragEnter={onYamlDragEnter} onDragOver={onYamlDragOver}
+                     onDragLeave={onYamlDragLeave} onDrop={onYamlDrop}>
                   <div className="sf-yaml-head">
                     <span className="sf-yaml-lbl">Attach your config (.yaml) {attachRequired
                       ? <span className="req">✳ required</span>
                       : <span className="opt">— optional; keeps your current file</span>}</span>
                     <button type="button" className="cz-btn" onClick={() => yamlInputRef.current?.click()} disabled={busy}>Choose file</button>
                   </div>
+                  <div className="sf-yaml-drop">{yamlDragOver ? '⇩ Release to attach this config' : 'or drag your .yaml file into this box'}</div>
                   <input ref={yamlInputRef} type="file" accept=".yaml,.yml,.txt" style={{ display: 'none' }}
                          onChange={e => onPickYaml(e.target.files?.[0] ?? null)} />
                   {yamlInfo && (

@@ -120,7 +120,11 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
         <div className="rl-tcard-tag">{gameFamily(game)}</div>
         <div className="rl-tcard-name">
           {cfg.label}
-          <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>
+          <span className="rl-pot">
+            <span className="n">{m.pot ?? 0}</span><span className="u">g pot</span>
+            {/* What one seat can expect: the pot split across the seats still open. */}
+            <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, maxSeats))}g ea</span>
+          </span>
         </div>
         <div className="rl-tcard-room">Cohort {toRoman(m.series)}</div>
       </div>

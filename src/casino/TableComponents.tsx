@@ -21,9 +21,15 @@ function SeatAvatar({ cls, playerId, avatarHash, name, style }: {
 
 // ── Pot display ───────────────────────────────────────────────────────────────
 
-interface PotDisplayProps { amount: number; bump?: boolean; }
+interface PotDisplayProps {
+  amount: number;
+  bump?: boolean;
+  seats?: number;   // seats the pot is expected to split across (decayed seats excluded)
+}
 
-export function PotDisplay({ amount, bump }: PotDisplayProps) {
+export function PotDisplay({ amount, bump, seats }: PotDisplayProps) {
+  // Mirrors casinoPotShares: an even floor split, remainder to the earliest seats.
+  const share = seats != null && seats > 0 ? Math.floor(amount / seats) : null;
   return (
     <div className="cz-pot">
       <div className="cz-pot-coins">
@@ -34,6 +40,11 @@ export function PotDisplay({ amount, bump }: PotDisplayProps) {
         <span className={`cz-pot-amt${bump ? ' bump' : ''}`}>
           {amount}<span style={{ fontSize: '0.6em', color: 'var(--gold-dim)' }}>g</span>
         </span>
+        {share != null && (
+          <span className="cz-pot-share" title={`Split ${seats} way${seats === 1 ? '' : 's'} — open seats count, closed ones don't`}>
+            ≈{share}g/player
+          </span>
+        )}
       </div>
     </div>
   );
