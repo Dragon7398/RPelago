@@ -148,6 +148,15 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
   font-size: 0.62rem; border-radius: 999px; padding: 0.15rem 0.35rem; box-shadow: 0 2px 6px #0008;
 }
 
+/* cards this variant pulls out — shown faded at the foot of the preview so a
+   player can see what's excluded without opening the Purist deck to compare */
+.cz-preview-excluded { margin-top: 1.5rem; border-top: 1px dashed var(--line-glow); padding-top: 1rem; }
+.cz-preview-excluded-head {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--neg); margin-bottom: 0.8rem;
+}
+.cz-preview-excluded .cz-preview-group { opacity: 0.4; filter: grayscale(0.85); }
+
 /* ── hand area ── */
 .cz-hand { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; }
 .cz-card-slot { position: relative; cursor: pointer; transition: transform 0.16s; }

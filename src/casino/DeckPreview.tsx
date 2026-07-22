@@ -15,10 +15,13 @@ export function DeckPreview({ choice, onClose }: DeckPreviewProps) {
   const variant = DECK_VARIANTS[choice];
   const excl    = new Set(variant.excludeTypes);
 
-  const groups = Object.values(CARD_TYPES)
-    .filter(t => !excl.has(t.key))
+  const groupsFor = (want: boolean) => Object.values(CARD_TYPES)
+    .filter(t => excl.has(t.key) === want)
     .sort((a, b) => a.order - b.order)
     .map(t => ({ type: t, cards: CARD_DEFS.filter(d => d.type === t.key) }));
+
+  const groups   = groupsFor(false);  // in this deck
+  const excluded = groupsFor(true);   // pulled from this deck (empty for Purist)
 
   return (
     <div className="cz-preview-overlay" onClick={onClose}>
@@ -43,6 +46,26 @@ export function DeckPreview({ choice, onClose }: DeckPreviewProps) {
               </div>
             </div>
           ))}
+
+          {excluded.length > 0 && (
+            <div className="cz-preview-excluded">
+              <div className="cz-preview-excluded-head">Not in this deck</div>
+              {excluded.map(g => (
+                <div key={g.type.key} className="cz-preview-group">
+                  <div className="cz-preview-group-head">
+                    <span className="cz-preview-suit">{g.type.suit}</span> {g.type.label}
+                  </div>
+                  <div className="cz-preview-grid">
+                    {g.cards.map(card => (
+                      <div key={card.name} className="cz-preview-card">
+                        <CardFace card={{ ...card, uid: 0, copyIndex: 0 }} look="plate" width={92} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
