@@ -348,6 +348,10 @@ export interface GMMission {
   collect:         TriState;
   hint:            number;
   link?:           string;
+  // When the room link first went up. The Elapsed clock runs from here, not from
+  // deploy — players can't actually start until there's a room to join. Cleared
+  // when the link is removed, so a re-added link restarts the clock.
+  linkedAt?:       number;
   tracker?:        string;
   cheese?:         string;
   firstJoinAt:     number | null;

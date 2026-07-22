@@ -442,7 +442,12 @@ function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: 
   const all       = [...mine, ...others];
   const goaled    = all.filter(g => isGoaled(g.status)).length;
   const myGoaled  = mine.filter(g => isGoaled(g.status)).length;
-  const elapsed   = m.deployedAt ? fmtClock((now - m.deployedAt) / 1000) : '—';
+  // Elapsed counts from the room link going up (when play can actually start),
+  // not from deploy — a table can sit deployed for a while before it has a room.
+  // Tables that were linked before `linkedAt` existed fall back to deploy time.
+  const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
+  const elapsed   = clockFrom  ? fmtClock((now - clockFrom) / 1000) : '—';
+  const sinceDeploy = m.deployedAt ? fmtClock((now - m.deployedAt) / 1000) : '—';
   const href      = tableHref(m, seasonId);
   const seat      = m.participants?.[uid];
 
@@ -453,7 +458,7 @@ function BoardView({ m, uid, now, seasonId }: { m: GMMission; uid: string; now: 
         <div>
           <div className="mp-ct-kick">Your table · live</div>
           <div className="mp-ct-name">{missionDisplayLabel(m)}</div>
-          <div className="mp-ct-room">{CASINO_GAMES[tableGame(m)].label} · deployed {elapsed} ago</div>
+          <div className="mp-ct-room">{CASINO_GAMES[tableGame(m)].label} · deployed {sinceDeploy} ago</div>
         </div>
         <span className="mp-phase-chip inprogress">In progress</span>
       </div>

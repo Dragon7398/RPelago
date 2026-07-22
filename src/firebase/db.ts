@@ -866,7 +866,17 @@ export async function adminUpdateParticipantSlotStatus(missionId: string, player
 
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {
   assertDb();
-  await set(sRef(db!, `missions/${missionId}/link`), link || null);
+  // `linkedAt` is the Elapsed clock's origin. Stamp it the first time a link goes
+  // up (later edits to the same room must not reset it) and clear it when the link
+  // is removed, so re-adding a link starts a fresh clock.
+  const updates: Record<string, unknown> = { link: link || null };
+  if (!link) {
+    updates.linkedAt = null;
+  } else {
+    const prev = await get(sRef(db!, `missions/${missionId}/linkedAt`));
+    if (!prev.exists()) updates.linkedAt = Date.now();
+  }
+  await update(sRef(db!, `missions/${missionId}`), updates);
 }
 
 export async function adminSetMissionRoomSettings(missionId: string, release: TriState, collect: TriState, hint: number): Promise<void> {
