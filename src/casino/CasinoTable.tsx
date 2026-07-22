@@ -49,10 +49,12 @@ const GAME_BLURB: Record<CasinoGame, string> = {
     'Five cards, one hand. Mark any you would rather not play — reroll them once for a ' +
     'fresh draw, or just leave them out. Commit the games you like (fewer than five is fine).',
   seven_card_stud:
-    'Seven cards, dealt at once. Drop the two you least want to play and commit the best five.',
+    'Seven cards, dealt at once. Commit up to five — at least two go unplayed, and you may drop ' +
+    'more than two if you only want the cards you like.',
   holdem:
     'Two hole cards now. Once every seat is in, five shared cards are revealed — then pay the ' +
-    'play-on to build your best five out of all seven, or fold and walk away from your ante.',
+    'play-on to commit up to five of your seven (dropping as many as you like), or fold and ' +
+    'walk away from your ante.',
   blackjack:
     'Push your luck. Draw from two cards up to six — every card is another game you commit to. ' +
     'You may discard at most one before you lock; at six cards you must discard exactly one.',
@@ -952,10 +954,18 @@ export function CasinoTable() {
                 {!resubmitting && game === 'five_card_draw' && rerolled ? ' · reroll spent' : ''}
                 {!resubmitting && game === 'blackjack' ? ` · ${hand.length}/${cfg.maxDraw} drawn` : ''}
               </div>
-              {resubmitting && (
+              {resubmitting ? (
                 <div className="cz-stage-note">
                   Choose which of your dealt cards to commit — drop one you've cooled on, or add one to be
                   bolder. Your gambit stays as it is; you'll re-attach your config after.
+                </div>
+              ) : (
+                // The "up to N" ceiling reads as a quota to new players, so spell out
+                // that dropping down to a single card is allowed (Blackjack aside).
+                <div className="cz-stage-note">
+                  {game === 'blackjack'
+                    ? `Commit up to ${cfg.pickMax}. You may drop at most one card — and at ${cfg.maxDraw} you must drop exactly one.`
+                    : `Commit up to ${cfg.pickMax} — that's a ceiling, not a quota. Drop as many as you like, down to a single card.`}
                 </div>
               )}
 
@@ -1068,8 +1078,9 @@ export function CasinoTable() {
             <>
               <div className="cz-stage-title">The reveal · build your best five</div>
               <div className="cz-stage-note">
-                Your two hole cards and the five shared cards are all in play. Drop any you don't
-                want and play on for {cfg.playOn}g — or fold and forfeit the {cfg.ante}g you're in for.
+                Your two hole cards and the five shared cards are all in play. Commit up to{' '}
+                {cfg.pickMax} — drop as many as you like, down to a single card — and play on for{' '}
+                {cfg.playOn}g, or fold and forfeit the {cfg.ante}g you're in for.
               </div>
               <div className="cz-hand">
                 {hand.map(c => {

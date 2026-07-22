@@ -20,19 +20,20 @@ const GAME_ICON: Record<CasinoGame, string> = {
 
 const GAME_BLURB: Record<CasinoGame, string> = {
   five_card_draw:
-    'Dealt 5 cards. You may reroll once to replace the cards you reject. Commit up to 5 — ' +
-    'rejecting a card simply drops it from your reward.',
+    'Dealt 5 cards. Mark any you would rather not play — reroll them once for a fresh draw, ' +
+    'or simply leave them out. You commit up to 5, and you may discard as many as you like.',
   seven_card_stud:
-    'Dealt 7 cards and no reroll. A bigger pool to choose from, but you still commit only ' +
-    'your best 5, so two cards always go unplayed.',
+    'Dealt 7 cards and no reroll. A bigger pool to choose from, but you commit at most 5, so ' +
+    'two cards always go unplayed — and you may drop more than two if you want to.',
   holdem:
     "The only game played across two sittings. Ante for 2 hole cards and lock them in; once " +
     'every seat is dealt in, five shared community cards are revealed to the whole table. ' +
-    'Then either pay the play-on and commit your best 5 from your hole cards plus the ' +
-    'community, or fold — folding forfeits your ante and leaves the seat empty.',
+    'Then either pay the play-on and commit up to 5 from the 7 available to you — discarding ' +
+    'as many as you like — or fold, which forfeits your ante and leaves the seat empty.',
   blackjack:
-    'Push your luck: draw one card at a time, up to 6, then keep your best 5. No reroll — ' +
-    'every card you take is a card you may have to play.',
+    'Push your luck: draw one card at a time, up to 6. The one game where you may discard at ' +
+    'most a single card — and at 6 cards you must discard exactly one. Every card you take is ' +
+    'a card you will almost certainly have to play.',
 };
 
 export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | 'casino' }) {
@@ -66,6 +67,25 @@ export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | '
           </div>
         ))}
       </div>
+
+      <h4>Committing Your Hand</h4>
+      <p>
+        Whatever you were dealt, you commit <strong>up to 5 cards</strong> — never more. That is a
+        ceiling, <em>not</em> a requirement: you may discard as many cards as you want and commit as
+        few as <strong>one</strong>. A discarded card is simply gone from your hand — it costs you
+        nothing beyond the gold it would have been worth.
+      </p>
+      <p>
+        So a Seven Card Stud hand must lose at least two cards, but you can drop three, four or five
+        of them if you'd rather only play the cards you're confident you can fill. The same goes for
+        Five Card Draw and Hold 'Em — commit two good cards instead of five awkward ones if that
+        suits you.
+      </p>
+      <p>
+        <strong>Blackjack is the exception.</strong> Because you chose to draw each card, you may
+        discard <strong>at most one</strong> — and if you push all the way to 6 cards you{' '}
+        <em>must</em> discard exactly one. Every card you hit for is a card you're committing to.
+      </p>
 
       <h4>Your Deck</h4>
       <p>
