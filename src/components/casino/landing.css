@@ -164,7 +164,10 @@ body.casino-scope #root { width: 100%; }
 .rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; }
 .rl-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.15rem; }
 .rl-pot .u { font-size: 0.6rem; color: var(--gold-dim); }
+/* Per-seat pot projection: Lounge only — the Floor's narrower cards can't spare
+   the room on the title line, so it keeps just the raw pot. */
 .rl-pot .s { font-size: 0.55rem; letter-spacing: 0.05em; color: var(--gold-dim); opacity: 0.85; }
+.rl-grid-tight .rl-pot .s { display: none; }
 
 .rl-entry { display: flex; gap: 0.5rem; flex-wrap: wrap; font-family:'Cinzel',serif; font-size: 0.58rem; letter-spacing: 0.04em; color: var(--gold-dim); }
 .rl-entry b { color: var(--parchment); }
