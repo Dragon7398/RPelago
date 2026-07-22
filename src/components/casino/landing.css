@@ -389,9 +389,8 @@ body.casino-scope #root { width: 100%; }
 /* ══ Profile modal ══ */
 .rl-prof-namerow { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 1rem; }
 .rl-prof-name { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.05rem; letter-spacing: 0.06em; }
-.rl-prof-ext { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 8px;
-  border: 1px solid var(--line); color: var(--gold-dim); flex-shrink: 0; transition: all 0.15s; }
-.rl-prof-ext:hover { color: var(--gold); border-color: var(--line-glow); }
+/* The profile link-out is <ProfileLink> — styled in components/profileLink.css
+   so the map app and the casino landing share one mark. */
 .rl-prof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .rl-prof-stat {
   display: flex; flex-direction: column; gap: 0.15rem; padding: 0.7rem 0.8rem;

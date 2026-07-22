@@ -7,6 +7,7 @@ import SettingsPanel from '../SettingsPanel';
 import HelpModal from '../HelpModal';
 import LoginModal from '../LoginModal';
 import PrivacyModal from '../PrivacyModal';
+import ProfileLink from '../ProfileLink';
 import PhasePanel from './PhasePanel';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
@@ -219,14 +220,7 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
         <span className="rl-prof-name" style={{ color: nameColorValue(player?.nameColor) }}>
           {(name || 'Player').toUpperCase()}
         </span>
-        <a className="rl-prof-ext" href={`https://profiles.brisbe.org/p/${uid}`}
-           target="_blank" rel="noopener noreferrer" title="View player profile">
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor" aria-hidden="true">
-            <path d="M10 1 L8.5 8.5 L11.5 8.5 Z" /><path d="M10 19 L11.5 11.5 L8.5 11.5 Z" />
-            <path d="M1 10 L8.5 8.5 L8.5 11.5 Z" /><path d="M19 10 L11.5 11.5 L11.5 8.5 Z" />
-            <circle cx="10" cy="10" r="2" />
-          </svg>
-        </a>
+        <ProfileLink uid={uid} />
       </div>
 
       <div className="rl-prof-grid">

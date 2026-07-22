@@ -8,6 +8,7 @@ import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/con
 import { db as firebaseDb } from '../firebase/config';
 import { sRef } from '../firebase/season';
 import { syncPlayerProfile } from '../firebase/db';
+import ProfileLink from './ProfileLink';
 import type { AdvClass, PlayerFeats, CompletedChallenge } from '../types';
 
 interface Props {
@@ -140,25 +141,7 @@ export default function ProfileLightbox({ open, onClose }: Props) {
               >
                 {user!.displayName.toUpperCase()}
               </div>
-              <a
-                className="profile-ext-link"
-                href={`https://profiles.brisbe.org/p/${user!.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View Player Profile"
-              >
-                <svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true">
-                  <path d="M10 1 L8.5 8.5 L11.5 8.5 Z" />
-                  <path d="M10 19 L11.5 11.5 L8.5 11.5 Z" />
-                  <path d="M1 10 L8.5 8.5 L8.5 11.5 Z" />
-                  <path d="M19 10 L11.5 11.5 L11.5 8.5 Z" />
-                  <path d="M17 3 L12 8.5 L13.5 10 Z" />
-                  <path d="M17 17 L11.5 12 L10 13.5 Z" />
-                  <path d="M3 17 L8 11.5 L6.5 10 Z" />
-                  <path d="M3 3 L8.5 8 L10 6.5 Z" />
-                  <circle cx="10" cy="10" r="2" />
-                </svg>
-              </a>
+              <ProfileLink uid={user!.id} />
             </div>
             <div className="profile-level-line">LEVEL {level} ADVENTURER</div>
 

@@ -1,0 +1,37 @@
+/* Shared styling for <ProfileLink> — the link out to the external profile site.
+   Used by the map app's ProfileLightbox and the casino landing's ProfileModal,
+   so it may only reference tokens that BOTH theme layers define
+   (index.css and casino/themes.css): --gold, --gold-dim, --bg-card,
+   --border, --border-glow. Notably NOT --line/--line-glow, which exist only
+   inside .rl-root. */
+
+.profile-link {
+  display: inline-flex; align-items: center; gap: 0.4rem; height: 2rem; padding: 0 0.6rem;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--gold-dim); flex-shrink: 0;
+  background: oklch(from var(--bg-card) l c h / 0.5); text-decoration: none;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.profile-link-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.66rem; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; line-height: 1;
+}
+.profile-link-arrow { font-size: 0.75rem; line-height: 1; opacity: 0.7; transition: transform 0.18s ease; }
+
+/* Rotation lives on the rose, not the anchor — rotating the anchor would spin
+   the label and arrow with it. */
+.profile-link .profile-compass { flex-shrink: 0; transition: transform 0.45s cubic-bezier(0.34, 1.4, 0.64, 1); }
+
+.profile-link:hover, .profile-link:focus-visible {
+  color: var(--gold); border-color: var(--border-glow);
+  background: oklch(from var(--gold) l c h / 0.1);
+  box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.18);
+}
+.profile-link:hover .profile-compass, .profile-link:focus-visible .profile-compass { transform: rotate(45deg); }
+.profile-link:hover .profile-link-arrow, .profile-link:focus-visible .profile-link-arrow {
+  transform: translate(1px, -1px); opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-link .profile-compass, .profile-link-arrow { transition: none; }
+  .profile-link:hover .profile-compass, .profile-link:focus-visible .profile-compass { transform: none; }
+}
