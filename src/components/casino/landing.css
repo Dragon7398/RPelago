@@ -176,6 +176,18 @@ body.casino-scope #root { width: 100%; }
 .rl-badge.ready { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.16); }
 .rl-badge.open { color: var(--gold-dim); border-color: var(--line); }
 .rl-badge.seated { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.55); background: oklch(from var(--gold) l c h / 0.14); }
+.rl-badge.live { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.16); display: inline-flex; align-items: center; gap: 0.35rem; }
+.rl-live-dot { width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 0 oklch(from var(--pos) l c h / 0.5); animation: rl-livepulse 1.8s ease-out infinite; }
+@keyframes rl-livepulse { 70% { box-shadow: 0 0 0 0.3rem oklch(from var(--pos) l c h / 0); } 100% { box-shadow: 0 0 0 0 oklch(from var(--pos) l c h / 0); } }
+
+/* Deployed tables read as live: a faint success-tinted top rim tells them apart
+   from the seat-taking cards without competing with the gold "your seat" glow. */
+.rl-tcard-live .rl-tcard-felt { border-bottom-color: oklch(from var(--pos) l c h / 0.35); }
+/* The whole live card is a button into its slot overview. */
+.rl-tcard-live { cursor: pointer; }
+.rl-tcard-live:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.4); }
+.rl-tcard-view { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); }
+.rl-tcard-live:hover .rl-tcard-view { color: var(--gold); }
 
 /* Config-denied notice — the player must resubmit at the table. */
 .rl-deny {
@@ -378,6 +390,7 @@ body.casino-scope #root { width: 100%; }
   border: 1px solid var(--line-glow); border-radius: 14px; padding: 1.6rem 1.5rem;
   box-shadow: 0 30px 70px #000c;
 }
+.rl-modal-wide { width: min(820px, 96vw); }
 .rl-modal-close { position: absolute; top: 0.9rem; right: 0.9rem; width: 2rem; height: 2rem; border-radius: 50%;
   background: oklch(from var(--bg-card) l c h / 0.8); border: 1px solid var(--line); color: var(--gold-dim); cursor: pointer; font-size: 0.9rem; }
 .rl-modal-close:hover { color: var(--gold); border-color: var(--line-glow); }
@@ -608,7 +621,7 @@ body.casino-scope #root { width: 100%; }
 
 @media (prefers-reduced-motion: reduce) {
   .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-sitflash-chip::after,
-  .rl-prof-swatch, .rl-prof-stat, .mp-ct, .rl-settled-wrap { animation: none !important; transition: none !important; }
+  .rl-prof-swatch, .rl-prof-stat, .mp-ct, .rl-settled-wrap, .rl-live-dot { animation: none !important; transition: none !important; }
   .rl-sitflash-chip::after { display: none; }
   .mp-meter-fill { transition: none !important; }
 }

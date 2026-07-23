@@ -524,6 +524,32 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
   );
 }
 
+// A standalone read-only slot overview for ANY table, reusing the Board view's
+// tile grid. The landing's in-progress table cards open this in a modal so the
+// floor's live rooms can be inspected without holding a seat there. `uid` only
+// tints the viewer's own tiles (harmless when they hold no seat at this table).
+export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
+  m: GMMission; uid: string | null;
+  colorOf: (playerId: string) => string;
+  handleOf: (playerId: string) => string | null;
+}) {
+  const tiles: OwnedGame[] = [];
+  Object.values(m.participants ?? {}).forEach((p, idx) => {
+    const hue = seatHue(idx);
+    for (const g of seatGames(p))
+      tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, you: p.playerId === uid, ownerHue: hue });
+  });
+  const goaled = tiles.filter(g => isGoaled(g.status)).length;
+  return (
+    <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
+      <Completion goaled={goaled} total={tiles.length} />
+      {tiles.length
+        ? <div style={{ marginTop: '1rem' }}><TileGrid tiles={tiles} wide /></div>
+        : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}
+    </PlayerCtx>
+  );
+}
+
 // ── Ledger (settled) ──────────────────────────────────────────────────────────
 
 const rollText = (t: TriState) => (t === 'on' ? 'On' : t === 'off' ? 'Off' : '—');

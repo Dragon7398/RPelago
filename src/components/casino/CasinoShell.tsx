@@ -8,14 +8,14 @@ import HelpModal from '../HelpModal';
 import LoginModal from '../LoginModal';
 import PrivacyModal from '../PrivacyModal';
 import ProfileLink from '../ProfileLink';
-import PhasePanel from './PhasePanel';
+import PhasePanel, { TableSlotsBoard } from './PhasePanel';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
-import { currentMaxSlots, msToNextDecay, missionDisplayLabel } from '../../lib/missionLogic';
+import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtClock } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
-import type { GMMission, ActivityEntry, Player } from '../../types';
+import type { GMMission, ActivityEntry, Player, SlotStatus } from '../../types';
 import '../../casino/themes.css';
 import './landing.css';
 
@@ -159,11 +159,77 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
   );
 }
 
+// ── In-progress table card ─────────────────────────────────────────────────────
+// A read-only companion to TableCard for tables that have already deployed. Where
+// TableCard sells an open seat, this one just reports how the room is doing — its
+// slots-goaled meter mirrors the Board view's Completion, so a forming-table grid
+// and a live-table grid read as one shelf.
+
+const GOALED_STATUSES: SlotStatus[] = ['Goaled', 'Done'];
+
+// Slots goaled over slots committed, summed across every seat at the table.
+function tableProgress(m: GMMission): { goaled: number; total: number } {
+  let goaled = 0, total = 0;
+  for (const p of Object.values(m.participants ?? {})) {
+    for (const s of p.slots ?? []) {
+      total++;
+      if (s.status && GOALED_STATUSES.includes(s.status)) goaled++;
+    }
+  }
+  return { goaled, total };
+}
+
+function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (m: GMMission) => void }) {
+  const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
+  const cfg   = CASINO_GAMES[game];
+  const seats = Object.values(m.participants ?? {}).length;
+  const { goaled, total } = tableProgress(m);
+  const pct  = total ? Math.round((goaled / total) * 100) : 0;
+  const done = total > 0 && goaled === total;
+  // Elapsed matches the Board view: from the room link going up, not from deploy.
+  const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
+  const elapsed   = clockFrom ? fmtClock((now - clockFrom) / 1000) : '—';
+
+  return (
+    <div className="rl-tcard rl-tcard-live" role="button" tabIndex={0}
+         title="View this table's slots"
+         onClick={() => onOpen(m)}
+         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m); } }}>
+      <div className="rl-tcard-felt">
+        <div className="rl-tcard-tag">{gameFamily(game)}</div>
+        <div className="rl-tcard-name">
+          {cfg.label}
+          <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>
+        </div>
+        <div className="rl-tcard-room">Cohort {toRoman(m.series)} · live</div>
+      </div>
+      <div className="rl-tcard-body">
+        <div className="mp-complete-wrap">
+          <div className="mp-complete">
+            <span className="big">{goaled}</span><span className="of">/ {total}</span>
+            <span className="lab">slots goaled · {pct}%</span>
+          </div>
+          <div className={`mp-meter${done ? ' done' : ''}`}><div className="mp-meter-fill" style={{ width: `${pct}%` }} /></div>
+        </div>
+        {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
+        <div className="rl-tcard-stats">
+          <div className="rl-mini"><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{seats}</span></div>
+          <div className="rl-mini"><span className="rl-mini-lbl">Elapsed</span><span className="rl-mini-val">{elapsed}</span></div>
+        </div>
+        <div className="rl-tcard-foot">
+          <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>
+          <span className="rl-tcard-view">View slots →</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Nav modals (compact, real data) ───────────────────────────────────────────
-function Modal({ title, tag, onClose, children }: { title: string; tag: string; onClose: () => void; children: ReactNode }) {
+function Modal({ title, tag, onClose, children, wide }: { title: string; tag: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="rl-overlay" onClick={onClose}>
-      <div className="rl-modal" onClick={e => e.stopPropagation()}>
+      <div className={`rl-modal${wide ? ' rl-modal-wide' : ''}`} onClick={e => e.stopPropagation()}>
         <button className="rl-modal-close" onClick={onClose} aria-label="Close">✕</button>
         <div className="rl-modal-name">{title}</div>
         <div className="rl-modal-tag">{tag}</div>
@@ -293,6 +359,9 @@ export default function CasinoShell() {
   const isAdmin = useIsAdmin();
   const [view, setView] = useState<View>(loadView);
   const [modal, setModal] = useState<null | 'profile' | 'games' | 'feed'>(null);
+  // In-progress table whose slot overview is open, held by id so the modal tracks
+  // the table's live status as seats goal out.
+  const [slotsId, setSlotsId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen]       = useState(false);
   const [loginOpen, setLoginOpen]     = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(() => window.location.hash === '#privacy');
@@ -349,9 +418,22 @@ export default function CasinoShell() {
       .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
   }, [gameState?.missions]);
 
+  // Deployed tables other than the one you're seated at (yours already lives in the
+  // Board view above). Shown as read-only progress cards so the floor's live rooms
+  // are visible alongside the ones still taking seats.
+  const liveTables = useMemo(() => {
+    const all = Object.values(gameState?.missions ?? {});
+    return all
+      .filter(m => m.type === 'casino' && m.state === 'inprogress' && m.id !== activeMission)
+      .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
+  }, [gameState?.missions, activeMission]);
+
   // The table you hold a seat at — live, so it carries you from forming through
   // in-progress without the panel tracking phase itself.
   const seatedAt   = activeMission ? gameState?.missions?.[activeMission] ?? null : null;
+  // Live-resolved so the open slot overview keeps updating; closes itself if the
+  // table settles out of `missions` while the modal is up.
+  const slotsMission = slotsId ? gameState?.missions?.[slotsId] ?? null : null;
   const lastSettled = useLastSettled(gameState?.missionsHistory, user?.id ?? null);
   // Dismissed-ledger id lives here (not in PhasePanel) so the tables heading below
   // and the panel agree on whether the Ledger is showing.
@@ -456,6 +538,18 @@ export default function CasinoShell() {
             </div>}
       </div>
 
+      {liveTables.length > 0 && (
+        <div className="rl-sec">
+          <div className="rl-sec-head">
+            <span className="rl-sec-title">Tables In Progress</span>
+            <span className="rl-sec-note">{liveTables.length} table{liveTables.length === 1 ? '' : 's'} playing on</span>
+          </div>
+          <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
+            {liveTables.map(m => <ProgressCard key={m.id} m={m} now={now} onOpen={() => setSlotsId(m.id)} />)}
+          </div>
+        </div>
+      )}
+
       {/* Shared site settings (theme + font size + reduced motion). The font
           scale drives html{font-size}, so it scales the casino too. */}
       <SettingsPanel variant="casino" />
@@ -476,6 +570,17 @@ export default function CasinoShell() {
         onPrivacyClick={() => { setLoginOpen(false); setPrivacyOpen(true); }}
       />
       <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
+
+      {slotsMission && (
+        <Modal wide
+          title={CASINO_GAMES[(slotsMission.casinoGame ?? 'five_card_draw') as CasinoGame].label}
+          tag={`Cohort ${toRoman(slotsMission.series)} · Table Slots`}
+          onClose={() => setSlotsId(null)}>
+          <TableSlotsBoard m={slotsMission} uid={user?.id ?? null}
+            colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
+            handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null} />
+        </Modal>
+      )}
 
       {modal === 'games' && <GamesModal onClose={() => setModal(null)} />}
       {modal === 'feed'  && <FeedModal entries={activityLog} now={now} onClose={() => setModal(null)} />}
