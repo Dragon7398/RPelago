@@ -15,7 +15,7 @@ import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtClock } from '../../lib/missionLogic';
 import { toRoman } from '../../lib/constants';
-import type { GMMission, ActivityEntry, Player, SlotStatus } from '../../types';
+import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
 import '../../casino/themes.css';
 import './landing.css';
 
@@ -179,6 +179,33 @@ function tableProgress(m: GMMission): { goaled: number; total: number } {
   return { goaled, total };
 }
 
+// Once a table deploys, Release/Collect have actually ROLLED — so an in-progress
+// card shows the resolved On/Off outcome, not the pre-deploy % chance the forming
+// cards advertise. Hint stays a cost %, mirroring the Board view's Telemetry.
+const rollFlag = (t: TriState): { txt: string; cls: string } =>
+  t === 'on' ? { txt: 'On', cls: 'on' } : t === 'off' ? { txt: 'Off', cls: 'off' } : { txt: 'to roll', cls: 'pending' };
+
+function RollFlags({ m }: { m: GMMission }) {
+  const rel = rollFlag(m.release);
+  const col = rollFlag(m.collect);
+  return (
+    <div className="rl-odds">
+      <div className="rl-odd" style={{ '--oh': 200 } as React.CSSProperties}>
+        <span className="rl-odd-lbl">Release</span>
+        <span className={`mp-roll ${rel.cls}`}>{rel.txt}</span>
+      </div>
+      <div className="rl-odd" style={{ '--oh': 295 } as React.CSSProperties}>
+        <span className="rl-odd-lbl">Collect</span>
+        <span className={`mp-roll ${col.cls}`}>{col.txt}</span>
+      </div>
+      <div className="rl-odd" style={{ '--oh': 30 } as React.CSSProperties}>
+        <span className="rl-odd-lbl">Hint</span>
+        <span className="rl-odd-val">{m.hint}<small>%</small></span>
+      </div>
+    </div>
+  );
+}
+
 function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (m: GMMission) => void }) {
   const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg   = CASINO_GAMES[game];
@@ -211,7 +238,7 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
           </div>
           <div className={`mp-meter${done ? ' done' : ''}`}><div className="mp-meter-fill" style={{ width: `${pct}%` }} /></div>
         </div>
-        {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
+        <RollFlags m={m} />
         <div className="rl-tcard-stats">
           <div className="rl-mini"><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{seats}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Elapsed</span><span className="rl-mini-val">{elapsed}</span></div>
