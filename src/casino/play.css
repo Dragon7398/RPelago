@@ -301,6 +301,35 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 
 .sf-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.1rem; }
 .sf-panel-title { font-family:'Cinzel',serif; font-size: 0.6rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.8rem; }
+
+/* Manifest panel header: title on the left, a "?" that opens the YAML Rules on the right */
+.sf-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.8rem; }
+.sf-panel-head .sf-panel-title { border-bottom: none; margin-bottom: 0; padding-bottom: 0.5rem; }
+.sf-help-btn {
+  flex: none; width: 1.5rem; height: 1.5rem; margin-bottom: 0.4rem; border-radius: 50%;
+  background: none; border: 1px solid var(--line); color: var(--gold-dim); cursor: pointer;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.8rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+}
+.sf-help-btn:hover { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 10px oklch(from var(--gold) l c h / 0.2); }
+
+/* Pre-submit reminder — nudge to test/generate the YAML and stay under the check cap */
+.sf-reminder {
+  font-family: 'Crimson Pro', serif; font-size: 0.92rem; line-height: 1.4; color: var(--parchment);
+  background: oklch(from var(--gold) l c h / 0.07); border: 1px solid oklch(from var(--gold) l c h / 0.25);
+  border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.9rem;
+}
+.sf-reminder strong { color: var(--gold); }
+
+/* YAML Rules lightbox body (reuses the .cz-preview-overlay/panel shell) */
+.cz-rules { font-family: 'Crimson Pro', serif; color: var(--parchment); font-size: 0.95rem; line-height: 1.5; }
+.cz-rules p { margin: 0 0 0.9rem; }
+.cz-rules a { color: var(--gold); }
+.cz-rules ul { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.cz-rules li { margin: 0; }
+.cz-rules ul ul { margin-top: 0.5rem; gap: 0.3rem; }
+.cz-rules strong { color: var(--gold); }
+.cz-rules code { font-family: 'Courier New', monospace; font-size: 0.85em; background: oklch(from var(--bg-deep) l c h / 0.6); padding: 0.05rem 0.3rem; border-radius: 3px; color: var(--gold-dim); }
 .sf-mlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.1rem 1.4rem; margin-bottom: 0.4rem; }
 .sf-mline { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px dashed oklch(from var(--border) l c h / 0.6); }
 .sf-mline:last-of-type { border-bottom: none; }

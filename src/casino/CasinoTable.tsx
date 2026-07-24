@@ -19,6 +19,7 @@ import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
 import { DeckPreview } from './DeckPreview';
+import { YamlRulesLightbox } from './YamlRulesLightbox';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -160,6 +161,7 @@ export function CasinoTable() {
   const [potBump, setPotBump]     = useState(false);
   const [preferredDeck, setPreferredDeck] = useState<CasinoDeckChoice>('purist');
   const [previewDeck, setPreviewDeck]     = useState<CasinoDeckChoice | null>(null);
+  const [showYamlRules, setShowYamlRules] = useState(false);
 
   const prevPot = useRef<number | null>(null);
   const yamlInputRef = useRef<HTMLInputElement>(null);
@@ -1198,7 +1200,15 @@ export function CasinoTable() {
 
               {/* Mission Manifest — per-card mapping (display-only, from the config) + YAML attach */}
               <div className="sf-panel">
-                <div className="sf-panel-title">Mission Manifest</div>
+                <div className="sf-panel-head">
+                  <div className="sf-panel-title">Mission Manifest</div>
+                  <button type="button" className="sf-help-btn" onClick={() => setShowYamlRules(true)}
+                          title="YAML Rules" aria-label="Open YAML Rules">?</button>
+                </div>
+                <div className="sf-reminder">
+                  Remember to <strong>test and generate your YAML</strong> before submitting. It should
+                  generate at or below <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
+                </div>
                 <div className="sf-manifest">
                   {committedCards.map((c, i) => {
                     const v  = manifest[c.uid];
@@ -1362,6 +1372,7 @@ export function CasinoTable() {
       </div>
 
       {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
+      {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} />}
     </div>
   );
 }
