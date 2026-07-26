@@ -4234,3 +4234,40 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
   .ag-drawer { width: 100%; max-width: 100%; }
   .ag-launcher { bottom: 1rem; right: 1rem; }
 }
+
+/* ── Status Report ─────────────────────────────────────────────────────────── */
+/* Colours derive from --bg-card (hue 25 = red problem, hue 60 = amber warning) so
+   they invert correctly across the dark and light themes. Icons + reason text carry
+   the meaning independently of hue for the colour-blind themes. */
+.sr-legend {
+  display: flex; gap: 1.2rem; align-items: center;
+  margin-bottom: 1rem; font-size: 0.7rem; color: var(--gold-dim);
+}
+.sr-legend > span { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+.sr-card { margin-bottom: 0.9rem; }
+.sr-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.55rem; }
+.sr-card-kind { font-size: 0.95rem; color: var(--gold-dim); flex-shrink: 0; }
+.sr-card-counts { margin-left: auto; display: flex; gap: 0.5rem; font-size: 0.62rem; font-variant-numeric: tabular-nums; }
+.sr-count-problem { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-count-warning { color: var(--amber); }
+
+.sr-player {
+  padding: 0.3rem 0 0.3rem 0.55rem; margin-bottom: 0.5rem;
+  border-left: 2px solid oklch(from var(--gold-dim) l c h / 0.35);
+}
+.sr-player-handle { font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--gold); margin-bottom: 0.3rem; }
+
+.sr-slot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.32rem; }
+.sr-slot { display: flex; gap: 0.45rem; align-items: flex-start; }
+.sr-badge { flex-shrink: 0; font-size: 0.8rem; line-height: 1.25; }
+.sr-badge-problem { color: oklch(from var(--bg-card) calc(1 - l) 0.2 25); }
+.sr-badge-warning { color: var(--amber); }
+.sr-slot-body { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
+.sr-slot-name { font-size: 0.72rem; color: var(--parchment); word-break: break-word; }
+.sr-slot-game { color: var(--gold-dim); }
+.sr-slot-reasons { font-size: 0.64rem; color: var(--gold-dim); word-break: break-word; }
+.sr-slot-problem .sr-slot-reasons { color: oklch(from var(--bg-card) calc(1 - l) 0.13 25); }
+
+.sr-section { margin-top: 1.15rem; }
+.sr-section .casino-log-toggle { margin-bottom: 0.6rem; }

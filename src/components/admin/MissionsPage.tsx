@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, type CasinoYaml } from '../../firebase/db';
-import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
+import { currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, type CasinoYaml } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -430,18 +430,23 @@ function MissionCard({ mission }: { mission: GMMission }) {
           try {
             const games = await fetchCheeseDetails(cheeseId);
             const statusMap = new Map<string, SlotStatus>();
+            // last_activity = STRONG server-verified activity; last_checked = WEAK
+            // manual self-report. Absent on the tracker → null. Recorded for every
+            // slot, whether or not its status changed.
+            const timeMap = new Map<string, { lastChecked: number | null; lastActivity: number | null }>();
             for (const g of games) {
-              const isGoal = g.tracker_status === 'goal_completed';
-              const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
-              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
-              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
-              if (s) statusMap.set(extractApSlotName(g.name), s);
+              const key = extractApSlotName(g.name);
+              const s = deriveSlotStatus(g);
+              if (s) statusMap.set(key, s);
+              timeMap.set(key, { lastChecked: parseCheeseTs(g.last_checked), lastActivity: parseCheeseTs(g.last_activity) });
             }
             for (const [pid, p] of Object.entries(mission.participants ?? {})) {
               const slots = p.slots ?? [];
               for (let i = 0; i < slots.length; i++) {
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateParticipantSlotStatus(mission.id, pid, i, newStatus);
+                const t = timeMap.get(slots[i].name);
+                if (t) await adminUpdateParticipantSlotActivity(mission.id, pid, i, t.lastChecked, t.lastActivity);
               }
             }
           } catch { /* cheese details fetch is best-effort */ }
@@ -461,7 +466,14 @@ function MissionCard({ mission }: { mission: GMMission }) {
   // Mount-time only, deliberately: setting the link on a live panel must not yank
   // the section closed while the host is still working in it.
   const [slotsOpen, setSlotsOpen] = useState(() => !mission.link);
-  const [now] = useState(() => Date.now());
+  // Ticks the Elapsed / since-report clocks below. A status-report monitor is only
+  // useful if the times advance live, so re-render once a second rather than only
+  // on RTDB changes.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const label        = missionDisplayLabel(mission);
   const participants = Object.entries(mission.participants ?? {});
@@ -479,6 +491,16 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const allSlots   = participants.flatMap(([, p]) => p.slots ?? []);
   const totalSlots = allSlots.length;
   const doneSlots  = allSlots.filter(s => s.status === 'Done' || s.status === 'Goaled').length;
+
+  // Elapsed clock origin: the room link going up is when play can actually start,
+  // matching the player-facing PhasePanel. Fall back through deploy → first join →
+  // creation so every card — forming or in progress — always shows something.
+  const clockOrigin = mission.linkedAt ?? mission.deployedAt ?? mission.firstJoinAt ?? mission.createdAt;
+  const elapsed     = clockOrigin != null ? fmtClock((now - clockOrigin) / 1000) : '—';
+  // "Since last report" runs from the most recent status report; with none filed
+  // yet (feature lands next task) it falls back to the Elapsed origin.
+  const reportOrigin = mission.lastReportAt ?? clockOrigin;
+  const sinceReport  = reportOrigin != null ? fmtClock((now - reportOrigin) / 1000) : '—';
 
   const nextDecayMs = mission.state === 'forming' && mission.firstJoinAt != null
     ? mission.firstJoinAt + Math.ceil((now - mission.firstJoinAt) / (24 * 3600_000)) * (24 * 3600_000) - now
@@ -546,6 +568,15 @@ function MissionCard({ mission }: { mission: GMMission }) {
             {syncing ? '…' : 'Sync'}
           </button>
         )}
+      </div>
+
+      {/* Elapsed + time-since-last-report clocks — for admin status-report cadence */}
+      <div style={{ display: 'flex', gap: '1.2rem', flexWrap: 'wrap', fontSize: '0.62rem', color: 'var(--gold-dim)', marginTop: '0.3rem' }}>
+        <span>Elapsed <b style={{ color: 'var(--parchment)', fontVariantNumeric: 'tabular-nums' }}>{elapsed}</b></span>
+        <span>
+          Since report <b style={{ color: 'var(--parchment)', fontVariantNumeric: 'tabular-nums' }}>{sinceReport}</b>
+          {mission.lastReportAt == null && <span style={{ opacity: 0.6 }}> (none yet)</span>}
+        </span>
       </div>
 
       {/* Casino: variable reward display */}

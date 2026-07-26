@@ -5,8 +5,8 @@ import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
-import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
-import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, freeAdventurer } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 
 interface TileBadgeInfo {
   cursed: boolean;
@@ -149,18 +149,20 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
           try {
             const games = await fetchCheeseDetails(cheeseId);
             const statusMap = new Map<string, SlotStatus>();
+            const timeMap = new Map<string, { lastChecked: number | null; lastActivity: number | null }>();
             for (const g of games) {
-              const isGoal = g.tracker_status === 'goal_completed';
-              const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
-              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
-              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
-              if (s) statusMap.set(extractApSlotName(g.name), s);
+              const key = extractApSlotName(g.name);
+              const s = deriveSlotStatus(g);
+              if (s) statusMap.set(key, s);
+              timeMap.set(key, { lastChecked: parseCheeseTs(g.last_checked), lastActivity: parseCheeseTs(g.last_activity) });
             }
             for (const adv of roomAdvs) {
               const slots = adv.slots ?? [];
               for (let i = 0; i < slots.length; i++) {
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateAdvSlotStatus(coord, adv.advId, i, newStatus);
+                const t = timeMap.get(slots[i].name);
+                if (t) await adminUpdateAdvSlotActivity(coord, adv.advId, i, t.lastChecked, t.lastActivity);
               }
               if (
                 slots.length > 0 &&
@@ -177,6 +179,8 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
               if (isBifurcated && ps.room && ps.room !== room) continue;
               const newStatus = statusMap.get(ps.name);
               if (newStatus) await adminUpdatePublicSlotStatus(coord, i, newStatus);
+              const t = timeMap.get(ps.name);
+              if (t) await adminUpdatePublicSlotActivity(coord, i, t.lastChecked, t.lastActivity);
             }
           } catch { /* cheese details fetch is best-effort */ }
         } catch {

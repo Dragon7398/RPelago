@@ -2242,24 +2242,52 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         const data = await res.json();
         return data.games ?? null;
     }
+    const parseTs = (v) => {
+        if (!v)
+            return null;
+        const t = Date.parse(v);
+        return Number.isNaN(t) ? null : t;
+    };
+    // In-Progress is gated on `last_activity` (the STRONG server-verified play signal),
+    // NOT checks_done: `collect` mechanics can inflate a check count without the player
+    // ever launching the game, so checks alone don't prove they've played. `last_checked`
+    // is only a weak manual self-report and doesn't qualify a slot as In-Progress.
+    // Done/Goaled/100% still take priority (terminal). Mirrors deriveSlotStatus in
+    // src/lib/archipelagoApi.ts.
     function deriveStatus(g) {
         const isGoal = g.tracker_status === 'goal_completed';
         const is100 = g.checks_total > 0 && g.checks_done === g.checks_total;
-        const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
         if (isGoal && is100)
             return 'Done';
         if (isGoal)
             return 'Goaled';
         if (is100)
             return '100%';
-        if (isInProgress)
+        if (parseTs(g.last_activity) != null)
             return 'In-Progress';
         return null;
+    }
+    // name → { lastChecked, lastActivity } (ms epoch or null), for stamping every slot.
+    function buildTimeMap(games) {
+        return new Map(games.map(g => [
+            extractApSlotName(g.name),
+            { lastChecked: parseTs(g.last_checked), lastActivity: parseTs(g.last_activity) },
+        ]));
     }
     function hasActiveSlots(slots) {
         return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
     }
     const updates = {};
+    // Stamp a slot's activity timestamps into `updates`, but only the fields that
+    // actually changed — avoids rewriting unchanged leaves every 15-minute tick.
+    function stampSlotTimes(basePath, slot, t) {
+        if (!t)
+            return;
+        if (t.lastChecked !== (slot.lastChecked ?? null))
+            updates[`${basePath}/lastChecked`] = t.lastChecked;
+        if (t.lastActivity !== (slot.lastActivity ?? null))
+            updates[`${basePath}/lastActivity`] = t.lastActivity;
+    }
     // Fan out over live + draft seasons (scheduled functions have no season param).
     const seasons = await (0, seasonPaths_1.tickableSeasons)(db, true);
     for (const { seasonId } of seasons) {
@@ -2295,6 +2323,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         const s = deriveStatus(g);
                         return s ? [[extractApSlotName(g.name), s]] : [];
                     }));
+                    const timeMap = buildTimeMap(games);
                     for (const adv of roomAdvs) {
                         const slots = adv.slots ?? [];
                         for (let i = 0; i < slots.length; i++) {
@@ -2302,6 +2331,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                             if (newStatus && slots[i].status !== newStatus) {
                                 updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`)] = newStatus;
                             }
+                            stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
                         }
                         if (slots.length > 0 &&
                             slots.every(s => {
@@ -2321,6 +2351,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         if (newStatus && ps.status !== newStatus) {
                             updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}/status`)] = newStatus;
                         }
+                        stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}`), ps, timeMap.get(ps.name));
                     }
                 }
             }
@@ -2342,6 +2373,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                     const s = deriveStatus(g);
                     return s ? [[extractApSlotName(g.name), s]] : [];
                 }));
+                const timeMap = buildTimeMap(games);
                 for (const [pid, p] of Object.entries(mission.participants ?? {})) {
                     const slots = p.slots ?? [];
                     for (let i = 0; i < slots.length; i++) {
@@ -2349,6 +2381,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         if (newStatus && slots[i].status !== newStatus) {
                             updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}/status`)] = newStatus;
                         }
+                        stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
                     }
                 }
             }
@@ -2447,6 +2480,9 @@ exports.fetchCheeseDetails = (0, https_1.onCall)(async (request) => {
             tracker_status: g.tracker_status,
             checks_done: g.checks_done,
             checks_total: g.checks_total,
+            // ISO timestamps (or null). last_activity: STRONG server activity; last_checked: WEAK self-report.
+            last_activity: g.last_activity ?? null,
+            last_checked: g.last_checked ?? null,
         })),
     };
 });

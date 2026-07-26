@@ -5,8 +5,8 @@ import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { hasUnfinishedTileSlots } from '../../lib/missionLogic';
 import type { Tile, TileState, TriState, SlotStatus } from '../../types';
-import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, freeAdventurer } from '../../firebase/db';
-import { fetchRoomStatus, extractApSlotName } from '../../lib/archipelagoApi';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, freeAdventurer } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 import MapGridPanel        from './mapPage/MapGridPanel';
 import TraitEditor         from './mapPage/TraitEditor';
 import AdvSlotEditor       from './mapPage/AdvSlotEditor';
@@ -122,18 +122,20 @@ const handleRegenStats = async () => {
           try {
             const games = await fetchCheeseDetails(cheeseId);
             const statusMap = new Map<string, SlotStatus>();
+            const timeMap = new Map<string, { lastChecked: number | null; lastActivity: number | null }>();
             for (const g of games) {
-              const isGoal = g.tracker_status === 'goal_completed';
-              const is100  = g.checks_total > 0 && g.checks_done === g.checks_total;
-              const isInProgress = !isGoal && g.checks_done > 0 && g.checks_done < g.checks_total;
-              const s = isGoal && is100 ? 'Done' as const : isGoal ? 'Goaled' as const : is100 ? '100%' as const : isInProgress ? 'In-Progress' as const : null;
-              if (s) statusMap.set(extractApSlotName(g.name), s);
+              const key = extractApSlotName(g.name);
+              const s = deriveSlotStatus(g);
+              if (s) statusMap.set(key, s);
+              timeMap.set(key, { lastChecked: parseCheeseTs(g.last_checked), lastActivity: parseCheeseTs(g.last_activity) });
             }
             for (const adv of roomAdvs) {
               const slots = adv.slots ?? [];
               for (let i = 0; i < slots.length; i++) {
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateAdvSlotStatus(selectedCoord, adv.advId, i, newStatus);
+                const t = timeMap.get(slots[i].name);
+                if (t) await adminUpdateAdvSlotActivity(selectedCoord, adv.advId, i, t.lastChecked, t.lastActivity);
               }
               if (
                 slots.length > 0 &&
@@ -150,6 +152,8 @@ const handleRegenStats = async () => {
               if (isBifurcated && ps.room && ps.room !== room) continue;
               const newStatus = statusMap.get(ps.name);
               if (newStatus) await adminUpdatePublicSlotStatus(selectedCoord, i, newStatus);
+              const t = timeMap.get(ps.name);
+              if (t) await adminUpdatePublicSlotActivity(selectedCoord, i, t.lastChecked, t.lastActivity);
             }
             const assignedNames = new Set(roomAdvs.flatMap(a => (a.slots ?? []).map(s => s.name)));
             const unassigned = games

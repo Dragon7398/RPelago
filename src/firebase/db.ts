@@ -178,7 +178,19 @@ export async function setTileInProgress(
 }
 
 export async function updateTileAdmin(coord: string, updates: Partial<Tile>): Promise<void> {
-  await update(sRef(db!, `tiles/${coord}`), { ...updates, adminOverride: true });
+  const out: Record<string, unknown> = { ...updates, adminOverride: true };
+  // Mirror adminSetMissionLink: `linkedAt` is the Elapsed clock's origin. Stamp it
+  // the first time a link goes up and clear it when the link is removed, so a
+  // re-added link starts a fresh clock. Only touch it when `link` is being edited.
+  if ('link' in updates) {
+    if (!updates.link) {
+      out.linkedAt = null;
+    } else {
+      const prev = await get(sRef(db!, `tiles/${coord}/linkedAt`));
+      if (!prev.exists()) out.linkedAt = Date.now();
+    }
+  }
+  await update(sRef(db!, `tiles/${coord}`), out);
 }
 
 export async function resetTileStats(coord: string, stats: Partial<Tile>): Promise<void> {
@@ -577,6 +589,10 @@ export interface CheeseGame {
   tracker_status: string;
   checks_done: number;
   checks_total: number;
+  // ISO timestamps (or null). last_activity: STRONG — last server-verified activity
+  // from the AP server. last_checked: WEAK — the player's last manual self-report.
+  last_activity?: string | null;
+  last_checked?: string | null;
 }
 
 export async function fetchCheeseDetails(cheeseId: string): Promise<CheeseGame[]> {
@@ -595,6 +611,24 @@ export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slo
 export async function adminUpdatePublicSlotStatus(coord: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
   await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/status`), status);
+}
+
+// Cheesetracker activity timestamps (ms epoch, or null to clear). See AdvSlot —
+// lastActivity = STRONG server-verified activity, lastChecked = WEAK manual self-report.
+export async function adminUpdateAdvSlotActivity(
+  coord: string, advId: string, slotIndex: number,
+  lastChecked: number | null, lastActivity: number | null,
+): Promise<void> {
+  assertDb();
+  await update(sRef(db!, `tiles/${coord}/adventurers/${advId}/slots/${slotIndex}`), { lastChecked, lastActivity });
+}
+
+export async function adminUpdatePublicSlotActivity(
+  coord: string, slotIndex: number,
+  lastChecked: number | null, lastActivity: number | null,
+): Promise<void> {
+  assertDb();
+  await update(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}`), { lastChecked, lastActivity });
 }
 
 export async function freeAdventurer(ownerId: string, advId: string): Promise<void> {
@@ -862,6 +896,18 @@ export async function adminSetParticipantSlots(missionId: string, playerId: stri
 export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
   await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
+}
+
+// Stamps a slot's Cheesetracker activity timestamps (ms epoch, or null to clear —
+// the tracker had no value). Written for every synced slot, independent of status.
+export async function adminUpdateParticipantSlotActivity(
+  missionId: string, playerId: string, slotIndex: number,
+  lastChecked: number | null, lastActivity: number | null,
+): Promise<void> {
+  assertDb();
+  await update(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}`), {
+    lastChecked, lastActivity,
+  });
 }
 
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {

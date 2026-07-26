@@ -25,6 +25,14 @@ export interface AdvSlot {
   room?: 1 | 2;       // bifurcated tiles: which room this slot belongs to
   bonusXP?: number;   // extra XP awarded to the player who completes this slot
   bonusGold?: number; // extra gold awarded to the player who completes this slot
+  // Stamped from Cheesetracker on sync (ms epoch, or null when the tracker has no
+  // value yet). Drive the status report.
+  //   lastActivity — STRONG: last server-verified activity from the Archipelago
+  //                  server (the real "still playing / making progress" signal).
+  //   lastChecked  — WEAK: the player's last manual self-report vouching status
+  //                  (e.g. "I'm stuck"); may be inaccurate.
+  lastActivity?: number | null;
+  lastChecked?: number | null;
 }
 
 export interface AdvStatusNote {
@@ -60,6 +68,12 @@ export interface Tile {
   tauntedAdvId?: string;
   link: string;
   link2?: string;
+  // When the room link first went up — the Elapsed clock's origin, mirroring GMMission.
+  // Stamped on first link set, cleared when the link is removed.
+  linkedAt?: number;
+  // When the most recent admin status report was filed on this challenge (setter
+  // arrives in a later task). Drives the status report's "Recently Reported" bucket.
+  lastReportAt?: number;
   tracker?: string;
   tracker2?: string;
   cheese?: string;
@@ -353,6 +367,10 @@ export interface GMMission {
   // deploy — players can't actually start until there's a room to join. Cleared
   // when the link is removed, so a re-added link restarts the clock.
   linkedAt?:       number;
+  // When the most recent admin status report was filed. The "since last report"
+  // clock runs from here; unset (no report yet) falls back to the Elapsed origin.
+  // Status reports themselves land in a later task — this is just the timestamp.
+  lastReportAt?:   number;
   tracker?:        string;
   cheese?:         string;
   firstJoinAt:     number | null;
