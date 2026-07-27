@@ -455,6 +455,10 @@ export const purchaseShopOrb = onCall(async (request) => {
 
 // ── onTileComplete ────────────────────────────────────────────────────────────
 
+// A player who racked up this many official-report Problem incidents on a world
+// gets an auto profile warning when that world completes.
+const STATUS_INCIDENT_WARN_THRESHOLD = 5;
+
 interface AdvEntry {
   owner:    string;
   ownerName: string;
@@ -493,15 +497,17 @@ export const onTileComplete = onValueWritten(
     // Read tile adventurers and all player records in parallel.
     // tile.adventurers at completion is the canonical claim list: players freed early
     // (slot completion) remain listed here; players who explicitly recalled do not.
-    const [advSnap, playersSnap] = await Promise.all([
+    const [advSnap, playersSnap, tileMetaSnap] = await Promise.all([
       db.ref(sp(seasonId, `tiles/${coord}/adventurers`)).get(),
       db.ref(sp(seasonId, 'players')).get(),
+      db.ref(sp(seasonId, `tiles/${coord}`)).get(),
     ]);
 
     if (!advSnap.exists()) return;
 
     const adventurers = advSnap.val() as Record<string, AdvEntry>;
     const players     = playersSnap.val() as Record<string, PlayerRecord> | null;
+    const tileMeta    = tileMetaSnap.val() as { name?: string; statusIncidents?: Record<string, number> } | null;
 
     // Group adventurers by owner; collect each owner's normalized game names.
     const byOwner = new Map<string, Set<string>>();
@@ -560,6 +566,17 @@ export const onTileComplete = onValueWritten(
       // replace '.' (invalid Firebase key char) with '_'.
       if (player.discordHandle) {
         profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+      }
+
+      // Auto profile warning for repeated status-report Problems on this challenge.
+      const incidents = tileMeta?.statusIncidents?.[playerId] ?? 0;
+      if (incidents >= STATUS_INCIDENT_WARN_THRESHOLD) {
+        const wKey = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push().key!;
+        profileUpdates[sp(seasonId, `players/${playerId}/warnings/${wKey}`)] = {
+          timestamp: Date.now(),
+          message: `${tileMeta?.name || coord}: ${incidents} status incidents.`,
+          auto: true,
+        };
       }
     }
 
@@ -713,6 +730,7 @@ interface GMMission {
   deployedAt?:  number;
   participants: Record<string, GMParticipant>;
   claimableSlots?: Record<string, GMSlot[]>;
+  statusIncidents?: Record<string, number>;   // per-player official-report Problem count
   // casino-only
   variableReward?: boolean;
   tableUrl?:       string;
@@ -751,6 +769,8 @@ interface Tile {
   cheese?:      string;
   cheese2?:     string;
   publicSlots?: TileSlot[];
+  name?:        string;
+  statusIncidents?: Record<string, number>;   // per-player official-report Problem count
 }
 
 // ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
@@ -2519,6 +2539,17 @@ export const onMissionComplete = onValueCreated(
 
       if (player.discordHandle) {
         profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+      }
+
+      // Auto profile warning for repeated status-report Problems on this mission.
+      const incidents = mission.statusIncidents?.[playerId] ?? 0;
+      if (incidents >= STATUS_INCIDENT_WARN_THRESHOLD) {
+        const wKey = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push().key!;
+        profileUpdates[sp(seasonId, `players/${playerId}/warnings/${wKey}`)] = {
+          timestamp: Date.now(),
+          message: `${gmMissionLabel(mission)}: ${incidents} status incidents.`,
+          auto: true,
+        };
       }
     }
 

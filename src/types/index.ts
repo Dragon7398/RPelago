@@ -71,9 +71,12 @@ export interface Tile {
   // When the room link first went up — the Elapsed clock's origin, mirroring GMMission.
   // Stamped on first link set, cleared when the link is removed.
   linkedAt?: number;
-  // When the most recent admin status report was filed on this challenge (setter
-  // arrives in a later task). Drives the status report's "Recently Reported" bucket.
+  // When the most recent official status report reset this challenge's timer.
+  // Drives the status report's "Recently Reported" bucket.
   lastReportAt?: number;
+  // Per-player count of official reports where the player had ≥1 Problem slot here.
+  // Read at completion to auto-warn players with 5+ incidents.
+  statusIncidents?: Record<string, number>;
   tracker?: string;
   tracker2?: string;
   cheese?: string;
@@ -270,7 +273,51 @@ export interface GameState {
   // Casino-season audit trail of weekly gold-floor top-ups — the one place outside
   // gold enters the economy. Absent (→ {}) in map seasons. Written by weeklyGoldTopUp.
   goldTopUpLog: Record<string, GoldTopUpEntry>;
+  // Admin Status Report snapshots, keyed by push id, capped at the newest 10.
+  // Arrives free with the season subscription.
+  statusReports?: Record<string, OfficialReport>;
   meta:     GameMeta;
+}
+
+// ── Official Status Report snapshots ─────────────────────────────────────────
+// Persisted when an admin runs an official report; see src/lib/statusReport.ts.
+
+export type StatusWarnCode = 'lastPlayer' | 'noActivity144' | 'allIdle60';
+
+export interface OfficialProblemPlayer {
+  playerId:  string;
+  handle:    string;    // "@discordHandle"
+  stalled:   string[];  // In-Progress problem slot names ("Status on …?")
+  unstarted: string[];  // Unstarted problem slot names ("Don't forget to start …")
+}
+
+export interface OfficialProblemWorld {
+  kind:    'mission' | 'tile';
+  id:      string;      // missionId or tile coord
+  name:    string;
+  players: OfficialProblemPlayer[];
+}
+
+export interface OfficialWarnItem {
+  code:     StatusWarnCode;
+  playerId?: string;    // present for player-specific codes (lastPlayer / noActivity144)
+  handle?:   string;
+}
+
+export interface OfficialWarnWorld {
+  kind:      'mission' | 'tile';
+  id:        string;
+  name:      string;
+  handled:   boolean;   // admin marked the warning addressed
+  handledAt?: number | null;
+  items:     OfficialWarnItem[];
+}
+
+export interface OfficialReport {
+  ts:       number;     // when the report was run (also the timer origin for its worlds)
+  runBy?:   string;     // admin uid
+  problems: OfficialProblemWorld[];
+  warnings: OfficialWarnWorld[];
 }
 
 // One weekly gold-floor top-up: a player below the floor was raised to it.
@@ -369,8 +416,10 @@ export interface GMMission {
   linkedAt?:       number;
   // When the most recent admin status report was filed. The "since last report"
   // clock runs from here; unset (no report yet) falls back to the Elapsed origin.
-  // Status reports themselves land in a later task — this is just the timestamp.
   lastReportAt?:   number;
+  // Per-player count of official reports where the player had ≥1 Problem slot here.
+  // Read at completion to auto-warn players with 5+ incidents.
+  statusIncidents?: Record<string, number>;
   tracker?:        string;
   cheese?:         string;
   firstJoinAt:     number | null;

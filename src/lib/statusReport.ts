@@ -11,7 +11,10 @@
 //                  stuck); may be inaccurate. Only counts toward the "later of the
 //                  two" progress check on the problem threshold.
 
-import type { GMMission, Tile, Player, AdvSlot, SlotStatus } from '../types';
+import type {
+  GMMission, Tile, Player, AdvSlot, SlotStatus,
+  OfficialReport, OfficialProblemWorld, OfficialProblemPlayer, OfficialWarnWorld, OfficialWarnItem,
+} from '../types';
 
 const HOUR = 3_600_000;
 
@@ -31,7 +34,10 @@ export interface ReportSlotFinding {
   slotName: string;
   game:     string;
   tier:     ReportTier;
-  reasons:  string[];
+  reasons:  string[];  // human-readable, for the live report UI
+  codes:    string[];  // machine-readable, for the official report builder
+                       // problems: 'unstarted' | 'stalled'
+                       // warnings: 'lastPlayer' | 'noActivity144' | 'allIdle60'
 }
 
 export interface ReportPlayerFinding {
@@ -81,12 +87,12 @@ const handleFor = (playerId: string, fallbackName: string, players: Record<strin
 // null when the slot is fine. Problem tier wins over warning when both apply.
 function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: number): ReportSlotFinding | null {
   const status = statusOf(s);
-  const problems: string[] = [];
-  const warnings: string[] = [];
+  const problems: { code: string; reason: string }[] = [];
+  const warnings: { code: string; reason: string }[] = [];
 
   // Problem (a): never started — needs to begin their game.
   if (status === 'Unstarted') {
-    problems.push('Unstarted — needs to begin their game');
+    problems.push({ code: 'unstarted', reason: 'Unstarted — needs to begin their game' });
   }
 
   if (status === 'In-Progress') {
@@ -98,7 +104,7 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
 
     // Problem (b): stalled — no server activity AND no self-report in 60h+.
     if (stale(lastSign, PROBLEM_STALE_HOURS, now)) {
-      problems.push(`No activity or self-report in ${fmtDuration((now - lastSign!) / HOUR)} (≥${PROBLEM_STALE_HOURS}h)`);
+      problems.push({ code: 'stalled', reason: `No activity or self-report in ${fmtDuration((now - lastSign!) / HOUR)} (≥${PROBLEM_STALE_HOURS}h)` });
     }
 
     // Warning (a): this is the last player still progressing — every OTHER player
@@ -109,13 +115,13 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
       return st === 'Unstarted' || st === 'In-Progress';
     });
     if (otherPlayerSlots.length > 0 && !anyOtherActive) {
-      warnings.push('Last player still progressing — others here are done');
+      warnings.push({ code: 'lastPlayer', reason: 'Last player still progressing — others here are done' });
     }
 
     // Warning (b): no SERVER ACTIVITY in 144h+, even if they self-reported recently
     // (the self-report is the weak signal, so a recent one doesn't clear this).
     if (stale(s.lastActivity, WARN_NO_ACTIVITY_HOURS, now)) {
-      warnings.push(`No activity in ${fmtDuration((now - s.lastActivity!) / HOUR)} (≥${WARN_NO_ACTIVITY_HOURS}h)`);
+      warnings.push({ code: 'noActivity144', reason: `No activity in ${fmtDuration((now - s.lastActivity!) / HOUR)} (≥${WARN_NO_ACTIVITY_HOURS}h)` });
     }
 
     // Warning (c): EVERY In-Progress slot here (all players + public) has had no
@@ -123,14 +129,16 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
     // idle, so its presence keeps this from firing (unknown ≠ idle).
     const inProgHere = all.filter(x => statusOf(x.slot) === 'In-Progress');
     if (inProgHere.length > 0 && inProgHere.every(x => stale(x.slot.lastActivity, WARN_ALL_STALE_HOURS, now))) {
-      warnings.push(`All in-progress slots here idle ≥${WARN_ALL_STALE_HOURS}h (no activity)`);
+      warnings.push({ code: 'allIdle60', reason: `All in-progress slots here idle ≥${WARN_ALL_STALE_HOURS}h (no activity)` });
     }
   }
 
   const slotName = s.name?.trim() || '(unnamed slot)';
   const game     = s.game?.trim() || '—';
-  if (problems.length > 0) return { slotName, game, tier: 'problem', reasons: problems };
-  if (warnings.length > 0) return { slotName, game, tier: 'warning', reasons: warnings };
+  const pack = (list: { code: string; reason: string }[], tier: ReportTier): ReportSlotFinding =>
+    ({ slotName, game, tier, reasons: list.map(x => x.reason), codes: list.map(x => x.code) });
+  if (problems.length > 0) return pack(problems, 'problem');
+  if (warnings.length > 0) return pack(warnings, 'warning');
   return null;
 }
 
@@ -221,4 +229,101 @@ export function computeStatusReport(
   }
 
   return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+// ── Official report ──────────────────────────────────────────────────────────
+// Snapshot the given candidates (the live "Active" section) into the persisted
+// shape. Problems drive the player-facing pings; warnings are admin-facing.
+
+export function buildOfficialReport(active: ReportCandidate[], ts: number, runBy?: string): OfficialReport {
+  const problems: OfficialProblemWorld[] = [];
+  const warnings: OfficialWarnWorld[]    = [];
+
+  for (const c of active) {
+    // Problems → per player, split into stalled ("Status on …?") and unstarted.
+    const players: OfficialProblemPlayer[] = [];
+    for (const p of c.players) {
+      const stalled: string[]   = [];
+      const unstarted: string[] = [];
+      for (const f of p.findings) {
+        if (f.tier !== 'problem') continue;
+        if (f.codes.includes('unstarted')) unstarted.push(f.slotName);
+        if (f.codes.includes('stalled'))   stalled.push(f.slotName);
+      }
+      if (stalled.length || unstarted.length) {
+        players.push({ playerId: p.playerId, handle: p.handle, stalled, unstarted });
+      }
+    }
+    if (players.length) problems.push({ kind: c.kind, id: c.id, name: c.name, players });
+
+    // Warnings → deduped items. Player-specific codes carry the handle; allIdle60
+    // is world-general (collapsed to a single item).
+    const items: OfficialWarnItem[] = [];
+    const seen = new Set<string>();
+    let allIdle = false;
+    const add = (code: OfficialWarnItem['code'], p?: ReportCandidate['players'][number]) => {
+      const key = `${code}|${p?.playerId ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push(p ? { code, playerId: p.playerId, handle: p.handle } : { code });
+    };
+    for (const p of c.players) {
+      for (const f of p.findings) {
+        if (f.tier !== 'warning') continue;
+        if (f.codes.includes('lastPlayer'))    add('lastPlayer', p);
+        if (f.codes.includes('noActivity144')) add('noActivity144', p);
+        if (f.codes.includes('allIdle60'))     allIdle = true;
+      }
+    }
+    if (allIdle) add('allIdle60');
+    if (items.length) warnings.push({ kind: c.kind, id: c.id, name: c.name, handled: false, items });
+  }
+
+  return { ts, runBy, problems, warnings };
+}
+
+const codeSpan = (s: string) => '``' + s + '``';
+
+// RTDB drops empty arrays to null and hands dense arrays back as-is; normalize any
+// array-ish value (including objects with numeric keys) to a plain array.
+const asArr = <T,>(v: T[] | Record<string, T> | undefined | null): T[] =>
+  v == null ? [] : Array.isArray(v) ? v : Object.values(v);
+
+// Player-facing Problems block (the primary copy-paste, to ping players).
+export function renderProblemsMarkdown(r: OfficialReport): string {
+  const worlds = asArr(r.problems);
+  if (!worlds.length) return '';
+  const lines: string[] = ['## Status Report'];
+  for (const w of worlds) {
+    lines.push(`### ${w.name}`);
+    for (const p of asArr(w.players)) {
+      const stalled = asArr(p.stalled);
+      const unstarted = asArr(p.unstarted);
+      const clauses: string[] = [];
+      if (stalled.length)   clauses.push(`Status on ${stalled.map(codeSpan).join(', ')}?`);
+      if (unstarted.length) clauses.push(`Don't forget to start ${unstarted.map(codeSpan).join(', ')}.`);
+      lines.push(`${p.handle} ${clauses.join(' ')}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+export function warnItemText(it: OfficialWarnItem): string {
+  switch (it.code) {
+    case 'lastPlayer':    return `${it.handle} is the last to finish this world.`;
+    case 'noActivity144': return `${it.handle} — no activity in over ${WARN_NO_ACTIVITY_HOURS} hours.`;
+    case 'allIdle60':     return `No activity by players in last ${WARN_ALL_STALE_HOURS} hours.`;
+  }
+}
+
+// Admin-facing Warnings block (handled manually).
+export function renderWarningsMarkdown(r: OfficialReport): string {
+  const worlds = asArr(r.warnings);
+  if (!worlds.length) return '';
+  const lines: string[] = ['## Status Report — Warnings'];
+  for (const w of worlds) {
+    lines.push(`${w.name}:`);
+    for (const it of asArr(w.items)) lines.push(warnItemText(it));
+  }
+  return lines.join('\n');
 }

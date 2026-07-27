@@ -1,8 +1,8 @@
-import { ref, set, update, get, onValue, remove, push } from 'firebase/database';
+import { ref, set, update, get, onValue, remove, push, increment } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame, OfficialReport } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
@@ -886,6 +886,61 @@ export async function standDownFromMission(missionId: string): Promise<void> {
 export async function setMissionParticipantStatusNote(missionId: string, note: string | null): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note, seasonId: getCurrentSeason() });
+}
+
+// ── Official status reports ──────────────────────────────────────────────────
+
+const worldBase = (kind: 'mission' | 'tile', id: string) =>
+  kind === 'mission' ? `missions/${id}` : `tiles/${id}`;
+
+// Persist an official report and apply its side effects in one atomic update:
+//   • +1 statusIncident for every player who appears in a Problem world
+//   • reset lastReportAt (= report.ts) on every Problem world
+//   • store the report, then prune to the newest 10
+export async function runOfficialStatusReport(report: OfficialReport): Promise<void> {
+  assertDb();
+  const updates: Record<string, unknown> = {};
+
+  for (const w of report.problems) {
+    updates[sPath(`${worldBase(w.kind, w.id)}/lastReportAt`)] = report.ts;
+    for (const p of w.players) {
+      updates[sPath(`${worldBase(w.kind, w.id)}/statusIncidents/${p.playerId}`)] = increment(1);
+    }
+  }
+
+  const key = push(sRef(db!, 'statusReports')).key!;
+  updates[sPath(`statusReports/${key}`)] = report;
+  await update(ref(db!), updates);
+
+  await pruneStatusReports();
+}
+
+async function pruneStatusReports(): Promise<void> {
+  const snap = await get(sRef(db!, 'statusReports'));
+  if (!snap.exists()) return;
+  const entries = Object.entries(snap.val() as Record<string, OfficialReport>)
+    .sort((a, b) => b[1].ts - a[1].ts);
+  const excess = entries.slice(10);
+  if (!excess.length) return;
+  const del: Record<string, unknown> = {};
+  for (const [k] of excess) del[sPath(`statusReports/${k}`)] = null;
+  await update(ref(db!), del);
+}
+
+// Mark a warning world handled on a stored report. Resets that world's timer to the
+// report's ts — but never MOVES it backward (a newer report may already have reset it).
+export async function markStatusWarningHandled(
+  reportId: string, warnIndex: number, world: { kind: 'mission' | 'tile'; id: string }, reportTs: number,
+): Promise<void> {
+  assertDb();
+  const updates: Record<string, unknown> = {
+    [sPath(`statusReports/${reportId}/warnings/${warnIndex}/handled`)]:   true,
+    [sPath(`statusReports/${reportId}/warnings/${warnIndex}/handledAt`)]: Date.now(),
+  };
+  const cur = await get(sRef(db!, `${worldBase(world.kind, world.id)}/lastReportAt`));
+  const curVal = cur.exists() ? (cur.val() as number) : 0;
+  if (reportTs > curVal) updates[sPath(`${worldBase(world.kind, world.id)}/lastReportAt`)] = reportTs;
+  await update(ref(db!), updates);
 }
 
 export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {

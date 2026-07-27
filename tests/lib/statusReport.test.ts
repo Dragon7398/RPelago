@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { computeStatusReport } from '../../src/lib/statusReport';
+import {
+  computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown,
+  type ReportCandidate,
+} from '../../src/lib/statusReport';
 import type { GMMission, Tile, Player, AdvSlot } from '../../src/types';
 
 const NOW = 1_700_000_000_000;
@@ -173,5 +176,75 @@ describe('computeStatusReport — ordering, handles, tiles', () => {
     expect(r[0].kind).toBe('tile');
     expect(r[0].name).toBe('Boss');
     expect(r[0].players[0].handle).toBe('@Zed');
+  });
+});
+
+describe('buildOfficialReport + markdown', () => {
+  const active = (missions: Record<string, GMMission>): ReportCandidate[] =>
+    run(missions).filter(c => c.bucket === 'active');
+
+  it('renders player-facing Problems grouped by world, players alphabetical', () => {
+    const rep = buildOfficialReport(active({
+      m1: mission({ label: 'World1', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
+                           slot({ name: 'S2', status: 'In-Progress', lastActivity: ago(70) })]),
+        b: part('b', 'B', [slot({ name: 'S3', status: 'Unstarted' }),
+                           slot({ name: 'S4', status: 'Unstarted' })]),
+      } }),
+    }), NOW);
+    expect(renderProblemsMarkdown(rep)).toBe(
+      '## Status Report\n' +
+      '### World1\n' +
+      '@Alice Don\'t forget to start ``S3``, ``S4``.\n' +
+      '@Zed Status on ``S1``, ``S2``?',
+    );
+  });
+
+  it('combines a player\'s stalled + unstarted problems into one line', () => {
+    const rep = buildOfficialReport(active({
+      m1: mission({ label: 'World1', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
+                           slot({ name: 'S2', status: 'Unstarted' })]),
+      } }),
+    }), NOW);
+    expect(renderProblemsMarkdown(rep)).toContain('@Zed Status on ``S1``? Don\'t forget to start ``S2``.');
+  });
+
+  it('renders admin Warnings: last-player and deduped world-general idle', () => {
+    const lastPlayer = buildOfficialReport(active({
+      m1: mission({ label: 'World4', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+        b: part('b', 'B', [slot({ status: 'Goaled' })]),
+      } }),
+    }), NOW);
+    expect(renderWarningsMarkdown(lastPlayer)).toBe(
+      '## Status Report — Warnings\nWorld4:\n@Zed is the last to finish this world.',
+    );
+
+    const idle = buildOfficialReport(active({
+      m1: mission({ label: 'World5', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
+        b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
+      } }),
+    }), NOW);
+    // allIdle60 is world-general → a single deduped line, not one per player.
+    expect(renderWarningsMarkdown(idle)).toBe(
+      '## Status Report — Warnings\nWorld5:\nNo activity by players in last 60 hours.',
+    );
+  });
+
+  it('carries structured problem data (stalled/unstarted split) for persistence', () => {
+    const rep = buildOfficialReport(active({
+      m1: mission({ id: 'm1', label: 'World1', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
+                           slot({ name: 'S2', status: 'Unstarted' })]),
+      } }),
+    }), NOW, 'admin-uid');
+    expect(rep.runBy).toBe('admin-uid');
+    expect(rep.problems).toHaveLength(1);
+    expect(rep.problems[0]).toMatchObject({ kind: 'mission', id: 'm1', name: 'World1' });
+    expect(rep.problems[0].players[0]).toMatchObject({
+      handle: '@Zed', stalled: ['S1'], unstarted: ['S2'],
+    });
   });
 });

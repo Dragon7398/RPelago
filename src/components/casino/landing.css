@@ -316,7 +316,7 @@ body.casino-scope #root { width: 100%; }
 .rl-deploy.ready .rl-deploy-played { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.14) c h), var(--pos)); }
 
 /* Board — Archipelago room + Cheesetracker links (in progress) */
-.rl-chlinks { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.rl-chlinks { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0; }
 .rl-chlink-play { text-decoration: none; display: inline-flex; align-items: center; }
 .rl-chlink-cheese {
   display: inline-flex; align-items: center; gap: 0.3rem; text-decoration: none;

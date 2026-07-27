@@ -543,6 +543,7 @@ export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
   return (
     <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
       <Completion goaled={goaled} total={tiles.length} />
+      <ChallengeLinks m={m} />
       {tiles.length
         ? <div style={{ marginTop: '1rem' }}><TileGrid tiles={tiles} wide /></div>
         : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}

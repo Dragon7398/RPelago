@@ -389,6 +389,10 @@ exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
     });
     return { success: true, orbId };
 });
+// ── onTileComplete ────────────────────────────────────────────────────────────
+// A player who racked up this many official-report Problem incidents on a world
+// gets an auto profile warning when that world completes.
+const STATUS_INCIDENT_WARN_THRESHOLD = 5;
 function normalizeGameName(name) {
     return name.trim().replace(/\s+/g, ' ');
 }
@@ -407,14 +411,16 @@ exports.onTileComplete = (0, database_1.onValueWritten)('seasons/{seasonId}/tile
     // Read tile adventurers and all player records in parallel.
     // tile.adventurers at completion is the canonical claim list: players freed early
     // (slot completion) remain listed here; players who explicitly recalled do not.
-    const [advSnap, playersSnap] = await Promise.all([
+    const [advSnap, playersSnap, tileMetaSnap] = await Promise.all([
         db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers`)).get(),
         db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get(),
     ]);
     if (!advSnap.exists())
         return;
     const adventurers = advSnap.val();
     const players = playersSnap.val();
+    const tileMeta = tileMetaSnap.val();
     // Group adventurers by owner; collect each owner's normalized game names.
     const byOwner = new Map();
     for (const adv of Object.values(adventurers)) {
@@ -461,6 +467,16 @@ exports.onTileComplete = (0, database_1.onValueWritten)('seasons/{seasonId}/tile
         // replace '.' (invalid Firebase key char) with '_'.
         if (player.discordHandle) {
             profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+        }
+        // Auto profile warning for repeated status-report Problems on this challenge.
+        const incidents = tileMeta?.statusIncidents?.[playerId] ?? 0;
+        if (incidents >= STATUS_INCIDENT_WARN_THRESHOLD) {
+            const wKey = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push().key;
+            profileUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${wKey}`)] = {
+                timestamp: Date.now(),
+                message: `${tileMeta?.name || coord}: ${incidents} status incidents.`,
+                auto: true,
+            };
         }
     }
     if (Object.keys(profileUpdates).length > 0) {
@@ -2128,6 +2144,16 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('seasons/{seasonId}/m
         }
         if (player.discordHandle) {
             profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+        }
+        // Auto profile warning for repeated status-report Problems on this mission.
+        const incidents = mission.statusIncidents?.[playerId] ?? 0;
+        if (incidents >= STATUS_INCIDENT_WARN_THRESHOLD) {
+            const wKey = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push().key;
+            profileUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${wKey}`)] = {
+                timestamp: Date.now(),
+                message: `${gmMissionLabel(mission)}: ${incidents} status incidents.`,
+                auto: true,
+            };
         }
     }
     if (Object.keys(profileUpdates).length > 0) {

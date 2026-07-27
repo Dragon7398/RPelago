@@ -4271,3 +4271,68 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 
 .sr-section { margin-top: 1.15rem; }
 .sr-section .casino-log-toggle { margin-bottom: 0.6rem; }
+
+/* Official report — run bar, confirm, copy blocks, handled toggles */
+.sr-run-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.sr-run-bar .sr-legend { margin-bottom: 0; }
+.dash-action-btn.primary {
+  color: var(--gold); border-color: var(--gold);
+  background: oklch(from var(--gold) l c h / 0.12);
+}
+.dash-action-btn.primary:disabled { opacity: 0.45; }
+
+.sr-confirm {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.5rem 0.7rem; margin-bottom: 0.9rem; font-size: 0.72rem;
+  color: var(--parchment);
+  border: 1px solid oklch(45% 0.12 60); border-radius: 6px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) 0.03 60);
+}
+
+.sr-subhead {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.08em;
+  color: var(--gold-dim); margin: 1.2rem 0 0.6rem;
+}
+
+.sr-report-card {
+  border: 1px solid var(--border-glow); border-radius: 8px;
+  background: oklch(from var(--bg-card) calc(l + 0.01) c h);
+  padding: 0.8rem; margin-bottom: 1rem;
+}
+.sr-report-card-title { font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--gold); margin-bottom: 0.6rem; }
+
+.sr-report-block { margin-bottom: 0.9rem; }
+.sr-report-block-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--gold-dim); margin-bottom: 0.4rem;
+}
+.sr-md {
+  margin: 0; padding: 0.6rem 0.7rem; overflow-x: auto;
+  font-family: 'Consolas', 'Courier New', monospace; font-size: 0.72rem; line-height: 1.5;
+  color: var(--parchment); white-space: pre-wrap; word-break: break-word;
+  border: 1px solid oklch(from var(--gold-dim) l c h / 0.25); border-radius: 6px;
+  background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+}
+
+.sr-warn-world { padding: 0.4rem 0; border-bottom: 1px solid oklch(from var(--gold-dim) l c h / 0.15); }
+.sr-warn-world:last-child { border-bottom: none; }
+.sr-warn-world-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.sr-warn-world-name { font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--parchment); }
+.sr-warn-item-list { list-style: none; margin: 0.25rem 0 0; padding: 0 0 0 0.2rem; font-size: 0.68rem; color: var(--gold-dim); }
+.sr-warn-item-list li { margin: 0.1rem 0; }
+
+.sr-handled-btn {
+  flex-shrink: 0; font-size: 0.6rem; letter-spacing: 0.04em; cursor: pointer;
+  padding: 0.2rem 0.5rem; border-radius: 4px;
+  color: var(--gold-dim); background: transparent;
+  border: 1px solid oklch(from var(--gold-dim) l c h / 0.4); transition: all 0.15s;
+}
+.sr-handled-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--gold); }
+.sr-handled-btn.done {
+  color: var(--state-avail-fg); border-color: var(--state-avail-border);
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 145); cursor: default;
+}
+
+.sr-stored { margin-bottom: 0.5rem; }
+.sr-stored .casino-log-toggle { margin-bottom: 0.4rem; }
