@@ -150,9 +150,9 @@ All in `functions/src/index.ts`:
 | `onOrbAcquired` | DB create on `game/orbState/{orbId}` | Removes boss traits unlocked by the acquired orb. |
 | `pruneActivityLog` | DB create on `game/activityLog/{entryId}` | Trims the activity log to the most recent 25 entries. |
 | `fetchCheesetracker` / `fetchCheeseDetails` | Callable | Server-side proxies to cheesetrackers.theincrediblewheelofchee.se (no CORS from the browser). Used by the admin **Sync** buttons. |
-| `tickSlotStatuses` | Scheduled every 15 minutes | Auto-syncs slot statuses + activity timestamps from Cheesetracker across live + draft seasons (see Archipelago / Cheesetracker sync). |
-| `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. |
-| `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed). |
+| `tickSlotStatuses` | Scheduled every 15 minutes | Auto-syncs slot statuses + activity timestamps from Cheesetracker across live + draft seasons (see Archipelago / Cheesetracker sync). Also **auto-reclaims mission claims** — frees `activeMissions/{id}` when a participant's slots go all-terminal (mirrors its tile adventurer-free block). |
+| `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. Rejects `no-claims-free` when the player's held claims (`activeMissions`) meet `MISSION_CLAIM_CAPACITY`. |
+| `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed); frees that mission's claim. |
 | `setMissionParticipantStatusNote` | Callable | Updates a participant's status note. |
 | `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). |
 | `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot. |
@@ -162,7 +162,7 @@ All in `functions/src/index.ts`:
 
 > DB triggers now watch the **season-scoped** paths (`seasons/{id}/…`), not the legacy top-level `game/…` shown above.
 
-The **casino/season** functions (also in `index.ts`) are the money-and-secret-authoritative half — clients are never trusted with hands, decks, gold, or the pot. Key ones: `dealCasinoHand` / `dealHoldemHole` / `holdemPlayOn` / `holdemFold` / `casinoFold` (deal & seat lifecycle), `dealGambitOffer` + `playCasinoGambit` (server-authoritative shared gambit deck), `lockCasinoResult` (commit → slots + gold), `resubmitCasinoYaml` / `adminDenyCasinoYaml` / `adminGetCasinoYamls` (config workflow), `weeklyGoldTopUp` (Sat 06:00 America/Chicago floor top-up → `goldTopUpLog`), and `resolveWriteSeason` (the shared seasonId resolver every casino callable runs first). **Deploy functions before the frontend** so a new client never calls a callable the server lacks.
+The **casino/season** functions (also in `index.ts`) are the money-and-secret-authoritative half — clients are never trusted with hands, decks, gold, or the pot. Key ones: `dealCasinoHand` / `dealHoldemHole` / `holdemPlayOn` / `holdemFold` / `casinoFold` (deal & seat lifecycle), `dealGambitOffer` + `playCasinoGambit` (server-authoritative shared gambit deck), `lockCasinoResult` (commit → slots + gold), `resubmitCasinoYaml` / `adminDenyCasinoYaml` / `adminGetCasinoYamls` (config workflow), `weeklyGoldTopUp` (Sat 06:00 America/Chicago floor top-up → `goldTopUpLog`; **skips any player seated at an `inprogress` table** — held or freed claim — since the floor is for players falling behind, not ones winning fast enough to hold several tables), and `resolveWriteSeason` (the shared seasonId resolver every casino callable runs first). **Deploy functions before the frontend** so a new client never calls a callable the server lacks.
 
 > **Disable is a two-part kill-switch.** `adminSetPlayerDisabled` (what `setPlayerDisabled` → the admin Players toggle calls) sets the per-season RTDB flag `players/{uid}/disabled` **and** disables the Firebase Auth account (+ `revokeRefreshTokens`). The RTDB flag alone can't stop the direct client→Storage YAML upload — Storage rules can't read RTDB — so the Auth disable is the only thing that gates uploads (an already-issued ID token lingers up to ~1h). It refuses to disable the caller's own account.
 
@@ -247,7 +247,11 @@ A parallel progression system independent of the tile map. Missions are stored i
 - **Patrol** (`patrol`) — repeatable, no traits, earns steady gold.
 - **Casino** (`casino`) — repeatable; slots are chosen via the casino mini-app card game. Reward is variable (`variableReward: true`): XP floor is 50 + gambit XP settled at deploy; GP is drawn from a shared `pot`. `casinoStats` (release %, collect %, hint cost) are rolled at deploy from the cohort's shared odds table.
 
-Mission state machine: `forming → inprogress → complete`. `player.activeMission` holds the current mission ID (or null); a player may only be in one mission at a time.
+Mission state machine: `forming → inprogress → complete`.
+
+**Pooled mission claims + early reclaim.** A player's mission "claim" (the guildmaster; S2 adds an advisor) is the mission analogue of a Challenge **adventurer**, and behaves the same way: it is **released early** the moment all the player's slots on a mission reach a terminal status (`100% | Goaled | Done`), letting them take another mission while the old one is still `inprogress` (they stay a participant and still pay out at settle). Held claims live in **`player.activeMissions: Record<string, true>`** (replaces the old scalar `player.activeMission`, which is gone). Capacity is a **per-player** helper `missionClaimCapacity(player)` in `gameLogic.ts` (base 1 — guildmaster; S2's advisor level-up bonus raises it to 2 *and* grants a second adventurer, both keyed off the same signal), NOT a season constant. Functions carry a server copy `MISSION_CLAIM_CAPACITY` + `heldClaimCount()`; enlist/claim reject with `no-claims-free` when `heldClaimCount >= capacity` (a **settling** table — slots done, claim already freed — does not count).
+
+The reclaim is **auto, on status sync** (mirrors the tile adventurer-free path): both the scheduled `tickSlotStatuses` mission loop and the admin **Sync** on MissionsPage null `players/{uid}/activeMissions/{missionId}` when a participant's slots go all-terminal (client path via `freeMissionClaim` in `db.ts`). The completion predicate is the shared **`slotsAllFree`** in `slotHelpers.ts` (which also backs `hasUnfinishedSlots`/`hasUnfinishedTileSlots` via `countUnfinishedSets` — the two are now thin wrappers, not parallel impls). Server-side (functions) inline a copy of the terminal check, like `deriveStatus`.
 
 **Decay mechanic**: max slots reduce by 1 per 24h after the first participant joins (`currentMaxSlots()` in `missionLogic.ts`). `tickGuildmasterMissions` (scheduled every 15 min) auto-deploys any forming mission where fill count has reached the decayed max. Deployment also fires immediately on enlist if full.
 
@@ -350,9 +354,9 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/types/index.ts` | All TypeScript types for game entities |
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
-| `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards` |
+| `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity` |
 | `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `computeMissionCard`, `freshMission` |
-| `src/lib/slotHelpers.ts` | Slot normalization utilities (`normalizeSlots`, `slotsFromEntry`) |
+| `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `fetchRoomStatus` |
 | `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
@@ -389,8 +393,8 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
-| `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`) |
-| `src/components/casino/PhasePanel.tsx` | Current-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger) |
+| `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`). Renders **one `PhasePanel` per table the player is seated at** (`myTables`) — pooled claims let a player hold several at once; **held (active) claims sort above freed (settling) ones**, and every table shows until it completes. Falls back to a single Ledger/empty panel when they hold none. |
+| `src/components/casino/PhasePanel.tsx` | Per-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger). One instance per seat; `mission=null` renders the Ledger (last settled) or empty prompt. |
 | `src/components/casino/OddsTrio.tsx` | Rolled Release/Collect/Hint display, shared by table cards and the phase panel |
 | `src/components/casino/useLastSettled.ts` | Finds the player's most recent settled table in `missionsHistory` (the Ledger's subject) |
 | `src/casino/CasinoTable.tsx` | Casino table root component; owns the phase state machine (`deckselect → ante → play\|(holdwait→holdplay) → gambit → locked → deployed`) and Firebase subscription. Game is read from `mission.casinoGame`; costs from `CASINO_GAMES`/`seatSpend`. |

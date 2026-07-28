@@ -32,12 +32,15 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
   const isAdmin        = player.id === adminId;
-  // Pooled claims: a player may hold several mission claims at once.
-  const activeMLabels  = missions
-    ? Object.keys(player.activeMissions ?? {})
-        .map(id => missions[id])
-        .filter(Boolean)
-        .map(m => missionDisplayLabel(m))
+  // Every table the player is currently on (forming + in-progress), by participant
+  // membership — NOT just `activeMissions`, so finished-but-settling tables (claim
+  // auto-freed, still a participant) show too. `held` marks the ones still holding
+  // a claim; freed tables are tagged "settling". Held first, mirroring the shell.
+  const onTables = missions
+    ? Object.values(missions)
+        .filter(m => (m.state === 'forming' || m.state === 'inprogress') && !!m.participants?.[player.id])
+        .map(m => ({ id: m.id, label: missionDisplayLabel(m), held: !!player.activeMissions?.[m.id] }))
+        .sort((a, b) => Number(b.held) - Number(a.held) || a.label.localeCompare(b.label))
     : [];
   // Casino-season players carry no `xp`/`gold` off the map economy, so treat a
   // missing value as 0 rather than crashing on `.toLocaleString()`.
@@ -90,9 +93,10 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
             </span>
           )}
         </div>
-        {activeMLabels.map(label => (
-          <div key={label} className="dash-player-section-label" style={{ marginTop: '0.2rem', color: 'oklch(from var(--gm-accent) calc(l + 0.04) c h)' }}>
-            ⚜ {label}
+        {onTables.map(t => (
+          <div key={t.id} className="dash-player-section-label" style={{ marginTop: '0.2rem', color: 'oklch(from var(--gm-accent) calc(l + 0.04) c h)' }}>
+            ⚜ {t.label}
+            {!t.held && <span style={{ opacity: 0.6, fontWeight: 'normal' }}> · settling</span>}
           </div>
         ))}
       </div>

@@ -396,6 +396,40 @@ export default function CasinoShell() {
   const [now, setNow] = useState(() => Date.now());
   const [sitFlash, setSitFlash] = useState<string | null>(null);
 
+  // Aggregate admin-attention count for the ⚙ ADMIN badge, mirroring the tab
+  // badges in AdminDashboard (challenges + all missions, casino or not).
+  const adminWarnCount = isAdmin && gameState ? (() => {
+    const tileWarn = Object.values(gameState.tiles ?? {}).filter(tile => {
+      const advCount = Object.keys(tile.adventurers ?? {}).length;
+      if (tile.state === 'available') return tile.required > 0 && advCount >= tile.required;
+      if (tile.state === 'inprogress') {
+        if (!tile.link) return true;
+        const advs = Object.values(tile.adventurers ?? {});
+        return advs.length > 0 && advs.every(adv => {
+          const slots = adv.slots ?? [];
+          return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+        });
+      }
+      return false;
+    }).length;
+    const missionWarn = Object.values(gameState.missions ?? {}).filter(m => {
+      if (m.state === 'complete') return false;
+      const filled = Object.keys(m.participants ?? {}).length;
+      const max = currentMaxSlots(m, now);
+      if (m.state === 'forming') return filled > 0 && max > 0 && filled >= max;
+      if (m.state === 'inprogress') {
+        if (!m.link) return true;
+        const parts = Object.values(m.participants ?? {});
+        return parts.length > 0 && parts.every(p => {
+          const slots = p.slots ?? [];
+          return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+        });
+      }
+      return false;
+    }).length;
+    return tileWarn + missionWarn;
+  })() : 0;
+
   // The casino token layer (casino/themes.css) is scoped to `.casino-scope` so it
   // never repaints the map's themes. Apply it — and the player's saved theme — for
   // the duration of the casino landing, then release it on unmount.
@@ -622,7 +656,9 @@ export default function CasinoShell() {
           the same to the admin — and so previewing the casino always leaves a
           route back to the dashboard (and the season switcher). */}
       {isAdmin && (
-        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">⚙ ADMIN</a>
+        <a className="admin-toggle" href="/#admin" target="_blank" rel="noreferrer">
+          ⚙ ADMIN{adminWarnCount > 0 && <span className="admin-toggle-badge">{adminWarnCount}</span>}
+        </a>
       )}
 
       {/* Shared guide, filtered to the sections a casino season actually has. */}
