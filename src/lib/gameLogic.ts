@@ -36,10 +36,12 @@ export function adventurerCountForLevel(lv: number): number {
 // lands it changes here and in adventurerCountForLevel together. A player may
 // hold any number of finished-but-settling tables — only un-finished claims
 // count against this cap (see missionLogic.hasUnfinishedSlots / activeMissions).
-// `player` is unused today but is the S2 advisor's input (a level-up bonus that
+// The param is unused today but is the S2 advisor's input (a level-up bonus that
 // raises this to 2); kept in the signature so call sites are already correct.
+// The `_` prefix satisfies tsc's noUnusedParameters (used by `tsc -b` in the
+// Netlify build); the eslint-disable covers ESLint, which doesn't honor the `_`.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function missionClaimCapacity(player: Player): number {
+export function missionClaimCapacity(_player: Player): number {
   return 1;
 }
 
