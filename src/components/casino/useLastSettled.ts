@@ -4,8 +4,8 @@ import type { GMMission } from '../../types';
 /**
  * The player's most recently settled casino table — the Ledger phase's subject.
  *
- * A settled table leaves `missions` for `missionsHistory` and clears the seat's
- * `activeMission`, so there is nothing left pointing at the table the player just
+ * A settled table leaves `missions` for `missionsHistory` and drops the seat's
+ * held claim, so there is nothing left pointing at the table the player just
  * finished. Find it by looking for themselves in the history instead.
  */
 export function useLastSettled(

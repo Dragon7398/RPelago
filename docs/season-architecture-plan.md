@@ -666,9 +666,20 @@ Casino-season launch happen close together. Ordered:
    `config/activeSeasonId = "casino_s1"` and its status to `active`.
    Old bundles force-reload. S1 remains archived/read-only; S2 stays
    draft/hidden.
-10. **Later, only after S1.5 is verified live:** remove the old `game/...`
-    trigger bindings and the `game` rules block, then delete `game/`. Keep
-    `profiles/` untouched throughout.
+10. **Legacy `game/` teardown — code done (2026-07-27); prod data deletion
+    pending an operator run.** The old `game/...` trigger bindings were already
+    gone (all triggers wildcard `seasons/{seasonId}/…`). Now removed: the `game`
+    rules block in `database.rules.json` (deleting the world-readable node and
+    the `!initialized` bootstrap loophole), and the legacy `game/` suites in
+    `tests/rules/database.rules.test.ts` — including the three `it.fails()`
+    casino-leak tests, which die with the tree as planned. That file now holds
+    only the still-global KMK + profiles invariants; the dead `game/` seed was
+    dropped from `tests/rules/setup.ts`. **Rules + unit + type-check all green
+    (147 rules tests pass against the emulator).** The irreversible prod step —
+    deleting the `game/` *data* — is a new guarded `season-migrate.mjs
+    delete-game` command (refuses unless `seasons/rpelago_s1` is archived and
+    `activeSeasonId` has moved off S1; `--dry-run`/`--force`). Run it against
+    prod when ready. `profiles/` is untouched throughout.
 
 ### Season wind-down (the S1 pattern, repeated)
 

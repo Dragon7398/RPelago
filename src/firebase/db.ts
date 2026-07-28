@@ -639,6 +639,15 @@ export async function freeAdventurer(ownerId: string, advId: string): Promise<vo
   });
 }
 
+// Release a player's held claim on a mission (pooled-claims analogue of
+// freeAdventurer). Called when a status sync marks all of a participant's slots
+// on that mission terminal — the participant record stays (they still settle),
+// only the claim returns to the pool so the player can take another mission.
+export async function freeMissionClaim(playerId: string, missionId: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `players/${playerId}/activeMissions/${missionId}`), null);
+}
+
 // ── Admin: public slots ───────────────────────────────────────────────────────
 export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<void> {
   const path = sPath(`tiles/${coord}/publicSlots`);
@@ -800,41 +809,42 @@ export async function playerReset(playerId: string): Promise<void> {
     }
   }
 
-  // Handle active mission — decision E
-  if (player.activeMission) {
-    const missionSnap = await get(sRef(db!, `missions/${player.activeMission}`));
-    if (missionSnap.exists()) {
-      const mission = missionSnap.val() as GMMission;
+  // Handle held mission claims — decision E. Pooled claims: a player may hold
+  // several missions at once, so mirror the kick behavior for each.
+  const heldMissionIds = Object.keys(player.activeMissions ?? {});
+  for (const missionId of heldMissionIds) {
+    const missionSnap = await get(sRef(db!, `missions/${missionId}`));
+    if (!missionSnap.exists()) continue;
+    const mission = missionSnap.val() as GMMission;
 
-      // Remove from participants
-      updates[sPath(`missions/${player.activeMission}/participants/${playerId}`)] = null;
+    // Remove from participants
+    updates[sPath(`missions/${missionId}/participants/${playerId}`)] = null;
 
-      if (mission.state === 'forming') {
-        // Check if this was the last participant; if so, reset firstJoinAt
-        const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
-        if (remaining.length === 0) {
-          updates[sPath(`missions/${player.activeMission}/firstJoinAt`)] = null;
-        }
-      } else if (mission.state === 'inprogress') {
-        // Full kick: create claimable slot + warning
-        const participant = mission.participants?.[playerId];
-        const slotsToAdd: AdvSlot[] = participant?.slots?.length
-          ? participant.slots.map(s => ({
-              name: s.name, game: s.game,
-              ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
-              ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
-            }))
-          : [{ name: '', game: '' }];
-        const claimRef = push(sRef(db!, `missions/${player.activeMission}/claimableSlots`));
-        updates[sPath(`missions/${player.activeMission}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
-
-        const warnRef = push(sRef(db!, `players/${playerId}/warnings`));
-        updates[sPath(`players/${playerId}/warnings/${warnRef.key}`)] = {
-          timestamp: Date.now(),
-          message: `Removed from ${mission.label} · Cohort ${mission.series} during player reset.`,
-          auto: true,
-        };
+    if (mission.state === 'forming') {
+      // Check if this was the last participant; if so, reset firstJoinAt
+      const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
+      if (remaining.length === 0) {
+        updates[sPath(`missions/${missionId}/firstJoinAt`)] = null;
       }
+    } else if (mission.state === 'inprogress') {
+      // Full kick: create claimable slot + warning
+      const participant = mission.participants?.[playerId];
+      const slotsToAdd: AdvSlot[] = participant?.slots?.length
+        ? participant.slots.map(s => ({
+            name: s.name, game: s.game,
+            ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+            ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+          }))
+        : [{ name: '', game: '' }];
+      const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
+      updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
+
+      const warnRef = push(sRef(db!, `players/${playerId}/warnings`));
+      updates[sPath(`players/${playerId}/warnings/${warnRef.key}`)] = {
+        timestamp: Date.now(),
+        message: `Removed from ${mission.label} · Cohort ${mission.series} during player reset.`,
+        auto: true,
+      };
     }
   }
 
@@ -846,7 +856,8 @@ export async function playerReset(playerId: string): Promise<void> {
     adventurers:      keptAdvs,
     xpHistory,
     feats:            {},
-    activeMission:    null,
+    activeMissions:   null,
+    activeMission:    null,  // clear any legacy scalar too
     basicTrainingDone: false,
   };
 
@@ -1067,7 +1078,7 @@ function archivedMission(mission: GMMission, potShares: Map<string, number>): GM
 }
 
 // Completes a mission: awards XP/GP (with feat bonuses), writes CompletedChallenge
-// records, archives to missionsHistory, and clears participants' activeMission.
+// records, archives to missionsHistory, and clears participants' held claims.
 // Returns { warned, unfinishedSlots } without acting when gating applies and
 // confirmed is not true — caller shows the confirmation dialog then re-calls.
 export async function completeMission(
@@ -1109,9 +1120,9 @@ export async function completeMission(
 
     const isCasino = mission.type === 'casino';
 
-    // A folded / never-played casino seat wins nothing — just free it.
+    // A folded / never-played casino seat wins nothing — just free its claim.
     if (isCasino && !participant.played) {
-      updates[sPath(`players/${pid}/activeMission`)] = null;
+      updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
       continue;
     }
 
@@ -1142,9 +1153,11 @@ export async function completeMission(
       }
     }
 
-    // Gold and mission-release are written for everyone.
-    updates[sPath(`players/${pid}/gold`)]          = (player.gold ?? 0) + earnedGold;
-    updates[sPath(`players/${pid}/activeMission`)] = null;
+    // Gold and mission-release are written for everyone. The claim may already
+    // have been reclaimed early (slots done); clearing the specific key is
+    // idempotent either way.
+    updates[sPath(`players/${pid}/gold`)]                         = (player.gold ?? 0) + earnedGold;
+    updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
 
     // XP, level-grants and completion history are only written in a season that
     // awards XP (map). A casino-only season (S1.5) is gold-only — XP is inert

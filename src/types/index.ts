@@ -130,7 +130,13 @@ export interface Player {
   discordHandle?: string;
   avatarHash?: string | null;
   joinedAt?: number;
-  activeMission?:     string | null;
+  // Missions the player currently holds a claim on. A claim is held from enlist
+  // until the player's slots on that mission are all free (100%/Goaled/Done),
+  // then it is auto-released on the next status sync — the mission analogue of an
+  // adventurer's busy/busyTile clearing on a Challenge. Capacity is per-player
+  // (missionClaimCapacity); a player may hold several settling tables at once but
+  // only `capacity` un-finished ones. Replaces the old scalar `activeMission`.
+  activeMissions?:    Record<string, true>;
   basicTrainingDone?: boolean;
   // Casino: which game types this player has successfully completed a table of.
   // When all four are true, the Coat of Many Colors is granted (name-color unlock).

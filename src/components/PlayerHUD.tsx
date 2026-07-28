@@ -23,9 +23,14 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
   const adventurers = player ? Object.values(player.adventurers) : [];
   const pending = player ? pendingFeatSlot(level, player.feats ?? {}) : null;
 
-  const activeMissionId = player?.activeMission ?? null;
-  const activeMission   = activeMissionId ? (gameState?.missions?.[activeMissionId] ?? null) : null;
-  const missionLabel    = activeMission ? missionDisplayLabel(activeMission) : null;
+  // Pooled claims: the player may hold more than one mission at a time. The HUD
+  // chip labels the first held claim and tallies the rest.
+  const heldMissions    = Object.keys(player?.activeMissions ?? {})
+    .map(id => gameState?.missions?.[id])
+    .filter((m): m is NonNullable<typeof m> => m != null);
+  const missionLabel    = heldMissions.length > 0
+    ? missionDisplayLabel(heldMissions[0]) + (heldMissions.length > 1 ? ` +${heldMissions.length - 1}` : '')
+    : null;
 
   const prevXpRef = useRef<number | null>(null);
   useEffect(() => {

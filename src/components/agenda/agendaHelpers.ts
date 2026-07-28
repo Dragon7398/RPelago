@@ -112,9 +112,12 @@ export function deriveAgendaData(gameState: GameState, userId: string): AgendaDa
   if (!player) return { mission: null, advGroups: [], activeCount: 0 };
 
   // ── Mission ───────────────────────────────────────────────────────────────
+  // Pooled claims: a player may hold several. The drawer pins one, so surface the
+  // first held claim (the advisor's multi-claim UI is S2 scope).
   let mission: AgendaMissionData | null = null;
-  if (player.activeMission) {
-    const m = gameState.missions?.[player.activeMission];
+  const firstHeldMissionId = Object.keys(player.activeMissions ?? {})[0];
+  if (firstHeldMissionId) {
+    const m = gameState.missions?.[firstHeldMissionId];
     if (m && m.state !== 'complete') {
       const participant = m.participants?.[userId];
       const typeLabelMap: Record<GMMissionType, string> = {

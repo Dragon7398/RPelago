@@ -5,8 +5,9 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, type CasinoYaml } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
+import { slotsAllFree } from '../../lib/slotHelpers';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -447,6 +448,16 @@ function MissionCard({ mission }: { mission: GMMission }) {
                 if (newStatus) await adminUpdateParticipantSlotStatus(mission.id, pid, i, newStatus);
                 const t = timeMap.get(slots[i].name);
                 if (t) await adminUpdateParticipantSlotActivity(mission.id, pid, i, t.lastChecked, t.lastActivity);
+              }
+              // Pooled claims: if this sync leaves all the participant's slots
+              // terminal and they still hold this mission's claim, release it —
+              // the mission analogue of freeing a tile adventurer (mirrors the
+              // server tick block in tickSlotStatuses).
+              const resolved = slots.map(s => ({ status: statusMap.get(s.name) ?? s.status }));
+              if (mission.state === 'inprogress'
+                  && slotsAllFree(resolved)
+                  && gameState?.players?.[pid]?.activeMissions?.[mission.id]) {
+                await freeMissionClaim(pid, mission.id);
               }
             }
           } catch { /* cheese details fetch is best-effort */ }

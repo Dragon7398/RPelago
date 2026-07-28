@@ -2,6 +2,7 @@ import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } fro
 import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
+import { countUnfinishedSets } from './slotHelpers';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -71,7 +72,12 @@ export function missionDisplayLabel(m: GMMission): string {
 export function computeMissionCard(
   m: GMMission,
   uid: string | null,
-  activeMissionId: string | null,
+  // Pooled claims: how many un-finished mission claims the player currently holds,
+  // and their capacity (missionClaimCapacity). A new mission is takeable only when
+  // the player is already in it OR has a free claim. Replaces the old single
+  // activeMissionId identity check.
+  heldClaimCount: number,
+  claimCapacity: number,
   basicTrainingDone: boolean,
   now: number,
   playerGold?: number,
@@ -120,8 +126,10 @@ export function computeMissionCard(
   } else if (def.special && basicTrainingDone && !youIn) {
     doneLabel = 'ALREADY COMPLETED';
     disabledReason = 'You have already completed Basic Training — it can be undertaken only once per guildmaster.';
-  } else if (activeMissionId && activeMissionId !== m.id) {
-    disabledReason = `You are already undertaking another mission. A guildmaster may only undertake one mission at a time.`;
+  } else if (!youIn && heldClaimCount >= claimCapacity) {
+    disabledReason = claimCapacity <= 1
+      ? `You are already undertaking a mission. Finish your part of it to free your claim.`
+      : `All your mission claims are in use — finish your part of a table to free one.`;
   } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
     disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
   } else if (m.type === 'casino' && m.casinoGame && playerGold != null && !youIn
@@ -299,33 +307,13 @@ export function fmtClock(totalSec: number): string {
   return `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }
 
+// Thin wrappers over the shared slot-completion core (slotHelpers.ts). Missions
+// count a slotless participant as unfinished (no hand locked yet); tiles skip a
+// slotless adventurer. Kept as named exports so existing imports/tests are stable.
 export function hasUnfinishedSlots(participants: Record<string, GMParticipant>): number {
-  let count = 0;
-  for (const p of Object.values(participants)) {
-    if (!p.slots || p.slots.length === 0) {
-      count++;
-      continue;
-    }
-    for (const slot of p.slots) {
-      if (!slot || !slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
-        count++;
-        break;
-      }
-    }
-  }
-  return count;
+  return countUnfinishedSets(Object.values(participants), true);
 }
 
 export function hasUnfinishedTileSlots(adv: { slots?: AdvSlot[] }[]): number {
-  let count = 0;
-  for (const a of adv) {
-    if (!a.slots || a.slots.length === 0) continue;
-    for (const slot of a.slots) {
-      if (!slot || !slot.status || slot.status === 'Unstarted' || slot.status === 'In-Progress') {
-        count++;
-        break;
-      }
-    }
-  }
-  return count;
+  return countUnfinishedSets(adv, false);
 }

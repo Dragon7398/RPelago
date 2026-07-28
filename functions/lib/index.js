@@ -602,6 +602,15 @@ function gmCurrentMaxSlots(m, now) {
 function gmFilledCount(m) {
     return Object.keys(m.participants ?? {}).length;
 }
+// How many missions a player may actively hold a claim on at once. Server copy of
+// src/lib/gameLogic.missionClaimCapacity (base 1 — the guildmaster; S2's advisor
+// raises it). Change both together. Un-finished claims live in
+// players/{uid}/activeMissions; a settling table (slots done, claim reclaimed) is
+// already absent and does not count.
+const MISSION_CLAIM_CAPACITY = 1;
+function heldClaimCount(player) {
+    return Object.keys(player.activeMissions ?? {}).length;
+}
 function gmShouldDeploy(m, now) {
     if (m.state !== 'forming')
         return false;
@@ -815,8 +824,10 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
     const mission = missionSnap.val();
     if (player.disabled)
         throw new https_1.HttpsError('permission-denied', 'Account restricted.');
-    if (player.activeMission)
-        throw new https_1.HttpsError('failed-precondition', 'already-on-mission');
+    // Pooled claims: block only when every claim is in use. Settling tables (slots
+    // done, claim reclaimed) are absent from activeMissions and free a slot here.
+    if (heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
+        throw new https_1.HttpsError('failed-precondition', 'no-claims-free');
     if (mission.state !== 'forming')
         throw new https_1.HttpsError('failed-precondition', 'Mission is not forming.');
     if (mission.type === 'basic' && player.basicTrainingDone)
@@ -837,7 +848,7 @@ exports.enlistInMission = (0, https_1.onCall)(async (request) => {
     };
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: participant,
-        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: missionId,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${missionId}`)]: true,
         // A fresh seat starts with no dealt hand — clears any orphan from a prior sit.
         ...clearSeatSecrets(seasonId, missionId, uid),
     };
@@ -872,7 +883,7 @@ exports.standDownFromMission = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', 'not-a-participant');
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: null,
-        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${missionId}`)]: null,
         // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
         ...clearSeatSecrets(seasonId, missionId, uid),
     };
@@ -933,8 +944,8 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
     const mission = missionSnap.val();
     if (player.disabled)
         throw new https_1.HttpsError('permission-denied', 'Account restricted.');
-    if (player.activeMission)
-        throw new https_1.HttpsError('failed-precondition', 'already-on-mission');
+    if (heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
+        throw new https_1.HttpsError('failed-precondition', 'no-claims-free');
     if (mission.state !== 'inprogress')
         throw new https_1.HttpsError('failed-precondition', 'Mission is not in progress.');
     if (uid in (mission.participants ?? {}))
@@ -954,7 +965,7 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
     await db.ref().update({
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: participant,
-        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: missionId,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${missionId}`)]: true,
     });
     return { success: true };
 });
@@ -1709,12 +1720,12 @@ exports.holdemFold = (0, https_1.onCall)(async (request) => {
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
         uid, playerName: seat.playerName, event: 'fold', game: 'holdem',
     });
-    // Remove the seat and free the player's activeMission immediately; clear secrets.
+    // Remove the seat and free the player's held claim immediately; clear secrets.
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${missionId}`)]: null,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
-        [(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)]: null,
         [logPath]: logEntry,
     };
     // All-fold reset: if this empties the table, return it to its opening state —
@@ -1938,7 +1949,7 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     const warnRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push();
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
-        [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/activeMission`)]: null,
+        [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
         // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
         ...clearSeatSecrets(seasonId, missionId, playerId),
         [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${warnRef.key}`)]: {
@@ -2182,7 +2193,7 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
             for (const [uid, p] of Object.entries(m.participants ?? {})) {
                 if (p.startBy && now > p.startBy && !p.played) {
                     standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `missions/${id}/participants/${uid}`)] = null;
-                    standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMission`)] = null;
+                    standDownUpdates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${id}`)] = null;
                     delete m.participants[uid];
                     anyRemoved = true;
                 }
@@ -2235,8 +2246,24 @@ exports.weeklyGoldTopUp = (0, scheduler_1.onSchedule)({ schedule: '0 6 * * 6', t
         if (!playersSnap.exists())
             continue;
         const players = playersSnap.val();
+        // The top-up helps players who are falling behind — not ones doing so well
+        // they hold a seat at a live table (pooled claims let a player be on several
+        // in-progress tables at once). Anyone seated at an in-progress table this
+        // week is skipped, whether their claim there is still held or already freed.
+        const missionsSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+        const onLiveTable = new Set();
+        if (missionsSnap.exists()) {
+            for (const m of Object.values(missionsSnap.val())) {
+                if (m.type === 'casino' && m.state === 'inprogress') {
+                    for (const uid of Object.keys(m.participants ?? {}))
+                        onLiveTable.add(uid);
+                }
+            }
+        }
         const updates = {};
         for (const [uid, p] of Object.entries(players)) {
+            if (onLiveTable.has(uid))
+                continue; // seated at a live table — not falling behind
             const gold = p.gold ?? 0;
             if (gold >= CASINO_GOLD_FLOOR)
                 continue;
@@ -2408,6 +2435,18 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                             updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}/status`)] = newStatus;
                         }
                         stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
+                    }
+                    // Pooled claims: once all a participant's slots are terminal and they
+                    // still hold this mission's claim, release it so the claim returns to
+                    // the pool — the mission analogue of the tile adventurer-free block
+                    // above. The participant record stays; only the claim is freed.
+                    if (slots.length > 0 &&
+                        slots.every(s => {
+                            const resolved = statusMap.get(s.name) ?? s.status;
+                            return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
+                        }) &&
+                        rawPlayers[pid]?.activeMissions?.[missionId]) {
+                        updates[(0, seasonPaths_1.sp)(seasonId, `players/${pid}/activeMissions/${missionId}`)] = null;
                     }
                 }
             }

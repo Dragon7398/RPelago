@@ -32,8 +32,13 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
   const isAdmin        = player.id === adminId;
-  const activeMission  = player.activeMission && missions ? missions[player.activeMission] : null;
-  const activeMLabel   = activeMission ? missionDisplayLabel(activeMission) : null;
+  // Pooled claims: a player may hold several mission claims at once.
+  const activeMLabels  = missions
+    ? Object.keys(player.activeMissions ?? {})
+        .map(id => missions[id])
+        .filter(Boolean)
+        .map(m => missionDisplayLabel(m))
+    : [];
   // Casino-season players carry no `xp`/`gold` off the map economy, so treat a
   // missing value as 0 rather than crashing on `.toLocaleString()`.
   const xp                = player.xp ?? 0;
@@ -85,11 +90,11 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
             </span>
           )}
         </div>
-        {activeMLabel && (
-          <div className="dash-player-section-label" style={{ marginTop: '0.2rem', color: 'oklch(from var(--gm-accent) calc(l + 0.04) c h)' }}>
-            ⚜ {activeMLabel}
+        {activeMLabels.map(label => (
+          <div key={label} className="dash-player-section-label" style={{ marginTop: '0.2rem', color: 'oklch(from var(--gm-accent) calc(l + 0.04) c h)' }}>
+            ⚜ {label}
           </div>
-        )}
+        ))}
       </div>
 
       {busyAdvs.length > 0 && (

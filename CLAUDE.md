@@ -146,16 +146,18 @@ All in `functions/src/index.ts`:
 | `exchangeDiscordCode` | HTTP request | Discord OAuth code exchange → Firebase custom token |
 | `purchaseShopItem` | Callable | Validates and deducts gold, adds item to inventory. Rejects disabled players. |
 | `purchaseShopOrb` | Callable | Atomically claims orb, deducts gold. Rejects disabled players. |
-| `onTileComplete` | DB write on `game/tiles/{coord}/state` | Fires when a tile reaches `complete`; updates `profiles/` with XP snapshot and game stats. |
+| `onTileComplete` | DB write on `game/tiles/{coord}/state` | Fires when a tile reaches `complete`; updates `profiles/` with XP snapshot and game stats. Also auto-warns players with ≥5 status incidents (see Status reports). |
 | `onOrbAcquired` | DB create on `game/orbState/{orbId}` | Removes boss traits unlocked by the acquired orb. |
 | `pruneActivityLog` | DB create on `game/activityLog/{entryId}` | Trims the activity log to the most recent 25 entries. |
+| `fetchCheesetracker` / `fetchCheeseDetails` | Callable | Server-side proxies to cheesetrackers.theincrediblewheelofchee.se (no CORS from the browser). Used by the admin **Sync** buttons. |
+| `tickSlotStatuses` | Scheduled every 15 minutes | Auto-syncs slot statuses + activity timestamps from Cheesetracker across live + draft seasons (see Archipelago / Cheesetracker sync). |
 | `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. |
 | `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed). |
 | `setMissionParticipantStatusNote` | Callable | Updates a participant's status note. |
 | `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). |
 | `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot. |
 | `adminForceDeploy` | Callable | Admin-forces a forming mission into `inprogress`. |
-| `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. |
+| `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. Also auto-warns players with ≥5 status incidents. |
 | `tickGuildmasterMissions` | Scheduled every 15 minutes | Auto-deploys any forming mission whose decay has reduced max slots to the current fill count. |
 
 > DB triggers now watch the **season-scoped** paths (`seasons/{id}/…`), not the legacy top-level `game/…` shown above.
@@ -257,6 +259,23 @@ Mission state machine: `forming → inprogress → complete`. `player.activeMiss
 
 Real-time event feed stored in `game/activityLog` in Firebase, automatically pruned to 25 entries by the `pruneActivityLog` Cloud Function trigger. Events are written on tile completions, in-progress state changes, tile availability changes, orb collection, item purchases, orb purchases, mission deploys, and mission completions. Each `ActivityEntry` has `id`, `timestamp`, `type` (`ActivityType`), `message`, and `icon`. The collapsible `ActivityFeed` component renders this in the UI.
 
+### Archipelago / Cheesetracker sync
+
+Slot statuses (`SlotStatus`: `Unstarted | In-Progress | 100% | Goaled | Done`) are synced from the Cheesetracker API for both tile adventurer/public slots and mission participant slots. Two paths write the same data: the admin **Sync** button on ChallengesPage / MapPage / MissionsPage (via `fetchCheeseDetails`), and the scheduled `tickSlotStatuses` (every 15 min, across live + draft seasons). Both call **`deriveSlotStatus`** (`archipelagoApi.ts`, mirrored server-side in `functions/src/index.ts`) — the single source of truth for status derivation.
+
+Two timestamps are stamped on **every** synced slot (ms epoch, or null): **`lastActivity`** and **`lastChecked`**. Their weights are the crux and easy to invert:
+
+- **`lastActivity`** (Cheese `last_activity`) — **STRONG**: server-verified activity from the Archipelago server; the real "is actually playing / making progress" signal.
+- **`lastChecked`** (Cheese `last_checked`) — **WEAK**: a manual self-report by the player (e.g. vouching they're stuck); may be inaccurate.
+
+**`deriveSlotStatus` gates `In-Progress` on `last_activity` being present — NOT on `checks_done`** (`collect` mechanics inflate a slot's check count without the player ever launching the game) and **not on `last_checked`** (the weak signal). Terminal states (Done/Goaled/100%) still win. **Any change to derivation or the strong/weak roles must be made in both `archipelagoApi.ts` and the server `deriveStatus`.** `parseCheeseTs` (`archipelagoApi.ts`) normalizes ISO → ms.
+
+### Status reports
+
+Admin **Report** tab (`StatusReportPage.tsx`) surfaces in-progress missions and challenges that need attention, with all logic in the pure/tested **`statusReport.ts`**. `computeStatusReport` classifies each owned slot into **Problem** (red) or **Warning** (yellow), buckets each world as **Active** / **Too Early** (<48h elapsed) / **Recently Reported** (`lastReportAt` <24h). Elapsed clock origin mirrors the mission card: `linkedAt ?? deployedAt ?? firstJoinAt ?? createdAt` (tiles: `linkedAt` only, stamped on first room-link set). Slot thresholds are exported constants (`PROBLEM_STALE_HOURS`, `WARN_NO_ACTIVITY_HOURS`, `WARN_ALL_STALE_HOURS`); a **missing timestamp is "unknown", never "stale"** (`stale()` returns false on null — this prevents false "no activity in never" flags).
+
+Running an **official report** (`runOfficialStatusReport` in `db.ts`) does one atomic update: +1 `statusIncidents[playerId]` on each Problem world (per-report, per-world), resets `lastReportAt = report.ts` on Problem worlds, stores the snapshot to `seasons/{id}/statusReports/{key}`, and prunes to the newest 10. `buildOfficialReport` + `renderProblemsMarkdown` / `renderWarningsMarkdown` produce the two copy-paste blocks (player-facing Problems; admin-facing Warnings). Marking a Warning world **handled** (`markStatusWarningHandled`) resets its timer to the report's `ts` but **never moves a newer `lastReportAt` backward**. At world completion, players with ≥5 `statusIncidents` get an auto `PlayerWarning` (see `onTileComplete` / `onMissionComplete`).
+
 ### Player customization
 
 - **Name color**: 12 color options (`NAME_COLORS` in `constants.ts`). Requires owning the "Coat of Many Colors" item. Stored as `player.nameColor`.
@@ -312,15 +331,17 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 
 ### Keymaster's Keep
 
-A co-op task-list system stored in `game/kmkLists/` in Firebase, separate from the tile map and missions. The active list ID is tracked in `gameState.meta.kmkActiveListId`.
+A co-op task-list system stored at the **top-level `kmkEvents/`** node in Firebase, separate from the tile map and missions. **KMK is global — not season-scoped** (it survives the eventual `game/` deletion and renders under any season shell via a `#keep/{listId}` route hoisted above the Season/GameState providers in `App()`). Admin writes key off the global `config/adminId`, KMK's only tie into the rest of the system.
 
 **Data shape**: `KmkList` → `areas: Record<string, KmkArea>` → `tasks: Record<string, KmkTask>`. Tasks have a `status` (`KmkStatus`: `'Incomplete' | 'Pending' | 'Verifying' | 'Complete'`) and an optional claimed player.
 
+**Active lists**: there is **no single active-list pointer** — the old `gameState.meta.kmkActiveListId` was removed. Each `KmkList` carries its own **`active: boolean`** flag, so **multiple lists may be active at once**. `KmkProvider` derives `activeListIds` from the flags; the UI handles several simultaneously-active lists.
+
 **Player flow**: claim a trial (`Incomplete → Pending`), mark it done (`Pending → Verifying`), abandon (`Pending → Incomplete`), or resume (`Verifying → Pending`). Areas can be locked by admin to prevent claiming.
 
-**Admin flow**: import a list from CSV rows (`{ area, trial, desc }`), set it as the active list, lock/unlock areas, override task status, override the assigned player, or delete a list.
+**Admin flow**: import a list from CSV rows (`{ area, trial, desc }`), toggle a list active/inactive (`kmkSetListActive`), lock/unlock areas, override task status, override the assigned player, or delete a list.
 
-State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All writes go through `db.ts` `kmk*` functions. The admin tab renders in `src/components/admin/kmk/KmkPage.tsx`.
+State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEvents/`, exposing `activeListIds`). All writes go through `db.ts` `kmk*` functions. The admin tab renders in `src/components/admin/kmk/KmkPage.tsx`.
 
 ### File map
 
@@ -332,6 +353,8 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards` |
 | `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `computeMissionCard`, `freshMission` |
 | `src/lib/slotHelpers.ts` | Slot normalization utilities (`normalizeSlots`, `slotsFromEntry`) |
+| `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `fetchRoomStatus` |
+| `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
 | `src/firebase/season.ts` | Season path helpers (`sPath`/`sRef`/`secretPath`), `setCurrentSeason`, season resolution |
 | `src/firebase/casinoYaml.ts` | `uploadCasinoYaml` → owner-scoped Storage |
@@ -339,7 +362,7 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/contexts/AuthContext.tsx` | Discord OAuth, player upsert |
 | `src/contexts/SeasonContext.tsx` / `SeasonProvider.tsx` | Season resolution, `useSeason`/`useIsAdmin`, draft preview |
 | `src/contexts/GameStateContext.tsx` | Active-season subscription, all action callbacks |
-| `src/contexts/KmkContext.tsx` | Keymaster's Keep subscription and action callbacks |
+| `src/contexts/KmkContext.tsx` / `KmkProvider.tsx` | Keymaster's Keep context + `kmkEvents/` subscription (derives `activeListIds`) and action callbacks |
 | `src/contexts/ToastContext.tsx` | Toast notification context |
 | `src/components/Header.tsx` | Site header with nav/branding |
 | `src/components/PlayerHUD.tsx` | Player XP/gold/level status bar |
@@ -354,8 +377,8 @@ State and callbacks live in `KmkContext` (subscribed to `game/kmkLists/`). All w
 | `src/components/HelpModal.tsx` | Help modal shell |
 | `src/components/help/` | Help section components (11 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml, Missions) |
 | `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers, GuildmasterMissions) |
-| `src/components/AdminDashboard.tsx` | Admin dashboard shell (tabs: challenges, missions, kmk, map, players, shops, orbs) |
-| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage |
+| `src/components/AdminDashboard.tsx` | Admin dashboard shell (tabs: challenges, missions, casino, report, kmk, map, players, shops, orbs) |
+| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage, StatusReportPage |
 | `src/components/admin/kmk/` | KmkPage (tab shell), KmkImport (CSV import form), KmkLedger (task list UI) |
 | `src/components/admin/mapPage/` | Map page sub-editors: MapGridPanel, AdvSlotEditor, PublicSlotEditor, ClaimableBonusEditor, TraitEditor |
 | `src/components/admin/playersPage/` | PlayerCard sub-component |

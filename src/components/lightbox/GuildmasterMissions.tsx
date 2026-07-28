@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useSeason } from '../../contexts/SeasonContext';
 import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
-import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip } from '../../lib/gameLogic';
+import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, missionClaimCapacity } from '../../lib/gameLogic';
 import { AdvFeatIcons, CopyButton } from './AdvRow';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
 import { resolveNameColor } from './lbHelpers';
@@ -13,11 +13,11 @@ import { handStakeFromSlots } from '../../lib/casinoSlots';
 // ── Claimable slot row ────────────────────────────────────────────────────────
 
 function ClaimableSlots({
-  mission, uid, activeMissionId, basicTrainingDone,
+  mission, uid, claimsFull, basicTrainingDone,
 }: {
   mission: GMMission;
   uid: string | null;
-  activeMissionId: string | null;
+  claimsFull: boolean;
   basicTrainingDone: boolean;
 }) {
   const { claimMissionSlot } = useGameState();
@@ -27,9 +27,8 @@ function ClaimableSlots({
   if (entries.length === 0 || !uid) return null;
 
   const alreadyIn    = uid in (mission.participants ?? {});
-  const onOtherMission = activeMissionId !== null && activeMissionId !== mission.id;
   const btBlocked    = mission.type === 'basic' && basicTrainingDone;
-  if (alreadyIn || onOtherMission || btBlocked) return null;
+  if (alreadyIn || claimsFull || btBlocked) return null;
 
   return (
     <div className="gm-claim-section">
@@ -464,10 +463,10 @@ function TakeMissionButton({
 
 // ── Mission card ──────────────────────────────────────────────────────────────
 
-function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, onStandDown, players }: {
+function MissionCard({ card, uid, claimsFull, basicTrainingDone, onEnlist, onStandDown, players }: {
   card: GMMissionCard;
   uid: string | null;
-  activeMissionId: string | null;
+  claimsFull: boolean;
   basicTrainingDone: boolean;
   players: Record<string, Player>;
   onEnlist: (card: GMMissionCard) => void;
@@ -574,7 +573,7 @@ function MissionCard({ card, uid, activeMissionId, basicTrainingDone, onEnlist, 
         <ClaimableSlots
           mission={card.mission}
           uid={uid}
-          activeMissionId={activeMissionId}
+          claimsFull={claimsFull}
           basicTrainingDone={basicTrainingDone}
         />
       )}
@@ -616,7 +615,12 @@ export default function GuildmasterMissions() {
   const uid = user?.id ?? null;
   const players = gameState?.players ?? {};
   const player = uid ? players[uid] : null;
-  const activeMissionId = player?.activeMission ?? null;
+  // Pooled claims: the set of missions currently holding one of the player's
+  // claims. Settling missions (slots done, claim auto-released) are absent here
+  // even though the player is still enrolled. See missionClaimCapacity.
+  const heldMissionIds = Object.keys(player?.activeMissions ?? {});
+  const capacity = player ? missionClaimCapacity(player) : 1;
+  const claimsFull = heldMissionIds.length >= capacity;
   const basicTrainingDone = player?.basicTrainingDone ?? false;
 
   // useState initializer runs once per mount; sufficient for slot-count display
@@ -633,7 +637,7 @@ export default function GuildmasterMissions() {
 
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
-    .map(m => computeMissionCard(m, uid, activeMissionId, basicTrainingDone, now, player?.gold))
+    .map(m => computeMissionCard(m, uid, heldMissionIds.length, capacity, basicTrainingDone, now, player?.gold))
     .sort((a, b) => {
       const ga = sortGroup(a), gb = sortGroup(b);
       if (ga !== gb) return ga - gb;
@@ -650,7 +654,9 @@ export default function GuildmasterMissions() {
 
   const [btExpanded, setBtExpanded] = useState(false);
 
-  const activeMission = activeMissionId ? missions[activeMissionId] : null;
+  const heldMissions = heldMissionIds
+    .map(id => missions[id])
+    .filter((m): m is GMMission => m != null);
 
   const handleEnlist = async (card: GMMissionCard) => {
     const label = missionDisplayLabel(card.mission);
@@ -662,10 +668,9 @@ export default function GuildmasterMissions() {
     await standDownFromMission(card.mission.id, label);
   };
 
-  const handleBannerStandDown = async () => {
-    if (!activeMission) return;
-    const label = missionDisplayLabel(activeMission);
-    await standDownFromMission(activeMission.id, label);
+  const handleBannerStandDown = async (mission: GMMission) => {
+    const label = missionDisplayLabel(mission);
+    await standDownFromMission(mission.id, label);
   };
 
   return (
@@ -676,9 +681,9 @@ export default function GuildmasterMissions() {
         <span className="gm-rule r" />
       </div>
 
-      {activeMission && (
-        <ActiveBanner mission={activeMission} onStandDown={handleBannerStandDown} />
-      )}
+      {heldMissions.map(m => (
+        <ActiveBanner key={m.id} mission={m} onStandDown={() => handleBannerStandDown(m)} />
+      ))}
 
       <div className="gmb-list">
         {mainCards.map(card => (
@@ -686,7 +691,7 @@ export default function GuildmasterMissions() {
             key={card.key}
             card={card}
             uid={uid}
-            activeMissionId={activeMissionId}
+            claimsFull={claimsFull}
             basicTrainingDone={basicTrainingDone}
             players={players}
             onEnlist={handleEnlist}
@@ -707,7 +712,7 @@ export default function GuildmasterMissions() {
                 key={card.key}
                 card={card}
                 uid={uid}
-                activeMissionId={activeMissionId}
+                claimsFull={claimsFull}
                 basicTrainingDone={basicTrainingDone}
                 players={players}
                 onEnlist={handleEnlist}

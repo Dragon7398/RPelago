@@ -29,6 +29,20 @@ export function adventurerCountForLevel(lv: number): number {
   return count;
 }
 
+// How many missions a player may actively hold a claim on at once (the mission
+// analogue of the adventurer pool for Challenges). Base 1 — the guildmaster.
+// S2's advisor is a level-up bonus that raises this to 2 AND grants a second
+// adventurer, both gated on the same future advisor-unlocked signal; when that
+// lands it changes here and in adventurerCountForLevel together. A player may
+// hold any number of finished-but-settling tables — only un-finished claims
+// count against this cap (see missionLogic.hasUnfinishedSlots / activeMissions).
+// `player` is unused today but is the S2 advisor's input (a level-up bonus that
+// raises this to 2); kept in the signature so call sites are already correct.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function missionClaimCapacity(player: Player): number {
+  return 1;
+}
+
 export function checkAndGrantAdventurers(player: Player, prevLevel: number, newLevel: number): Player {
   if (newLevel <= prevLevel) return player;
 

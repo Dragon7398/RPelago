@@ -14,6 +14,7 @@ import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtClock } from '../../lib/missionLogic';
+import { missionClaimCapacity } from '../../lib/gameLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
 import '../../casino/themes.css';
@@ -418,7 +419,11 @@ export default function CasinoShell() {
   const me   = user && gameState ? gameState.players[user.id] : undefined;
   const gold = me?.gold ?? 0;
   const net  = gold - CASINO_START_GOLD;
-  const activeMission = me?.activeMission ?? null;
+  // Pooled claims: the set of missions holding one of the player's claims (still
+  // being set up or not yet finished). A settling table — slots done, claim
+  // auto-released — is absent here even though the player still holds the seat.
+  const heldClaimCount = Object.keys(me?.activeMissions ?? {}).length;
+  const claimCapacity  = me ? missionClaimCapacity(me) : 1;
 
   // Lifetime casino record, computed from settled tables (the profile-site
   // counters live in a separate `profiles/` tree this shell can't read). A seat
@@ -445,19 +450,34 @@ export default function CasinoShell() {
       .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
   }, [gameState?.missions]);
 
-  // Deployed tables other than the one you're seated at (yours already lives in the
-  // Board view above). Shown as read-only progress cards so the floor's live rooms
-  // are visible alongside the ones still taking seats.
+  // Every table the player holds a seat at right now — pooled claims mean this can
+  // be several at once. Each gets its own phase panel, and the player keeps seeing
+  // every table until it completes. Order: the tables whose claim is still HELD
+  // (active — being set up, or slots not yet done) sit above the FREED ones
+  // (finished-your-part, settling), then forming first, then by game/series.
+  const myTables = useMemo(() => {
+    const uid = user?.id;
+    if (!uid) return [] as GMMission[];
+    const held = (m: GMMission) => !!me?.activeMissions?.[m.id];
+    return Object.values(gameState?.missions ?? {})
+      .filter(m => m.type === 'casino' && (m.state === 'forming' || m.state === 'inprogress') && !!m.participants?.[uid])
+      .sort((a, b) =>
+        (Number(held(b)) - Number(held(a)))
+        || (a.state === b.state ? 0 : a.state === 'forming' ? -1 : 1)
+        || (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '')
+        || a.series - b.series);
+  }, [gameState?.missions, me?.activeMissions, user?.id]);
+  const myTableIds = useMemo(() => new Set(myTables.map(m => m.id)), [myTables]);
+
+  // Deployed tables the player holds NO seat at. Shown as read-only progress cards
+  // so the floor's live rooms are visible alongside the ones still taking seats.
   const liveTables = useMemo(() => {
     const all = Object.values(gameState?.missions ?? {});
     return all
-      .filter(m => m.type === 'casino' && m.state === 'inprogress' && m.id !== activeMission)
+      .filter(m => m.type === 'casino' && m.state === 'inprogress' && !myTableIds.has(m.id))
       .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
-  }, [gameState?.missions, activeMission]);
+  }, [gameState?.missions, myTableIds]);
 
-  // The table you hold a seat at — live, so it carries you from forming through
-  // in-progress without the panel tracking phase itself.
-  const seatedAt   = activeMission ? gameState?.missions?.[activeMission] ?? null : null;
   // Live-resolved so the open slot overview keeps updating; closes itself if the
   // table settles out of `missions` while the modal is up.
   const slotsMission = slotsId ? gameState?.missions?.[slotsId] ?? null : null;
@@ -466,8 +486,10 @@ export default function CasinoShell() {
   // and the panel agree on whether the Ledger is showing.
   const [dismissedSettled, setDismissedSettled] = useState<string | null>(null);
 
-  const locked    = !!activeMission;
-  const lockLabel = 'Seated elsewhere';
+  // Locked out of taking a NEW seat only when every claim is in use. Settling
+  // tables have already freed their claim, so they don't count here.
+  const locked    = heldClaimCount >= claimCapacity;
+  const lockLabel = 'All claims in use';
 
   const sit = (m: GMMission) => {
     const label = `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`;
@@ -487,11 +509,11 @@ export default function CasinoShell() {
   // The tables grid retitles with the player's seat phase, closing the loop per the
   // design: it invites you back once you're mid-room or just settled up. Mirrors
   // PhasePanel's Board (in-progress) / Ledger (settled, not yet dismissed) states.
-  const showingLedger = !seatedAt && !!lastSettled && lastSettled.id !== dismissedSettled;
+  const showingLedger = myTables.length === 0 && !!lastSettled && lastSettled.id !== dismissedSettled;
   const tablesTitle =
-    seatedAt?.state === 'inprogress' ? 'Other Tables Forming'
-    : showingLedger                  ? 'Your Seat Is Free — Pull Up Again'
-    :                                  "Tonight's Tables";
+    myTables.some(m => m.state === 'inprogress') ? 'Other Tables Forming'
+    : showingLedger                              ? 'Your Seat Is Free — Pull Up Again'
+    :                                              "Tonight's Tables";
 
   return (
     <div className="rl-root">
@@ -535,14 +557,29 @@ export default function CasinoShell() {
         </div>
       </div>
 
-      {/* One panel, phase owned by the backend: mission state IS the phase. */}
-      <PhasePanel
-        mission={seatedAt} settled={lastSettled} uid={user?.id ?? null} now={now} view={view}
-        onLeave={m => void standDownFromMission(m.id, missionDisplayLabel(m))}
-        dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
-        colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
-        handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
-      />
+      {/* One phase panel per held seat — pooled claims let a player hold several
+          tables at once (mid-setup plus any settling). Backend mission state IS
+          the phase. When the player holds none, a single panel falls back to the
+          Ledger (last settled) or the empty prompt. */}
+      {myTables.length > 0
+        ? myTables.map(m => (
+            <PhasePanel key={m.id}
+              mission={m} settled={null} uid={user?.id ?? null} now={now} view={view}
+              onLeave={mm => void standDownFromMission(mm.id, missionDisplayLabel(mm))}
+              dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
+              colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
+              handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
+            />
+          ))
+        : (
+            <PhasePanel
+              mission={null} settled={lastSettled} uid={user?.id ?? null} now={now} view={view}
+              onLeave={mm => void standDownFromMission(mm.id, missionDisplayLabel(mm))}
+              dismissedId={dismissedSettled} onDismiss={setDismissedSettled}
+              colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
+              handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
+            />
+          )}
 
       <div className="rl-sec">
         <div className="rl-sec-head">
@@ -556,7 +593,7 @@ export default function CasinoShell() {
                 const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
                 return (
                   <TableCard key={m.id} m={m} now={now}
-                    seatedHere={activeMission === m.id}
+                    seatedHere={myTableIds.has(m.id)}
                     locked={locked} lockLabel={lockLabel}
                     buyIn={buyIn} canAfford={gold >= buyIn}
                     onSit={sit} />

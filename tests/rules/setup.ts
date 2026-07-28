@@ -15,8 +15,6 @@ export const PLAYER_UID = 'discord_player1';
 export const OTHER_UID  = 'discord_player2';
 export const ALPHA_UID  = 'discord_alpha';
 
-export const TILE_AVAILABLE  = 'C3';
-export const TILE_INPROGRESS = 'E3';
 export const MISSION_ID      = 'mission1';
 export const KMK_LIST        = 'list1';
 export const KMK_AREA        = 'area1';
@@ -45,97 +43,6 @@ export async function makeTestEnv(projectId: string): Promise<RulesTestEnvironme
 export async function seed(testEnv: RulesTestEnvironment): Promise<void> {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await ctx.database().ref().set({
-      game: {
-        meta: { adminId: ADMIN_UID, initialized: true, seed: 12345 },
-
-        players: {
-          [PLAYER_UID]: {
-            id: PLAYER_UID,
-            displayName: 'Player One',
-            xp: 100,
-            gold: 500,
-            adventurers: {
-              [`${PLAYER_UID}_adv_1`]: {
-                id: `${PLAYER_UID}_adv_1`,
-                firstName: 'Aldric',
-                lastName: 'Stonefist',
-                cls: 'Warrior',
-                busy: false,
-                busyTile: null,
-              },
-            },
-            inventory: {},
-            // no `feats` node — an unset feat slot is the "can select" case
-          },
-          [OTHER_UID]: {
-            id: OTHER_UID,
-            displayName: 'Player Two',
-            xp: 50,
-            gold: 200,
-            adventurers: {
-              [`${OTHER_UID}_adv_1`]: {
-                id: `${OTHER_UID}_adv_1`,
-                firstName: 'Serana',
-                lastName: 'Ashveil',
-                cls: 'Mage',
-                busy: false,
-                busyTile: null,
-              },
-            },
-            inventory: {},
-            feats: { level3: 'knowledgeable' }, // already-taken slot
-          },
-        },
-
-        tiles: {
-          [TILE_AVAILABLE]: {
-            state: 'available',
-            name: 'Quiet Hollow',
-            adventurers: {},
-          },
-          [TILE_INPROGRESS]: {
-            state: 'inprogress',
-            name: 'Ember Pass',
-            adventurers: {},
-            claimableSlots: {
-              slotA: [{ name: '', game: '' }],
-            },
-          },
-        },
-
-        orbState: {},
-        shops: { centralia: { name: 'Centralia', orbId: null, itemIds: ['map'] } },
-        orbConfig: { bossMinOrbs: 5 },
-
-        missions: {
-          [MISSION_ID]: {
-            id: MISSION_ID,
-            type: 'casino',
-            state: 'forming',
-            pot: 100,
-            participants: {
-              [PLAYER_UID]: {
-                playerId: PLAYER_UID,
-                playerName: 'Player One',
-                joinedAt: 1_700_000_000_000,
-                // Secrets: the remaining draw deck and the live hand.
-                deck: [{ uid: 1, type: 'broad', value: 40 }],
-                hand: [{ uid: 2, type: 'narrow', value: 25 }],
-              },
-            },
-            claimableSlots: {
-              slotB: [{ name: '', game: '' }],
-            },
-          },
-        },
-
-        missionsHistory: {},
-        activityLog: {},
-        notifications: {
-          [PLAYER_UID]: { n1: { type: 'mission_deploy', label: 'X', ts: 1 } },
-        },
-      },
-
       kmkEvents: {
         [KMK_LIST]: {
           name: 'Trial List',
