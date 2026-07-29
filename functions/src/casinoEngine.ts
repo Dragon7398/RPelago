@@ -190,7 +190,7 @@ const RAW: readonly [string, CardTypeKey, number][] = [
 ];
 
 const CARD_NOTES: Record<string, string> = {
-  'Game Boy':    'e.g. GB, GBA, GBC',
+  'Game Boy':    'e.g. GB, GBA, GBC, DS, 3DS',
   'AP-original': 'A game made specifically for Archipelago',
 };
 

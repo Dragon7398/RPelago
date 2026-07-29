@@ -129,7 +129,7 @@ const RAW = [
     ['AP-original', 'platform', 30],
 ];
 const CARD_NOTES = {
-    'Game Boy': 'e.g. GB, GBA, GBC',
+    'Game Boy': 'e.g. GB, GBA, GBC, DS, 3DS',
     'AP-original': 'A game made specifically for Archipelago',
 };
 const WILD_BASE = {

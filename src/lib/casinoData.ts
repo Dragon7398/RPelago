@@ -89,7 +89,7 @@ const RAW: readonly [string, CardTypeKey, number][] = [
 
 // Optional flavour notes displayed on a card's details line
 const CARD_NOTES: Readonly<Record<string, string>> = {
-  'Game Boy':  'e.g. GB, GBA, GBC',
+  'Game Boy':  'e.g. GB, GBA, GBC, DS, 3DS',
   'AP-original': 'A game made specifically for Archipelago',
 };
 
