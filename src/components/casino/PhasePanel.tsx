@@ -27,7 +27,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { casinoSeatPaid, currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
+import { casinoSeatPaid, currentMaxSlots, fmtDayClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
 import { CardFace } from '../../casino/CardFace';
@@ -474,8 +474,8 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
   // not from deploy — a table can sit deployed for a while before it has a room.
   // Tables that were linked before `linkedAt` existed fall back to deploy time.
   const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
-  const elapsed   = clockFrom  ? fmtClock((now - clockFrom) / 1000) : '—';
-  const sinceDeploy = m.deployedAt ? fmtClock((now - m.deployedAt) / 1000) : '—';
+  const elapsed   = clockFrom  ? fmtDayClock((now - clockFrom) / 1000) : '—';
+  const sinceDeploy = m.deployedAt ? fmtDayClock((now - m.deployedAt) / 1000) : '—';
   const href      = tableHref(m, seasonId);
   const seat      = m.participants?.[uid];
 

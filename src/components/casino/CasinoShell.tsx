@@ -13,7 +13,7 @@ import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
-import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtClock } from '../../lib/missionLogic';
+import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
@@ -216,7 +216,7 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
   const done = total > 0 && goaled === total;
   // Elapsed matches the Board view: from the room link going up, not from deploy.
   const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
-  const elapsed   = clockFrom ? fmtClock((now - clockFrom) / 1000) : '—';
+  const elapsed   = clockFrom ? fmtDayClock((now - clockFrom) / 1000) : '—';
 
   return (
     <div className="rl-tcard rl-tcard-live" role="button" tabIndex={0}

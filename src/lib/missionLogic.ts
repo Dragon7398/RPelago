@@ -307,6 +307,19 @@ export function fmtClock(totalSec: number): string {
   return `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }
 
+// Day-aware duration for long-running clocks (elapsed / deployed-ago / since-
+// report). Renders `d HH:mm` once past 24h (e.g. "2d 14:03") and drops the day
+// segment below it, reading as plain "HH:mm". Seconds are omitted — these clocks
+// span hours to days, unlike the short countdowns that stay on fmtClock.
+export function fmtDayClock(totalSec: number): string {
+  const s   = Math.max(0, Math.floor(totalSec));
+  const d   = Math.floor(s / 86400);
+  const h   = Math.floor((s % 86400) / 3600);
+  const m   = Math.floor((s % 3600) / 60);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`;
+}
+
 // Thin wrappers over the shared slot-completion core (slotHelpers.ts). Missions
 // count a slotless participant as unfinished (no hand locked yet); tiles skip a
 // slotless adventurer. Kept as named exports so existing imports/tests are stable.

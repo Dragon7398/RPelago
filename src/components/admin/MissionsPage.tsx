@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, fmtClock, missionDisplayLabel } from '../../lib/missionLogic';
+import { currentMaxSlots, fmtDayClock, missionDisplayLabel } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 import { slotsAllFree } from '../../lib/slotHelpers';
@@ -507,11 +507,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
   // matching the player-facing PhasePanel. Fall back through deploy → first join →
   // creation so every card — forming or in progress — always shows something.
   const clockOrigin = mission.linkedAt ?? mission.deployedAt ?? mission.firstJoinAt ?? mission.createdAt;
-  const elapsed     = clockOrigin != null ? fmtClock((now - clockOrigin) / 1000) : '—';
+  const elapsed     = clockOrigin != null ? fmtDayClock((now - clockOrigin) / 1000) : '—';
   // "Since last report" runs from the most recent status report; with none filed
   // yet (feature lands next task) it falls back to the Elapsed origin.
   const reportOrigin = mission.lastReportAt ?? clockOrigin;
-  const sinceReport  = reportOrigin != null ? fmtClock((now - reportOrigin) / 1000) : '—';
+  const sinceReport  = reportOrigin != null ? fmtDayClock((now - reportOrigin) / 1000) : '—';
 
   const nextDecayMs = mission.state === 'forming' && mission.firstJoinAt != null
     ? mission.firstJoinAt + Math.ceil((now - mission.firstJoinAt) / (24 * 3600_000)) * (24 * 3600_000) - now
