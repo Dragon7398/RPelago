@@ -1209,6 +1209,15 @@ export function CasinoTable() {
                   Remember to <strong>test and generate your YAML</strong> before submitting. It should
                   generate at or below <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
                 </div>
+                <div className="sf-reminder">
+                  Please also check that your games are included in{' '}
+                  <a href="https://docs.google.com/spreadsheets/d/1YdsVZWxICS7NF0y68NMW-jXIwljZJcKOAHN_wiJh2Ms"
+                     target="_blank" rel="noopener noreferrer">Drago's List</a>{' '}
+                  on the 'Complete List' sheet as ready for Async or Sync before submitting. If they are{' '}
+                  <em>not</em> included here, please ping <strong>@Brisbe</strong> in the channel with the game
+                  you're wishing to get approved. Games not pre-approved may be initially denied until approval
+                  can be finalized.
+                </div>
                 <div className="sf-manifest">
                   {committedCards.map((c, i) => {
                     const v  = manifest[c.uid];
