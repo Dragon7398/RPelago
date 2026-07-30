@@ -5,6 +5,8 @@
 import type { CasinoDeckChoice } from '../types';
 import { CARD_DEFS, CARD_TYPES, DECK_VARIANTS } from '../lib/casinoData';
 import { CardFace } from './CardFace';
+import './cards.css';
+import './deckPreview.css';
 
 interface DeckPreviewProps {
   choice: CasinoDeckChoice;

@@ -399,6 +399,9 @@ body.casino-scope #root { width: 100%; }
 .rl-modal-close:hover { color: var(--gold); border-color: var(--line-glow); }
 .rl-modal-name { font-family:'Cinzel',serif; font-weight: 800; font-size: 1.5rem; letter-spacing: 0.03em; color: var(--parchment); }
 .rl-modal-tag { font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); margin: 0.2rem 0 1.2rem; }
+/* Section divider inside a modal (e.g. "The Decks" under "The Games"). */
+.rl-modal-subhead { font-family:'Cinzel',serif; font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold);
+  border-top: 1px solid var(--line-glow); padding-top: 0.9rem; margin-bottom: 0.4rem; }
 
 .rl-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
 

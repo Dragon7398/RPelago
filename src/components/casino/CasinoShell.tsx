@@ -11,8 +11,10 @@ import ProfileLink from '../ProfileLink';
 import PhasePanel, { TableSlotsBoard } from './PhasePanel';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
-import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend, type CasinoGame } from '../../lib/casinoData';
+import { DeckPreview } from '../../casino/DeckPreview';
+import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
+import type { CasinoDeckChoice } from '../../types';
 import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { toRoman } from '../../lib/constants';
@@ -268,23 +270,50 @@ function Modal({ title, tag, onClose, children, wide }: { title: string; tag: st
 }
 
 function GamesModal({ onClose }: { onClose: () => void }) {
+  // Same deck preview the table offers, brought to the landing so a player can see
+  // exactly what's in each deck before ever sitting down. Rendered as a sibling of
+  // the Modal so its lightbox (z-index 120) stacks above this modal's overlay.
+  const [previewDeck, setPreviewDeck] = useState<CasinoDeckChoice | null>(null);
   return (
-    <Modal title="The Games" tag="Tonight's Tables" onClose={onClose}>
-      {CASINO_GAME_ORDER.map(g => {
-        const c = CASINO_GAMES[g];
-        const cost = [`${c.ante}g ante`, c.reroll ? `${c.rerollCost}g reroll` : '', c.playOn ? `${c.playOn}g play-on` : '']
-          .filter(Boolean).join(' · ');
-        return (
-          <div key={g} style={{ borderTop: '1px solid var(--border)', padding: '0.7rem 0' }}>
-            <div className="rl-spread" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="rl-mini-val gold">{c.label}</span>
-              <span className="rl-mini-val">{cost}</span>
+    <>
+      <Modal title="The Games" tag="Tonight's Tables" onClose={onClose}>
+        {CASINO_GAME_ORDER.map(g => {
+          const c = CASINO_GAMES[g];
+          const cost = [`${c.ante}g ante`, c.reroll ? `${c.rerollCost}g reroll` : '', c.playOn ? `${c.playOn}g play-on` : '']
+            .filter(Boolean).join(' · ');
+          return (
+            <div key={g} style={{ borderTop: '1px solid var(--border)', padding: '0.7rem 0' }}>
+              <div className="rl-spread" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span className="rl-mini-val gold">{c.label}</span>
+                <span className="rl-mini-val">{cost}</span>
+              </div>
+              <div className="rl-muted">Commit up to {c.pickMax} cards{c.sittings === 2 ? ' · two sittings (hole cards, then community reveal)' : ''}.</div>
             </div>
-            <div className="rl-muted">Commit up to {c.pickMax} cards{c.sittings === 2 ? ' · two sittings (hole cards, then community reveal)' : ''}.</div>
-          </div>
-        );
-      })}
-    </Modal>
+          );
+        })}
+
+        <div className="rl-modal-subhead" style={{ marginTop: '1.1rem' }}>The Decks</div>
+        <p className="rl-muted" style={{ margin: '0 0 0.2rem' }}>
+          Every table is dealt from one of these decks — you pick yours when you sit down. Preview what's in each.
+        </p>
+        {DECK_VARIANT_ORDER.map(key => {
+          const v = DECK_VARIANTS[key];
+          return (
+            <div key={key} style={{ borderTop: '1px solid var(--border)', padding: '0.7rem 0' }}>
+              <div className="rl-spread" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem' }}>
+                <span className="rl-mini-val gold">{v.label}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                  <span className="rl-mini-val">{deckSizeFor(key)} / {deckSizeFor('purist')} cards</span>
+                  <button className="rl-btn" onClick={() => setPreviewDeck(key)}>Preview</button>
+                </div>
+              </div>
+              <div className="rl-muted">{v.blurb}</div>
+            </div>
+          );
+        })}
+      </Modal>
+      {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
+    </>
   );
 }
 
