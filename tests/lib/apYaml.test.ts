@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseApYaml, checkWorldCount, RANDOMIZED_GAME } from '../../src/lib/apYaml';
+import { parseApYaml, checkWorldCount, checkProgressionBalancing, RANDOMIZED_GAME } from '../../src/lib/apYaml';
 
 describe('parseApYaml — game resolution', () => {
   it('reads a plain string game', () => {
@@ -108,5 +108,71 @@ describe('checkWorldCount', () => {
     expect(checkWorldCount(0, { min: 1, max: 5 })).toMatch(/at least 1/);
     expect(checkWorldCount(6, { min: 1, max: 5 })).toMatch(/at most 5/);
     expect(checkWorldCount(3, { min: 1, max: 5 })).toBeNull();
+  });
+});
+
+// Progression Balancing is nested under the resolved game's section in an AP YAML.
+const pbYaml = (pb: string) => `name: P\ngame: Super Metroid\nSuper Metroid:\n  progression_balancing: ${pb}\n`;
+
+describe('checkProgressionBalancing', () => {
+  it('passes acceptable scalar values (≤50, disabled, normal, random-low)', () => {
+    for (const v of ['0', '50', 'disabled', 'normal', 'random', 'random-low']) {
+      expect(checkProgressionBalancing(pbYaml(v))).toEqual([]);
+    }
+  });
+
+  it('warns on a scalar in 51–75', () => {
+    const f = checkProgressionBalancing(pbYaml('60'));
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe('warn');
+    expect(f[0].value).toBe('60');
+  });
+
+  it('rejects a scalar above 75', () => {
+    const f = checkProgressionBalancing(pbYaml('80'));
+    expect(f[0].severity).toBe('reject');
+  });
+
+  it('rejects "extreme"', () => {
+    expect(checkProgressionBalancing(pbYaml('extreme'))[0].severity).toBe('reject');
+  });
+
+  it('warns on "random-high"', () => {
+    expect(checkProgressionBalancing(pbYaml('random-high'))[0].severity).toBe('warn');
+  });
+
+  it('warns on a random-range that reaches into 50–75', () => {
+    expect(checkProgressionBalancing(pbYaml('random-range-40-60'))[0].severity).toBe('warn');
+  });
+
+  it('rejects a random-range whose top exceeds 75', () => {
+    expect(checkProgressionBalancing(pbYaml('random-range-0-99'))[0].severity).toBe('reject');
+  });
+
+  it('ignores a random-range that stays at or below 50', () => {
+    expect(checkProgressionBalancing(pbYaml('random-range-0-40'))).toEqual([]);
+  });
+
+  it('judges a weighted mapping across only weight>0 options, worst wins', () => {
+    // extreme has weight 0 (ignored); a viable 60 warns, viable 80 rejects.
+    const map = `name: P\ngame: Celeste\nCeleste:\n  progression_balancing:\n    normal: 1\n    extreme: 0\n    60: 1\n    80: 1\n`;
+    const f = checkProgressionBalancing(map);
+    expect(f[0].severity).toBe('reject');
+  });
+
+  it('ignores an out-of-policy option that has weight 0', () => {
+    const map = `name: P\ngame: Celeste\nCeleste:\n  progression_balancing:\n    normal: 1\n    extreme: 0\n    random-range-0-99: 0\n`;
+    expect(checkProgressionBalancing(map)).toEqual([]);
+  });
+
+  it('labels each world in a multi-document file', () => {
+    const text = `${pbYaml('80')}---\n${pbYaml('30')}`;
+    const f = checkProgressionBalancing(text);
+    expect(f).toHaveLength(1);
+    expect(f[0].world).toBe('World 1');
+  });
+
+  it('returns nothing for a config with no progression_balancing', () => {
+    expect(checkProgressionBalancing('name: P\ngame: Celeste\n')).toEqual([]);
   });
 });

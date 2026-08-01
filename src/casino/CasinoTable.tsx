@@ -11,7 +11,7 @@ import {
 } from '../lib/casinoData';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
-import { parseApYaml, checkWorldCount } from '../lib/apYaml';
+import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
 import { currentMaxSlots } from '../lib/missionLogic';
@@ -146,6 +146,7 @@ export function CasinoTable() {
   const [yamlText, setYamlText]   = useState<string | null>(null);
   const [yamlInfo, setYamlInfo]   = useState<{ name: string; docs: number; filled: number } | null>(null);
   const [yamlWarn, setYamlWarn]   = useState<string[]>([]);
+  const [pbFindings, setPbFindings] = useState<PbFinding[]>([]);
   // Manifest drag-reorder: the row being dragged, and the row it would land on.
   const [dragRow, setDragRow]     = useState<number | null>(null);
   const [dropRow, setDropRow]     = useState<number | null>(null);
@@ -591,10 +592,10 @@ export function CasinoTable() {
   // Attach a YAML: parse in-browser, prefill the manifest in committed order, and
   // surface broken-file / wrong-world-count / randomized warnings (non-blocking).
   const onPickYaml = (file: File | null) => {
-    if (!file) { setYamlText(null); setYamlInfo(null); setYamlWarn([]); return; }
+    if (!file) { setYamlText(null); setYamlInfo(null); setYamlWarn([]); setPbFindings([]); return; }
     // Reject oversized files up front (the upload + storage rule enforce it too).
     if (file.size >= MAX_YAML_BYTES) {
-      setYamlText(null); setYamlInfo(null);
+      setYamlText(null); setYamlInfo(null); setPbFindings([]);
       setYamlWarn([`That file is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Configs must be under 1 MB.`]);
       return;
     }
@@ -616,6 +617,9 @@ export function CasinoTable() {
       const warn = [...errors];
       if (parsed.some(p => p.randomized))
         warn.push('One or more games are a weighted / randomized choice — your host resolves the actual game from your config.');
+      // Screen progression_balancing: reject-level findings become a hard submit
+      // block (below), warn-level ones surface as notices. Host sees both on download.
+      setPbFindings(checkProgressionBalancing(text));
       setYamlText(text);
       setYamlInfo({ name: file.name, docs: parsed.length, filled: Math.min(parsed.length, committedCards.length) });
       setYamlWarn(warn);
@@ -694,7 +698,11 @@ export function CasinoTable() {
   // slip past the manifestReady gate. Only checkable when a config was attached this
   // session (yamlInfo present); a reorder-only resubmit keeps its already-valid file.
   const countErr = yamlInfo ? checkWorldCount(yamlInfo.docs, { count: committedCards.length }) : null;
-  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr;
+  // Progression Balancing screening (only for a config attached this session).
+  // Reject-level findings are a HARD block; warn-level are non-blocking notices.
+  const pbBlock = pbFindings.filter(f => f.severity === 'reject');
+  const pbWarn  = pbFindings.filter(f => f.severity === 'warn');
+  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr && pbBlock.length === 0;
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
   // (already-locked). The per-card manifest is keyed by card uid, so reordering the
@@ -754,7 +762,7 @@ export function CasinoTable() {
     const seeded: Record<number, ManifestVal> = {};
     cards.forEach((c, i) => { seeded[c.uid] = { name: slots[i]?.name ?? '', game: slots[i]?.game ?? '' }; });
     setManifest(seeded);
-    setYamlText(null); setYamlInfo(null); setYamlWarn([]);
+    setYamlText(null); setYamlInfo(null); setYamlWarn([]); setPbFindings([]);
     setResubmitting(true);
     setPhase('manifest');
   };
@@ -1297,7 +1305,13 @@ export function CasinoTable() {
                       ⛔ {countErr} Attach a config with exactly {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
                     </div>
                   )}
+                  {pbBlock.map((f, i) => (
+                    <div className="sf-yaml-err" key={`pbe${i}`}>⛔ {f.world}: {f.message}</div>
+                  ))}
                   {yamlWarn.map((w, i) => <div className="sf-yaml-warn" key={i}>⚠ {w}</div>)}
+                  {pbWarn.map((f, i) => (
+                    <div className="sf-yaml-warn" key={`pbw${i}`}>⚠ {f.world}: {f.message}</div>
+                  ))}
                 </div>
               </div>
 
@@ -1306,6 +1320,7 @@ export function CasinoTable() {
                   {canSubmit ? '✓ ' : ''}<b>{manifestReady}</b>/{committedCards.length} slots ready
                   {attachRequired && !yamlText && <> · <span className="sf-ready-need">config required</span></>}
                   {countErr && <> · <span className="sf-ready-need">wrong game count</span></>}
+                  {pbBlock.length > 0 && <> · <span className="sf-ready-need">progression balancing too high</span></>}
                 </span>
                 <div className="sf-foot-acts">
                   {resubmitting ? (

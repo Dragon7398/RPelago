@@ -8,6 +8,7 @@ import { currentMaxSlots, fmtDayClock, missionDisplayLabel } from '../../lib/mis
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 import { slotsAllFree } from '../../lib/slotHelpers';
+import { checkProgressionBalancing } from '../../lib/apYaml';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -366,9 +367,22 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
             <span>{yamls.length} YAML{yamls.length === 1 ? '' : 's'} uploaded</span>
             <button className="dash-action-btn" onClick={downloadZip}>⬇ All (.zip)</button>
           </div>
-          {yamls.map((y, i) => (
+          {yamls.map((y, i) => {
+            // Screened here in the host's own browser from the downloaded config —
+            // the player's submit gate blocks reject-level PB, so anything flagged
+            // here (esp. a ⛔) slipped past the client and is worth a look / deny.
+            const pb = checkProgressionBalancing(y.text);
+            return (
             <div key={y.uid} className="casino-yaml-row">
-              <span className="casino-yaml-name">{y.playerName}</span>
+              <span className="casino-yaml-name">
+                {y.playerName}
+                {pb.map((f, j) => (
+                  <span key={j} className={`casino-yaml-pb ${f.severity}`}
+                        title={`${f.world}: ${f.message}`}>
+                    {f.severity === 'reject' ? '⛔' : '⚠'} PB {f.value}
+                  </span>
+                ))}
+              </span>
               <span className="casino-yaml-acts">
                 {/* ︎ = text-presentation selector: renders the glyph monochrome so it takes the CSS tint. */}
                 <button className="dash-tile-link" title={`Download ${names[i]}`}
@@ -388,7 +402,8 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
                 )}
               </span>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -112,6 +112,130 @@ export function parseApYaml(text: string): ParseYamlResult {
   return { slots, errors };
 }
 
+// ── Progression Balancing screening ─────────────────────────────────────────
+//
+// A machine check on the one AP setting we care to police automatically:
+// `progression_balancing` (per-world, range 0–99; named values disabled=0,
+// normal=50, extreme=99). Community consensus keeps it ≤50; higher values (or
+// "extreme") make a world much easier and are discouraged/disallowed here.
+//
+//   • REJECT (hard block): a value above 75, "extreme", or a random-range whose
+//     top reaches above 75.
+//   • WARN  (soft, host-visible): a value in 51–75, "random-high", or a
+//     random-range that reaches into 50–75.
+//
+// The setting is scanned wherever it appears in a document: at the top level and
+// under each game section (AP nests it under the resolved game's name; a weighted
+// game can carry several sections). A weighted mapping (option → weight) is
+// judged across every option with weight > 0, taking the worst outcome.
+
+export type PbSeverity = 'warn' | 'reject';
+
+export interface PbFinding {
+  world:    string;      // "World 2" (multi-doc) or "File" (single)
+  severity: PbSeverity;
+  value:    string;      // the offending option(s), comma-joined
+  message:  string;      // human-readable explanation
+}
+
+const pbWorse = (a: PbSeverity | null, b: PbSeverity | null): PbSeverity | null =>
+  a === 'reject' || b === 'reject' ? 'reject' : a === 'warn' || b === 'warn' ? 'warn' : null;
+
+// Severity of a single progression_balancing option (a number, or a token like
+// "extreme" / "random-high" / "random-range-0-99"). Returns null when acceptable.
+function pbTokenSeverity(token: string | number): PbSeverity | null {
+  const raw = String(token).trim();
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (n > 75) return 'reject';
+    if (n > 50) return 'warn';
+    return null;
+  }
+  const t = raw.toLowerCase();
+  if (t === 'extreme') return 'reject';
+  if (t === 'random-high') return 'warn';
+  if (t.startsWith('random-range')) {
+    const nums = (t.match(/\d+/g) ?? []).map(Number);
+    if (nums.length >= 2) {
+      const top = Math.max(...nums);
+      if (top > 75) return 'reject';   // range can land above 75
+      if (top >= 50) return 'warn';    // range reaches into 50–75
+    }
+    return null;
+  }
+  // random, random-low, disabled, normal, or anything unrecognized → acceptable.
+  return null;
+}
+
+// Judge one progression_balancing value: a scalar, or a weighted option→weight
+// mapping (only weight > 0 counts). Returns the worst severity and the labels of
+// the offending options.
+function evalPbValue(val: unknown): { severity: PbSeverity | null; labels: string[] } {
+  if (typeof val === 'number' || typeof val === 'string') {
+    const sev = pbTokenSeverity(val);
+    return { severity: sev, labels: sev ? [String(val).trim()] : [] };
+  }
+  if (val && typeof val === 'object' && !Array.isArray(val)) {
+    let worst: PbSeverity | null = null;
+    const labels: string[] = [];
+    for (const [opt, weight] of Object.entries(val as Record<string, unknown>)) {
+      if (typeof weight !== 'number' || weight <= 0) continue;
+      const sev = pbTokenSeverity(opt);
+      if (sev) { labels.push(opt); worst = pbWorse(worst, sev); }
+    }
+    return { severity: worst, labels };
+  }
+  return { severity: null, labels: [] };
+}
+
+// Screen every world in a config for an out-of-policy progression_balancing.
+// One finding per world (the worst it carries); acceptable worlds produce none.
+export function checkProgressionBalancing(text: string): PbFinding[] {
+  let docs: ReturnType<typeof parseAllDocuments>;
+  try {
+    docs = parseAllDocuments(text, { uniqueKeys: false, logLevel: 'silent' });
+  } catch {
+    return [];
+  }
+
+  const multi = docs.length > 1;
+  const findings: PbFinding[] = [];
+  docs.forEach((doc, i) => {
+    let obj: unknown;
+    try { obj = doc.toJS({ maxAliasCount: 100 }); } catch { obj = null; }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    const rec = obj as Record<string, unknown>;
+
+    // Gather progression_balancing wherever it lives: at the root, and under any
+    // nested game section.
+    const pbVals: unknown[] = [];
+    if ('progression_balancing' in rec) pbVals.push(rec.progression_balancing);
+    for (const v of Object.values(rec)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && 'progression_balancing' in (v as Record<string, unknown>))
+        pbVals.push((v as Record<string, unknown>).progression_balancing);
+    }
+
+    let worst: PbSeverity | null = null;
+    const labels = new Set<string>();
+    for (const pv of pbVals) {
+      const { severity, labels: ls } = evalPbValue(pv);
+      if (severity) { ls.forEach(l => labels.add(l)); worst = pbWorse(worst, severity); }
+    }
+    if (!worst) return;
+
+    const value = [...labels].join(', ');
+    findings.push({
+      world:    multi ? `World ${i + 1}` : 'File',
+      severity: worst,
+      value,
+      message: worst === 'reject'
+        ? `Progression Balancing (${value}) is too high — values above 75 and "extreme" are not allowed. Set it to 75 or lower.`
+        : `Progression Balancing (${value}) is above 50 — this is discouraged and will be flagged for your host.`,
+    });
+  });
+  return findings;
+}
+
 // Warn (non-blocking) when the number of parsed worlds doesn't match what's
 // expected: the casino passes an exact `count` (the seat's locked cards); other
 // contexts pass a `min`/`max` range (e.g. 1–5 for a typical challenge/mission).

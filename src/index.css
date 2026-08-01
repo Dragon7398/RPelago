@@ -1047,7 +1047,25 @@ header p {
 .casino-yaml-reason:focus { border-color: var(--gold); }
 .casino-yaml-reason::placeholder { color: oklch(from var(--gold-dim) l c h / 0.7); font-style: italic; }
 .casino-yaml-row:last-child { border-bottom: none; }
-.casino-yaml-name { font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment); }
+.casino-yaml-name {
+  font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment);
+  display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+}
+/* Progression-balancing flag shown beside a seat's name on download. Amber for a
+   discouraged (warn) value, red for a disallowed (reject) one that slipped past the
+   player's submit gate. Theme-aware via the same oklch tokens as the deny button. */
+.casino-yaml-pb {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
+  padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
+}
+.casino-yaml-pb.warn {
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
+  border: 1px solid oklch(from var(--gold) l c h / 0.45);
+}
+.casino-yaml-pb.reject {
+  color: oklch(72% 0.19 25); background: oklch(55% 0.16 25 / 0.14);
+  border: 1px solid oklch(55% 0.16 25 / 0.55);
+}
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
 .casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
 
