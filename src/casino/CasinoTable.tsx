@@ -81,6 +81,20 @@ function getParams() {
   };
 }
 
+// ── Closing the table tab ─────────────────────────────────────────────────────
+
+/**
+ * Firefox only honours `window.close()` on a tab that a *script* opened
+ * (`window.open`); the table is reached through a plain `target="_blank"` link,
+ * so the close is silently ignored there and the button looks dead. Chrome is
+ * lenient and closes it. Try the close anyway, then fall back to sending the tab
+ * back to the main app so the player is never stranded on the table.
+ */
+function closeTable() {
+  window.close();
+  setTimeout(() => { if (!window.closed) window.location.href = '/'; }, 150);
+}
+
 // ── Seat status helper ────────────────────────────────────────────────────────
 
 function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: number) {
@@ -823,7 +837,7 @@ export function CasinoTable() {
             : mission && !mission.casinoGame
               ? 'This table has no game assigned.'
               : 'Mission not found or unavailable.'}
-          <button className="cz-btn" onClick={() => window.close()}>Close</button>
+          <button className="cz-btn" onClick={closeTable}>Close</button>
         </div>
       </div>
     );
@@ -1136,7 +1150,7 @@ export function CasinoTable() {
               </div>
               <div className="cz-actions">
                 {game === 'holdem'
-                  ? <button className="cz-btn ghost" onClick={() => window.close()}>Close table</button>
+                  ? <button className="cz-btn ghost" onClick={closeTable}>Close table</button>
                   : <button className="cz-btn primary" onClick={() => { setFlash(''); setPhase('ante'); }} disabled={busy}>Try again</button>}
               </div>
               <div className="cz-flash">{flash}</div>
@@ -1387,7 +1401,7 @@ export function CasinoTable() {
                 Gold payouts (hand reward + pot share) are credited when the admin marks this mission complete.
               </div>
               <div className="cz-actions">
-                <button className="cz-btn ghost" onClick={() => window.close()}>Close table</button>
+                <button className="cz-btn ghost" onClick={closeTable}>Close table</button>
               </div>
             </>
           )}
