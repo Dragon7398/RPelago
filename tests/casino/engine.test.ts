@@ -2,14 +2,14 @@ import { describe, it, expect } from 'vitest';
 
 // Client (canonical) casino modules.
 import {
-  CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend,
+  CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend, buildDeck,
   type CasinoGame,
 } from '../../src/lib/casinoData';
 import {
   evaluatePoker, evaluateBlackjack,
   rollSeatCount, rollReleaseChance, rollCollectChance,
   deriveHintCost, computeInitialPot, potContribution, rollTableSetup,
-  drawCommunity, initialDealCount, selectCommitted,
+  drawCommunity, holdemPool, COMMUNITY_UID_BASE, initialDealCount, selectCommitted,
   CASINO_XP_FLOOR, CASINO_POT_CUT_PCT,
   type DeckCard,
 } from '../../src/lib/casinoEngine';
@@ -374,6 +374,78 @@ describe('drawCommunity', () => {
     for (const seed of [3, 55, 999]) {
       expect(server.drawCommunity(mulberry32(seed))).toEqual(drawCommunity(mulberry32(seed)));
     }
+  });
+
+  // buildDeck numbers uid 0..N by position, fresh per call, so the seat's hole
+  // deck and the community deck would otherwise share a uid space. uid is the
+  // selection protocol AND the React key, so one uid meaning two cards silently
+  // drops a card from holdemPlayOn's lookup and makes one tap count as two
+  // commits. The community lives in its own range so that cannot happen.
+  it('namespaces every community uid clear of the hole-card range', () => {
+    const holeDeckMax = buildDeck().length;   // hole uids are 0..holeDeckMax-1
+    for (const seed of [1, 7, 42, 100, 2024]) {
+      for (const c of drawCommunity(mulberry32(seed))) {
+        expect(c.uid).toBeGreaterThanOrEqual(COMMUNITY_UID_BASE);
+        expect(c.uid).toBeGreaterThanOrEqual(holeDeckMax);
+      }
+    }
+  });
+
+  it('agrees with the server on the namespace constant', () => {
+    expect(server.COMMUNITY_UID_BASE).toBe(COMMUNITY_UID_BASE);
+  });
+});
+
+// ── Hold 'Em pool assembly ────────────────────────────────────────────────────
+describe('holdemPool', () => {
+  const hole = [card(40, 'A'), card(60, 'B')];
+
+  it('is hole cards first, then the community, all seven kept', () => {
+    const community = drawCommunity(mulberry32(11));
+    const pool = holdemPool(hole, community);
+    expect(pool.length).toBe(7);
+    expect(pool.slice(0, 2).map(c => c.name)).toEqual(['A', 'B']);
+    expect(new Set(pool.map(c => c.uid)).size).toBe(7);
+  });
+
+  it('leaves a modern (already namespaced) pool byte-identical', () => {
+    const community = drawCommunity(mulberry32(11));
+    expect(holdemPool(hole, community)).toEqual([...hole, ...community]);
+  });
+
+  // Tables dealt before the namespace existed can hold a collision. Their rows are
+  // already written, so the pool de-duplicates on READ: the hole card keeps its uid
+  // (it is what `hand` / `lockedCards` were written from) and the community card
+  // moves. Both sides build the pool this way, so a tapped uid still resolves to
+  // the same card when the server re-reads it.
+  it('de-duplicates a legacy collision, keeping the hole card at its uid', () => {
+    const legacyCommunity = [
+      { ...card(30, 'C'), uid: hole[1].uid },   // collides with hole card B
+      card(50, 'D'),
+    ];
+    const pool = holdemPool(hole, legacyCommunity);
+    expect(pool.length).toBe(4);
+    expect(new Set(pool.map(c => c.uid)).size).toBe(4);
+    // B keeps its uid; the colliding community card is the one that moved.
+    expect(pool[1]).toEqual(hole[1]);
+    expect(pool[2].name).toBe('C');
+    expect(pool[2].uid).not.toBe(hole[1].uid);
+  });
+
+  it('is identical on client and server, legacy collisions included', () => {
+    const legacyCommunity = [
+      { ...card(30, 'C'), uid: hole[0].uid },
+      { ...card(50, 'D'), uid: hole[1].uid },
+      card(70, 'E'),
+    ];
+    expect(server.holdemPool(hole, legacyCommunity)).toEqual(holdemPool(hole, legacyCommunity));
+    expect(server.holdemPool([], [])).toEqual(holdemPool([], []));
+  });
+
+  it('tolerates a seat with no hole cards or no community yet', () => {
+    expect(holdemPool([], []).length).toBe(0);
+    expect(holdemPool(hole, []).length).toBe(2);
+    expect(holdemPool([], drawCommunity(mulberry32(5))).length).toBe(5);
   });
 });
 

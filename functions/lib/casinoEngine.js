@@ -3,7 +3,7 @@
 // Keep in sync with: casinoData.ts, casinoEngine.ts, casinoGambits.ts, casinoSlots.ts
 // This file is compiled by functions/tsconfig.json (CommonJS, no Vite).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = void 0;
+exports.COMMUNITY_UID_BASE = exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = void 0;
 exports.minCasinoAnte = minCasinoAnte;
 exports.seatSpend = seatSpend;
 exports.buildDeck = buildDeck;
@@ -29,6 +29,7 @@ exports.computeInitialPot = computeInitialPot;
 exports.potContribution = potContribution;
 exports.rollTableSetup = rollTableSetup;
 exports.drawCommunity = drawCommunity;
+exports.holdemPool = holdemPool;
 exports.cardsToSlots = cardsToSlots;
 // ── Casino mission constants ─────────────────────────────────────────────────
 // Mirror of CASINO_START_STATS in src/lib/constants.ts. (Enlist gold is the
@@ -423,6 +424,19 @@ function rollTableSetup(rng = Math.random) {
 // community cards: full Purist deck, 1 truly random + one each of Broad / Narrow
 // / Franchise / Platform, all distinct. Keep in sync.
 const COMMUNITY_TYPES = ['broad', 'narrow', 'franchise', 'platform'];
+// ⚠️ `uid` is NOT globally unique — buildDeck numbers it 0..N by position, fresh
+// on every call. Hold 'Em is the only game whose pool comes from TWO independent
+// buildDeck() calls (the seat's hole deck and the community deck below), so its
+// two halves share a uid space and can collide. uid is the selection protocol
+// (`selectedUids` / `keepUids`) AND the client's React key, so one uid meaning two
+// cards makes the `byUid` Map below silently drop a card and makes the UI count a
+// single tap as two commits. Community cards therefore live in their own uid
+// range. Applied at draw time, so it only covers tables dealt from here on — see
+// holdemPool for the seats already holding a collision.
+exports.COMMUNITY_UID_BASE = 1000;
+// Step used to move a colliding LEGACY community card out of the way. Chosen so a
+// rekeyed uid can never land on a hole uid (0..N) or a modern community uid.
+const LEGACY_REKEY_STEP = 2000;
 function shuffleWith(arr, rng) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {
@@ -442,7 +456,35 @@ function drawCommunity(rng = Math.random) {
         chosen.push(card);
         used.add(card.uid);
     }
-    return chosen;
+    // Namespace the whole community so it can never share a uid with a hole card.
+    return chosen.map(c => ({ ...c, uid: c.uid + exports.COMMUNITY_UID_BASE }));
+}
+/**
+ * A Hold 'Em seat's selectable pool: its own hole cards, then the shared
+ * community. THE one way to assemble it — the reveal, the play-on, and the
+ * resubmit re-selection must all agree on which uid means which card.
+ *
+ * Tables whose community was dealt before COMMUNITY_UID_BASE existed can carry a
+ * collision. Their rows are already written, so this de-duplicates on read rather
+ * than rewriting stored data: the hole card KEEPS its uid (it is what `hand` and
+ * `lockedCards` were written from) and the colliding community card moves. The
+ * rekey is pure and deterministic, and both client and server build the pool
+ * through this function, so a uid the player taps resolves to the same card here.
+ * For every table dealt since, this is a no-op copy.
+ *
+ * Mirror of holdemPool in src/lib/casinoEngine.ts. Keep in sync.
+ */
+function holdemPool(hole = [], community = []) {
+    const seen = new Set();
+    const pool = [];
+    for (const card of [...hole, ...community]) {
+        let uid = card.uid;
+        while (seen.has(uid))
+            uid += LEGACY_REKEY_STEP;
+        seen.add(uid);
+        pool.push(uid === card.uid ? { ...card } : { ...card, uid });
+    }
+    return pool;
 }
 // ── Slot conversion ──────────────────────────────────────────────────────────
 function cardsToSlots(hand) {

@@ -9,6 +9,7 @@ import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
   DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
 } from '../lib/casinoData';
+import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
@@ -172,6 +173,10 @@ export function CasinoTable() {
   // True while re-editing an already-locked config (forming self-tweak, or after a
   // host denial): reuses the Manifest phase, but Submit resubmits instead of locking.
   const [resubmitting, setResubmitting] = useState(false);
+  // Hold 'Em only: true while deliberately back on the reveal to choose a different
+  // five after playing on. `playedOn` is already true server-side by then, so this
+  // is what keeps the derive effect from pushing the seat straight back forward.
+  const [rePicking, setRePicking]       = useState(false);
   const [flash, setFlash]         = useState('');
   const [busy, setBusy]           = useState(false);
   const [now, setNow]             = useState(() => Date.now());
@@ -322,6 +327,22 @@ export function CasinoTable() {
     if (resubmitting) return;
     if (mission.state === 'inprogress') { setPhase('deployed'); return; }
     if (seat?.played) { setPhase('locked'); return; }
+
+    // Hold 'Em: once the play-on has COMMITTED server-side, the reveal is a dead
+    // end — its play-on button is one the server will now reject, and its only
+    // other action is a fold that forfeits the ante and the seat. So push forward
+    // even though `holdplay` is a LOCAL phase: that early return is what strands a
+    // seat when anything after the committed play-on throws (the gambit fetch used
+    // to sit there). A deliberate re-pick is the one exception — see startRePick.
+    if (game === 'holdem' && seat?.playedOn && !rePicking
+        && phase === 'holdplay' && secretHand?.length) {
+      setHand(secretHand);
+      setKeep(new Set(secretHand.map(c => c.uid)));
+      setSpent(seatSpend('holdem', { playedOn: true }));
+      setPhase('gambit');
+      return;
+    }
+
     if (LOCAL_PHASES.includes(phase)) return;
 
     // Recovery: the gambit was already played but the seat isn't locked (a reload
@@ -352,7 +373,10 @@ export function CasinoTable() {
         setSpent(seatSpend('holdem'));
         if (mission.community?.length && secretHand?.length) {
           // The reveal has landed — open sitting 2 with the whole pool selected.
-          const pool = [...secretHand, ...mission.community];
+          // Built from the persisted `hole` (identical to `hand` at this point,
+          // but the one field a re-pick can rely on) through the shared assembler,
+          // so every screen agrees on which uid means which card.
+          const pool = holdemPool(secretHole ?? secretHand, mission.community);
           setHand(pool);
           setKeep(new Set(pool.map(c => c.uid)));
           setPhase('holdplay');
@@ -379,10 +403,11 @@ export function CasinoTable() {
     // subscription, which can resolve after the mission does. Without it, a
     // player reloading mid-hand would never have their hand restored.
     // `phase` is deliberately omitted — including it would re-run this effect on
-    // every phase change and loop. `resubmitting` IS a dep: the guard above reads
-    // it, so the effect must see its current value when a mission tick fires.
+    // every phase change and loop. `resubmitting` and `rePicking` ARE deps: the
+    // guards above read them, so the effect must see their current values when a
+    // mission tick fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, mission, secretHand, game, cfg, resubmitting]);
+  }, [uid, mission, secretHand, secretHole, game, cfg, resubmitting, rePicking]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Callables. The resolved seasonId is injected into every payload so the
@@ -416,6 +441,9 @@ export function CasinoTable() {
 
   const seatDeckChoice   = uid ? (mission?.participants?.[uid]?.deckChoice ?? null) : null;
   const effectiveDeckChoice: CasinoDeckChoice = seatDeckChoice ?? 'purist';
+  // The gambit is one-shot and never reopens, so it's what decides where a step
+  // BACKWARD rejoins the flow: before it, the gambit screen; after it, Slot Fill.
+  const gambitPlayed = uid ? mission?.participants?.[uid]?.gambitPlayed === true : false;
 
   // What actually gets committed:
   //  · Five Card Draw — everything you DIDN'T mark. A mark means "reroll or drop":
@@ -519,9 +547,43 @@ export function CasinoTable() {
     setHand(res.hand);
     setKeep(new Set(res.hand.map(c => c.uid)));
     setSpent(seatSpend('holdem', { playedOn: true }));
-    await dealGambit();
-    setPhase('gambit');
+    setRePicking(false);
+    // Advance BEFORE drawing the gambit. The play-on is committed and PAID the
+    // moment that call returns, so anything after it that can throw must not be
+    // able to strand the seat back on the reveal — which is where it lands with
+    // its hand already narrowed to the five it just committed, facing a play-on
+    // the server will now reject and a fold that would forfeit the ante. The
+    // gambit offer is fetched by the recovery effect below (idempotent), and a
+    // failure there is now retried on a screen the player can actually leave.
+    //
+    // A re-pick that comes back AFTER the gambit was played rejoins the flow at
+    // the Slot Fill step — the gambit never reopens, so the gambit screen would
+    // just be an empty offer with a Continue button.
+    setPhase(gambitPlayed ? 'manifest' : 'gambit');
   }, 'Play-on failed. Try again.');
+
+  // Re-pick: go back to the reveal and choose a different five out of the same
+  // seven. Free — the play-on bought the sitting, not one particular five — and
+  // available until the seat locks in, which is where the resubmit path takes
+  // over. `rePicking` is what stops the derive effect pushing us straight back to
+  // the gambit, since `playedOn` is already true server-side.
+  const startRePick = () => {
+    setHand(holdemPool(secretHole ?? [], mission?.community ?? []));
+    setKeep(new Set(committedCards.map(c => c.uid)));
+    setRePicking(true);
+    setPhase('holdplay');
+  };
+
+  // Back out of a re-pick with the committed five untouched. Nothing was written,
+  // so this only has to restore the local view of the seat's stored hand and drop
+  // the player back at the step they came from.
+  const cancelRePick = () => {
+    const held = secretHand ?? [];
+    setHand(held);
+    setKeep(new Set(held.map(c => c.uid)));
+    setRePicking(false);
+    setPhase(gambitPlayed ? 'manifest' : 'gambit');
+  };
 
   // Folding after a Hold 'Em reveal EMPTIES the seat for good — it isn't the
   // single-sitting fold, which leaves you seated and free to redeal.
@@ -555,16 +617,24 @@ export function CasinoTable() {
   const toGambit = () => run(async () => { await dealGambit(); setPhase('gambit'); },
     'Could not draw your gambits. Try again.');
 
-  // Recovery: landed on the gambit step without the offer (a reload, or the Hold
-  // 'Em play-on recovery path) — fetch it. Idempotent server-side, so this never
-  // re-draws or double-depletes the shared deck. The fetch's setState all runs
-  // after the await, so nothing is set synchronously inside the effect.
+  // Recovery: landed on the gambit step without the offer (a reload, or straight
+  // off a play-on) — fetch it. Idempotent server-side, so this never re-draws or
+  // double-depletes the shared deck. This is now the ONLY path that draws the
+  // offer: doPlayOn deliberately advances the phase and leaves the fetch here, so
+  // a failed draw is retried on a screen the player can leave rather than
+  // stranding a committed seat back on the reveal.
+  //
+  // The rule can't see that every setState here is behind an await — the fetch's
+  // own writes follow one, and doFlash runs inside a .catch callback — so it is
+  // scoped off for this effect the same way the derive effect above scopes it.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (phase !== 'gambit' || gOffer.length > 0) return;
     if (uid && mission?.participants?.[uid]?.gambitPlayed) return;  // resolved — lock directly
     void dealGambit().catch(e => doFlash((e as { message?: string })?.message ?? 'Could not draw your gambits. Try again.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── Slot Fill (Manifest) ────────────────────────────────────────────────────
 
@@ -706,12 +776,36 @@ export function CasinoTable() {
   // at deploy, so there is no reroll/hit/redraw, and the gambit is never re-openable.
   // The pool survives until the table settles, when onMissionComplete purges it.
   const resubmitPool: DeckCard[] = game === 'holdem'
-    ? [...(secretHole ?? []), ...(mission?.community ?? [])]
+    ? holdemPool(secretHole ?? [], mission?.community ?? [])
     : (secretHand ?? []);
   const canChangeCards = !!mySeat?.played
     && (mission?.state === 'forming' || (mission?.state === 'inprogress' && yamlDenied))
     && (game === 'holdem' ? (secretHole?.length ?? 0) > 0 && (mission?.community?.length ?? 0) > 0
                           : (secretHand?.length ?? 0) > 0);
+
+  // Hold 'Em re-pick: a seat that has played on may still swap which five of its
+  // seven it commits, free, right up until it locks in — after which the resubmit
+  // path above owns card changes. Mirrors what the server allows (mustCasinoSeat
+  // already rejects a locked seat and a table past `forming`), plus a pool check:
+  // a seat dealt before `hole` was persisted has nothing to re-select FROM, and
+  // offering it would drop them onto the reveal missing their two hole cards.
+  const canRePick = game === 'holdem'
+    && !!mySeat?.playedOn && !mySeat?.played
+    && mission?.state === 'forming'
+    && (secretHole?.length ?? 0) > 0
+    && (mission?.community?.length ?? 0) > 0;
+
+  // The gambit step's way back to the cards. For Hold 'Em AFTER the play-on that is
+  // a RE-PICK, not a step back: the seat's hand has been narrowed to the five it
+  // committed, so walking into `holdplay` without rebuilding the pool lands the
+  // player on the reveal showing only those five — every one captioned as a hole
+  // card, with a play-on the server will reject. That was the dead end. When the
+  // pool can't be rebuilt there is no safe way back, so the button is hidden.
+  const showBackToCards = game !== 'holdem' || !mySeat?.playedOn || canRePick;
+  const backToCards = () => {
+    if (game === 'holdem' && mySeat?.playedOn) { if (canRePick) startRePick(); return; }
+    setPhase(game === 'holdem' ? 'holdplay' : 'play');
+  };
 
   const manifestReady = committedCards.filter(c => (manifest[c.uid]?.game ?? '').trim().length > 0).length;
   // A new attach is REQUIRED for an initial submit and for a denied resubmit (the
@@ -751,8 +845,7 @@ export function CasinoTable() {
       return;
     }
 
-    const seatGambitPlayed = uid ? mission?.participants?.[uid]?.gambitPlayed === true : false;
-    if (!seatGambitPlayed) {
+    if (!gambitPlayed) {
       await call<object, unknown>('playCasinoGambit')({ missionId, gambitDefId: gPick ?? null });
     }
     await call<object, { goldSwing: number }>('lockCasinoResult')({
@@ -1110,15 +1203,23 @@ export function CasinoTable() {
           {/* HOLDPLAY — Hold 'Em sitting 2: build the best five, or walk */}
           {phase === 'holdplay' && (
             <>
-              <div className="cz-stage-title">The reveal · build your best five</div>
+              <div className="cz-stage-title">
+                {rePicking ? 'Change your five' : 'The reveal · build your best five'}
+              </div>
               <div className="cz-stage-note">
-                Your two hole cards and the five shared cards are all in play. Commit up to{' '}
-                {cfg.pickMax} — drop as many as you like, down to a single card — and play on for{' '}
-                {cfg.playOn}g, or fold and forfeit the {cfg.ante}g you're in for.
+                {rePicking
+                  ? `Your play-on is already paid, so changing your mind is free: pick any ${cfg.pickMax} `
+                    + 'of the same seven. Your gambit and your ante are untouched.'
+                  : `Your two hole cards and the five shared cards are all in play. Commit up to `
+                    + `${cfg.pickMax} — drop as many as you like, down to a single card — and play on for `
+                    + `${cfg.playOn}g, or fold and forfeit the ${cfg.ante}g you're in for.`}
               </div>
               <div className="cz-hand">
                 {hand.map(c => {
-                  const isHole  = !!secretHand?.some(h => h.uid === c.uid);
+                  // From the persisted hole, NOT `secretHand` — after a play-on the
+                  // hand IS the committed five, which would caption every card
+                  // (community ones included) as a hole card.
+                  const isHole  = !!(secretHole ?? secretHand)?.some(h => h.uid === c.uid);
                   const dropped = !keep.has(c.uid);
                   return (
                     <div
@@ -1136,14 +1237,26 @@ export function CasinoTable() {
                 })}
               </div>
               <BlackjackGauge shownCards={committedCards} allCards={hand} deckChoice={effectiveDeckChoice} />
-              <PokerReadout cards={committedCards} spent={spent + cfg.playOn} deckChoice={effectiveDeckChoice} />
+              {/* On a re-pick the play-on is already in `spent` — adding it again
+                  would bill the seat twice in the readout. */}
+              <PokerReadout
+                cards={committedCards}
+                spent={rePicking ? spent : spent + cfg.playOn}
+                deckChoice={effectiveDeckChoice}
+              />
               <div className="cz-actions">
                 <button className="cz-btn primary" onClick={doPlayOn} disabled={busy || !canCommit}>
                   {overPick
-                    ? `Drop ${committedCards.length - cfg.pickMax} to play on`
-                    : `Play on (${cfg.playOn}g) with ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'}`}
+                    ? `Drop ${committedCards.length - cfg.pickMax} to ${rePicking ? 'commit' : 'play on'}`
+                    : rePicking
+                      ? `Keep these ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'} →`
+                      : `Play on (${cfg.playOn}g) with ${committedCards.length} ${committedCards.length === 1 ? 'game' : 'games'}`}
                 </button>
-                <button className="cz-btn danger" onClick={doHoldemFold} disabled={busy}>Fold</button>
+                {/* No Fold while re-picking: the seat has already paid on, so the
+                    escape here is "leave it as it was", not "forfeit the ante". */}
+                {rePicking
+                  ? <button className="cz-btn" onClick={cancelRePick} disabled={busy}>Cancel</button>
+                  : <button className="cz-btn danger" onClick={doHoldemFold} disabled={busy}>Fold</button>}
               </div>
               <div className="cz-flash">{flash}</div>
             </>
@@ -1171,8 +1284,7 @@ export function CasinoTable() {
           {phase === 'gambit' && (() => {
             // Offer empty but gambit not yet resolved → it's still being drawn
             // from the shared server deck (or a reload is re-fetching it).
-            const gambitDone   = uid ? mission.participants?.[uid]?.gambitPlayed === true : false;
-            const loadingOffer = gOffer.length === 0 && !gambitDone;
+            const loadingOffer = gOffer.length === 0 && !gambitPlayed;
             return (
               <>
                 <div className="cz-stage-title">Play a Gambit?</div>
@@ -1198,9 +1310,11 @@ export function CasinoTable() {
                       })}
                 </div>
                 <div className="cz-actions">
-                  <button className="cz-btn ghost" onClick={() => setPhase(game === 'holdem' ? 'holdplay' : 'play')} disabled={busy}>
-                    ← Back to cards
-                  </button>
+                  {showBackToCards && (
+                    <button className="cz-btn ghost" onClick={backToCards} disabled={busy}>
+                      {canRePick ? '← Change my five' : '← Back to cards'}
+                    </button>
+                  )}
                   <button className="cz-btn primary" onClick={() => setPhase('manifest')} disabled={busy || loadingOffer}>
                     {loadingOffer ? 'Drawing…' : gOffer.length === 0 ? 'Continue →' : gPick ? 'Play this gambit & continue →' : 'Skip & continue →'}
                   </button>

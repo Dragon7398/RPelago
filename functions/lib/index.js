@@ -1508,7 +1508,7 @@ exports.resubmitCasinoYaml = (0, https_1.onCall)(async (request) => {
         if (mission.casinoGame === 'holdem') {
             const holeSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)).get();
             const hole = holeSnap.val() ?? [];
-            rawHand = [...hole, ...(mission.community ?? [])];
+            rawHand = (0, casinoEngine_1.holdemPool)(hole, mission.community ?? []);
         }
         else {
             const handSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)).get();
@@ -1682,10 +1682,22 @@ exports.holdemPlayOn = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', 'The community cards have not been dealt yet.');
     if (!seat.holeLocked)
         throw new https_1.HttpsError('failed-precondition', 'Lock your hole cards first.');
-    if (seat.playedOn)
-        throw new https_1.HttpsError('failed-precondition', 'You have already played on.');
+    // RE-PICK. The play-on buys the SITTING, not one specific five, so a seat that
+    // has already played on may choose a different five out of the same seven at no
+    // further cost — the same "re-pick until the point of no return" rule the
+    // resubmit path applies after lock-in. mustCasinoSeat has already rejected a
+    // locked seat (`played`) and a table past `forming`, so those are the bounds.
+    // Nothing is charged, no pot cut is taken and no second `playon` audit entry is
+    // written; only the seat's hand changes.
+    const rePick = seat.playedOn === true;
     // Selectable pool = this seat's 2 hole cards (secret) + the 5 shared community.
-    const pool = [...(seat.hand ?? []), ...mission.community];
+    // Read the PERSISTED hole rather than `seat.hand`: on a re-pick `hand` has
+    // already been narrowed to the previous five, and re-selecting out of that is
+    // exactly the dead end this is fixing. Pre-play-on the two are identical, so the
+    // fallback covers a seat dealt before `hole` was persisted.
+    const holeSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hole`)).get();
+    const hole = holeSnap.val() ?? seat.hand ?? [];
+    const pool = (0, casinoEngine_1.holdemPool)(hole, mission.community);
     const byUid = new Map(pool.map(c => [c.uid, c]));
     const chosen = [];
     for (const u of selectedUids) {
@@ -1695,35 +1707,38 @@ exports.holdemPlayOn = (0, https_1.onCall)(async (request) => {
         chosen.push(card);
     }
     const potCut = (0, casinoEngine_1.potContribution)(HOLDEM_PLAY_ON);
-    // Debit the play-on.
-    const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
-    if (!playerSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Player not found.');
-    const snapData = playerSnap.val();
-    let abortReason = 'Gold deduction failed.';
-    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
-        const data = current ?? snapData;
-        const gold = data.gold ?? 0;
-        if (gold < HOLDEM_PLAY_ON) {
-            abortReason = 'Not enough gold for the play-on.';
-            return undefined;
-        }
-        return { ...data, gold: gold - HOLDEM_PLAY_ON };
-    });
-    if (!committed)
-        throw new https_1.HttpsError('failed-precondition', abortReason);
-    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-        uid, playerName: seat.playerName, event: 'playon', game: 'holdem', amount: HOLDEM_PLAY_ON, potAdd: potCut,
-    });
-    // Write the chosen final hand as the seat's SECRET hand; the normal gambit →
-    // lock flow (playCasinoGambit, then lockCasinoResult) takes it from here.
-    await db.ref().update({
+    const updates = {
+        // The chosen final hand, as the seat's SECRET hand; the normal gambit → lock
+        // flow (playCasinoGambit, then lockCasinoResult) takes it from here.
         [(0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: chosen,
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/playedOn`)]: true,
-        [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)]: database_2.ServerValue.increment(potCut),
-        [logPath]: logEntry,
-    });
-    return { hand: chosen };
+    };
+    if (!rePick) {
+        // Debit the play-on.
+        const playerSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get();
+        if (!playerSnap.exists())
+            throw new https_1.HttpsError('not-found', 'Player not found.');
+        const snapData = playerSnap.val();
+        let abortReason = 'Gold deduction failed.';
+        const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).transaction((current) => {
+            const data = current ?? snapData;
+            const gold = data.gold ?? 0;
+            if (gold < HOLDEM_PLAY_ON) {
+                abortReason = 'Not enough gold for the play-on.';
+                return undefined;
+            }
+            return { ...data, gold: gold - HOLDEM_PLAY_ON };
+        });
+        if (!committed)
+            throw new https_1.HttpsError('failed-precondition', abortReason);
+        const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+            uid, playerName: seat.playerName, event: 'playon', game: 'holdem', amount: HOLDEM_PLAY_ON, potAdd: potCut,
+        });
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/pot`)] = database_2.ServerValue.increment(potCut);
+        updates[logPath] = logEntry;
+    }
+    await db.ref().update(updates);
+    return { hand: chosen, rePick };
 });
 // Sitting 2 — fold after the reveal. Forfeits the ante (already paid; no refund).
 // The seat is EMPTIED and not reopened. If this empties the table, it resets

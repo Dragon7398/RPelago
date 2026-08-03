@@ -157,6 +157,24 @@ export function rollTableSetup(rng: Rng = Math.random): { seats: number; stats: 
 
 const COMMUNITY_TYPES = ['broad', 'narrow', 'franchise', 'platform'] as const;
 
+// ⚠️ `uid` is NOT globally unique — buildDeck numbers it 0..N by position, fresh
+// on every call. Hold 'Em is the only game whose pool comes from TWO independent
+// buildDeck() calls (the seat's hole deck and the community deck below), so its
+// two halves share a uid space and can collide. That is not cosmetic: uid is the
+// selection protocol (`selectedUids` / `keepUids`) AND the React key, so one uid
+// meaning two cards makes holdemPlayOn's `byUid` Map silently drop a card and
+// makes the UI count a single tap as two commits (locking the commit button at
+// "Drop 1 to commit" with no way back to five).
+//
+// Community cards therefore live in their own uid range. Applied at draw time, so
+// it only covers tables dealt from here on — see holdemPool for the seats already
+// holding a collision.
+export const COMMUNITY_UID_BASE = 1000;
+
+// Step used to move a colliding LEGACY community card out of the way. Chosen so a
+// rekeyed uid can never land on a hole uid (0..N) or a modern community uid.
+const LEGACY_REKEY_STEP = 2000;
+
 function shuffleWith<T>(arr: readonly T[], rng: () => number): T[] {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -176,7 +194,36 @@ export function drawCommunity(rng: () => number = Math.random): DeckCard[] {
     chosen.push(card);
     used.add(card.uid);
   }
-  return chosen;
+  // Namespace the whole community so it can never share a uid with a hole card.
+  return chosen.map(c => ({ ...c, uid: c.uid + COMMUNITY_UID_BASE }));
+}
+
+/**
+ * A Hold 'Em seat's selectable pool: its own hole cards, then the shared
+ * community. THE one way to assemble it — the reveal, the play-on, and the
+ * resubmit re-selection must all agree on which uid means which card.
+ *
+ * Tables whose community was dealt before COMMUNITY_UID_BASE existed can carry a
+ * collision. Their rows are already written, so this de-duplicates on read rather
+ * than rewriting stored data: the hole card KEEPS its uid (it is what `hand` and
+ * `lockedCards` were written from) and the colliding community card moves. The
+ * rekey is pure and deterministic, and both client and server build the pool
+ * through this function, so a uid the player taps resolves to the same card when
+ * the server re-reads it. For every table dealt since, this is a no-op copy.
+ */
+export function holdemPool(
+  hole: readonly DeckCard[] = [],
+  community: readonly DeckCard[] = [],
+): DeckCard[] {
+  const seen = new Set<number>();
+  const pool: DeckCard[] = [];
+  for (const card of [...hole, ...community]) {
+    let uid = card.uid;
+    while (seen.has(uid)) uid += LEGACY_REKEY_STEP;
+    seen.add(uid);
+    pool.push(uid === card.uid ? { ...card } : { ...card, uid });
+  }
+  return pool;
 }
 
 // Index of the lowest-value card in a hand (used by the UI to suggest which to drop)
