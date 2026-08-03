@@ -143,7 +143,8 @@ All in `functions/src/index.ts`:
 
 | Function | Trigger | Purpose |
 |----------|---------|---------|
-| `exchangeDiscordCode` | HTTP request | Discord OAuth code exchange → Firebase custom token |
+| `exchangeDiscordCode` | HTTP request | Discord OAuth code exchange → Firebase custom token. **Consults `config/bannedDiscordIds` first** (see Bans). |
+| `adminBanDiscordId` / `adminUnbanDiscordId` | Callable | Add/remove a pre-emptive ban keyed on Discord snowflake; ban also sweeps `disabled` across all seasons + disables the Auth account. |
 | `purchaseShopItem` | Callable | Validates and deducts gold, adds item to inventory. Rejects disabled players. |
 | `purchaseShopOrb` | Callable | Atomically claims orb, deducts gold. Rejects disabled players. |
 | `onTileComplete` | DB write on `game/tiles/{coord}/state` | Fires when a tile reaches `complete`; updates `profiles/` with XP snapshot and game stats. Also auto-warns players with ≥5 status incidents (see Status reports). |
@@ -165,6 +166,16 @@ All in `functions/src/index.ts`:
 The **casino/season** functions (also in `index.ts`) are the money-and-secret-authoritative half — clients are never trusted with hands, decks, gold, or the pot. Key ones: `dealCasinoHand` / `dealHoldemHole` / `holdemPlayOn` / `holdemFold` / `casinoFold` (deal & seat lifecycle), `dealGambitOffer` + `playCasinoGambit` (server-authoritative shared gambit deck), `lockCasinoResult` (commit → slots + gold), `resubmitCasinoYaml` / `adminDenyCasinoYaml` / `adminGetCasinoYamls` (config workflow), `weeklyGoldTopUp` (Sat 06:00 America/Chicago floor top-up → `goldTopUpLog`; **skips any player seated at an `inprogress` table** — held or freed claim — since the floor is for players falling behind, not ones winning fast enough to hold several tables), and `resolveWriteSeason` (the shared seasonId resolver every casino callable runs first). **Deploy functions before the frontend** so a new client never calls a callable the server lacks.
 
 > **Disable is a two-part kill-switch.** `adminSetPlayerDisabled` (what `setPlayerDisabled` → the admin Players toggle calls) sets the per-season RTDB flag `players/{uid}/disabled` **and** disables the Firebase Auth account (+ `revokeRefreshTokens`). The RTDB flag alone can't stop the direct client→Storage YAML upload — Storage rules can't read RTDB — so the Auth disable is the only thing that gates uploads (an already-issued ID token lingers up to ~1h). It refuses to disable the caller's own account.
+
+### Bans (pre-emptive) vs Disable (reactive)
+
+**Disable can only act on someone who already exists** — it needs a `players/{uid}` record and an Auth account. To keep someone out *before* they ever sign in, use the ban list.
+
+- **`config/bannedDiscordIds/{discordSnowflake}`** — global (not season-scoped), `{ reason, ts, by, handle?, lastAttemptAt? }`. Keyed on the **immutable Discord snowflake, never the username** — handles are renameable, so a handle-keyed ban falls off the moment they rename.
+- **The gate is in `exchangeDiscordCode`, deliberately placed BEFORE `createUser` / `createCustomToken` / the profile stub / `createSeasonPlayer`.** That is the only place a Discord login becomes a Firebase identity, so it is the only point where a ban can be pre-emptive. A banned ID gets a 403 (`{ error, banned: true }`) and leaves no trace anywhere in the tree. **Anything added to that function must stay below the ban check.**
+- **Rules**: `.read` is **admin-only — not alpha** (it's a roster of banned IDs), and `.write` is **`false` for everyone including admin**. Both mutations go through `adminBanDiscordId` / `adminUnbanDiscordId`, because a raw client write would set the flag while leaving the Auth account live — a ban that doesn't ban. Pinned by tests in `tests/rules/seasons.rules.test.ts`.
+- **Ban ⊃ disable**: `adminBanDiscordId` also sets `disabled` in **every** season (not just the active one) and disables the Auth account, so it works whether or not the person has ever played. **Unban is deliberately asymmetric** — it clears the ban and re-enables Auth but leaves the per-season `disabled` flags alone, so "may sign in again" stays a separate decision from "season records reinstated".
+- **Limitation**: this blocks a Discord *account*, not a person — a new account gets a new snowflake. An allowlist is the only structural answer.
 
 > **Admin SDK pitfall**: When using `admin.database().ref(path).transaction()`, passing a child path (e.g. `profiles/{uid}/gold`) instead of the parent node can cause the transaction callback to receive `null` on the first invocation — even when data exists. Always verify the transaction ref resolves to a node that exists, and after fixing a null-transaction bug in one function, audit sibling functions (e.g. `purchaseShopItem` and `purchaseShopOrb`) for the same pattern.
 

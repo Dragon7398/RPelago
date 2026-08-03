@@ -114,6 +114,17 @@ export interface PlayerWarning {
   auto?: boolean;
 }
 
+// One entry in `config/bannedDiscordIds`, keyed by the bare Discord snowflake.
+// Pre-emptive: checked by exchangeDiscordCode before any account is minted, so
+// it applies to people who have never signed in. See database.rules.json.
+export interface DiscordBan {
+  reason?: string | null;
+  ts:      number;          // when the ban was applied
+  by:      string;          // admin uid
+  handle?: string | null;   // Discord username, stamped on a rejected attempt
+  lastAttemptAt?: number;   // last time this ID tried to sign in
+}
+
 export interface Player {
   id: string;
   displayName: string;

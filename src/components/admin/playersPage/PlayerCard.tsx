@@ -5,7 +5,7 @@ import { useSeason } from '../../../contexts/SeasonContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings, adventurerCountForLevel } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
-import { playerReset, syncPlayerProfile } from '../../../firebase/db';
+import { playerReset, syncPlayerProfile, banDiscordId } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
 
 interface Props {
@@ -28,6 +28,7 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const [resetting, setResetting]         = useState(false);
   const [granting, setGranting]           = useState(false);
   const [syncing, setSyncing]             = useState(false);
+  const [banning, setBanning]             = useState(false);
 
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
@@ -254,20 +255,51 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
         </button>
         {isAdmin ? (
           <span className="dash-player-admin-badge">ADMIN</span>
-        ) : player.disabled ? (
-          <button className="dash-player-enable" onClick={() => adminEnablePlayer(player.id)}>
-            Re-enable Player
-          </button>
         ) : (
-          <button
-            className="dash-player-disable"
-            onClick={() => {
-              if (confirm(`Restrict ${player.displayName}? They will be unable to log in.`))
-                adminDisablePlayer(player.id);
-            }}
-          >
-            Disable Player
-          </button>
+          <>
+            {player.disabled ? (
+              <button className="dash-player-enable" onClick={() => adminEnablePlayer(player.id)}>
+                Re-enable Player
+              </button>
+            ) : (
+              <button
+                className="dash-player-disable"
+                onClick={() => {
+                  if (confirm(`Restrict ${player.displayName}? They will be unable to log in.`))
+                    adminDisablePlayer(player.id);
+                }}
+              >
+                Disable Player
+              </button>
+            )}
+            {/* Ban is the harder version of Disable: it also writes the pre-emptive
+                ban entry, so deleting their season record (or a new season starting)
+                can't quietly let them back in. Lifting it is the Players page's
+                Banned Discord Accounts panel, not this button. */}
+            <button
+              className="dash-player-ban"
+              disabled={banning}
+              onClick={async () => {
+                if (!confirm(
+                  `Ban ${player.displayName} outright?\n\n`
+                  + `They will be blocked at sign-in across all seasons, and cannot rejoin `
+                  + `with this Discord account. Lift it from the Banned Discord Accounts panel.`,
+                )) return;
+                const why = prompt('Reason (optional — shown to them at sign-in):') ?? '';
+                setBanning(true);
+                try {
+                  await banDiscordId(player.id, why.trim() || undefined);
+                  addToast(`${player.displayName} has been banned.`, 'success');
+                } catch (err) {
+                  addToast((err as { message?: string }).message ?? `Failed to ban ${player.displayName}.`, 'error');
+                } finally {
+                  setBanning(false);
+                }
+              }}
+            >
+              {banning ? 'Banning…' : '⛔ Ban'}
+            </button>
+          </>
         )}
       </div>
     </div>

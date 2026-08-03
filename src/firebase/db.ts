@@ -2,7 +2,7 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame, OfficialReport } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame, OfficialReport, DiscordBan } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
@@ -691,6 +691,34 @@ export async function isPlayerDisabled(playerId: string): Promise<boolean> {
   assertDb();
   const snap = await get(sRef(db!, `players/${playerId}/disabled`));
   return snap.val() === true;
+}
+
+// ── Discord ban list ──────────────────────────────────────────────────────────
+// Pre-emptive counterpart to disable: `exchangeDiscordCode` checks this before
+// minting an Auth account, so a banned Discord ID can never become a player.
+// GLOBAL, not season-scoped (plain `ref`, not `sRef`) — like config/adminId.
+// The node is admin-read-only and client-write-denied by rules; both mutations
+// go through Cloud Functions.
+
+/** `discordId` may be a bare snowflake or the `discord_…` uid — server normalizes. */
+export async function banDiscordId(discordId: string, reason?: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminBanDiscordId')({ discordId, reason: reason ?? null });
+}
+
+export async function unbanDiscordId(discordId: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminUnbanDiscordId')({ discordId });
+}
+
+/** Admin-only read — rules reject this for everyone else. */
+export function subscribeToDiscordBans(
+  callback: (bans: Record<string, DiscordBan>) => void,
+): () => void {
+  assertDb();
+  return onValue(ref(db!, 'config/bannedDiscordIds'), snap => {
+    callback((snap.val() as Record<string, DiscordBan>) ?? {});
+  }, () => callback({}));
 }
 
 // ── Activity log ──────────────────────────────────────────────────────────────

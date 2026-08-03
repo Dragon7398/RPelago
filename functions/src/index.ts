@@ -230,6 +230,35 @@ export const exchangeDiscordCode = onRequest(
       const discordUser = await userRes.json() as DiscordUser;
       const uid         = `discord_${discordUser.id}`;
       const displayName = discordUser.global_name ?? discordUser.username;
+      const db          = getDatabase();
+
+      // ── BAN GATE ───────────────────────────────────────────────────────────
+      // This is the ONLY place a Firebase identity is minted from a Discord
+      // login, so it is the only place a ban can be made pre-emptive. Everything
+      // below — the Auth account, the custom token, the global profile stub, the
+      // handleIndex entry, the season player record — is skipped entirely, so a
+      // banned ID leaves no trace in the system rather than being muted inside
+      // it. Keyed on the immutable snowflake, so renaming on Discord doesn't
+      // shake the ban. Deliberately BEFORE createUser: adminSetPlayerDisabled
+      // can only act on an account that already exists.
+      const banSnap = await db.ref(`config/bannedDiscordIds/${discordUser.id}`).get();
+      if (banSnap.exists()) {
+        const ban = banSnap.val() as { reason?: string };
+        // Record the attempt (and the current handle) so admin can see a banned
+        // account still knocking. Best-effort — never block the rejection on it.
+        await db.ref(`config/bannedDiscordIds/${discordUser.id}`).update({
+          lastAttemptAt: Date.now(),
+          handle:        discordUser.username ?? null,
+        }).catch(() => { /* non-fatal */ });
+        console.warn(`[ban] Rejected sign-in for banned Discord ID ${discordUser.id} (${discordUser.username})`);
+        res.status(403).json({
+          error: ban.reason
+            ? `This Discord account is not permitted to join RPelago. Reason: ${ban.reason}`
+            : 'This Discord account is not permitted to join RPelago.',
+          banned: true,
+        });
+        return;
+      }
 
       try {
         await getAuth().updateUser(uid, { displayName });
@@ -241,7 +270,6 @@ export const exchangeDiscordCode = onRequest(
 
       // Write a minimal profile stub so the profile site can show an identity card
       // and empty state even before the player completes any tiles.
-      const db         = getDatabase();
       const profileRef = db.ref(`profiles/players/${uid}`);
       const [joinedSnap, firstEventSnap] = await Promise.all([
         profileRef.child('joinedAt').get(),
@@ -2289,14 +2317,111 @@ export const adminSetPlayerDisabled = onCall(async (request) => {
   await db.ref(sp(seasonId, `players/${playerId}/disabled`)).set(disabled ? true : null);
 
   // 2) Firebase Auth account — gates direct Storage uploads (rules can't see the flag).
+  await setAuthDisabled(playerId, disabled);
+
+  return { ok: true };
+});
+
+// ── Ban list ──────────────────────────────────────────────────────────────────
+//
+// Disable (above) is REACTIVE — it needs an existing player record and Auth
+// account. The ban list is PRE-EMPTIVE: `exchangeDiscordCode` consults it before
+// minting anything, so a banned Discord ID can never become a player in the
+// first place. Ban covers disable's ground too, so banning someone already
+// playing is a single action.
+
+/** Firebase Auth half of the kill-switch. Tolerates a never-signed-in user. */
+async function setAuthDisabled(uid: string, disabled: boolean): Promise<void> {
   try {
-    await getAuth().updateUser(playerId, { disabled });
-    if (disabled) await getAuth().revokeRefreshTokens(playerId);
+    await getAuth().updateUser(uid, { disabled });
+    if (disabled) await getAuth().revokeRefreshTokens(uid);
   } catch (err) {
     if ((err as { code?: string }).code !== 'auth/user-not-found') throw err;
   }
+}
 
-  return { ok: true };
+/**
+ * Accept either a raw Discord snowflake ("123456789012345678") or the uid form
+ * ("discord_123456789012345678") and return the bare snowflake. Rejects anything
+ * else — a typo'd/partial id would otherwise create a ban entry that silently
+ * never matches.
+ */
+function normalizeDiscordId(input: string): string {
+  const id = input.trim().replace(/^discord_/, '');
+  if (!/^\d{17,20}$/.test(id))
+    throw new HttpsError('invalid-argument',
+      'Expected a Discord user ID (17–20 digits). In Discord: Settings → Advanced → Developer Mode, then right-click the user → Copy User ID.');
+  return id;
+}
+
+/** Every season id in config, live + draft + archived — a ban applies to all. */
+async function allSeasonIds(db: ReturnType<typeof getDatabase>): Promise<string[]> {
+  const config = await getConfig(db);
+  return [
+    ...Object.keys(config.seasonList ?? {}),
+    ...Object.keys(config.draftSeasons ?? {}),
+  ];
+}
+
+// Admin: ban a Discord account outright. Writes the pre-emptive ban entry AND
+// applies the existing kill-switch (Auth account + every season's `disabled`
+// flag), so it works whether or not the person has ever signed in. The season
+// flags are swept across ALL seasons rather than just the active one because a
+// ban is not season-scoped.
+export const adminBanDiscordId = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { discordId: rawId, reason } = request.data as { discordId?: string; reason?: string };
+  if (!rawId) throw new HttpsError('invalid-argument', 'Missing discordId.');
+
+  const discordId = normalizeDiscordId(rawId);
+  const uid       = `discord_${discordId}`;
+  // Lockout guard, mirroring adminSetPlayerDisabled.
+  if (uid === request.auth.uid)
+    throw new HttpsError('failed-precondition', 'You cannot ban your own account.');
+
+  const db = getDatabase();
+
+  await db.ref(`config/bannedDiscordIds/${discordId}`).update({
+    reason: reason?.trim() || null,
+    ts:     Date.now(),
+    by:     request.auth.uid,
+  });
+
+  // Cover the already-joined case: flag them out of every season, then kill the
+  // Auth account. An ID token already issued stays valid up to ~1h — the season
+  // flags are what stop them acting in that window.
+  const seasonIds = await allSeasonIds(db);
+  const updates: Record<string, unknown> = {};
+  for (const seasonId of seasonIds) {
+    updates[sp(seasonId, `players/${uid}/disabled`)] = true;
+  }
+  if (Object.keys(updates).length) await db.ref().update(updates);
+
+  await setAuthDisabled(uid, true);
+
+  return { ok: true, discordId };
+});
+
+// Admin: lift a ban. Clears the ban entry and re-enables the Auth account, but
+// deliberately leaves each season's `disabled` flag ALONE — unbanning is "you
+// may sign in again", not "your old season records are reinstated". Use the
+// per-player enable toggle for that, so the two decisions stay separate.
+export const adminUnbanDiscordId = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { discordId: rawId } = request.data as { discordId?: string };
+  if (!rawId) throw new HttpsError('invalid-argument', 'Missing discordId.');
+
+  const discordId = normalizeDiscordId(rawId);
+  const db = getDatabase();
+
+  await db.ref(`config/bannedDiscordIds/${discordId}`).remove();
+  await setAuthDisabled(`discord_${discordId}`, false);
+
+  return { ok: true, discordId };
 });
 
 

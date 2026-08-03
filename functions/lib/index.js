@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminSetPlayerDisabled = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -177,6 +177,34 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
         const discordUser = await userRes.json();
         const uid = `discord_${discordUser.id}`;
         const displayName = discordUser.global_name ?? discordUser.username;
+        const db = (0, database_2.getDatabase)();
+        // ── BAN GATE ───────────────────────────────────────────────────────────
+        // This is the ONLY place a Firebase identity is minted from a Discord
+        // login, so it is the only place a ban can be made pre-emptive. Everything
+        // below — the Auth account, the custom token, the global profile stub, the
+        // handleIndex entry, the season player record — is skipped entirely, so a
+        // banned ID leaves no trace in the system rather than being muted inside
+        // it. Keyed on the immutable snowflake, so renaming on Discord doesn't
+        // shake the ban. Deliberately BEFORE createUser: adminSetPlayerDisabled
+        // can only act on an account that already exists.
+        const banSnap = await db.ref(`config/bannedDiscordIds/${discordUser.id}`).get();
+        if (banSnap.exists()) {
+            const ban = banSnap.val();
+            // Record the attempt (and the current handle) so admin can see a banned
+            // account still knocking. Best-effort — never block the rejection on it.
+            await db.ref(`config/bannedDiscordIds/${discordUser.id}`).update({
+                lastAttemptAt: Date.now(),
+                handle: discordUser.username ?? null,
+            }).catch(() => { });
+            console.warn(`[ban] Rejected sign-in for banned Discord ID ${discordUser.id} (${discordUser.username})`);
+            res.status(403).json({
+                error: ban.reason
+                    ? `This Discord account is not permitted to join RPelago. Reason: ${ban.reason}`
+                    : 'This Discord account is not permitted to join RPelago.',
+                banned: true,
+            });
+            return;
+        }
         try {
             await (0, auth_1.getAuth)().updateUser(uid, { displayName });
         }
@@ -186,7 +214,6 @@ exports.exchangeDiscordCode = (0, https_1.onRequest)({ secrets: [discordClientSe
         const customToken = await (0, auth_1.getAuth)().createCustomToken(uid, { discordId: discordUser.id });
         // Write a minimal profile stub so the profile site can show an identity card
         // and empty state even before the player completes any tiles.
-        const db = (0, database_2.getDatabase)();
         const profileRef = db.ref(`profiles/players/${uid}`);
         const [joinedSnap, firstEventSnap] = await Promise.all([
             profileRef.child('joinedAt').get(),
@@ -1916,16 +1943,100 @@ exports.adminSetPlayerDisabled = (0, https_1.onCall)(async (request) => {
     // 1) Per-season game flag — what the shop/mission/kmk callables check.
     await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/disabled`)).set(disabled ? true : null);
     // 2) Firebase Auth account — gates direct Storage uploads (rules can't see the flag).
+    await setAuthDisabled(playerId, disabled);
+    return { ok: true };
+});
+// ── Ban list ──────────────────────────────────────────────────────────────────
+//
+// Disable (above) is REACTIVE — it needs an existing player record and Auth
+// account. The ban list is PRE-EMPTIVE: `exchangeDiscordCode` consults it before
+// minting anything, so a banned Discord ID can never become a player in the
+// first place. Ban covers disable's ground too, so banning someone already
+// playing is a single action.
+/** Firebase Auth half of the kill-switch. Tolerates a never-signed-in user. */
+async function setAuthDisabled(uid, disabled) {
     try {
-        await (0, auth_1.getAuth)().updateUser(playerId, { disabled });
+        await (0, auth_1.getAuth)().updateUser(uid, { disabled });
         if (disabled)
-            await (0, auth_1.getAuth)().revokeRefreshTokens(playerId);
+            await (0, auth_1.getAuth)().revokeRefreshTokens(uid);
     }
     catch (err) {
         if (err.code !== 'auth/user-not-found')
             throw err;
     }
-    return { ok: true };
+}
+/**
+ * Accept either a raw Discord snowflake ("123456789012345678") or the uid form
+ * ("discord_123456789012345678") and return the bare snowflake. Rejects anything
+ * else — a typo'd/partial id would otherwise create a ban entry that silently
+ * never matches.
+ */
+function normalizeDiscordId(input) {
+    const id = input.trim().replace(/^discord_/, '');
+    if (!/^\d{17,20}$/.test(id))
+        throw new https_1.HttpsError('invalid-argument', 'Expected a Discord user ID (17–20 digits). In Discord: Settings → Advanced → Developer Mode, then right-click the user → Copy User ID.');
+    return id;
+}
+/** Every season id in config, live + draft + archived — a ban applies to all. */
+async function allSeasonIds(db) {
+    const config = await (0, seasonPaths_1.getConfig)(db);
+    return [
+        ...Object.keys(config.seasonList ?? {}),
+        ...Object.keys(config.draftSeasons ?? {}),
+    ];
+}
+// Admin: ban a Discord account outright. Writes the pre-emptive ban entry AND
+// applies the existing kill-switch (Auth account + every season's `disabled`
+// flag), so it works whether or not the person has ever signed in. The season
+// flags are swept across ALL seasons rather than just the active one because a
+// ban is not season-scoped.
+exports.adminBanDiscordId = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    await requireAdmin(request.auth.uid);
+    const { discordId: rawId, reason } = request.data;
+    if (!rawId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing discordId.');
+    const discordId = normalizeDiscordId(rawId);
+    const uid = `discord_${discordId}`;
+    // Lockout guard, mirroring adminSetPlayerDisabled.
+    if (uid === request.auth.uid)
+        throw new https_1.HttpsError('failed-precondition', 'You cannot ban your own account.');
+    const db = (0, database_2.getDatabase)();
+    await db.ref(`config/bannedDiscordIds/${discordId}`).update({
+        reason: reason?.trim() || null,
+        ts: Date.now(),
+        by: request.auth.uid,
+    });
+    // Cover the already-joined case: flag them out of every season, then kill the
+    // Auth account. An ID token already issued stays valid up to ~1h — the season
+    // flags are what stop them acting in that window.
+    const seasonIds = await allSeasonIds(db);
+    const updates = {};
+    for (const seasonId of seasonIds) {
+        updates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/disabled`)] = true;
+    }
+    if (Object.keys(updates).length)
+        await db.ref().update(updates);
+    await setAuthDisabled(uid, true);
+    return { ok: true, discordId };
+});
+// Admin: lift a ban. Clears the ban entry and re-enables the Auth account, but
+// deliberately leaves each season's `disabled` flag ALONE — unbanning is "you
+// may sign in again", not "your old season records are reinstated". Use the
+// per-player enable toggle for that, so the two decisions stay separate.
+exports.adminUnbanDiscordId = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    await requireAdmin(request.auth.uid);
+    const { discordId: rawId } = request.data;
+    if (!rawId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing discordId.');
+    const discordId = normalizeDiscordId(rawId);
+    const db = (0, database_2.getDatabase)();
+    await db.ref(`config/bannedDiscordIds/${discordId}`).remove();
+    await setAuthDisabled(`discord_${discordId}`, false);
+    return { ok: true, discordId };
 });
 exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     if (!request.auth)

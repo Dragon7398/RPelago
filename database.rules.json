@@ -38,6 +38,20 @@
         // PRIVATE. Allowlist of uids that may read AND playtest draft seasons.
         ".read":  "auth != null && (root.child('config/adminId').val() === auth.uid || root.child('config/alphaUsers').child(auth.uid).exists())",
         ".write": "auth != null && root.child('config/adminId').val() === auth.uid"
+      },
+      "bannedDiscordIds": {
+        // PRIVATE, SERVER-WRITTEN. Keyed by Discord snowflake ID (NOT username —
+        // handles are renameable, snowflakes are not). exchangeDiscordCode reads
+        // this BEFORE minting an Auth account, so a banned ID never becomes a
+        // Firebase identity at all. { reason, ts, by, lastAttemptAt?, handle? }
+        //
+        // ADMIN-READ ONLY: this is a roster of banned Discord IDs, so it must
+        // never be world-readable. `.write` is false for EVERYONE — all writes go
+        // through adminBanDiscordId / adminUnbanDiscordId, which also disable the
+        // Auth account and the per-season player flag. The Admin SDK bypasses
+        // rules, so the server retains full access.
+        ".read":  "auth != null && root.child('config/adminId').val() === auth.uid",
+        ".write": false
       }
     },
 

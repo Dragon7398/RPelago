@@ -87,6 +87,10 @@ export async function seed(testEnv: RulesTestEnvironment): Promise<void> {
           [S2]: { label: 'Season 2', shell: 'map' },
         },
         alphaUsers: { [ALPHA_UID]: true },
+        // PRIVATE, SERVER-WRITTEN — admin-read only, nobody may write.
+        bannedDiscordIds: {
+          '123456789012345678': { reason: 'Harassment', ts: 1_700_000_000_000, by: ADMIN_UID },
+        },
       },
 
       seasons: {

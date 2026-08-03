@@ -42,6 +42,12 @@ interface ExchangeResult {
   customToken: string;
 }
 
+// A rejection the user cannot retry their way out of (currently: a banned
+// Discord ID, 403 from exchangeDiscordCode). Carries the server's message
+// through so we show the real reason instead of "please try again", which would
+// otherwise have them retrying — and asking for support — forever.
+class TerminalAuthError extends Error {}
+
 async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID as string;
   const url       = `https://us-central1-${projectId}.cloudfunctions.net/exchangeDiscordCode`;
@@ -54,7 +60,11 @@ async function exchangeCodeForToken(code: string): Promise<ExchangeResult> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((err as { error?: string }).error ?? 'Exchange failed');
+    const { error, banned } = err as { error?: string; banned?: boolean };
+    if (res.status === 403 && banned) {
+      throw new TerminalAuthError(error ?? 'This Discord account is not permitted to join RPelago.');
+    }
+    throw new Error(error ?? 'Exchange failed');
   }
 
   return res.json() as Promise<ExchangeResult>;
@@ -102,7 +112,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch(err => {
           console.error('Discord auth exchange failed:', err);
           exchangingRef.current = false;
-          setAuthError('Sign-in failed. Please try again.');
+          setAuthError(err instanceof TerminalAuthError
+            ? err.message
+            : 'Sign-in failed. Please try again.');
           setLoading(false);
         });
     }

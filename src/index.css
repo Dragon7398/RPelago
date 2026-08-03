@@ -13,6 +13,12 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --gold-dim:   oklch(62% 0.10 75);
   --parchment:  oklch(92% 0.03 80);
   --red:        oklch(55% 0.18 25);
+  /* Ban/danger surface tokens — one place for the light themes to remap. */
+  --ban-fg:      oklch(66% 0.19 25);
+  --ban-fg-hi:   oklch(76% 0.21 25);
+  --ban-bg:      oklch(14% 0.10 25 / 0.4);
+  --ban-bg-hi:   oklch(20% 0.12 25 / 0.55);
+  --ban-border:  oklch(44% 0.16 25);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -2071,6 +2077,90 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   color: oklch(60% 0.14 145); transition: all 0.15s;
 }
 .dash-player-enable:hover { background: oklch(20% 0.10 145 / 0.5); color: oklch(70% 0.16 145); }
+.dash-player-ban {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
+  background: var(--ban-bg); border: 1px solid var(--ban-border);
+  color: var(--ban-fg); transition: all 0.15s;
+}
+.dash-player-ban:hover:not(:disabled) { background: var(--ban-bg-hi); color: var(--ban-fg-hi); }
+.dash-player-ban:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Discord ban list ──
+   Danger red is carried by --ban-* tokens so light themes can remap it in one
+   place (see the light-theme block below). Every ban affordance also carries a
+   ⛔ glyph or the literal word BANNED, so the state never depends on hue alone —
+   this has to stay legible on the Obsidian/Tidepool accessibility themes. */
+.dash-ban-panel {
+  border: 1px solid var(--ban-border); border-radius: 3px;
+  background: var(--ban-bg); margin-bottom: 0.9rem;
+}
+.dash-ban-toggle {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; padding: 0.45rem 0.7rem; cursor: pointer;
+  background: none; border: none;
+  font-family: 'Cinzel', serif; font-size: 0.7rem; letter-spacing: 0.08em;
+  color: var(--ban-fg);
+}
+.dash-ban-toggle:hover { color: var(--ban-fg-hi); }
+.dash-ban-count {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.62rem; color: var(--text-muted); letter-spacing: 0.06em;
+}
+.dash-ban-chev { color: var(--ban-fg); }
+.dash-ban-body {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  padding: 0 0.7rem 0.6rem; border-top: 1px solid var(--ban-border);
+  padding-top: 0.55rem;
+}
+.dash-ban-help {
+  margin: 0; font-size: 0.68rem; line-height: 1.45; color: var(--text-muted);
+}
+.dash-ban-help strong { color: var(--parchment); font-weight: 600; }
+.dash-ban-form { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.dash-ban-input {
+  padding: 0.3rem 0.45rem; border-radius: 2px; font-size: 0.72rem;
+  background: var(--bg-deep); border: 1px solid var(--border);
+  color: var(--parchment); font-family: inherit;
+}
+.dash-ban-input:focus { outline: none; border-color: var(--ban-border); }
+.dash-ban-input.id     { flex: 0 1 15rem; font-variant-numeric: tabular-nums; }
+.dash-ban-input.reason { flex: 1 1 16rem; min-width: 0; }
+.dash-ban-submit {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.1em;
+  padding: 0.3rem 0.85rem; border-radius: 2px; cursor: pointer;
+  background: var(--ban-bg-hi); border: 1px solid var(--ban-border);
+  color: var(--ban-fg); transition: all 0.15s;
+}
+.dash-ban-submit:hover:not(:disabled) { color: var(--ban-fg-hi); }
+.dash-ban-submit:disabled { opacity: 0.45; cursor: default; }
+.dash-ban-empty { font-size: 0.7rem; color: var(--text-dim); font-style: italic; }
+.dash-ban-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem;
+  padding: 0.32rem 0.45rem; border-radius: 2px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+.dash-ban-tag {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em;
+  padding: 0.1rem 0.4rem; border-radius: 2px; flex: none;
+  background: var(--ban-bg-hi); border: 1px solid var(--ban-border); color: var(--ban-fg);
+}
+.dash-ban-id {
+  font-variant-numeric: tabular-nums; color: var(--parchment);
+  display: inline-flex; align-items: baseline; gap: 0.35rem;
+}
+.dash-ban-handle { color: var(--text-muted); font-size: 0.68rem; }
+.dash-ban-reason { flex: 1 1 8rem; min-width: 0; color: var(--text-muted); }
+.dash-ban-meta   { color: var(--text-dim); font-size: 0.65rem; white-space: nowrap; }
+.dash-ban-attempt { color: var(--ban-fg); }
+.dash-ban-lift {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  padding: 0.2rem 0.55rem; border-radius: 2px; cursor: pointer; flex: none;
+  background: oklch(14% 0.08 145 / 0.4); border: 1px solid oklch(38% 0.12 145);
+  color: oklch(60% 0.14 145); transition: all 0.15s;
+}
+.dash-ban-lift:hover { background: oklch(20% 0.10 145 / 0.5); color: oklch(70% 0.16 145); }
 
 /* ── Player warnings ── */
 .dash-player-warn-badge {
@@ -3482,6 +3572,28 @@ body.theme-lapis {
   --gm-accent-d: oklch(30% 0.15 285);
   /* --amber at 72% l is also invisible on cream; pull it to earthy orange. */
   --amber:       oklch(46% 0.16 60);
+  /* Ban surfaces: the dark-theme values are a 14%-lightness wash meant to sit on
+     near-black. On cream that reads as mud with unreadable red-on-red text, so
+     flip the polarity — light red tint behind dark red text. */
+  --ban-fg:      oklch(40% 0.20 25);
+  --ban-fg-hi:   oklch(30% 0.22 25);
+  --ban-bg:      oklch(92% 0.045 25 / 0.55);
+  --ban-bg-hi:   oklch(86% 0.07 25 / 0.7);
+  --ban-border:  oklch(52% 0.16 25);
+}
+/* Unban stays green, and green-on-cream has the same wash problem. */
+body.theme-parchment .dash-ban-lift,
+body.theme-sakura    .dash-ban-lift,
+body.theme-mint      .dash-ban-lift,
+body.theme-lapis     .dash-ban-lift {
+  background: oklch(90% 0.05 145 / 0.55); border-color: oklch(46% 0.13 145);
+  color: oklch(36% 0.15 145);
+}
+body.theme-parchment .dash-ban-lift:hover,
+body.theme-sakura    .dash-ban-lift:hover,
+body.theme-mint      .dash-ban-lift:hover,
+body.theme-lapis     .dash-ban-lift:hover {
+  background: oklch(84% 0.08 145 / 0.7); color: oklch(28% 0.17 145);
 }
 
 /* Available tile adventurer count — the dark-theme brightness (82% l) washes

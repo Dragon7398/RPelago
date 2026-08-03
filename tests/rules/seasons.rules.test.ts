@@ -56,6 +56,46 @@ describe('config — must be read child-by-child, never as a whole node', () => 
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// config/bannedDiscordIds — the pre-emptive ban list.
+//
+// Stricter than draftSeasons/alphaUsers on BOTH axes:
+//   read  — admin only (NOT alpha). It is a roster of banned Discord IDs; alphas
+//           are playtesters, not moderators.
+//   write — nobody, ever, including the admin. Both mutations go through the
+//           adminBanDiscordId / adminUnbanDiscordId callables, which also disable
+//           the Auth account. A client write would set the flag while leaving the
+//           Auth account live — a ban that doesn't ban.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('config/bannedDiscordIds — admin-read, server-write-only', () => {
+  const BANNED = '123456789012345678';
+
+  it('is unreadable by anyone but the admin — including alpha users', async () => {
+    await assertFails(anon().ref('config/bannedDiscordIds').get());
+    await assertFails(player().ref('config/bannedDiscordIds').get());
+    await assertFails(alpha().ref('config/bannedDiscordIds').get());
+    await assertSucceeds(admin().ref('config/bannedDiscordIds').get());
+  });
+
+  it('does not leak a single entry to a non-admin either', async () => {
+    await assertFails(player().ref(`config/bannedDiscordIds/${BANNED}`).get());
+    await assertSucceeds(admin().ref(`config/bannedDiscordIds/${BANNED}`).get());
+  });
+
+  it('cannot be written from a client — not even by the admin', async () => {
+    for (const ctx of [anon, player, alpha, admin]) {
+      await assertFails(ctx().ref('config/bannedDiscordIds/999888777666555444')
+        .set({ reason: 'x', ts: 1, by: ADMIN_UID }));
+    }
+  });
+
+  it('cannot be self-lifted by the banned party or anyone else', async () => {
+    for (const ctx of [anon, player, alpha, admin]) {
+      await assertFails(ctx().ref(`config/bannedDiscordIds/${BANNED}`).remove());
+    }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 🔒 THE FIX — casino secrets live OUTSIDE the world-readable season tree.
 //
 // The legacy `game/` tree leaked the draw deck and every hand to anyone,

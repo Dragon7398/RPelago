@@ -1,6 +1,7 @@
 import { useGameState } from '../../contexts/GameStateContext';
 import { useSeason } from '../../contexts/SeasonContext';
 import PlayerCard from './playersPage/PlayerCard';
+import BanPanel from './playersPage/BanPanel';
 
 export default function PlayersPage() {
   const { gameState } = useGameState();
@@ -14,6 +15,7 @@ export default function PlayersPage() {
   return (
     <div className="dash-page">
       <h2 className="dash-page-title">👥 Players</h2>
+      <BanPanel />
       {players.length === 0 ? (
         <div className="dash-empty">No players have joined yet.</div>
       ) : players.map(player => (
