@@ -2086,6 +2086,29 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-player-ban:hover:not(:disabled) { background: var(--ban-bg-hi); color: var(--ban-fg-hi); }
 .dash-player-ban:disabled { opacity: 0.5; cursor: default; }
 
+/* ── Players filter ── */
+.dash-player-filter-row {
+  display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.7rem;
+}
+.dash-player-filter {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0.35rem 0.5rem; border-radius: 2px; font-size: 0.75rem;
+  background: var(--bg-deep); border: 1px solid var(--border);
+  color: var(--parchment); font-family: inherit;
+}
+.dash-player-filter::placeholder { color: var(--text-dim); }
+.dash-player-filter:focus { outline: none; border-color: var(--border-glow); }
+.dash-player-filter-clear {
+  flex: none; padding: 0.25rem 0.45rem; border-radius: 2px; cursor: pointer;
+  background: none; border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 0.7rem; line-height: 1; transition: all 0.15s;
+}
+.dash-player-filter-clear:hover { color: var(--parchment); border-color: var(--border-glow); }
+.dash-player-filter-count {
+  flex: none; font-family: 'Cinzel', serif; font-size: 0.6rem;
+  letter-spacing: 0.08em; color: var(--gold-dim); white-space: nowrap;
+}
+
 /* ── Discord ban list ──
    Danger red is carried by --ban-* tokens so light themes can remap it in one
    place (see the light-theme block below). Every ban affordance also carries a

@@ -2389,13 +2389,35 @@ export const adminBanDiscordId = onCall(async (request) => {
     by:     request.auth.uid,
   });
 
-  // Cover the already-joined case: flag them out of every season, then kill the
-  // Auth account. An ID token already issued stays valid up to ~1h — the season
-  // flags are what stop them acting in that window.
+  // Cover the already-joined case: flag them out of every season they actually
+  // have a record in, then kill the Auth account. An ID token already issued
+  // stays valid up to ~1h — the season flags are what stop them acting in that
+  // window.
+  //
+  // ⚠️ MUST check for an existing record first. RTDB creates missing ancestors on
+  // write, so a blind `players/{uid}/disabled = true` in a season the player was
+  // never in CREATES a phantom record holding only that flag — no id, no
+  // displayName — which then renders as a nameless RESTRICTED card on the admin
+  // Players page. Skipping absent records loses nothing: the ban gate in
+  // exchangeDiscordCode stops them before `createSeasonPlayer` ever runs, so
+  // there is no future season record for the flag to have pre-empted.
+  //
+  // Probe `/id` rather than the player node itself — a phantom from before this
+  // fix "exists" as a node but has no `id`, so this also self-heals those.
   const seasonIds = await allSeasonIds(db);
+  const present   = await Promise.all(seasonIds.map(async seasonId => ({
+    seasonId,
+    real: (await db.ref(sp(seasonId, `players/${uid}/id`)).get()).exists(),
+  })));
   const updates: Record<string, unknown> = {};
-  for (const seasonId of seasonIds) {
-    updates[sp(seasonId, `players/${uid}/disabled`)] = true;
+  for (const { seasonId, real } of present) {
+    if (real) {
+      updates[sp(seasonId, `players/${uid}/disabled`)] = true;
+    } else {
+      // No `id` — either genuinely absent (null is a no-op) or a phantom left by
+      // the earlier blind-write version of this function. Either way, clear it.
+      updates[sp(seasonId, `players/${uid}`)] = null;
+    }
   }
   if (Object.keys(updates).length) await db.ref().update(updates);
 
