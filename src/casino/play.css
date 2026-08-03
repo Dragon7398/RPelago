@@ -50,6 +50,11 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-seat.active { border-color: var(--gold); box-shadow: 0 0 22px oklch(from var(--gold) l c h / 0.3); transform: translateY(-3px); }
 .cz-seat.folded { opacity: 0.55; }
 .cz-seat.empty { opacity: 0.35; border-style: dashed; }
+/* Decayed off the table: dimmer than an open seat and drained of the seat hue, so
+   "nobody here yet" and "nobody can sit here" never read the same. Grayscale +
+   opacity keep it theme-agnostic (works on the light and color-blind themes too). */
+.cz-seat.closed { opacity: 0.22; border-style: dashed; background: none; filter: grayscale(1); }
+.cz-seat.closed .cz-seat-av { box-shadow: none; }
 .cz-seat-head { display: flex; align-items: center; gap: 0.45rem; }
 .cz-seat-av { width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; color: oklch(18% 0.03 70); background: linear-gradient(150deg, oklch(80% 0.11 var(--seat-hue,75)), oklch(58% 0.12 var(--seat-hue,75))); }
 .cz-seat.you .cz-seat-av { background: linear-gradient(150deg, oklch(86% 0.13 86), oklch(66% 0.13 70)); box-shadow: 0 0 10px oklch(from var(--gold) l c h / 0.4); }

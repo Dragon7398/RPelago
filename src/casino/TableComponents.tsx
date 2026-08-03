@@ -52,7 +52,9 @@ export function PotDisplay({ amount, bump, seats }: PotDisplayProps) {
 
 // ── Player seat in the rail ───────────────────────────────────────────────────
 
-type SeatStatus = 'empty' | 'waiting' | 'deadline' | 'playing' | 'locked';
+// 'empty' is a seat still up for grabs; 'closed' is one decay has taken off the
+// table, so it can never be filled.
+type SeatStatus = 'empty' | 'closed' | 'waiting' | 'deadline' | 'playing' | 'locked';
 
 interface SeatProps {
   name: string | null;
@@ -67,6 +69,7 @@ interface SeatProps {
 
 const STATUS_DOT: Record<SeatStatus, string> = {
   empty:    '',
+  closed:   '',
   waiting:  'wait',
   deadline: 'live',
   playing:  'live',
@@ -75,6 +78,7 @@ const STATUS_DOT: Record<SeatStatus, string> = {
 
 const STATUS_TEXT: Record<SeatStatus, string> = {
   empty:    'Open',
+  closed:   'Closed',
   waiting:  'Waiting',
   deadline: 'Must start',
   playing:  'Playing…',
@@ -86,6 +90,7 @@ export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stak
   if (isMe)           cls.push('you');
   if (status === 'playing') cls.push('active');
   if (status === 'empty')   cls.push('empty');
+  if (status === 'closed')  cls.push('closed');
 
   const dot     = STATUS_DOT[status];
   const text    = STATUS_TEXT[status];

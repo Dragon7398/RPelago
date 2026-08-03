@@ -97,8 +97,10 @@ function closeTable() {
 
 // ── Seat status helper ────────────────────────────────────────────────────────
 
-function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: number) {
-  if (!p) return 'empty' as const;
+// `seatOpen` is false for a seat decay has closed — an unfillable slot, which is
+// not the same as an open one nobody has taken yet.
+function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: number, seatOpen = true) {
+  if (!p) return seatOpen ? ('empty' as const) : ('closed' as const);
   if (p.played) return 'locked' as const;
   if (isMe) return 'playing' as const;
   if (p.holeLocked) return 'playing' as const;   // Hold 'Em: in, waiting on the reveal
@@ -444,8 +446,12 @@ export function CasinoTable() {
       ? Math.max(1, currentMaxSlots(mission, now))
       : Math.max(1, allSeats.filter(p => p.played).length);
 
-  // Fill empty seats up to baseMax
-  const baseMax = mission?.baseMax ?? 6;
+  // Fill empty seats up to baseMax. All baseMax seats stay drawn so decay is
+  // visible, but any seat past the DECAYED max is closed, not open — mirrors the
+  // seat pips on the landing shell. Once the table is running currentMaxSlots
+  // collapses to the fill count, so every unfilled seat reads as closed.
+  const baseMax  = mission?.baseMax ?? 6;
+  const openMax  = mission ? currentMaxSlots(mission, now) : baseMax;
   const seatEntries: [string, GMParticipant | null][] =
     Object.entries(mission?.participants ?? {});
   while (seatEntries.length < baseMax) seatEntries.push([`__empty_${seatEntries.length}`, null]);
@@ -867,15 +873,15 @@ export function CasinoTable() {
 
       <div className="cz-room-tag">
         {mission.state === 'forming'
-          ? `${allSeats.filter(p => p?.played).length}/${baseMax} seats played · 40% of every entry feeds the pot · non-folded players split it`
+          ? `${allSeats.filter(p => p?.played).length}/${Math.max(allSeats.length, openMax)} seats played · 40% of every entry feeds the pot · non-folded players split it`
           : 'This table has concluded.'}
       </div>
 
       {/* ── Seat rail ── */}
       <div className="cz-rail">
-        {seatEntries.map(([id, p]) => {
+        {seatEntries.map(([id, p], i) => {
           const isMe   = id === uid;
-          const status = seatStatus(p, isMe, now);
+          const status = seatStatus(p, isMe, now, i < openMax);
           const stake  = p?.played ? (p.goldSwing ?? handStakeFromSlots(p.slots)) : undefined;
           const sbLeft = p?.startBy ? p.startBy - now : 0;
           return (
