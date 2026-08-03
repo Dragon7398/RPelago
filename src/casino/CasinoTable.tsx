@@ -14,7 +14,7 @@ import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlot
 import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
-import { currentMaxSlots } from '../lib/missionLogic';
+import { seatTally } from '../lib/missionLogic';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -443,15 +443,19 @@ export function CasinoTable() {
   const potSeats = !mission
     ? 0
     : mission.state === 'forming'
-      ? Math.max(1, currentMaxSlots(mission, now))
+      // seatTally, not the raw cap: a seat already taken will split the pot even if
+      // decay has since dropped the cap below the fill count.
+      ? Math.max(1, seatTally(mission, now).max)
       : Math.max(1, allSeats.filter(p => p.played).length);
 
   // Fill empty seats up to baseMax. All baseMax seats stay drawn so decay is
-  // visible, but any seat past the DECAYED max is closed, not open — mirrors the
-  // seat pips on the landing shell. Once the table is running currentMaxSlots
-  // collapses to the fill count, so every unfilled seat reads as closed.
+  // visible, but any seat past the max is closed, not open — mirrors the seat pips
+  // on the landing shell. `seatTally` floors the max at the fill count (a table can
+  // decay past full while waiting to lock in) and collapses to the fill count once
+  // the table is running, so every unfilled seat then reads as closed.
   const baseMax  = mission?.baseMax ?? 6;
-  const openMax  = mission ? currentMaxSlots(mission, now) : baseMax;
+  const tally    = mission ? seatTally(mission, now) : null;
+  const openMax  = tally?.max ?? baseMax;
   const seatEntries: [string, GMParticipant | null][] =
     Object.entries(mission?.participants ?? {});
   while (seatEntries.length < baseMax) seatEntries.push([`__empty_${seatEntries.length}`, null]);
@@ -871,9 +875,9 @@ export function CasinoTable() {
         </div>
       </div>
 
-      <div className="cz-room-tag">
+      <div className="cz-room-tag" title={tally?.title}>
         {mission.state === 'forming'
-          ? `${allSeats.filter(p => p?.played).length}/${Math.max(allSeats.length, openMax)} seats played · 40% of every entry feeds the pot · non-folded players split it`
+          ? `${allSeats.filter(p => p?.played).length}/${openMax}${tally?.over ? '*' : ''} seats played · 40% of every entry feeds the pot · non-folded players split it`
           : 'This table has concluded.'}
       </div>
 

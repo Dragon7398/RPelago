@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { slotsAllFree, countUnfinishedSets } from '../../src/lib/slotHelpers';
-import { hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard } from '../../src/lib/missionLogic';
+import { hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
 import { missionClaimCapacity } from '../../src/lib/gameLogic';
 import type { AdvSlot, GMMission, GMParticipant, Player } from '../../src/types';
 
@@ -44,6 +44,40 @@ describe('countUnfinishedSets vs the mission/tile wrappers', () => {
 describe('missionClaimCapacity', () => {
   it('is 1 by default (guildmaster; advisor is S2)', () => {
     expect(missionClaimCapacity({ id: 'p' } as Player)).toBe(1);
+  });
+});
+
+describe('seatTally — the displayed seat count', () => {
+  const HOUR = 3600_000;
+  // A casino table decays every 36h and waits for every seat to lock in, so it can
+  // sit at baseMax while the cap keeps sliding under it — the "7/6" case.
+  const table = (baseMax: number, seats: number, firstJoinAt: number | null): GMMission => ({
+    id: 'c1', type: 'casino', series: 1, label: 'Casino', state: 'forming',
+    baseMax, xp: 0, gp: 0, release: 'off', collect: 'off', hint: 0,
+    firstJoinAt, createdAt: 0,
+    participants: Object.fromEntries(
+      Array.from({ length: seats }, (_, i) => [`p${i}`, { playerId: `p${i}`, playerName: `P${i}`, joinedAt: 0 }]),
+    ),
+  });
+
+  it('reports the plain cap while decay is still above the fill count', () => {
+    const t = seatTally(table(7, 3, 0), 40 * HOUR);   // one decay step: cap 6
+    expect(t.label).toBe('3/6');
+    expect(t.over).toBe(false);
+  });
+
+  it('floors the shown max at the fill count and stars it, instead of "7/6"', () => {
+    const m = table(7, 7, 0);
+    const now = 40 * HOUR;
+    expect(currentMaxSlots(m, now)).toBe(6);          // the cap really did drop
+    const t = seatTally(m, now);
+    expect(t.label).toBe('7/7*');
+    expect(t.max).toBe(7);
+    expect(t.over).toBe(true);
+  });
+
+  it('never stars a table that has not decayed past its fill', () => {
+    expect(seatTally(table(6, 6, null), 0).label).toBe('6/6');
   });
 });
 

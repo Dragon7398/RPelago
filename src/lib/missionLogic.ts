@@ -14,6 +14,8 @@ export interface GMMissionCard {
   status:          GMMissionStatus;
   maxSlots:        number;
   filled:          number;
+  /** Display-only seat count — see `seatTally`. Use this for any "x/y" the player sees. */
+  seats:           SeatTally;
   decaySteps:      number;
   decayPct:        number;
   liveSec:         number;
@@ -48,6 +50,44 @@ export function msToNextDecay(m: GMMission, now: number): number | null {
 
 export function filledCount(m: GMMission): number {
   return Object.keys(m.participants ?? {}).length;
+}
+
+// ── Seat tally (what the UI shows) ────────────────────────────────────────────
+/**
+ * Seats as the UI should DISPLAY them, which is not always `currentMaxSlots`.
+ *
+ * Decay lowers the cap but never evicts a seated player, and a casino cohort keeps
+ * decaying while it waits for every seat to lock in (`shouldDeploy` also demands
+ * `allSeatsPlayed`). So a full table can outlive its own cap and render the
+ * nonsense "7/6". The shown max is floored at the fill count instead, and `over`
+ * marks the tables where that floor kicked in so they can be flagged — the seats
+ * are real, the cap is simply behind them.
+ *
+ * Gameplay math (deploy, takeable, pot split) must keep using `currentMaxSlots`;
+ * this is presentation only.
+ */
+export interface SeatTally {
+  filled: number;
+  max:    number;   // never below `filled`
+  over:   boolean;  // decay dropped the cap under the fill count
+  label:  string;   // "5/6" · "7/7*"
+  title:  string;   // tooltip explaining the label
+}
+
+export function seatTally(m: GMMission, now: number): SeatTally {
+  const filled = filledCount(m);
+  const cap    = currentMaxSlots(m, now);
+  const over   = filled > cap;
+  const max    = Math.max(cap, filled);
+  return {
+    filled,
+    max,
+    over,
+    label: `${filled}/${max}${over ? '*' : ''}`,
+    title: over
+      ? `This table has one or more seats that will decay if a player leaves the table.`
+      : `${filled} of ${max} seats taken`,
+  };
 }
 
 export function allSeatsPlayed(m: GMMission): boolean {
@@ -151,6 +191,7 @@ export function computeMissionCard(
     status,
     maxSlots,
     filled,
+    seats:         seatTally(m, now),
     decaySteps,
     decayPct,
     liveSec,

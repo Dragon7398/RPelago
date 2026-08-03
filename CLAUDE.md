@@ -264,7 +264,9 @@ Mission state machine: `forming → inprogress → complete`.
 
 The reclaim is **auto, on status sync** (mirrors the tile adventurer-free path): both the scheduled `tickSlotStatuses` mission loop and the admin **Sync** on MissionsPage null `players/{uid}/activeMissions/{missionId}` when a participant's slots go all-terminal (client path via `freeMissionClaim` in `db.ts`). The completion predicate is the shared **`slotsAllFree`** in `slotHelpers.ts` (which also backs `hasUnfinishedSlots`/`hasUnfinishedTileSlots` via `countUnfinishedSets` — the two are now thin wrappers, not parallel impls). Server-side (functions) inline a copy of the terminal check, like `deriveStatus`.
 
-**Decay mechanic**: max slots reduce by 1 per 24h after the first participant joins (`currentMaxSlots()` in `missionLogic.ts`). `tickGuildmasterMissions` (scheduled every 15 min) auto-deploys any forming mission where fill count has reached the decayed max. Deployment also fires immediately on enlist if full.
+**Decay mechanic**: max slots reduce by 1 per 24h after the first participant joins — 36h for casino tables (`currentMaxSlots()` in `missionLogic.ts`). `tickGuildmasterMissions` (scheduled every 15 min) auto-deploys any forming mission where fill count has reached the decayed max. Deployment also fires immediately on enlist if full.
+
+> **Display seats with `seatTally`, never `currentMaxSlots`.** Decay lowers the cap but never evicts a seated player, and a casino cohort keeps decaying while it waits for every seat to lock in (`shouldDeploy` also demands `allSeatsPlayed`) — so the cap legitimately slides *below* the fill count and a raw `{filled}/{currentMaxSlots}` renders the nonsense **"7/6"**. `seatTally(m, now)` floors the shown max at the fill count and returns `{ filled, max, over, label, title }`, rendering **"7/7\*"** with an explanatory tooltip. Anything indexed by max seats (seat rails, pips, `SeatGrid`) must use it too, or an occupied seat gets drawn as closed — or dropped entirely. `GMMissionCard.seats` carries the tally for card consumers. Gameplay math (deploy, `takeable`, pot split at settle) keeps using `currentMaxSlots`.
 
 `claimableSlots?: Record<string, AdvSlot[]>` on missions mirrors the tile claimable slot mechanic — created when a participant is kicked. `slotsLocked` prevents slot edits once locked by admin.
 
@@ -366,7 +368,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity` |
-| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `computeMissionCard`, `freshMission` |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission` |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `fetchRoomStatus` |
 | `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |

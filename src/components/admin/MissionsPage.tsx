@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, fmtDayClock, missionDisplayLabel } from '../../lib/missionLogic';
+import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
 import { slotsAllFree } from '../../lib/slotHelpers';
@@ -505,6 +505,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const participants = Object.entries(mission.participants ?? {});
   const filled       = participants.length;
   const maxSlots     = currentMaxSlots(mission, now);
+  const tally        = seatTally(mission, now);   // display-only; `maxSlots` still drives the logic below
   const needsRoom    = mission.state === 'forming'
     ? (filled > 0 && maxSlots > 0 && filled >= maxSlots)
     : !mission.link;
@@ -569,7 +570,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
         {readyToComplete && (
           <span className="dash-complete-ready" title="All slots are Goaled/Done — ready to mark Complete">✓</span>
         )}
-        <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }}>{filled}/{maxSlots}</span>
+        <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }} title={tally.title}>{tally.label}</span>
         {/* Casino: spectate / test the card table */}
         {mission.type === 'casino' && mission.tableUrl && (
           <a

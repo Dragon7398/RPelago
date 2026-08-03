@@ -27,7 +27,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { casinoSeatPaid, currentMaxSlots, fmtDayClock, missionDisplayLabel } from '../../lib/missionLogic';
+import { casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
 import { CardFace } from '../../casino/CardFace';
@@ -173,17 +173,17 @@ function seatRoster(s: GMParticipant): { cls: string; rail: string; full: string
 
 // Deploy-progress bar: seats filled (soft) over seats played (bright); turns
 // green once the table is ready to deal in. Mirrors the design's DeployBar.
-function DeployBar({ m, max }: { m: GMMission; max: number }) {
+function DeployBar({ m, max, over, title }: { m: GMMission; max: number; over: boolean; title: string }) {
   const seats  = Object.values(m.participants ?? {});
   const filled = seats.length;
   const played = seats.filter(s => s.played).length;
   const ready  = filled > 0 && filled >= max && played === filled;
   const pct    = (n: number) => (max ? Math.min(100, (n / max) * 100) : 0);
   return (
-    <div className={`rl-deploy${ready ? ' ready' : ''}`}>
+    <div className={`rl-deploy${ready ? ' ready' : ''}`} title={title}>
       <div className="rl-deploy-head">
         <span>Deploy progress</span>
-        <span><b>{filled}</b>/{max} seated · <b>{played}</b> played</span>
+        <span><b>{filled}</b>/{max}{over && '*'} seated · <b>{played}</b> played</span>
       </div>
       <div className="rl-deploy-track">
         <div className="rl-deploy-filled" style={{ width: `${pct(filled)}%` }} />
@@ -285,7 +285,10 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
   m: GMMission; uid: string; now: number; seasonId: string; view: View; onLeave: () => void;
 }) {
   const seat = m.participants?.[uid];
-  const max  = currentMaxSlots(m, now);
+  // Display max — never below the fill count, so a table that decayed past full
+  // (see seatTally) still draws every seated player in the roster and seat grid.
+  const tally = seatTally(m, now);
+  const max   = tally.max;
   const href = tableHref(m, seasonId);
   if (!seat) return null;
 
@@ -325,7 +328,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
         {hand}
         {seat.played && <Stake amount={seat.goldSwing ?? 0} label={stakeLabel(game)} />}
         {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
-        <DeployBar m={m} max={max} />
+        <DeployBar m={m} max={max} over={tally.over} title={tally.title} />
         <RosterChips m={m} uid={uid} max={max} />
         <div className="rl-ct-acts">{actions}</div>
       </div>
@@ -349,7 +352,7 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
         </div>
         <div className="rl-ct-col">
           {m.casinoStats && <div><div className="rl-ct-cell-lbl">Odds rolled</div><OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} /></div>}
-          <DeployBar m={m} max={max} />
+          <DeployBar m={m} max={max} over={tally.over} title={tally.title} />
         </div>
       </div>
       <div className="rl-ct-acts">{actions}</div>

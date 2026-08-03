@@ -96,12 +96,17 @@ function Countdown({ card }: { card: GMMissionCard }) {
 // ── Slot pips ─────────────────────────────────────────────────────────────────
 
 function Pips({ card }: { card: GMMissionCard }) {
+  // Pips key off the DISPLAY max (`card.seats`), not the raw cap: decay can slip
+  // below the fill count on a table waiting to lock in, and an occupied seat must
+  // never be drawn as lost. The pending-decay pulse is suppressed there too —
+  // there is no next seat for decay to take.
+  const max  = card.seats.max;
   const pips = [];
   for (let i = 0; i < card.mission.baseMax; i++) {
     let cls = 'gm-pip';
-    if (i >= card.maxSlots) cls += ' lost';
+    if (i >= max) cls += ' lost';
     else if (i < card.filled) cls += card.youIn && i === 0 ? ' you' : ' filled';
-    if (card.status === 'filling' && i === card.maxSlots - 1) cls += ' decaying';
+    if (card.status === 'filling' && !card.seats.over && i === max - 1) cls += ' decaying';
     pips.push(<span key={i} className={cls} />);
   }
   return <span className="gm-pips">{pips}</span>;
@@ -532,10 +537,12 @@ function MissionCard({ card, uid, claimsFull, basicTrainingDone, onEnlist, onSta
       <div className="gmb-meta">
         <div className="gmb-slots">
           <Pips card={card} />
-          <span className="gm-slot-count">
-            <b>{card.filled}</b> / {card.maxSlots} slots
-            {card.decaySteps > 0 && (
-              <span style={{ color: 'oklch(60% 0.10 60)' }}> · {card.decaySteps} decayed</span>
+          <span className="gm-slot-count" title={card.seats.title}>
+            <b>{card.filled}</b> / {card.seats.max}{card.seats.over && '*'} slots
+            {/* Slots actually lost, not decay ticks — a tick that landed under the
+                fill count took nothing. */}
+            {card.mission.baseMax - card.seats.max > 0 && (
+              <span style={{ color: 'oklch(60% 0.10 60)' }}> · {card.mission.baseMax - card.seats.max} decayed</span>
             )}
           </span>
         </div>

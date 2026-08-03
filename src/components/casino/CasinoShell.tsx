@@ -15,7 +15,7 @@ import { DeckPreview } from '../../casino/DeckPreview';
 import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
-import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock } from '../../lib/missionLogic';
+import { currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock, seatTally } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
@@ -57,11 +57,14 @@ function fmtDur(ms: number): string {
 // step is pending. Mirrors the map's mission pips.
 function SeatPips({ m, now }: { m: GMMission; now: number }) {
   const baseMax  = m.baseMax;
-  const maxSeats = currentMaxSlots(m, now);
+  // Display max, not the raw cap — a full table that kept decaying while waiting
+  // for its seats to lock in must not draw an occupied seat as closed.
+  const tally    = seatTally(m, now);
+  const maxSeats = tally.max;
   const seats    = Object.values(m.participants ?? {});
   const filled   = seats.length;
   const played   = seats.filter(p => p.played).length;
-  const decaying = msToNextDecay(m, now) != null;
+  const decaying = !tally.over && msToNextDecay(m, now) != null;
 
   const pips: ReactNode[] = [];
   for (let i = 0; i < baseMax; i++) {
@@ -77,8 +80,12 @@ function SeatPips({ m, now }: { m: GMMission; now: number }) {
 
 // One-line decay status: how long until the next seat closes, or how many have.
 function DecayNote({ m, now }: { m: GMMission; now: number }) {
-  const next   = msToNextDecay(m, now);
-  const closed = m.baseMax - currentMaxSlots(m, now);
+  const tally  = seatTally(m, now);
+  // Once the cap has slipped under the fill count there is no seat left to close,
+  // so the countdown would be a lie — report the table as full instead.
+  const next   = tally.over ? null : msToNextDecay(m, now);
+  const closed = m.baseMax - tally.max;
+  if (tally.over) return <span className="rl-decay closed">Full at {tally.max} — decay closed the rest</span>;
   if (next != null) return <span className="rl-decay">Next seat closes in {fmtDur(next)}</span>;
   if (closed > 0)   return <span className="rl-decay closed">{closed} seat{closed === 1 ? '' : 's'} closed to decay</span>;
   return null;
@@ -109,11 +116,13 @@ interface TableCardProps {
 function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, onSit }: TableCardProps) {
   const game    = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg     = CASINO_GAMES[game];
-  const maxSeats = currentMaxSlots(m, now);
+  // `full` gates the seat button and must use the real cap; everything shown to
+  // the player reads off the tally, which can't fall below the seats already taken.
+  const tally   = seatTally(m, now);
   const seats   = Object.values(m.participants ?? {});
   const filled  = seats.length;
   const played  = seats.filter(p => p.played).length;
-  const full    = filled >= maxSeats;
+  const full    = filled >= currentMaxSlots(m, now);
   const ante    = cfg.ante;
 
   const takeable = !locked && !full && canAfford;
@@ -126,8 +135,8 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
           {cfg.label}
           <span className="rl-pot">
             <span className="n">{m.pot ?? 0}</span><span className="u">g pot</span>
-            {/* What one seat can expect: the pot split across the seats still open. */}
-            <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, maxSeats))}g ea</span>
+            {/* What one seat can expect: the pot split across the seats still in. */}
+            <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, tally.max))}g ea</span>
           </span>
         </div>
         <div className="rl-tcard-room">Cohort {toRoman(m.series)}</div>
@@ -137,7 +146,7 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
         <DecayNote m={m} now={now} />
         {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
         <div className="rl-tcard-stats">
-          <div className="rl-mini"><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{filled}/{maxSeats}</span></div>
+          <div className="rl-mini" title={tally.title}><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{tally.label}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Played</span><span className="rl-mini-val">{played}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Ante</span><span className="rl-mini-val gold">{ante}g</span></div>
         </div>
