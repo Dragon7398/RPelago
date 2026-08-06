@@ -354,7 +354,8 @@ export const BOARD_SPECS: Record<BoardId, BoardSpec> = { … };
 // Module state, mirroring src/firebase/season.ts's setCurrentSeason pattern:
 // callers don't thread the board through every signature.
 export function setActiveBoard(id: BoardId): void;
-export function activeBoard(): BoardSpec;   // throws if unset
+// DEFAULTS to the s1 spec when unset — it must NOT throw. See the note below.
+export function activeBoard(): BoardSpec;
 
 // Geometry helpers move here from constants.ts and read activeBoard():
 export function coordFromRC(r: number, c: number): string;
@@ -384,6 +385,22 @@ Changes:
 - **`functions/src/index.ts`** — mirror `BOARD_SPECS` (it already keeps a private
   `ROWS`/`COLS`/`bossCoordFromSeed` copy for `onOrbAcquired`). Add this to the
   dual-copy list in `CLAUDE.md`.
+
+> **`activeBoard()` must NOT throw — unlike the season path helpers.** `sPath`
+> throws when no season is set because guessing a season would write to the wrong
+> data. A board is only a rendering concern, and the codebase evaluates geometry
+> at **module scope** in at least two places:
+>
+> - [tileGen.ts:153](../src/lib/tileGen.ts#L153) eagerly runs
+>   `buildTypeGrid(DEFAULT_SEED)` at import, and `tileGen` is imported by
+>   `Tile.tsx` — i.e. it is in the **main bundle**.
+> - [MapGridPanel.tsx:12-17](../src/components/admin/mapPage/MapGridPanel.tsx#L12-L17)
+>   builds `allCoords` in a module-scope loop over `COLS`/`ROWS`.
+>
+> A throwing accessor would therefore break app load for **every** user —
+> including live casino players — before any season resolves. Default to the
+> `s1` spec instead, and fix `MapGridPanel`'s module-scope loop to build lazily
+> during the migration.
 
 > **Invariant to preserve:** `initializeGrid(seed)` must be called before any
 > `getTypeKey` lookup. Now it also depends on the board, so `subscribeToGame`
