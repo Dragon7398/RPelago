@@ -84,6 +84,97 @@ describe('computeStatusReport — slot classification', () => {
     expect(f.reasons.some(x => /Last player/.test(x))).toBe(true);
   });
 
+  it('warns when the last player is at 100% but has not goaled', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: '100%' })]),
+      b: part('b', 'B', [slot({ status: 'Goaled' })]),
+    } }) });
+    // Previously invisible: no flag fired on 100%, so the world dropped off entirely.
+    expect(r).toHaveLength(1);
+    expect(r[0].players.map(p => p.handle)).toEqual(['@Zed']);
+    const f = r[0].players[0].findings[0];
+    expect(f.tier).toBe('warning');
+    expect(f.codes).toEqual(['lastPlayer']);
+    expect(f.reasons[0]).toMatch(/100% but not goaled/);
+  });
+
+  it('treats Done the same as Goaled for the last-player check', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: '100%' })]),
+      b: part('b', 'B', [slot({ status: 'Done' })]),
+    } }) });
+    expect(r[0].players[0].findings[0].codes).toEqual(['lastPlayer']);
+  });
+
+  it('warns the last player still finding checks when the others sit at 100%', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+      b: part('b', 'B', [slot({ status: '100%' })]),
+    } }) });
+    // b has every check and is likely blocked on an item only a can still send.
+    expect(r[0].players.map(p => p.handle)).toEqual(['@Zed']);
+    const f = r[0].players[0].findings[0];
+    expect(f.tier).toBe('warning');
+    expect(f.codes).toEqual(['lastChecker']);
+    expect(f.reasons[0]).toMatch(/waiting on an item/);
+  });
+
+  it('keeps lastPlayer and lastChecker mutually exclusive', () => {
+    // All others goaled → lastPlayer only, never both.
+    const goaled = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+      b: part('b', 'B', [slot({ status: 'Goaled' })]),
+    } }) });
+    expect(goaled[0].players[0].findings[0].codes).toEqual(['lastPlayer']);
+
+    // A goaled peer AND a 100% peer → still lastChecker, since one is ungoaled.
+    const mixed = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+      b: part('b', 'B', [slot({ status: '100%' })]),
+      c: part('c', 'C', [slot({ status: 'Goaled' })]),
+    } }) });
+    expect(mixed[0].players[0].findings[0].codes).toEqual(['lastChecker']);
+  });
+
+  it('does not call anyone last while another player is still finding checks', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+      b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+      c: part('c', 'C', [slot({ status: '100%' })]),
+    } }) });
+    // Two players are still seeking, so neither is the bottleneck.
+    expect(r).toHaveLength(0);
+  });
+
+  it('does not fire lastChecker for a 100% player alongside another at 100%', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: '100%' })]),
+      b: part('b', 'B', [slot({ status: '100%' })]),
+    } }) });
+    // Nobody is finding checks, and nobody is last to goal — no one to chase.
+    expect(r).toHaveLength(0);
+  });
+
+  it('does not flag a lone 100% player with no other participants', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: '100%' })]),
+    } }) });
+    // No "others" to be last among — the existing otherPlayerSlots guard holds.
+    expect(r).toHaveLength(0);
+  });
+
+  it('does not let a 100% slot trip the time-based In-Progress flags', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: '100%', lastActivity: ago(300) })]),
+      b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+    } }) });
+    // a's ancient activity must NOT produce a stalled/144h flag — they have every
+    // check, so there is nothing to nag them about; only b (the last one still
+    // finding checks, and so possibly holding a's goal item) is surfaced.
+    expect(r[0].players.map(p => p.handle)).toEqual(['@Alice']);
+    expect(r[0].players[0].findings[0].codes).toEqual(['lastChecker']);
+  });
+
   it('warns on 144h+ since last ACTIVITY even with a recent self-report (lastChecked)', () => {
     const r = run({ m1: mission({ linkedAt: ago(100), participants: {
       a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(150), lastChecked: ago(1) })]),
@@ -230,6 +321,30 @@ describe('buildOfficialReport + markdown', () => {
     // allIdle60 is world-general → a single deduped line, not one per player.
     expect(renderWarningsMarkdown(idle)).toBe(
       '## Status Report — Warnings\nWorld5:\nNo activity by players in last 60 hours.',
+    );
+
+    // A 100%-but-ungoaled last player rides the same lastPlayer code, so it needs
+    // no new markdown branch.
+    const ungoaled = buildOfficialReport(active({
+      m1: mission({ label: 'World6', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ status: '100%' })]),
+        b: part('b', 'B', [slot({ status: 'Goaled' })]),
+      } }),
+    }), NOW);
+    expect(renderWarningsMarkdown(ungoaled)).toBe(
+      '## Status Report — Warnings\nWorld6:\n@Zed is the last to finish this world.',
+    );
+    expect(ungoaled.problems).toHaveLength(0);
+
+    const lastChecker = buildOfficialReport(active({
+      m1: mission({ label: 'World7', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+        b: part('b', 'B', [slot({ status: '100%' })]),
+      } }),
+    }), NOW);
+    expect(renderWarningsMarkdown(lastChecker)).toBe(
+      '## Status Report — Warnings\nWorld7:\n' +
+      '@Zed is the last still finding checks — others here are at 100% and may be waiting on an item from them.',
     );
   });
 

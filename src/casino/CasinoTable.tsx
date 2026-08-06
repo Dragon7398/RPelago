@@ -971,7 +971,9 @@ export function CasinoTable() {
       <div className="cz-room-tag" title={tally?.title}>
         {mission.state === 'forming'
           ? `${allSeats.filter(p => p?.played).length}/${openMax}${tally?.over ? '*' : ''} seats played · 40% of every entry feeds the pot · non-folded players split it`
-          : 'This table has concluded.'}
+          : mission.state === 'inprogress'
+            ? 'Cards are locked in · your worlds are live — play them out in Archipelago · the pot pays out when the table settles'
+            : 'This table has settled · the pot has been paid out'}
       </div>
 
       {/* ── Seat rail ── */}
