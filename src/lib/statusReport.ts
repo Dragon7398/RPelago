@@ -10,6 +10,10 @@
 //   lastChecked  — WEAK. A manual self-report by the player (e.g. vouching they're
 //                  stuck); may be inaccurate. Only counts toward the "later of the
 //                  two" progress check on the problem threshold.
+//
+// "Done" here means Goaled/Done only — a `100%` slot has every check but no goal,
+// so it still holds its world open and can be flagged as the last player. See
+// OWING_STATUSES; do not conflate it with FREE_COMPLETED_STATUSES.
 
 import type {
   GMMission, Tile, Player, AdvSlot, SlotStatus,
@@ -37,7 +41,7 @@ export interface ReportSlotFinding {
   reasons:  string[];  // human-readable, for the live report UI
   codes:    string[];  // machine-readable, for the official report builder
                        // problems: 'unstarted' | 'stalled'
-                       // warnings: 'lastPlayer' | 'noActivity144' | 'allIdle60'
+                       // warnings: 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60'
 }
 
 export interface ReportPlayerFinding {
@@ -61,6 +65,23 @@ interface ScopedSlot {
 }
 
 const statusOf = (s: AdvSlot): SlotStatus => s.status ?? 'Unstarted';
+
+// `100%` sits between "playing" and "finished", and the two last-player warnings
+// need it on OPPOSITE sides — hence two predicates, not one:
+//
+//   seeking  — still finding checks (Unstarted | In-Progress). A 100% player is
+//              NOT seeking; they have every check.
+//   ungoaled — has not goaled (Unstarted | In-Progress | 100%). A 100% player IS
+//              ungoaled; the world cannot close on them.
+//
+// ⚠️ Neither is `FREE_COMPLETED_STATUSES`, and neither may be unified with it.
+// That set counts `100%` as complete because it releases the player's *claim*
+// (they may take another world) — a different question from either of these.
+const SEEKING_STATUSES:  readonly SlotStatus[] = ['Unstarted', 'In-Progress'];
+const UNGOALED_STATUSES: readonly SlotStatus[] = ['Unstarted', 'In-Progress', '100%'];
+
+const seeking  = (s: AdvSlot): boolean => SEEKING_STATUSES.includes(statusOf(s));
+const ungoaled = (s: AdvSlot): boolean => UNGOALED_STATUSES.includes(statusOf(s));
 
 // True when `ts` is present AND at least `hours` old. A MISSING timestamp is
 // "unknown", never "stale" — a slot we have no check/activity data for must not
@@ -95,6 +116,42 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
     problems.push({ code: 'unstarted', reason: 'Unstarted — needs to begin their game' });
   }
 
+  // Warnings (a) and (a2): the two ways of being "the last one". Both compare
+  // against OTHER players only, and they are mutually exclusive by construction —
+  // (a) requires no other player ungoaled, (a2) requires at least one.
+  // (Unstarted slots are excluded from both only because the `unstarted` problem
+  // outranks any warning anyway — see the problems-win return below.)
+  const others = all.filter(x => x.ownerId != null && x.ownerId !== ownerId);
+  const otherSeeking  = others.some(x => seeking(x.slot));
+  const otherUngoaled = others.some(x => ungoaled(x.slot));
+
+  if (others.length > 0 && (status === 'In-Progress' || status === '100%')) {
+    // (a) Last to GOAL — every other player has goaled. Covers `100%` as well as
+    // `In-Progress`: a player with every check but no goal still holds the world
+    // open, and no other flag fires on `100%`, so a lone 100% player used to drop
+    // the whole world off the candidate list.
+    if (!otherUngoaled) {
+      warnings.push({
+        code: 'lastPlayer',
+        reason: status === '100%'
+          ? 'Last player still to goal — at 100% but not goaled; others here are done'
+          : 'Last player still progressing — others here are done',
+      });
+    }
+
+    // (a2) Last still FINDING CHECKS — no other player is seeking, but at least
+    // one is ungoaled, which (given the above) means they are sitting at 100%.
+    // That is usually not idleness: a 100% player has exhausted their own world
+    // and is most likely blocked on an item only this player can still send. So
+    // the seeker is the bottleneck for everyone here, not merely for themselves.
+    if (status === 'In-Progress' && !otherSeeking && otherUngoaled) {
+      warnings.push({
+        code: 'lastChecker',
+        reason: 'Last player still finding checks — others here are at 100% and may be waiting on an item from them',
+      });
+    }
+  }
+
   if (status === 'In-Progress') {
     // "Later of activity / self-report": strong server activity OR a (weaker) manual
     // self-report both count as a sign of life. Only present timestamps count — a
@@ -105,17 +162,6 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
     // Problem (b): stalled — no server activity AND no self-report in 60h+.
     if (stale(lastSign, PROBLEM_STALE_HOURS, now)) {
       problems.push({ code: 'stalled', reason: `No activity or self-report in ${fmtDuration((now - lastSign!) / HOUR)} (≥${PROBLEM_STALE_HOURS}h)` });
-    }
-
-    // Warning (a): this is the last player still progressing — every OTHER player
-    // here is done (no other player holds an Unstarted or In-Progress slot).
-    const otherPlayerSlots = all.filter(x => x.ownerId != null && x.ownerId !== ownerId);
-    const anyOtherActive = otherPlayerSlots.some(x => {
-      const st = statusOf(x.slot);
-      return st === 'Unstarted' || st === 'In-Progress';
-    });
-    if (otherPlayerSlots.length > 0 && !anyOtherActive) {
-      warnings.push({ code: 'lastPlayer', reason: 'Last player still progressing — others here are done' });
     }
 
     // Warning (b): no SERVER ACTIVITY in 144h+, even if they self-reported recently
@@ -271,6 +317,7 @@ export function buildOfficialReport(active: ReportCandidate[], ts: number, runBy
       for (const f of p.findings) {
         if (f.tier !== 'warning') continue;
         if (f.codes.includes('lastPlayer'))    add('lastPlayer', p);
+        if (f.codes.includes('lastChecker'))   add('lastChecker', p);
         if (f.codes.includes('noActivity144')) add('noActivity144', p);
         if (f.codes.includes('allIdle60'))     allIdle = true;
       }
@@ -311,6 +358,7 @@ export function renderProblemsMarkdown(r: OfficialReport): string {
 export function warnItemText(it: OfficialWarnItem): string {
   switch (it.code) {
     case 'lastPlayer':    return `${it.handle} is the last to finish this world.`;
+    case 'lastChecker':   return `${it.handle} is the last still finding checks — others here are at 100% and may be waiting on an item from them.`;
     case 'noActivity144': return `${it.handle} — no activity in over ${WARN_NO_ACTIVITY_HOURS} hours.`;
     case 'allIdle60':     return `No activity by players in last ${WARN_ALL_STALE_HOURS} hours.`;
   }

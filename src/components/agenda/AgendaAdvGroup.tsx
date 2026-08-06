@@ -10,6 +10,12 @@ const TILE_TYPE_META: Record<TileTypeKey, { icon: string; label: string; cssKey:
   puzzle:      { icon: '🧩', label: 'PUZZLE', cssKey: 'puzzle' },
   elite:       { icon: '💀', label: 'ELITE',  cssKey: 'elite'  },
   boss:        { icon: '🐉', label: 'BOSS',   cssKey: 'boss'   },
+  // S2 tile types. Castle/dungeon/tower surface tiles are never joinable
+  // challenges, so an adventurer can't be on one and these should not appear in
+  // the agenda — they exist to keep this Record exhaustive over TileTypeKey.
+  castle:      { icon: '🏰', label: 'CASTLE',  cssKey: 'castle'  },
+  dungeon:     { icon: '🗝️', label: 'DUNGEON', cssKey: 'dungeon' },
+  tower:       { icon: '🏯', label: 'TOWER',   cssKey: 'tower'   },
 };
 
 // Maps SlotStatus strings to CSS class suffixes matching the existing ss-* palette

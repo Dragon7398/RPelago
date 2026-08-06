@@ -2,7 +2,12 @@ import type { DeckCard } from '../lib/casinoData';
 
 export type TileState = 'hidden' | 'available' | 'inprogress' | 'complete';
 export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done';
-export type TileTypeKey = 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss';
+// S1 types: town / town_center / boss. S2 replaces them with castle (the D6
+// start tile) plus dungeon and tower doorways — the S1 members stay in the union
+// so the archived season keeps rendering.
+export type TileTypeKey =
+  | 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss'
+  | 'castle' | 'dungeon' | 'tower';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
 export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
@@ -299,7 +304,7 @@ export interface GameState {
 // ── Official Status Report snapshots ─────────────────────────────────────────
 // Persisted when an admin runs an official report; see src/lib/statusReport.ts.
 
-export type StatusWarnCode = 'lastPlayer' | 'noActivity144' | 'allIdle60';
+export type StatusWarnCode = 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60';
 
 export interface OfficialProblemPlayer {
   playerId:  string;
@@ -317,7 +322,7 @@ export interface OfficialProblemWorld {
 
 export interface OfficialWarnItem {
   code:     StatusWarnCode;
-  playerId?: string;    // present for player-specific codes (lastPlayer / noActivity144)
+  playerId?: string;    // present for player-specific codes (all but allIdle60)
   handle?:   string;
 }
 
