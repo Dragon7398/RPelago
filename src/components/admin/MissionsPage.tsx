@@ -5,8 +5,8 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
-import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree } from '../../lib/slotHelpers';
 import { checkProgressionBalancing } from '../../lib/apYaml';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
@@ -434,9 +434,23 @@ function MissionCard({ mission }: { mission: GMMission }) {
     setSyncing(true);
     try {
       const status = await fetchRoomStatus(roomLink);
-      const apNames = new Set(status.players.map(([name]: [string, string]) => name));
-      const allSlots = Object.values(mission.participants ?? {}).flatMap(p => p.slots ?? []);
-      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNames.has(n)));
+      const apNames = status.players.map(([name]: [string, string]) => name);
+      // A `{NUMBER}` name never matches the room as typed — AP expanded the token at
+      // generation. Adopt the generated name when it's unambiguous; anything still
+      // holding a token falls through to the mismatch list for the host to map.
+      const parts = Object.entries(mission.participants ?? {})
+        .map(([pid, p]) => ({ pid, slots: (p.slots ?? []).map(s => ({ ...s })) }));
+      for (const { pid, slots } of parts) {
+        for (let i = 0; i < slots.length; i++) {
+          const real = resolveNumberedSlotName(slots[i].name, apNames);
+          if (!real) continue;
+          slots[i].name = real;
+          await adminUpdateParticipantSlotName(mission.id, pid, i, real);
+        }
+      }
+      const apNameSet = new Set(apNames);
+      const allSlots = parts.flatMap(p => p.slots);
+      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNameSet.has(n)));
       setMismatchedNames(mismatched);
       if (status.tracker) {
         await setMissionTracker(mission.id, status.tracker);
@@ -456,8 +470,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
               if (s) statusMap.set(key, s);
               timeMap.set(key, { lastChecked: parseCheeseTs(g.last_checked), lastActivity: parseCheeseTs(g.last_activity) });
             }
-            for (const [pid, p] of Object.entries(mission.participants ?? {})) {
-              const slots = p.slots ?? [];
+            for (const { pid, slots } of parts) {
               for (let i = 0; i < slots.length; i++) {
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateParticipantSlotStatus(mission.id, pid, i, newStatus);

@@ -816,6 +816,24 @@ header p {
 }
 .lb-archipelago-link a:hover { background: oklch(20% 0.10 220 / 0.5); box-shadow: 0 0 12px oklch(60% 0.16 220 / 0.3); color: oklch(80% 0.16 220); }
 
+/* Room-pending notice — stands in for the Archipelago link on a mission that has
+   deployed but whose room the host hasn't generated yet. Amber, not the link's
+   teal or an error red: the table is fine, it just isn't playable yet. Dashed to
+   read as "placeholder for something that's coming". */
+.lb-room-pending {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  margin: 0.4rem 0 0.8rem; padding: 0.5rem 0.75rem;
+  border: 1px dashed oklch(52% 0.12 75); border-radius: 3px;
+  background: oklch(16% 0.05 75 / 0.35);
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.78rem; line-height: 1.35; color: oklch(76% 0.06 75);
+}
+.lb-room-pending b {
+  font-family: 'Cinzel', serif; font-style: normal;
+  font-size: 0.68rem; letter-spacing: 0.06em; color: oklch(80% 0.14 75);
+}
+.lb-room-pending-icon { font-size: 0.9rem; line-height: 1.4; }
+
 /* Boss lock */
 .lb-boss-lock { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.8rem 1rem; border-radius: 3px; margin: 0.6rem 0; background: oklch(12% 0.05 25 / 0.5); border: 1px solid oklch(40% 0.12 25); }
 .lb-boss-lock-title { font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.14em; color: oklch(65% 0.16 25); text-align: center; }
@@ -3766,6 +3784,20 @@ body.theme-lapis     .lb-archipelago-link a:hover {
   color:        oklch(28% 0.18 220);
 }
 
+/* Room-pending notice — the dark amber is unreadable on the light themes. */
+body.theme-parchment .lb-room-pending,
+body.theme-sakura    .lb-room-pending,
+body.theme-mint      .lb-room-pending,
+body.theme-lapis     .lb-room-pending {
+  border-color: oklch(56% 0.13 68);
+  background:   oklch(from var(--bg-card) calc(l - 0.05) 0.045 75);
+  color:        oklch(38% 0.07 60);
+}
+body.theme-parchment .lb-room-pending b,
+body.theme-sakura    .lb-room-pending b,
+body.theme-mint      .lb-room-pending b,
+body.theme-lapis     .lb-room-pending b { color: oklch(38% 0.14 62); }
+
 /* 13. Orb reward banner on tiles — hardcoded near-black purple bg ── */
 @keyframes orbRewardPulseLight {
   0%,100% { box-shadow: 0 0 6px oklch(48% 0.18 290 / 0.2); }
@@ -4247,6 +4279,19 @@ body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }
 }
 .ag-archi-link:hover { background: oklch(from var(--bg-card) calc(l - 0.10) c h / 0.8); color: oklch(84% 0.16 220); }
 
+/* Same footprint as .ag-archi-link, but inert — it marks the absence of the link
+   rather than offering one, so: dashed border, no hover, default cursor. */
+.ag-room-pending {
+  display: inline-flex; align-items: center; gap: 0.32rem;
+  margin-top: 0.45rem;
+  font-family: 'Cinzel', serif; font-size: 0.56rem;
+  letter-spacing: 0.08em; color: oklch(76% 0.12 75);
+  border: 1px dashed oklch(52% 0.12 75 / 0.7);
+  background: oklch(from var(--bg-card) calc(l - 0.04) c h / 0.5);
+  border-radius: 3px; padding: 0.22rem 0.55rem;
+  justify-content: center; cursor: default;
+}
+
 /* Cheesetracker link */
 .ag-tracker-link {
   display: inline-flex; align-items: center; gap: 0.32rem;
@@ -4376,6 +4421,14 @@ body.theme-parchment .ag-archi-link:hover,
 body.theme-sakura    .ag-archi-link:hover,
 body.theme-mint      .ag-archi-link:hover,
 body.theme-lapis     .ag-archi-link:hover { color: oklch(24% 0.20 220); }
+
+body.theme-parchment .ag-room-pending,
+body.theme-sakura    .ag-room-pending,
+body.theme-mint      .ag-room-pending,
+body.theme-lapis     .ag-room-pending {
+  color: oklch(38% 0.13 62);
+  border-color: oklch(52% 0.12 68 / 0.8);
+}
 
 /* Room badge teal text on light bg */
 body.theme-parchment .ag-tile-room-badge,

@@ -27,7 +27,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
 import { useSeason } from '../../contexts/SeasonContext';
 import OddsTrio from './OddsTrio';
 import { CardFace } from '../../casino/CardFace';
@@ -367,13 +367,30 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
 // admin-set after deploy, so each appears only once available. Mirrors the map
 // mission card (link) and agenda drawer (🧀 tracker).
 function ChallengeLinks({ m }: { m: GMMission }) {
-  if (!m.link && !m.cheese) return null;
+  // The play button is ABSENT, not disabled, while the room is pending — an empty
+  // gap where the only actionable control lives reads as "something is broken /
+  // everyone else got a link but me". Say so instead.
+  const pending = awaitingRoom(m);
+  if (!m.link && !m.cheese && !pending) return null;
   return (
     <div className="rl-chlinks">
       {m.link && (
         <a className="rl-btn primary rl-chlink-play" href={m.link} target="_blank" rel="noopener noreferrer">
           🗺 Open Archipelago Game →
         </a>
+      )}
+      {pending && (
+        <div className="rl-pending">
+          <span className="rl-pending-icon">⏳</span>
+          <div className="rl-pending-txt">
+            <b>The room isn't up yet.</b>
+            <span>
+              Your seat is locked in and your host is still generating this table — it can take a
+              while. Nothing for you to do; the Archipelago link appears right here the moment it's
+              ready.
+            </span>
+          </div>
+        </div>
       )}
       {m.cheese && (
         <a className="rl-chlink-cheese" title="Open Cheesetracker — challenge progress"
@@ -481,30 +498,42 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
   const sinceDeploy = m.deployedAt ? fmtDayClock((now - m.deployedAt) / 1000) : '—';
   const href      = tableHref(m, seasonId);
   const seat      = m.participants?.[uid];
+  const pending   = awaitingRoom(m);
 
   return (
     <div className="mp-ct">
       <div className="mp-ct-rim" />
       <div className="mp-ct-head">
         <div>
-          <div className="mp-ct-kick">Your table · live</div>
+          <div className="mp-ct-kick">Your table · {pending ? 'awaiting room' : 'live'}</div>
           <div className="mp-ct-name">{missionDisplayLabel(m)}</div>
-          <div className="mp-ct-room">{CASINO_GAMES[tableGame(m)].label} · deployed {sinceDeploy} ago</div>
+          {/* "deployed 14h ago" is the most prominent time on the panel and reads as
+              "playable for 14h and you haven't started" — exactly wrong while the room
+              is pending. Same clock, honest framing. */}
+          <div className="mp-ct-room">
+            {CASINO_GAMES[tableGame(m)].label} · {pending ? `seats locked ${sinceDeploy} ago` : `deployed ${sinceDeploy} ago`}
+          </div>
         </div>
-        <span className="mp-phase-chip inprogress">In progress</span>
+        <span className={`mp-phase-chip ${pending ? 'pending' : 'inprogress'}`}>
+          {pending ? 'Awaiting room' : 'In progress'}
+        </span>
       </div>
 
       <div className="mp-ct-body">
         {seat && <DenyNotice seat={seat} href={href} />}
         <div className="mp-row" style={{ gap: '1.6rem', alignItems: 'flex-start' }}>
-          <Completion goaled={goaled} total={all.length} />
+          {/* No room means no play, so 0/N goaled is a foregone zero — a full-width
+              empty meter that only reads as failure. Hidden until there's a room. */}
+          {!pending && <Completion goaled={goaled} total={all.length} />}
           <Telemetry m={m} elapsed={elapsed} />
         </div>
 
         <ChallengeLinks m={m} />
 
         <div className="mp-mine">
-          <div className="mp-cell-lbl">Your games <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span></div>
+          <div className="mp-cell-lbl">
+            Your games {!pending && <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span>}
+          </div>
           {mine.length
             ? <TileGrid tiles={mine} wide={wide} />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
@@ -545,7 +574,8 @@ export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
   const goaled = tiles.filter(g => isGoaled(g.status)).length;
   return (
     <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
-      <Completion goaled={goaled} total={tiles.length} />
+      {/* Mirrors BoardView: no room yet ⇒ the completion meter is a guaranteed zero. */}
+      {!awaitingRoom(m) && <Completion goaled={goaled} total={tiles.length} />}
       <ChallengeLinks m={m} />
       {tiles.length
         ? <div style={{ marginTop: '1rem' }}><TileGrid tiles={tiles} wide /></div>

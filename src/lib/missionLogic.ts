@@ -52,6 +52,24 @@ export function filledCount(m: GMMission): number {
   return Object.keys(m.participants ?? {}).length;
 }
 
+/**
+ * A mission that has dealt in but has no Archipelago room yet.
+ *
+ * Deploying a cohort and generating its room are two separate host actions and can
+ * sit a day apart — the `linkedAt` clock exists precisely because "a table can sit
+ * deployed for a while before it has a room". That gap is a real state players
+ * occupy, not a blink, so it needs its own wording: anything that says *live*,
+ * counts elapsed time, or shows progress must hold off until the room exists, or
+ * the table reads as running while nobody can actually play it.
+ *
+ * Deliberately keyed on `m.state`, NOT `GMMissionCard.status` — a full-but-forming
+ * cohort already reports `status: 'inprogress'` (see `computeMissionCard`) and has
+ * no business claiming its room is late.
+ */
+export function awaitingRoom(m: GMMission): boolean {
+  return m.state === 'inprogress' && !m.link;
+}
+
 // ── Seat tally (what the UI shows) ────────────────────────────────────────────
 /**
  * Seats as the UI should DISPLAY them, which is not always `currentMaxSlots`.

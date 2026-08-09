@@ -613,6 +613,18 @@ export async function adminUpdatePublicSlotStatus(coord: string, slotIndex: numb
   await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/status`), status);
 }
 
+// Adopts the slot name Archipelago actually generated for a `{NUMBER}` slot (see
+// resolveNumberedSlotName) — the stored token would never match the room again.
+export async function adminUpdateAdvSlotName(coord: string, advId: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/name`), name);
+}
+
+export async function adminUpdatePublicSlotName(coord: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/name`), name);
+}
+
 // Cheesetracker activity timestamps (ms epoch, or null to clear). See AdvSlot —
 // lastActivity = STRONG server-verified activity, lastChecked = WEAK manual self-report.
 export async function adminUpdateAdvSlotActivity(
@@ -990,6 +1002,13 @@ export async function adminSetParticipantSlots(missionId: string, playerId: stri
 export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
   await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
+}
+
+// Adopts the slot name Archipelago actually generated for a `{NUMBER}` slot — the
+// mission twin of adminUpdateAdvSlotName.
+export async function adminUpdateParticipantSlotName(missionId: string, playerId: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/name`), name);
 }
 
 // Stamps a slot's Cheesetracker activity timestamps (ms epoch, or null to clear —

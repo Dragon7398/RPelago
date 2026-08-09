@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { slotsAllFree, countUnfinishedSets } from '../../src/lib/slotHelpers';
-import { hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
+import { awaitingRoom, hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
 import { missionClaimCapacity } from '../../src/lib/gameLogic';
 import type { AdvSlot, GMMission, GMParticipant, Player } from '../../src/types';
 
@@ -78,6 +78,43 @@ describe('seatTally — the displayed seat count', () => {
 
   it('never stars a table that has not decayed past its fill', () => {
     expect(seatTally(table(6, 6, null), 0).label).toBe('6/6');
+  });
+});
+
+describe('awaitingRoom — deployed but no room generated yet', () => {
+  const m = (over: Partial<GMMission>): GMMission => ({
+    id: 'm1', type: 'patrol', series: 1, label: 'Patrol', state: 'forming',
+    baseMax: 4, xp: 10, gp: 10, release: 'off', collect: 'off', hint: 0,
+    firstJoinAt: null, createdAt: 0, participants: {}, ...over,
+  });
+
+  it('is true once deployed with no link — the gap between deploy and generation', () => {
+    expect(awaitingRoom(m({ state: 'inprogress' }))).toBe(true);
+    expect(awaitingRoom(m({ state: 'inprogress', link: '' }))).toBe(true);
+  });
+
+  it('is false the moment a room link exists', () => {
+    expect(awaitingRoom(m({ state: 'inprogress', link: 'https://archipelago.gg/room/x' }))).toBe(false);
+  });
+
+  it('is false for a linkless FORMING cohort — it has no room because it has not dealt in', () => {
+    expect(awaitingRoom(m({ state: 'forming' }))).toBe(false);
+    expect(awaitingRoom(m({ state: 'complete' }))).toBe(false);
+  });
+
+  // The trap: computeMissionCard reports status 'inprogress' for a full-but-forming
+  // cohort, so keying the notice off card.status would tell a table that hasn't
+  // deployed that its room is late. awaitingRoom reads m.state instead.
+  it('stays false for a full forming cohort that already reports status "inprogress"', () => {
+    const full = m({
+      baseMax: 2, firstJoinAt: 0,
+      participants: {
+        a: { playerId: 'a', playerName: 'A', joinedAt: 0 },
+        b: { playerId: 'b', playerName: 'B', joinedAt: 0 },
+      },
+    });
+    expect(computeMissionCard(full, 'a', 0, 1, false, 1_000).status).toBe('inprogress');
+    expect(awaitingRoom(full)).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import type { GameState, AdvSlot, TileTypeKey, GMMissionType, AdvClass } from '.
 import { TILE_TRAITS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { normalizeSlots } from '../../lib/slotHelpers';
+import { awaitingRoom } from '../../lib/missionLogic';
 
 export interface AgendaSlot {
   name: string;
@@ -37,6 +38,8 @@ export interface AgendaMissionData {
   reward: string;
   link: string;
   cheese: string;
+  /** Deployed, but the host hasn't generated the room yet — see `awaitingRoom`. */
+  awaitingRoom: boolean;
   slots: AgendaSlot[];
   xp: number;
   gp: number;
@@ -135,6 +138,7 @@ export function deriveAgendaData(gameState: GameState, userId: string): AgendaDa
         reward,
         link: m.link ?? '',
         cheese: m.cheese ?? '',
+        awaitingRoom: awaitingRoom(m),
         slots: slotsToAgenda(participant?.slots),
         xp: m.xp,
         gp: m.gp,

@@ -2434,6 +2434,22 @@ function extractApSlotName(name) {
     const m = name.match(/\(([^)]+)\)$/);
     return m ? m[1].trim() : name;
 }
+// A slot name ending in `{NUMBER}` is a collision guard the player wrote so the room
+// would still generate: AP expands the token to nothing for the first such slot and
+// to a digit for each one after it. Resolve it to the name the room really has, but
+// ONLY when exactly one candidate matches — 2+ are genuinely ambiguous and are left
+// for the admin to map by hand. Mirrors resolveNumberedSlotName in
+// src/lib/archipelagoApi.ts.
+function resolveNumberedSlotName(name, apNames) {
+    if (!/\{NUMBER\}$/i.test(name))
+        return null;
+    const base = name.replace(/\{NUMBER\}$/i, '');
+    if (!base)
+        return null;
+    const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d*$`);
+    const matches = Array.from(new Set(apNames)).filter(n => re.test(n));
+    return matches.length === 1 ? matches[0] : null;
+}
 // ── Scheduled tick: auto-sync slot statuses from Cheesetracker ───────────────
 exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async () => {
     const db = (0, database_2.getDatabase)();
@@ -2490,6 +2506,17 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         if (t.lastActivity !== (slot.lastActivity ?? null))
             updates[`${basePath}/lastActivity`] = t.lastActivity;
     }
+    // The names to sync a slot list against: a `{NUMBER}` name resolves to the one the
+    // room actually generated (and is adopted permanently, so the token stops needing
+    // resolution); everything else, including an ambiguous token, stays as written.
+    function resolveSlotNames(slots, apNames, basePath) {
+        return slots.map((s, i) => {
+            const real = resolveNumberedSlotName(s.name, apNames);
+            if (real)
+                updates[`${basePath(i)}/name`] = real;
+            return real ?? s.name;
+        });
+    }
     // Fan out over live + draft seasons (scheduled functions have no season param).
     const seasons = await (0, seasonPaths_1.tickableSeasons)(db, true);
     for (const { seasonId } of seasons) {
@@ -2521,6 +2548,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                     const games = await getCheeseGames(cheeseId);
                     if (!games)
                         continue;
+                    const apNames = games.map(g => extractApSlotName(g.name));
                     const statusMap = new Map(games.flatMap(g => {
                         const s = deriveStatus(g);
                         return s ? [[extractApSlotName(g.name), s]] : [];
@@ -2528,16 +2556,18 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                     const timeMap = buildTimeMap(games);
                     for (const adv of roomAdvs) {
                         const slots = adv.slots ?? [];
+                        const advBase = (i) => (0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}`);
+                        const names = resolveSlotNames(slots, apNames, advBase);
                         for (let i = 0; i < slots.length; i++) {
-                            const newStatus = statusMap.get(slots[i].name);
+                            const newStatus = statusMap.get(names[i]);
                             if (newStatus && slots[i].status !== newStatus) {
-                                updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`)] = newStatus;
+                                updates[`${advBase(i)}/status`] = newStatus;
                             }
-                            stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
+                            stampSlotTimes(advBase(i), slots[i], timeMap.get(names[i]));
                         }
                         if (slots.length > 0 &&
-                            slots.every(s => {
-                                const resolved = statusMap.get(s.name) ?? s.status;
+                            slots.every((s, i) => {
+                                const resolved = statusMap.get(names[i]) ?? s.status;
                                 return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                             }) &&
                             rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
@@ -2549,11 +2579,13 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         const ps = allPubSlots[i];
                         if (isBifurcated && ps.room && ps.room !== roomNum)
                             continue;
-                        const newStatus = statusMap.get(ps.name);
+                        const psBase = (0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}`);
+                        const psName = resolveSlotNames([ps], apNames, () => psBase)[0];
+                        const newStatus = statusMap.get(psName);
                         if (newStatus && ps.status !== newStatus) {
-                            updates[(0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}/status`)] = newStatus;
+                            updates[`${psBase}/status`] = newStatus;
                         }
-                        stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/publicSlots/${i}`), ps, timeMap.get(ps.name));
+                        stampSlotTimes(psBase, ps, timeMap.get(psName));
                     }
                 }
             }
@@ -2571,6 +2603,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                 const games = await getCheeseGames(mission.cheese);
                 if (!games)
                     continue;
+                const apNames = games.map(g => extractApSlotName(g.name));
                 const statusMap = new Map(games.flatMap(g => {
                     const s = deriveStatus(g);
                     return s ? [[extractApSlotName(g.name), s]] : [];
@@ -2578,20 +2611,22 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                 const timeMap = buildTimeMap(games);
                 for (const [pid, p] of Object.entries(mission.participants ?? {})) {
                     const slots = p.slots ?? [];
+                    const slotBase = (i) => (0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`);
+                    const names = resolveSlotNames(slots, apNames, slotBase);
                     for (let i = 0; i < slots.length; i++) {
-                        const newStatus = statusMap.get(slots[i].name);
+                        const newStatus = statusMap.get(names[i]);
                         if (newStatus && slots[i].status !== newStatus) {
-                            updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}/status`)] = newStatus;
+                            updates[`${slotBase(i)}/status`] = newStatus;
                         }
-                        stampSlotTimes((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
+                        stampSlotTimes(slotBase(i), slots[i], timeMap.get(names[i]));
                     }
                     // Pooled claims: once all a participant's slots are terminal and they
                     // still hold this mission's claim, release it so the claim returns to
                     // the pool — the mission analogue of the tile adventurer-free block
                     // above. The participant record stays; only the claim is freed.
                     if (slots.length > 0 &&
-                        slots.every(s => {
-                            const resolved = statusMap.get(s.name) ?? s.status;
+                        slots.every((s, i) => {
+                            const resolved = statusMap.get(names[i]) ?? s.status;
                             return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                         }) &&
                         rawPlayers[pid]?.activeMissions?.[missionId]) {

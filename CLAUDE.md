@@ -285,6 +285,8 @@ Two timestamps are stamped on **every** synced slot (ms epoch, or null): **`last
 - **`lastActivity`** (Cheese `last_activity`) — **STRONG**: server-verified activity from the Archipelago server; the real "is actually playing / making progress" signal.
 - **`lastChecked`** (Cheese `last_checked`) — **WEAK**: a manual self-report by the player (e.g. vouching they're stuck); may be inaccurate.
 
+**`{NUMBER}` slot names.** A player may end a slot name with `{NUMBER}` so the room still generates through a name collision — Archipelago expands the token to nothing for the first such slot and to a digit for each one after (`jam_minit`, then `jam_minit2`). The stored name keeps the token, so it matches nothing on the tracker. Every sync path resolves it through **`resolveNumberedSlotName`** (`archipelagoApi.ts`, mirrored server-side in `tickSlotStatuses`) and **adopts the generated name permanently** — the client paths write it via `adminUpdate{Adv,Public,Participant}SlotName`, the tick folds it into its `updates` batch. Resolution is deliberately **only for the unambiguous case**: exactly one room name matching the base (bare or AP-numbered). Two or more real candidates return null, keep the token, and surface in the admin mismatch list — with two genuine `jam_minit` slots nothing in the name says whose is whose, so that mapping stays a manual call.
+
 **`deriveSlotStatus` gates `In-Progress` on `last_activity` being present — NOT on `checks_done`** (`collect` mechanics inflate a slot's check count without the player ever launching the game) and **not on `last_checked`** (the weak signal). Terminal states (Done/Goaled/100%) still win. **Any change to derivation or the strong/weak roles must be made in both `archipelagoApi.ts` and the server `deriveStatus`.** `parseCheeseTs` (`archipelagoApi.ts`) normalizes ISO → ms.
 
 ### Status reports
@@ -376,7 +378,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity` |
 | `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission` |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
-| `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `fetchRoomStatus` |
+| `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `resolveNumberedSlotName`, `fetchRoomStatus` |
 | `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
 | `src/firebase/season.ts` | Season path helpers (`sPath`/`sRef`/`secretPath`), `setCurrentSeason`, season resolution |
