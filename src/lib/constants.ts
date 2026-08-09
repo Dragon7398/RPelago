@@ -1,8 +1,7 @@
 import type { AdvClass, OrbDef, ShopItem, Shop } from '../types';
 
-export const COLS = 7;
-export const ROWS = 5;
-export const COL_CHARS = 'ABCDEFG';
+// Board geometry (ROWS / COLS / COL_CHARS / CENTER_COORD and the coord helpers)
+// moved to src/lib/board.ts — it is per-season now, not a set of constants.
 
 export const TILE_TYPES: Record<string, { label: string; icon: string; cls: string }> = {
   town:        { label: 'Town',   icon: '🏰', cls: 'tile-town'   },
@@ -134,8 +133,6 @@ export const ITEM_TRAIT_REFS: Readonly<Record<string, readonly string[]>> = {
 // These will need to be changed for future seasons as the map grows and/or the XP distribution changes.
 export const LEVEL_THRESHOLDS = [0, 100, 300, 500, 800, 1150, 1500];
 export const MAX_LEVEL = LEVEL_THRESHOLDS.length;
-
-export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
 
 // ── Boss orb-reactive traits ───────────────────────────────────────────────────
 // Elemental orb → trait IDs applied to the boss while that orb is ungathered
@@ -417,30 +414,3 @@ export function toRoman(n: number): string {
   return result;
 }
 
-export function coordFromRC(r: number, c: number): string {
-  return `${COL_CHARS[c]}${r + 1}`;
-}
-
-export function rcFromCoord(coord: string): [number, number] {
-  const c = COL_CHARS.indexOf(coord[0]);
-  const r = parseInt(coord.slice(1)) - 1;
-  return [r, c];
-}
-
-export function getAdjRC(r: number, c: number): [number, number][] {
-  const out: [number, number][] = [];
-  if (r > 0)       out.push([r - 1, c]);
-  if (r < ROWS - 1) out.push([r + 1, c]);
-  if (c > 0)       out.push([r, c - 1]);
-  if (c < COLS - 1) out.push([r, c + 1]);
-  return out;
-}
-
-export function getAdjCoords(coord: string): string[] {
-  const [r, c] = rcFromCoord(coord);
-  return getAdjRC(r, c).map(([ar, ac]) => coordFromRC(ar, ac));
-}
-
-export function isEdgeTile(r: number, c: number): boolean {
-  return r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1;
-}

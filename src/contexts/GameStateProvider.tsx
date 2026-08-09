@@ -36,9 +36,9 @@ import {
 import { useToast } from './ToastContext';
 import { useSeason } from './SeasonContext';
 import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
-import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
+import { FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
-import { rcFromCoord } from '../lib/constants';
+import { getAdjCoords, rcFromCoord } from '../lib/board';
 import { GameStateContext } from './GameStateContext';
 import type { GameState } from '../types';
 

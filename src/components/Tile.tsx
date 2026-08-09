@@ -3,7 +3,7 @@ import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
 import { TILE_TYPES } from '../lib/constants';
 import { getTypeKey } from '../lib/tileGen';
-import { rcFromCoord } from '../lib/constants';
+import { rcFromCoord, activeBoard } from '../lib/board';
 import type { TileState } from '../types';
 
 interface Props {
@@ -22,7 +22,9 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const typeKey = getTypeKey(r, c);
   const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
   const state: TileState = tile?.state ?? 'hidden';
-  const isCenter = coord === 'D3';
+  // The board's start tile (S1's Crossroads at D3, S2's Castle at D6) — was
+  // hardcoded to 'D3' before geometry became per-season.
+  const isCenter = coord === activeBoard().startCoord;
 
   const filled       = tile ? Object.keys(tile.adventurers ?? {}).length : 0;
   const required     = tile?.required ?? 0;

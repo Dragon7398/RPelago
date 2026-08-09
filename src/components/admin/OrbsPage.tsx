@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
-import { ALL_ORBS, rcFromCoord } from '../../lib/constants';
+import { ALL_ORBS } from '../../lib/constants';
+import { rcFromCoord } from '../../lib/board';
 import { getTypeKey, orbIdForElite, orbIdForEdgeTile } from '../../lib/tileGen';
 import type { OrbConfig } from '../../types';
 

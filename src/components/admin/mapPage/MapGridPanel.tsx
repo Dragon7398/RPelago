@@ -1,4 +1,5 @@
-import { TILE_TYPES, COLS, ROWS, COL_CHARS, coordFromRC, TILE_TRAITS } from '../../../lib/constants';
+import { TILE_TYPES, TILE_TRAITS } from '../../../lib/constants';
+import { activeBoard, allCoords, coordFromRC } from '../../../lib/board';
 import { getTypeKey, typeKeyForCoord } from '../../../lib/tileGen';
 import type { GameState } from '../../../types';
 
@@ -6,14 +7,6 @@ interface Props {
   gameState: GameState;
   selectedCoord: string | null;
   onSelectCoord: (coord: string) => void;
-}
-
-// Column-major order: A1–A5, B1–B5, …
-const allCoords: string[] = [];
-for (let c = 0; c < COLS; c++) {
-  for (let r = 0; r < ROWS; r++) {
-    allCoords.push(coordFromRC(r, c));
-  }
 }
 
 function tileComplete(coord: string, gs: GameState): boolean {
@@ -40,9 +33,14 @@ function tileComplete(coord: string, gs: GameState): boolean {
 }
 
 export default function MapGridPanel({ gameState, selectedCoord, onSelectCoord }: Props) {
+  // Board geometry is resolved at RENDER time. This used to be a module-scope
+  // loop, which froze S1's 5×7 shape into the bundle at import.
+  const { rows: ROWS, cols: COLS, colChars: COL_CHARS } = activeBoard();
+  const coords = allCoords();   // column-major: A1–A5, B1–B5, …
+
   const traitCoverage = TILE_TRAITS.map(def => {
     let battle = 0, puzzle = 0, elite = 0;
-    for (const coord of allCoords) {
+    for (const coord of coords) {
       if (!gameState.tiles[coord]?.traits?.[def.id]) continue;
       const typeKey = typeKeyForCoord(coord);
       if (typeKey === 'battle') battle++;
@@ -90,7 +88,7 @@ export default function MapGridPanel({ gameState, selectedCoord, onSelectCoord }
 
       <div className="map-checklist">
         <div className="map-checklist-title">TILE CHECKLIST</div>
-        {allCoords.map(coord => {
+        {coords.map(coord => {
           const typeKey = typeKeyForCoord(coord);
           const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
           const t       = gameState.tiles[coord];

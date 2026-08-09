@@ -3,7 +3,8 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useIsAdmin } from '../../contexts/SeasonContext';
 import { useToast } from '../../contexts/ToastContext';
-import { ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, ITEM_TRAIT_REFS, CENTER_COORD } from '../../lib/constants';
+import { ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, ITEM_TRAIT_REFS } from '../../lib/constants';
+import { activeBoard } from '../../lib/board';
 import { renderTraitDesc } from './lbHelpers';
 import GuildmasterMissions from './GuildmasterMissions';
 import type { Tile } from '../../types';
@@ -64,9 +65,9 @@ export default function TownLightbox({ coord, tile, info, open, onClose, onLogin
         <div className="lb-coord">Grid Position: {coord}</div>
         <div className="lb-icon">{info.icon}</div>
         <div className="lb-title town">{tile.name || info.label}</div>
-        {coord === CENTER_COORD && <div className="lb-subtitle">The Capital · Guild Hall</div>}
+        {coord === activeBoard().startCoord && <div className="lb-subtitle">The Capital · Guild Hall</div>}
         <div className="lb-divider" />
-        {coord === CENTER_COORD && (
+        {coord === activeBoard().startCoord && (
           <>
             <GuildmasterMissions />
             <div className="lb-divider wide" />

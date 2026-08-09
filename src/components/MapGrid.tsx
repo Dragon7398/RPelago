@@ -1,11 +1,14 @@
 import Tile from './Tile';
-import { COLS, ROWS, COL_CHARS, coordFromRC } from '../lib/constants';
+import { activeBoard, coordFromRC } from '../lib/board';
 
 interface Props {
   onTileClick: (coord: string) => void;
 }
 
 export default function MapGrid({ onTileClick }: Props) {
+  // Read at render time, never at module scope — the board changes when the
+  // season resolves, and this component is in the main bundle.
+  const { rows: ROWS, cols: COLS, colChars: COL_CHARS } = activeBoard();
   return (
     <div className="map-frame">
       <div className="col-labels">

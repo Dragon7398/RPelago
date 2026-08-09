@@ -3,7 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
 import { calcLevel, pendingFeatSlot } from '../lib/gameLogic';
-import { ADV_ICONS, CENTER_COORD } from '../lib/constants';
+import { ADV_ICONS } from '../lib/constants';
+import { activeBoard } from '../lib/board';
 import { missionDisplayLabel } from '../lib/missionLogic';
 
 interface Props {
@@ -70,7 +71,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         {missionLabel ? (
           <button
             className="hud-mission-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            onClick={e => { e.stopPropagation(); onTileClick(activeBoard().startCoord); }}
             title={`Currently undertaking: ${missionLabel} — click to view`}
           >
             ⚜ {missionLabel}
@@ -78,7 +79,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         ) : (
           <button
             className="hud-idle-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            onClick={e => { e.stopPropagation(); onTileClick(activeBoard().startCoord); }}
             title="No active mission — click to view Guildmaster Missions"
           >
             ⚜ Idle

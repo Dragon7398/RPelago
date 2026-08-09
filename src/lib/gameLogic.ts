@@ -1,5 +1,6 @@
 import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, FREE_COMPLETED_STATUSES } from './constants';
+import { getAdjCoords } from './board';
 import { slotsFromEntry } from './slotHelpers';
 import { randomAdvName, randomAdvClass } from './tileGen';
 

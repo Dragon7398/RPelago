@@ -67,65 +67,66 @@ export function activeBoard(): BoardSpec {
 }
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
-// All read the active board at CALL time. Never cache their results at module
-// scope — the board changes when the season resolves.
+// All default to the ACTIVE board, read at CALL time. Never cache their results
+// at module scope — the board changes when the season resolves.
+//
+// Every helper also accepts an explicit `spec` override. Generators need it:
+// the S1 map generator must still emit a 5×7 grid while an S2 season is active
+// (an admin previewing the S2 draft, say), so it pins itself to BOARD_SPECS.s1
+// rather than inheriting whatever happens to be selected.
 
 /** (0,0) → "A1". Row index is 0-based; the coord's row number is 1-based. */
-export function coordFromRC(r: number, c: number): string {
-  return `${activeBoard().colChars[c]}${r + 1}`;
+export function coordFromRC(r: number, c: number, spec: BoardSpec = activeBoard()): string {
+  return `${spec.colChars[c]}${r + 1}`;
 }
 
-/** "D3" → [2, 3]. Returns [-1, -1]-ish values for coords outside this board. */
-export function rcFromCoord(coord: string): [number, number] {
-  const c = activeBoard().colChars.indexOf(coord[0]);
+/** "D3" → [2, 3]. Off-board coords come back out of range — check `inBounds`. */
+export function rcFromCoord(coord: string, spec: BoardSpec = activeBoard()): [number, number] {
+  const c = spec.colChars.indexOf(coord[0]);
   const r = parseInt(coord.slice(1), 10) - 1;
   return [r, c];
 }
 
-export function inBounds(r: number, c: number): boolean {
-  const b = activeBoard();
-  return r >= 0 && r < b.rows && c >= 0 && c < b.cols;
+export function inBounds(r: number, c: number, spec: BoardSpec = activeBoard()): boolean {
+  return r >= 0 && r < spec.rows && c >= 0 && c < spec.cols;
 }
 
 /** Orthogonal neighbours, clipped to the board. */
-export function getAdjRC(r: number, c: number): [number, number][] {
-  const b = activeBoard();
+export function getAdjRC(r: number, c: number, spec: BoardSpec = activeBoard()): [number, number][] {
   const out: [number, number][] = [];
-  if (r > 0)          out.push([r - 1, c]);
-  if (r < b.rows - 1) out.push([r + 1, c]);
-  if (c > 0)          out.push([r, c - 1]);
-  if (c < b.cols - 1) out.push([r, c + 1]);
+  if (r > 0)             out.push([r - 1, c]);
+  if (r < spec.rows - 1) out.push([r + 1, c]);
+  if (c > 0)             out.push([r, c - 1]);
+  if (c < spec.cols - 1) out.push([r, c + 1]);
   return out;
 }
 
-export function getAdjCoords(coord: string): string[] {
-  const [r, c] = rcFromCoord(coord);
-  return getAdjRC(r, c).map(([ar, ac]) => coordFromRC(ar, ac));
+export function getAdjCoords(coord: string, spec: BoardSpec = activeBoard()): string[] {
+  const [r, c] = rcFromCoord(coord, spec);
+  return getAdjRC(r, c, spec).map(([ar, ac]) => coordFromRC(ar, ac, spec));
 }
 
-export function isEdgeTile(r: number, c: number): boolean {
-  const b = activeBoard();
-  return r === 0 || r === b.rows - 1 || c === 0 || c === b.cols - 1;
+export function isEdgeTile(r: number, c: number, spec: BoardSpec = activeBoard()): boolean {
+  return r === 0 || r === spec.rows - 1 || c === 0 || c === spec.cols - 1;
 }
 
 /** Manhattan distance between two coords — the S2 placement bands are built on this. */
-export function manhattan(a: string, b: string): number {
-  const [ar, ac] = rcFromCoord(a);
-  const [br, bc] = rcFromCoord(b);
+export function manhattan(a: string, b: string, spec: BoardSpec = activeBoard()): number {
+  const [ar, ac] = rcFromCoord(a, spec);
+  const [br, bc] = rcFromCoord(b, spec);
   return Math.abs(ar - br) + Math.abs(ac - bc);
 }
 
 /**
- * Every coord on the active board, in column-major order (A1–A5, B1–B5, …).
+ * Every coord on the board, in column-major order (A1–A5, B1–B5, …).
  * A FUNCTION, not a constant: callers that need this at module scope would
  * otherwise freeze S1's geometry into the bundle at import time.
  */
-export function allCoords(): string[] {
-  const b = activeBoard();
+export function allCoords(spec: BoardSpec = activeBoard()): string[] {
   const out: string[] = [];
-  for (let c = 0; c < b.cols; c++) {
-    for (let r = 0; r < b.rows; r++) {
-      out.push(coordFromRC(r, c));
+  for (let c = 0; c < spec.cols; c++) {
+    for (let r = 0; r < spec.rows; r++) {
+      out.push(coordFromRC(r, c, spec));
     }
   }
   return out;

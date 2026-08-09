@@ -176,6 +176,45 @@ describe('manhattan', () => {
   });
 });
 
+describe('explicit spec override', () => {
+  // tileGen pins itself to BOARD_SPECS.s1 through this parameter. Without it,
+  // generating the S1 map while an S2 season is active (admin previewing the
+  // draft) would build a 6-row grid and index off the end of 5-row arrays.
+  it('ignores the active board when a spec is passed', () => {
+    setActiveBoard('s2');
+    const s1 = BOARD_SPECS.s1;
+
+    // Row 5 (index 4) is S1's LAST row but an interior row on S2.
+    expect(getAdjRC(4, 3)).toEqual([[3, 3], [5, 3], [4, 2], [4, 4]]);        // active = s2
+    expect(getAdjRC(4, 3, s1)).toEqual([[3, 3], [4, 2], [4, 4]]);            // pinned  = s1
+    expect(isEdgeTile(4, 3)).toBe(false);
+    expect(isEdgeTile(4, 3, s1)).toBe(true);
+    expect(inBounds(5, 3)).toBe(true);
+    expect(inBounds(5, 3, s1)).toBe(false);
+    expect(allCoords(s1)).toHaveLength(35);
+    expect(allCoords()).toHaveLength(42);
+  });
+
+  it('never yields an S1-out-of-range neighbour when pinned to S1', () => {
+    setActiveBoard('s2');
+    const s1 = BOARD_SPECS.s1;
+    for (let r = 0; r < s1.rows; r++) {
+      for (let c = 0; c < s1.cols; c++) {
+        for (const [ar, ac] of getAdjRC(r, c, s1)) {
+          expect(inBounds(ar, ac, s1)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('resolves coords identically on both boards (same colChars)', () => {
+    // coordFromRC/rcFromCoord depend only on colChars, which both boards share —
+    // so only the bounds-dependent helpers actually diverge.
+    expect(coordFromRC(2, 3, BOARD_SPECS.s1)).toBe(coordFromRC(2, 3, BOARD_SPECS.s2));
+    expect(rcFromCoord('D3', BOARD_SPECS.s1)).toEqual(rcFromCoord('D3', BOARD_SPECS.s2));
+  });
+});
+
 describe('allCoords', () => {
   it('is column-major and sized to the active board', () => {
     expect(allCoords()).toHaveLength(35);            // S1: 5 × 7

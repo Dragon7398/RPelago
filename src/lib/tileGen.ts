@@ -1,9 +1,27 @@
 import type { Tile, TileTypeKey, TriState, OrbConfig } from '../types';
 import {
-  COLS, ROWS, ADV_CLASSES, ADV_NAMES_FIRST, ADV_NAMES_LAST,
-  ALL_ORBS, coordFromRC, rcFromCoord, getAdjRC, isEdgeTile, NON_CENTER_SHOP_IDS,
-  BOSS_ELEMENTAL_TRAIT_VALUES,
+  ADV_CLASSES, ADV_NAMES_FIRST, ADV_NAMES_LAST,
+  ALL_ORBS, NON_CENTER_SHOP_IDS, BOSS_ELEMENTAL_TRAIT_VALUES,
 } from './constants';
+import {
+  BOARD_SPECS, coordFromRC as coordFromRCOn, rcFromCoord as rcFromCoordOn,
+  getAdjRC as getAdjRCOn, isEdgeTile as isEdgeTileOn,
+} from './board';
+
+// ── This module's geometry is PINNED to S1 ────────────────────────────────────
+// Everything below generates the S1 map, so it must emit a 5×7 grid even when an
+// S2 season is active (an admin previewing the S2 draft, for instance). Reading
+// the active board here would silently produce a 6-row grid and index off the
+// end of the 5-row arrays. The S2 generator lands separately and pins itself to
+// BOARD_SPECS.s2 the same way.
+const S1 = BOARD_SPECS.s1;
+const ROWS = S1.rows;
+const COLS = S1.cols;
+
+const coordFromRC = (r: number, c: number) => coordFromRCOn(r, c, S1);
+const rcFromCoord = (coord: string) => rcFromCoordOn(coord, S1);
+const getAdjRC    = (r: number, c: number) => getAdjRCOn(r, c, S1);
+const isEdgeTile  = (r: number, c: number) => isEdgeTileOn(r, c, S1);
 
 // ── Seeded shuffle (LCG) ──────────────────────────────────────────────────────
 function seededShuffle<T>(arr: T[], seed: number): T[] {
