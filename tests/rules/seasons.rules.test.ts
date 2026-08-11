@@ -284,6 +284,29 @@ describe('active season — mission claimable slots', () => {
         .set([{ name: '', game: '' }]),
     );
   });
+
+  // Casino entries are objects carrying the card and its pot fraction, not bare
+  // slot arrays. The create ban must hold for that shape too — otherwise a player
+  // could mint themselves an open slot with any fraction of the pot they liked.
+  it('a player CANNOT create a casino-shaped claimable entry', async () => {
+    await assertFails(
+      player()
+        .ref(`seasons/${CASINO}/missions/${MISSION_ID}/claimableSlots/fake2`)
+        .set({
+          slots: [{ name: 'mine', game: 'g' }],
+          card: { uid: 1, name: 'SNES', value: 99 },
+          potFraction: 1,
+        }),
+    );
+  });
+
+  it('a player CANNOT inflate the pot fraction on an existing entry', async () => {
+    await assertFails(
+      player()
+        .ref(`seasons/${CASINO}/missions/${MISSION_ID}/claimableSlots/slotB/potFraction`)
+        .set(5),
+    );
+  });
 });
 
 describe('active season — admin-only surfaces', () => {

@@ -17,6 +17,7 @@ import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/consta
 import type { CasinoDeckChoice } from '../../types';
 import { awaitingRoom, currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock, seatTally } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
+import { claimableCount } from '../../lib/slotHelpers';
 import { toRoman } from '../../lib/constants';
 import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
 import '../../casino/themes.css';
@@ -225,6 +226,9 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
   const { goaled, total } = tableProgress(m);
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
   const done = total > 0 && goaled === total;
+  // Slots a player vacated. Anyone can take one over for free, so it's the single
+  // most actionable thing on this card — it earns a badge of its own.
+  const open = claimableCount(m);
   // Elapsed matches the Board view: from the room link going up, not from deploy.
   const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
   const elapsed   = clockFrom ? fmtDayClock((now - clockFrom) / 1000) : '—';
@@ -268,6 +272,11 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
           {pending
             ? <span className="rl-badge pending">Awaiting room</span>
             : <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>}
+          {open > 0 && (
+            <span className="rl-badge open-slots" title="A seat was vacated here — you can take over the slot for free">
+              ⚐ {open} open slot{open === 1 ? '' : 's'}
+            </span>
+          )}
           <span className="rl-tcard-view">View slots →</span>
         </div>
       </div>
@@ -561,6 +570,14 @@ export default function CasinoShell() {
       .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
   }, [gameState?.missions, myTableIds]);
 
+  // Vacated slots across every live table, seated or not — a free seat at a room
+  // that's already running is worth calling out at the section head, not just on
+  // whichever card happens to hold it.
+  const openSlotCount = useMemo(
+    () => [...myTables, ...liveTables].reduce((n, m) => n + claimableCount(m), 0),
+    [myTables, liveTables],
+  );
+
   // Live-resolved so the open slot overview keeps updating; closes itself if the
   // table settles out of `missions` while the modal is up.
   const slotsMission = slotsId ? gameState?.missions?.[slotsId] ?? null : null;
@@ -689,7 +706,12 @@ export default function CasinoShell() {
         <div className="rl-sec">
           <div className="rl-sec-head">
             <span className="rl-sec-title">Tables In Progress</span>
-            <span className="rl-sec-note">{liveTables.length} table{liveTables.length === 1 ? '' : 's'} playing on</span>
+            <span className="rl-sec-note">
+              {liveTables.length} table{liveTables.length === 1 ? '' : 's'} playing on
+              {openSlotCount > 0 && (
+                <> · <b className="rl-sec-open">{openSlotCount} open slot{openSlotCount === 1 ? '' : 's'}</b></>
+              )}
+            </span>
           </div>
           <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
             {liveTables.map(m => <ProgressCard key={m.id} m={m} now={now} onOpen={() => setSlotsId(m.id)} />)}

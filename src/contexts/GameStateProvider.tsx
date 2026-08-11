@@ -460,9 +460,14 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const claimMissionSlot = useCallback(async (missionId: string, slotKey: string) => {
+    const isCasino = gameState?.missions?.[missionId]?.type === 'casino';
     await dbClaimMissionSlot(missionId, slotKey);
-    addToast('You have claimed the open spot and are now committed to this mission.', 'success');
-  }, [addToast]);
+    // A casino claim costs neither gold nor one of the player's mission claims, so
+    // saying they're "committed" would misdescribe what they just agreed to.
+    addToast(isCasino
+      ? 'Slot claimed — it cost you nothing, and its card and share of the pot are yours.'
+      : 'You have claimed the open spot and are now committed to this mission.', 'success');
+  }, [addToast, gameState]);
 
   const adminGrantMissingAdventurers = useCallback(async (playerId: string) => {
     if (!gameState) return 0;

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { slotsAllFree, countUnfinishedSets } from '../../src/lib/slotHelpers';
+import { slotsAllFree, countUnfinishedSets, normalizeClaimEntry, claimableCount } from '../../src/lib/slotHelpers';
 import { awaitingRoom, hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
 import { missionClaimCapacity } from '../../src/lib/gameLogic';
-import type { AdvSlot, GMMission, GMParticipant, Player } from '../../src/types';
+import type { AdvSlot, ClaimableEntry, GMMission, GMParticipant, Player } from '../../src/types';
 
 const slot = (status?: AdvSlot['status']): AdvSlot => ({ name: 'n', game: 'g', ...(status ? { status } : {}) });
 
@@ -145,5 +145,50 @@ describe('computeMissionCard — pooled-claim gating', () => {
     expect(card.youIn).toBe(true);
     expect(card.doneLabel).toBe('YOU ARE ENLISTED');
     expect(card.takeable).toBe(false);
+  });
+});
+
+// ── Claimable entries ─────────────────────────────────────────────────────────
+// Two shapes exist on the wire: the legacy/non-casino bare AdvSlot[], and the
+// casino ClaimableEntry that also carries the card (its gold value survives
+// nowhere else once the seat is gone) and the pot fraction the slot is worth.
+// Every reader goes through the normalizer, so a table kicked before the shape
+// change must still render and still be claimable.
+describe('normalizeClaimEntry', () => {
+  it('reads a legacy bare array as slots with no card or fraction', () => {
+    const e = normalizeClaimEntry([slot('Goaled')]);
+    expect(e.slots).toHaveLength(1);
+    expect(e.card).toBeUndefined();
+    expect(e.potFraction).toBeUndefined();
+  });
+
+  it('preserves the card and fraction on a casino entry', () => {
+    const e = normalizeClaimEntry({
+      slots: [slot('In-Progress')],
+      card: { uid: 3, name: 'SNES', value: 20, type: 'platform' },
+      potFraction: 0.25,
+      fromPlayerName: 'Quitter',
+    } as ClaimableEntry);
+    expect(e.card?.value).toBe(20);
+    expect(e.potFraction).toBe(0.25);
+    expect(e.fromPlayerName).toBe('Quitter');
+  });
+
+  it('handles Firebase object-keyed slot arrays and absent entries', () => {
+    expect(normalizeClaimEntry({ slots: { 0: slot(), 1: slot() } } as unknown as ClaimableEntry).slots).toHaveLength(2);
+    expect(normalizeClaimEntry(undefined).slots).toEqual([]);
+  });
+});
+
+describe('claimableCount', () => {
+  it('counts open spots regardless of entry shape', () => {
+    const m = {
+      claimableSlots: {
+        a: [slot()],
+        b: { slots: [slot()], potFraction: 0.5 },
+      },
+    } as unknown as GMMission;
+    expect(claimableCount(m)).toBe(2);
+    expect(claimableCount({} as GMMission)).toBe(0);
   });
 });

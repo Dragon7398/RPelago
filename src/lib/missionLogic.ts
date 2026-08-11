@@ -323,25 +323,110 @@ export function freshCasinoTable(
   };
 }
 
-// Split a casino pot evenly among the winning (played) seats at settle. The
-// floor-division remainder (0..winners−1 gold) goes to one seat chosen at random
-// so the whole pot is always paid out and never leaks. Empty winners → no split.
+// ── Pot shares ────────────────────────────────────────────────────────────────
+//
+// A casino pot is measured in SEAT UNITS: one unit per seat that locked a hand at
+// deploy (`casinoShareUnits`). A seat that keeps its whole hand is worth one unit;
+// removing cards from a seat carves fractions off it, and where those fractions go
+// is the entire difference between a void and a kick.
+//
+//   VOID  — the slot is killed outright. Its fraction is RELEASED: it rejoins the
+//           split by shrinking the denominator, so every survivor's share grows.
+//           Tracked cumulatively on the mission as `casinoVoidedShare`.
+//   KICK  — the slot survives as a claimable slot. Its fraction is RESERVED: it
+//           stays in the denominator, and is paid only to a player who claims it.
+//           Unclaimed at settle, it is simply never paid — the pot underpays
+//           rather than rewarding the seats that happened to stay.
+//
+// So: denominator D = casinoShareUnits − casinoVoidedShare, unit U = pot / D, and
+// a recipient is paid `weight × U`. Total paid ≤ pot, with the shortfall being
+// exactly the unclaimed kick reserve.
+
+/** Pot weight a participant holds from slots they CLAIMED (each carries its own fraction). */
+export function claimedWeight(p: GMParticipant): number {
+  return (p.slots ?? [])
+    .filter(s => s && s.claimed)
+    .reduce((sum, s) => sum + (s.claimedFraction ?? 0), 0);
+}
+
+/** How much of one seat unit a participant is owed: their own surviving cards plus anything they claimed. */
+export function seatPotWeight(p: GMParticipant): number {
+  const slots  = (p.slots ?? []).filter(Boolean);
+  const owned  = slots.filter(s => !s.claimed).length;
+  // `lockedCount` is stamped at lock; pre-change tables fall back to their current
+  // owned count, which reads as a full unit — the same share they'd have had before.
+  const denom  = p.lockedCount && p.lockedCount > 0 ? p.lockedCount : owned;
+  const ownW   = denom > 0 ? owned / denom : 0;
+  return ownW + claimedWeight(p);
+}
+
+/** Seats that take a cut at settle: anyone who locked a hand, plus pure claimants. */
+export function potRecipients(m: GMMission): GMParticipant[] {
+  return Object.values(m.participants ?? {})
+    .filter(p => p.played || claimedWeight(p) > 0);
+}
+
+/**
+ * The denominator: seat units banked at deploy, less everything voids have
+ * released. Falls back to the recipient count for tables that deployed before
+ * `casinoShareUnits` existed, which reproduces the old even split exactly.
+ */
+export function casinoShareDenominator(m: GMMission): number {
+  const banked = m.casinoShareUnits ?? potRecipients(m).filter(p => p.played).length;
+  return Math.max(0, banked - (m.casinoVoidedShare ?? 0));
+}
+
+/**
+ * Split a casino pot across weighted recipients. Each is floored, then the
+ * rounding leftover goes to one recipient chosen at random so the paid portion
+ * never leaks a gold — but the leftover is bounded by what the weights actually
+ * earn, so an unclaimed kick reserve stays unpaid instead of being handed out.
+ */
 export function casinoPotShares(
   pot: number,
-  winnerIds: string[],
+  weights: Map<string, number>,
+  denominator: number,
   rng: () => number = Math.random,
 ): Map<string, number> {
   const shares = new Map<string, number>();
-  const n = winnerIds.length;
-  if (n === 0 || pot <= 0) {
-    for (const id of winnerIds) shares.set(id, 0);
+  const ids    = [...weights.keys()];
+  if (pot <= 0 || denominator <= 0) {
+    for (const id of ids) shares.set(id, 0);
     return shares;
   }
-  const base = Math.floor(pot / n);
-  const rem  = pot - base * n;
-  const remIdx = Math.min(n - 1, Math.floor(rng() * n));
-  winnerIds.forEach((id, i) => shares.set(id, base + (i === remIdx ? rem : 0)));
+
+  // The whole pot is only on the table when the weights account for every unit;
+  // any reserved-but-unclaimed weight simply never becomes gold.
+  const paidWeight = ids.reduce((sum, id) => sum + Math.max(0, weights.get(id) ?? 0), 0);
+  // Guard against minting. Weights should never outrun the denominator, but a
+  // legacy table or a data repair can leave them inconsistent — and dividing by
+  // the smaller number would pay out more gold than the pot holds. Falling back to
+  // the weight total distributes the pot proportionally instead, which is wrong by
+  // at most a rounding step and can never create gold.
+  const divisor = Math.max(denominator, paidWeight);
+  const payable = Math.min(pot, Math.round((pot * paidWeight) / divisor));
+
+  let handed = 0;
+  for (const id of ids) {
+    const w = Math.max(0, weights.get(id) ?? 0);
+    const g = Math.floor((pot * w) / divisor);
+    shares.set(id, g);
+    handed += g;
+  }
+
+  const leftover = payable - handed;
+  if (leftover > 0 && ids.length > 0) {
+    const idx = Math.min(ids.length - 1, Math.floor(rng() * ids.length));
+    shares.set(ids[idx], (shares.get(ids[idx]) ?? 0) + leftover);
+  }
   return shares;
+}
+
+/** The weights → shares pipeline for a whole table, as settlement uses it. */
+export function casinoTableShares(m: GMMission, rng: () => number = Math.random): Map<string, number> {
+  const weights = new Map<string, number>();
+  for (const p of potRecipients(m)) weights.set(p.playerId, seatPotWeight(p));
+  return casinoPotShares(m.pot ?? 0, weights, casinoShareDenominator(m), rng);
 }
 
 // What a seat actually paid at this table, read back off the audit log rather

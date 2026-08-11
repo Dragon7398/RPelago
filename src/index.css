@@ -19,6 +19,19 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --ban-bg:      oklch(14% 0.10 25 / 0.4);
   --ban-bg-hi:   oklch(20% 0.12 25 / 0.55);
   --ban-border:  oklch(44% 0.16 25);
+  /* Void (no-fault removal) and open-slot surfaces, same remapping deal. Void is
+     amber, NOT red: it does not punish anyone and it hands the slot's share of the
+     pot back to the table. Open slots are violet so they never read as an error. */
+  --void-fg:     oklch(72% 0.15 62);
+  --void-fg-hi:  oklch(82% 0.16 62);
+  --void-bg:     oklch(16% 0.08 62 / 0.42);
+  --void-bg-hi:  oklch(23% 0.10 62 / 0.58);
+  --void-border: oklch(46% 0.13 62);
+  --open-fg:     oklch(70% 0.16 320);
+  --open-fg-hi:  oklch(80% 0.18 320);
+  --open-bg:     oklch(16% 0.08 320 / 0.36);
+  --open-bg-hi:  oklch(24% 0.11 320 / 0.55);
+  --open-border: oklch(46% 0.14 320);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -1282,6 +1295,61 @@ header p {
   color: oklch(60% 0.14 25); line-height: 1; flex-shrink: 0;
 }
 .admin-slot-del:hover { background: oklch(22% 0.10 25 / 0.6); color: oklch(70% 0.16 25); }
+/* Void (⊘) vs kick (✕). Void is deliberately NOT red: it is the no-fault removal
+   — the card was unplayable, the player is not being punished, and its share of
+   the pot goes back to the table. Amber says "withdrawn", red says "ejected". */
+.admin-slot-del.void {
+  background: var(--void-bg); border-color: var(--void-border); color: var(--void-fg);
+}
+.admin-slot-del.void:hover { background: var(--void-bg-hi); color: var(--void-fg-hi); }
+
+/* Confirmation strips for every removal. The explanation is not optional dressing:
+   void and kick look alike and differ only in consequences, so the row states the
+   consequence before the destructive button is reachable. */
+.admin-remove-confirm {
+  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+  flex: 1; min-width: 0;
+}
+.admin-remove-explain {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.68rem;
+  line-height: 1.35; color: var(--ink-soft); flex: 1 1 14rem; min-width: 0;
+}
+
+/* ── Open (claimable) slots, admin view ──────────────────────────────────────
+   Kicked slots waiting on a replacement. Each holds a reserved share of the pot
+   that goes unpaid if nobody claims it, so the host needs to see them and be able
+   to withdraw one — nothing else in the dashboard surfaces these. */
+.admin-claimable {
+  margin-top: 0.55rem; padding: 0.5rem 0.6rem; border-radius: 3px;
+  border: 1px solid var(--open-border); background: var(--open-bg);
+}
+.admin-claimable-head {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.12em;
+  color: var(--open-fg); margin-bottom: 0.4rem;
+}
+.admin-claimable-count {
+  display: inline-block; margin-left: 0.3rem; padding: 0.05rem 0.32rem;
+  border-radius: 999px; background: var(--open-bg-hi); color: var(--open-fg-hi);
+}
+.admin-claimable-note {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.68rem;
+  letter-spacing: 0; text-transform: none; color: var(--ink-soft); margin-left: 0.45rem;
+}
+.admin-claimable-row {
+  display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+  padding: 0.28rem 0; border-top: 1px solid oklch(from var(--open-border) l c h / 0.35);
+  font-size: 0.68rem;
+}
+.admin-claimable-card { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--parchment); }
+.admin-claimable-card b { color: var(--gold); }
+.admin-claimable-game { font-family: 'Crimson Pro', serif; color: var(--ink-soft); flex: 1; min-width: 6rem; }
+.admin-claimable-status { font-size: 0.6rem; color: var(--ink-soft); }
+.admin-claimable-share {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em;
+  color: var(--open-fg); border: 1px solid var(--open-border);
+  border-radius: 999px; padding: 0.05rem 0.35rem;
+}
+.admin-claimable-from { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.66rem; color: var(--ink-soft); }
 .admin-slot-add-row {
   display: flex; gap: 0.3rem; margin-top: 0.3rem;
 }
@@ -2030,6 +2098,18 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   background: oklch(14% 0.06 50 / 0.5); color: oklch(62% 0.16 50);
 }
 .dash-kick-btn--takeover:hover { background: oklch(20% 0.10 50 / 0.7); color: oklch(70% 0.18 50); }
+/* Whole-seat void — sits beside Kick and must not be mistaken for it. Same shape,
+   amber instead of red, because it carries no warning and returns the seat's share
+   of the pot to the table rather than reserving it for a replacement. */
+.dash-void-btn {
+  flex-shrink: 0; margin-top: 0.15rem;
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
+  padding: 0.2rem 0.45rem; border-radius: 2px; cursor: pointer;
+  border: 1px solid var(--void-border);
+  background: var(--void-bg); color: var(--void-fg);
+  transition: background 0.15s, color 0.15s;
+}
+.dash-void-btn:hover { background: var(--void-bg-hi); color: var(--void-fg-hi); }
 .dash-player-disabled-badge {
   font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;
   border-radius: 2px; background: oklch(16% 0.10 25 / 0.5);
@@ -3621,6 +3701,19 @@ body.theme-lapis {
   --ban-bg:      oklch(92% 0.045 25 / 0.55);
   --ban-bg-hi:   oklch(86% 0.07 25 / 0.7);
   --ban-border:  oklch(52% 0.16 25);
+  /* Void + open-slot surfaces have the same wash problem as the ban ones: the
+     dark-theme values are a low-lightness tint meant to sit on near-black. Flip
+     the polarity for cream — light tint behind dark, saturated text. */
+  --void-fg:     oklch(42% 0.15 62);
+  --void-fg-hi:  oklch(32% 0.17 62);
+  --void-bg:     oklch(93% 0.05 62 / 0.55);
+  --void-bg-hi:  oklch(87% 0.08 62 / 0.7);
+  --void-border: oklch(54% 0.13 62);
+  --open-fg:     oklch(42% 0.17 320);
+  --open-fg-hi:  oklch(32% 0.19 320);
+  --open-bg:     oklch(94% 0.04 320 / 0.5);
+  --open-bg-hi:  oklch(88% 0.07 320 / 0.65);
+  --open-border: oklch(54% 0.15 320);
 }
 /* Unban stays green, and green-on-cream has the same wash problem. */
 body.theme-parchment .dash-ban-lift,

@@ -5,9 +5,9 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
 import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
+import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
-import { slotsAllFree } from '../../lib/slotHelpers';
+import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
 import { checkProgressionBalancing } from '../../lib/apYaml';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
@@ -22,13 +22,15 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, locked, isCasino, mismatchedNames, onKick,
+  missionId, playerId, participant, locked, isCasino, isLive, mismatchedNames, onKick,
 }: {
   missionId: string;
   playerId: string;
   participant: GMParticipant;
   locked: boolean;
   isCasino?: boolean;
+  /** Mission is in progress — a room exists, so a kicked slot can actually be taken over. */
+  isLive?: boolean;
   mismatchedNames?: Set<string>;
   onKick: () => void;
 }) {
@@ -38,9 +40,19 @@ function MissionParticipantSlots({
   const [draft, setDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>({
     name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0,
   });
-  const [confirmKick, setConfirmKick] = useState(false);
-  const [confirmDel, setConfirmDel] = useState<number | null>(null);
-  const [delBusy, setDelBusy]       = useState(false);
+  // Removals come in two flavours at two scopes, and the difference is always the
+  // same one: where the removed slot's share of the pot goes.
+  //
+  //   VOID — the slot is dead. Nobody can take it over, and its pot weight returns
+  //          to the table, raising every remaining seat's share. No warning: this
+  //          says the card was unplayable, not that the player walked away.
+  //   KICK — the Archipelago slot is still good, so it reopens as a claimable slot
+  //          carrying its card and pot fraction, reserved for whoever takes it (and
+  //          unpaid if nobody does). Punitive, so it also warns the player.
+  const [confirmSeat, setConfirmSeat] = useState<null | 'void' | 'kick'>(null);
+  const [confirmDel, setConfirmDel]   = useState<null | { i: number; mode: 'void' | 'kick' }>(null);
+  const [delBusy, setDelBusy]         = useState(false);
+  const [seatBusy, setSeatBusy]       = useState(false);
 
   const save = (next: AdvSlot[]) => adminSetParticipantSlots(missionId, playerId, next);
 
@@ -48,17 +60,34 @@ function MissionParticipantSlots({
   // (index-aligned, and the only record of each card's gold value) and its stored
   // goldSwing have to move with it, so removal goes through a callable that does
   // all three atomically. Every other mission type is a straight slot filter.
-  const removeSlot = async (i: number) => {
+  const removeSlot = async (i: number, mode: 'void' | 'kick') => {
     if (!isCasino) { save(slots.filter((_, j) => j !== i)); setConfirmDel(null); return; }
     setDelBusy(true);
     try {
-      const { goldSwing, remaining } = await adminRemoveCasinoSlot(missionId, playerId, i);
-      addToast(`Card struck — ${remaining} slot${remaining === 1 ? '' : 's'} left, reward now ${goldSwing}g.`, 'success');
+      const { goldSwing, remaining } = await adminRemoveCasinoSlot(missionId, playerId, i, mode);
+      addToast(mode === 'kick'
+        ? `Card kicked — reopened as an open slot. ${remaining} left on this seat, reward now ${goldSwing}g.`
+        : `Card voided — its share returns to the table. ${remaining} left on this seat, reward now ${goldSwing}g.`,
+        'success');
       setConfirmDel(null);
     } catch (err) {
       addToast(`Could not remove slot: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
       setDelBusy(false);
+    }
+  };
+
+  const removeSeat = async (mode: 'void' | 'kick') => {
+    if (mode === 'kick') { onKick(); setConfirmSeat(null); return; }
+    setSeatBusy(true);
+    try {
+      await adminVoidCasinoSeat(missionId, playerId);
+      addToast(`${participant.playerName}'s seat voided — its whole share returns to the table.`, 'success');
+      setConfirmSeat(null);
+    } catch (err) {
+      addToast(`Could not void seat: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      setSeatBusy(false);
     }
   };
 
@@ -69,21 +98,43 @@ function MissionParticipantSlots({
         {isCasino && participant.yamlDenied && (
           <span className="casino-deny-badge" title="Config denied — awaiting the player's resubmit">⛔ resubmit pending</span>
         )}
-        {confirmKick ? (
-          <span style={{ display: 'flex', gap: '0.3rem' }}>
+        {confirmSeat ? (
+          <span className="admin-remove-confirm">
+            <span className="admin-remove-explain">
+              {confirmSeat === 'kick'
+                ? isCasino
+                  ? `Kick ${participant.playerName}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
+                  : `Kick ${participant.playerName}? Their slots reopen for a replacement and they are warned.`
+                : `Void ${participant.playerName}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
+            </span>
             <button
               className="dash-action-btn danger"
               style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
-              onClick={() => { onKick(); setConfirmKick(false); }}
-            >Confirm Kick</button>
+              disabled={seatBusy}
+              onClick={() => void removeSeat(confirmSeat)}
+            >{seatBusy ? '…' : confirmSeat === 'kick' ? 'Confirm Kick' : 'Confirm Void'}</button>
             <button
               className="dash-action-btn"
               style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
-              onClick={() => setConfirmKick(false)}
+              disabled={seatBusy}
+              onClick={() => setConfirmSeat(null)}
             >Cancel</button>
           </span>
         ) : (
-          <button className="dash-kick-btn" onClick={() => setConfirmKick(true)}>Kick</button>
+          <span style={{ display: 'flex', gap: '0.3rem' }}>
+            {isCasino && (
+              <button className="dash-void-btn" onClick={() => setConfirmSeat('void')}
+                title="Void the whole seat — kills every card, returns its share to the table, no warning">
+                ⊘⊘ Void seat
+              </button>
+            )}
+            <button className="dash-kick-btn" onClick={() => setConfirmSeat('kick')}
+              title={isCasino
+                ? "Kick the whole seat — every card reopens as an open slot for someone else, and the player is warned"
+                : 'Kick this player from the mission'}>
+              {isCasino ? '✕✕ Kick seat' : 'Kick'}
+            </button>
+          </span>
         )}
       </div>
 
@@ -137,14 +188,21 @@ function MissionParticipantSlots({
           >
             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
-          {!locked && (confirmDel === i ? (
-            <span style={{ display: 'flex', gap: '0.3rem' }}>
+          {!locked && (confirmDel?.i === i ? (
+            <span className="admin-remove-confirm">
+              <span className="admin-remove-explain">
+                {confirmDel.mode === 'kick'
+                  ? 'Reopen this card as an open slot? Its share of the pot is held for whoever takes it — and goes unpaid if nobody does. The player is warned.'
+                  : isCasino
+                    ? "Void this card? Nobody can take it over, and its share of the pot returns to the table. The player keeps the rest of their hand and isn't warned."
+                    : 'Remove this slot?'}
+              </span>
               <button
                 className="dash-action-btn danger"
                 style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
                 disabled={delBusy}
-                onClick={() => removeSlot(i)}
-              >{delBusy ? '…' : isCasino ? 'Strike card' : 'Remove'}</button>
+                onClick={() => removeSlot(i, confirmDel.mode)}
+              >{delBusy ? '…' : !isCasino ? 'Remove' : confirmDel.mode === 'kick' ? 'Confirm Kick' : 'Confirm Void'}</button>
               <button
                 className="dash-action-btn"
                 style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
@@ -153,13 +211,24 @@ function MissionParticipantSlots({
               >Cancel</button>
             </span>
           ) : (
-            <button
-              className="admin-slot-del"
-              title={isCasino
-                ? 'Strike this card — drops the slot and its card, and recomputes the seat reward'
-                : 'Remove slot'}
-              onClick={() => setConfirmDel(i)}
-            >✕</button>
+            <span style={{ display: 'flex', gap: '0.2rem' }}>
+              <button
+                className={`admin-slot-del${isCasino ? ' void' : ''}`}
+                title={isCasino
+                  ? 'Void this card — kills the slot outright and returns its share of the pot to the table'
+                  : 'Remove slot'}
+                onClick={() => setConfirmDel({ i, mode: 'void' })}
+              >{isCasino ? '⊘' : '✕'}</button>
+              {/* Kicking a card offers it to a replacement, which only means anything
+                  once there's a room to join — before deploy there is nothing to take over. */}
+              {isCasino && isLive && (
+                <button
+                  className="admin-slot-del"
+                  title="Kick this card — reopens it as an open slot another player can take over"
+                  onClick={() => setConfirmDel({ i, mode: 'kick' })}
+                >✕</button>
+              )}
+            </span>
           ))}
         </div>
       ))}
@@ -789,12 +858,82 @@ function MissionCard({ mission }: { mission: GMMission }) {
           participant={p}
           locked={slotsLocked}
           isCasino={mission.type === 'casino'}
+          isLive={mission.state === 'inprogress'}
           mismatchedNames={mismatchedNames}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />
       )) : (
         <div className="dash-empty">No participants yet.</div>
       ))}
+      {slotsOpen && <MissionClaimableSlots mission={mission} />}
+    </div>
+  );
+}
+
+// ── Open (claimable) slots ────────────────────────────────────────────────────
+// Kicked slots waiting for a replacement. Nothing else in the admin surfaces
+// these, so without this panel a slot could sit open (holding its share of the
+// pot hostage) with no way to see it, let alone withdraw it.
+function MissionClaimableSlots({ mission }: { mission: GMMission }) {
+  const { addToast } = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<string | null>(null);
+
+  const entries = claimEntries(mission);
+  if (entries.length === 0) return null;
+
+  const release = async (key: string) => {
+    setBusy(key);
+    try {
+      await adminReleaseClaimableSlot(mission.id, key);
+      addToast('Open slot withdrawn — its share of the pot returns to the table.', 'success');
+      setConfirm(null);
+    } catch (err) {
+      addToast(`Could not withdraw slot: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div className="admin-claimable">
+      <div className="admin-claimable-head">
+        ⚐ OPEN SLOTS <span className="admin-claimable-count">{entries.length}</span>
+        <span className="admin-claimable-note">
+          waiting for a replacement — each holds its share of the pot until claimed
+        </span>
+      </div>
+      {entries.map(([key, entry]) => {
+        const slot = entry.slots[0];
+        const pct  = entry.potFraction ? Math.round(entry.potFraction * 100) : 0;
+        return (
+          <div key={key} className="admin-claimable-row">
+            <span className="admin-claimable-card">
+              {entry.card?.name ?? slot?.name ?? '—'}
+              {entry.card?.value != null && <b> {entry.card.value}g</b>}
+            </span>
+            <span className="admin-claimable-game">{slot?.game?.trim() || '—'}</span>
+            <span className="admin-claimable-status">{slot?.status ?? 'Unstarted'}</span>
+            {pct > 0 && <span className="admin-claimable-share" title="Share of one seat's pot cut, reserved for the claimant">{pct}% share</span>}
+            {entry.fromPlayerName && <span className="admin-claimable-from">from {entry.fromPlayerName}</span>}
+            {confirm === key ? (
+              <span className="admin-remove-confirm">
+                <span className="admin-remove-explain">
+                  Withdraw this open slot? Nobody will be able to take it over, and the
+                  {pct > 0 ? ` ${pct}% ` : ' '}share it is holding returns to the table.
+                </span>
+                <button className="dash-action-btn danger" style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+                  disabled={busy !== null} onClick={() => void release(key)}>
+                  {busy === key ? '…' : 'Confirm'}
+                </button>
+                <button className="dash-action-btn" style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
+                  disabled={busy !== null} onClick={() => setConfirm(null)}>Cancel</button>
+              </span>
+            ) : (
+              <button className="admin-slot-del void" title="Withdraw this open slot and return its share to the table"
+                onClick={() => setConfirm(key)}>⊘</button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

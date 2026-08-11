@@ -155,8 +155,10 @@ All in `functions/src/index.ts`:
 | `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. Rejects `no-claims-free` when the player's held claims (`activeMissions`) meet `MISSION_CLAIM_CAPACITY`. |
 | `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed); frees that mission's claim. |
 | `setMissionParticipantStatusNote` | Callable | Updates a participant's status note. |
-| `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). |
-| `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot. |
+| `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). **Casino claims are free** — no gold, no mission claim consumed; see Casino: void vs kick. |
+| `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot — **one per card** for a casino seat. |
+| `adminVoidCasinoSeat` | Callable | Removes a whole casino seat with no replacement; releases all its pot weight, writes no warning. |
+| `adminReleaseClaimableSlot` | Callable | Withdraws an unclaimed open slot and returns its reserved pot weight to the table. |
 | `adminForceDeploy` | Callable | Admin-forces a forming mission into `inprogress`. |
 | `onMissionComplete` | DB create on `game/missionsHistory/{missionId}` | Fires when a mission is completed; updates `profiles/` with XP snapshot and mission count. Also auto-warns players with ≥5 status incidents. |
 | `tickGuildmasterMissions` | Scheduled every 15 minutes | Auto-deploys any forming mission whose decay has reduced max slots to the current fill count. |
@@ -268,7 +270,7 @@ The reclaim is **auto, on status sync** (mirrors the tile adventurer-free path):
 
 > **Display seats with `seatTally`, never `currentMaxSlots`.** Decay lowers the cap but never evicts a seated player, and a casino cohort keeps decaying while it waits for every seat to lock in (`shouldDeploy` also demands `allSeatsPlayed`) — so the cap legitimately slides *below* the fill count and a raw `{filled}/{currentMaxSlots}` renders the nonsense **"7/6"**. `seatTally(m, now)` floors the shown max at the fill count and returns `{ filled, max, over, label, title }`, rendering **"7/7\*"** with an explanatory tooltip. Anything indexed by max seats (seat rails, pips, `SeatGrid`) must use it too, or an occupied seat gets drawn as closed — or dropped entirely. `GMMissionCard.seats` carries the tally for card consumers. Gameplay math (deploy, `takeable`, pot split at settle) keeps using `currentMaxSlots`.
 
-`claimableSlots?: Record<string, AdvSlot[]>` on missions mirrors the tile claimable slot mechanic — created when a participant is kicked. `slotsLocked` prevents slot edits once locked by admin.
+`claimableSlots` on missions mirrors the tile claimable slot mechanic — created when a participant is kicked. `slotsLocked` prevents slot edits once locked by admin. Entries have **two shapes**: non-casino missions write a bare `AdvSlot[]` (one entry holding all the kicked player's slots, claiming costs a mission claim), while casino tables write a richer `ClaimableEntry` — see **Casino: void vs kick** below. Every reader goes through `normalizeClaimEntry` / `claimEntries` (`slotHelpers.ts`), so legacy bare arrays keep working.
 
 `seedInitialMissions()` in `db.ts` bootstraps the first Basic Training and Patrol cohorts; it is a no-op if missions already exist. The admin Missions page allows state transitions, slot editing, kicking, force-deploy, and slot lock.
 
@@ -338,7 +340,36 @@ Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSl
 - **Leave invalidates**: `deleteSeatYaml` runs on stand-down / kick / deny; `clearSeatSecrets` nulls the seat's secret hand/deck/hole on those same paths (an orphaned secret would otherwise block re-sitting with *"Finish or fold your current hand first"*).
 - **Admin download** (`adminGetCasinoYamls`, admin-only callable via Admin SDK): per-seat `.yaml` and a `.zip` of all seats (via `fflate`) — deliberately never a single combined file.
 
-> **Never shorten a casino seat with `adminSetParticipantSlots`.** A casino seat is three fields that must agree: `slots`, the index-aligned `lockedCards` (the only surviving record of each card's gold value), and `goldSwing` (the stored number settlement pays — it is *not* re-derived from slots; `handStakeFromSlots` is a display fallback only). Dropping a slot through the generic row editor leaves the seat over-paying and mis-maps games to cards on the player's next resubmit. The admin Missions ✕ routes casino seats through **`adminRemoveCasinoSlot`**, which rewrites all three atomically, compacts any pre-existing `null` hole, refuses to empty a seat (kick instead), and logs an `adminvoid` audit entry. Prefer letting the player re-pick via `resubmitCasinoYaml` whenever they can.
+> **Never shorten a casino seat with `adminSetParticipantSlots`.** A casino seat is three fields that must agree: `slots`, the index-aligned `lockedCards` (the only surviving record of each card's gold value), and `goldSwing` (the stored number settlement pays — it is *not* re-derived from slots; `handStakeFromSlots` is a display fallback only). Dropping a slot through the generic row editor leaves the seat over-paying and mis-maps games to cards on the player's next resubmit. The admin Missions ⊘/✕ route casino seats through the callables below, which rewrite all three atomically, compact any pre-existing `null` hole, and refuse to empty a seat. Prefer letting the player re-pick via `resubmitCasinoYaml` whenever they can.
+
+#### Casino: void vs kick, and the weighted pot
+
+Removing a card or a seat comes in two flavours at two scopes (a **2×2**, all four confirmed in the admin UI), and the *only* difference is where the removed slot's share of the pot goes:
+
+| Action | Callable | Claimable slot? | Pot weight | Warning |
+|---|---|---|---|---|
+| **Void card** ⊘ | `adminRemoveCasinoSlot` (`mode:'void'`, the default) | no | **released** to the table | no |
+| **Void seat** ⊘⊘ | `adminVoidCasinoSeat` | no | all of it released | no |
+| **Kick card** ✕ | `adminRemoveCasinoSlot` (`mode:'kick'`) | 1 entry | **reserved** on the entry | yes |
+| **Kick seat** ✕✕ | `adminKickMissionParticipant` | **one per card** | reserved on each | yes |
+
+A **void** says the slot is dead — unplayable game, unfillable card — so nobody can take it over and its weight returns to the table. A **kick** says the Archipelago slot is fine but its player isn't, so it reopens for a replacement. Voids are no-fault and leave no mark; kicks write a `PlayerWarning`. `adminReleaseClaimableSlot` converts an unanswered kick into a void after the fact.
+
+**The pot is measured in seat units.** `mission.casinoShareUnits` is banked at deploy (the number of seats that had `played`) because a removed seat is *deleted* from `participants` and cannot be counted later. `mission.casinoVoidedShare` accumulates every released fraction. Settlement then uses:
+
+```
+D = casinoShareUnits − casinoVoidedShare        (denominator)
+U = pot / D                                      (one seat unit)
+weight = ownRemainingCards / lockedCount  +  Σ claimed slots' claimedFraction
+```
+
+- **`lockedCount`** is stamped on the seat at lock and never moves, so repeated removals each carve a consistent `1/lockedCount` instead of a growing slice of a shrinking hand. `resubmitCasinoYaml`'s card re-pick restamps it.
+- Unclaimed kick reserve is **never paid** — the pot deliberately underpays rather than rewarding the seats that happened to stay. Voids are the opposite: they raise every survivor's share.
+- `casinoPotShares` / `casinoTableShares` / `seatPotWeight` / `casinoShareDenominator` live in `missionLogic.ts`. **Gold settlement is client-side only** (`completeMission` in `db.ts`; `onMissionComplete` merely snapshots profiles), so there is no server mirror of this math.
+
+**Claimed slots.** A claim is only ever offered from an **in-progress** table, so the Archipelago room already exists and the claimant adopts a *live* slot — no ante, no deal, no config to submit, and `claimMissionSlot` charges nothing and does **not** consume a mission claim. Limits: one claimed slot per player per table (a player already seated there may take one extra). The claimed slot is appended to both `slots` and `lockedCards` so every existing consumer keeps working, and is marked on the slot itself with `claimed` / `claimedFraction` / `claimedFrom`. **The fraction lives on the slot, not on the participant** — it was carved off a *different* seat with a different `lockedCount`, so a seat-level total could not say which slot contributed what.
+
+> **A claimed card pays FLAT — no deck boost.** `seatGoldSwing` boosts only the seat's own hand; the claimant never chose the deck. Anything that rebuilds `slots`/`lockedCards` must preserve claimed slots and re-derive `goldSwing` through it — `resubmitCasinoYaml` does both (its card re-pick re-appends them, and its config-only path skips them, since a claimed card came from another player's deck and is absent from this player's manifest). `completeMission` also gates the **Coat of Many Colors** credit on `played`, or four claims would buy the Coat without ever playing a hand.
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
 
@@ -376,8 +407,8 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity` |
-| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission` |
-| `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
+| `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `resolveNumberedSlotName`, `fetchRoomStatus` |
 | `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |

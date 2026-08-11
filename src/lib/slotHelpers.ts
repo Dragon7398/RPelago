@@ -1,10 +1,35 @@
-import type { AdvSlot, SlotStatus, TileAdventurer } from '../types';
+import type { AdvSlot, ClaimableEntry, GMMission, SlotStatus, TileAdventurer } from '../types';
 import { FREE_COMPLETED_STATUSES } from './constants';
 
 export function normalizeSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlot[] {
   if (!raw) return [];
   // Firebase may return a dense array or an object with numeric keys
   return Array.isArray(raw) ? raw : Object.values(raw);
+}
+
+// ── Claimable entries ─────────────────────────────────────────────────────────
+// Mission claimable slots exist in two shapes: the legacy/non-casino bare
+// AdvSlot[] and the casino ClaimableEntry, which additionally carries the card
+// (its gold value lives nowhere else once the seat is gone) and the pot fraction
+// the slot is worth. Everything that reads them goes through this, so a table
+// kicked before the shape change still renders and still claims.
+export function normalizeClaimEntry(raw: AdvSlot[] | ClaimableEntry | undefined): ClaimableEntry {
+  if (!raw) return { slots: [] };
+  if (Array.isArray(raw)) return { slots: normalizeSlots(raw) };
+  return {
+    ...raw,
+    slots: normalizeSlots(raw.slots as AdvSlot[] | Record<string, AdvSlot> | undefined),
+  };
+}
+
+/** A mission's claimable slots as [key, entry] pairs, in a single normalized shape. */
+export function claimEntries(m: GMMission): [string, ClaimableEntry][] {
+  return Object.entries(m.claimableSlots ?? {}).map(([k, v]) => [k, normalizeClaimEntry(v)]);
+}
+
+/** How many open spots a table is advertising — drives the landing/board badges. */
+export function claimableCount(m: GMMission): number {
+  return Object.keys(m.claimableSlots ?? {}).length;
 }
 
 export function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {

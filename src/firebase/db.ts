@@ -2,12 +2,12 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame, OfficialReport, DiscordBan } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoPotShares, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 
 function assertDb() {
@@ -867,17 +867,47 @@ export async function playerReset(playerId: string): Promise<void> {
         updates[sPath(`missions/${missionId}/firstJoinAt`)] = null;
       }
     } else if (mission.state === 'inprogress') {
-      // Full kick: create claimable slot + warning
+      // Full kick: create claimable slot(s) + warning
       const participant = mission.participants?.[playerId];
-      const slotsToAdd: AdvSlot[] = participant?.slots?.length
-        ? participant.slots.map(s => ({
-            name: s.name, game: s.game,
-            ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
-            ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
-          }))
-        : [{ name: '', game: '' }];
-      const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
-      updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
+      if (mission.type === 'casino') {
+        // Mirrors adminKickMissionParticipant: a casino seat reopens one card at a
+        // time, each entry carrying its card (the only record of its gold value)
+        // and its 1/lockedCount slice of the pot. Bundling them would force one
+        // replacement to take the whole hand.
+        const slots = (participant?.slots ?? []).filter(Boolean);
+        const cards = (participant?.lockedCards ?? []).filter(Boolean);
+        const owned = slots.filter(s => !s.claimed).length;
+        const denom = participant?.lockedCount && participant.lockedCount > 0
+          ? participant.lockedCount : owned;
+        slots.forEach((slot, i) => {
+          const fraction = slot.claimed
+            ? (slot.claimedFraction ?? 0)
+            : (denom > 0 ? 1 / denom : 0);
+          const clean: AdvSlot = { ...slot };
+          delete clean.claimed;
+          delete clean.claimedFraction;
+          delete clean.claimedFrom;
+          const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
+          updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = {
+            slots: [clean],
+            ...(cards[i] ? { card: cards[i] } : {}),
+            potFraction:    fraction,
+            fromPlayerId:   playerId,
+            fromPlayerName: participant?.playerName ?? '',
+            createdAt:      Date.now(),
+          } satisfies ClaimableEntry;
+        });
+      } else {
+        const slotsToAdd: AdvSlot[] = participant?.slots?.length
+          ? participant.slots.map(s => ({
+              name: s.name, game: s.game,
+              ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+              ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+            }))
+          : [{ name: '', game: '' }];
+        const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
+        updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
+      }
 
       const warnRef = push(sRef(db!, `players/${playerId}/warnings`));
       updates[sPath(`players/${playerId}/warnings/${warnRef.key}`)] = {
@@ -1073,14 +1103,53 @@ export async function adminDenyCasinoYaml(missionId: string, playerId: string, r
 // fields that must move together — slots, the index-aligned lockedCards, and the
 // stored goldSwing that settlement pays. Editing slots alone leaves the seat
 // over-paying and mis-maps games to cards on the player's next resubmit.
+/**
+ * Remove ONE committed card from a casino seat. `mode` decides where the removed
+ * slot's share of the pot goes, which is the whole difference between the two:
+ *
+ *   'void' — the slot is dead, nobody can take it over, and its pot weight is
+ *            released back to the table (every remaining seat's share goes up).
+ *            No warning: the card was unplayable, not abandoned.
+ *   'kick' — the Archipelago slot survives and reopens as a claimable slot with
+ *            its card and pot fraction attached, reserved for whoever takes it.
+ *            Punitive, so it also writes a PlayerWarning.
+ */
 export async function adminRemoveCasinoSlot(
-  missionId: string, playerId: string, slotIndex: number,
+  missionId: string, playerId: string, slotIndex: number, mode: 'void' | 'kick' = 'void',
 ): Promise<{ goldSwing: number; remaining: number }> {
   assertFunctions();
   const res = await httpsCallable<object, { ok: boolean; goldSwing: number; remaining: number }>(
     functions!, 'adminRemoveCasinoSlot',
-  )({ missionId, playerId, slotIndex, seasonId: getCurrentSeason() });
+  )({ missionId, playerId, slotIndex, mode, seasonId: getCurrentSeason() });
   return { goldSwing: res.data.goldSwing, remaining: res.data.remaining };
+}
+
+/**
+ * Remove a WHOLE casino seat without reopening any of it — the no-fault twin of
+ * kicking the player. Every card dies, all of the seat's pot weight returns to the
+ * table, and no warning is recorded. Use `adminKickMissionParticipant` instead when
+ * the slots are still playable and should go to replacements.
+ */
+export async function adminVoidCasinoSeat(
+  missionId: string, playerId: string,
+): Promise<{ released: number }> {
+  assertFunctions();
+  const res = await httpsCallable<object, { ok: boolean; released: number }>(
+    functions!, 'adminVoidCasinoSeat',
+  )({ missionId, playerId, seasonId: getCurrentSeason() });
+  return { released: res.data.released };
+}
+
+/**
+ * Withdraw an unclaimed claimable slot. The reserved pot weight it was holding is
+ * released back to the table, so this converts a kick nobody took up into a void
+ * rather than leaving that share permanently unpaid.
+ */
+export async function adminReleaseClaimableSlot(missionId: string, slotKey: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminReleaseClaimableSlot')({
+    missionId, slotKey, seasonId: getCurrentSeason(),
+  });
 }
 
 export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
@@ -1151,14 +1220,14 @@ export async function completeMission(
   const label    = missionDisplayLabel(mission);
   const updates: Record<string, unknown> = {};
 
-  // For casino missions, pre-compute each played player's pot share.
-  // Gold comes from goldSwing (card values) + equal pot split; no feat multiplier on gambling winnings.
+  // For casino missions, pre-compute each recipient's weighted pot share. Weights
+  // are in seat units (see casinoTableShares): a full hand is one unit, voids
+  // release their fraction back to the table, kicks reserve theirs for a claimant.
+  // Gold comes from goldSwing (card values) + that share; no feat multiplier on
+  // gambling winnings.
   let potShares = new Map<string, number>();
   if (mission.type === 'casino') {
-    const winnerIds = Object.entries(mission.participants ?? {})
-      .filter(([, p]) => p.played)
-      .map(([pid]) => pid);
-    potShares = casinoPotShares(mission.pot ?? 0, winnerIds);
+    potShares = casinoTableShares(mission);
   }
 
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
@@ -1168,7 +1237,10 @@ export async function completeMission(
     const isCasino = mission.type === 'casino';
 
     // A folded / never-played casino seat wins nothing — just free its claim.
-    if (isCasino && !participant.played) {
+    // Someone who only ever CLAIMED a vacated slot has no `played` flag of their
+    // own but is still owed the slot's card value and its fraction of the pot, so
+    // they must not be swept up by this.
+    if (isCasino && !participant.played && claimedWeight(participant) <= 0) {
       updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
       continue;
     }
@@ -1234,7 +1306,12 @@ export async function completeMission(
     // Casino Coat earn path: mark this game type completed; grant the Coat once
     // the player has successfully completed a table of all four game types. Works
     // in either season — the tracking is the same.
-    if (isCasino && mission.casinoGame) {
+    //
+    // Gated on `played`: the Coat is earned by SITTING a table of each game, and a
+    // pure claimant never played the game at all — they took over an abandoned slot
+    // without anteing, being dealt to, or locking a hand. Crediting them would let
+    // four claims buy the Coat without ever playing a hand.
+    if (isCasino && mission.casinoGame && participant.played) {
       updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
       const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
       const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
