@@ -353,7 +353,11 @@ Removing a card or a seat comes in two flavours at two scopes (a **2×2**, all f
 | **Kick card** ✕ | `adminRemoveCasinoSlot` (`mode:'kick'`) | 1 entry | **reserved** on the entry | yes |
 | **Kick seat** ✕✕ | `adminKickMissionParticipant` | **one per card** | reserved on each | yes |
 
+All four are in-progress actions. A forming table offers only the void column — see the note below.
+
 A **void** says the slot is dead — unplayable game, unfillable card — so nobody can take it over and its weight returns to the table. A **kick** says the Archipelago slot is fine but its player isn't, so it reopens for a replacement. Voids are no-fault and leave no mark; kicks write a `PlayerWarning`. `adminReleaseClaimableSlot` converts an unanswered kick into a void after the fact.
+
+> **Void vs kick is an IN-PROGRESS-only distinction.** It only means anything once a room exists and a removed slot is something another player could actually pick up. On a **forming** casino table both collapse into a single no-fault removal: no claimable slot, no warning, no share bookkeeping — the forfeited ante is the entire penalty, and marking the player's record on top of it would punish them twice for a table that never ran. (Deny the YAML instead if the config is the problem.) This is enforced in three places that must agree: `adminRemoveCasinoSlot` refuses `mode:'kick'` unless the mission is `inprogress`; `adminKickMissionParticipant` skips the warning when `forming && type === 'casino'`; and `MissionsPage` shows one **⊘ Remove seat** button instead of the Void/Kick pair (`splitRemoval = isCasino && isLive`). Non-casino missions have no wager to forfeit, so they keep warning on any kick. Pre-deploy voids also skip the `casinoVoidedShare` increment — `casinoShareUnits` is banked *at deploy* from whoever is still seated, so a seat pulled beforehand was never in the denominator to be released from.
 
 **The pot is measured in seat units.** `mission.casinoShareUnits` is banked at deploy (the number of seats that had `played`) because a removed seat is *deleted* from `participants` and cannot be counted later. `mission.casinoVoidedShare` accumulates every released fraction. Settlement then uses:
 

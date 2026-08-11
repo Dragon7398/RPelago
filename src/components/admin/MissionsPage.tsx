@@ -49,6 +49,11 @@ function MissionParticipantSlots({
   //   KICK — the Archipelago slot is still good, so it reopens as a claimable slot
   //          carrying its card and pot fraction, reserved for whoever takes it (and
   //          unpaid if nobody does). Punitive, so it also warns the player.
+  // Whether the void/kick choice is offered at all. It only means something on a
+  // LIVE casino table, where a removed slot is a real Archipelago slot someone else
+  // could pick up. Before deploy there is nothing to hand on, so the two collapse
+  // into one no-fault removal.
+  const splitRemoval = !!isCasino && !!isLive;
   const [confirmSeat, setConfirmSeat] = useState<null | 'void' | 'kick'>(null);
   const [confirmDel, setConfirmDel]   = useState<null | { i: number; mode: 'void' | 'kick' }>(null);
   const [delBusy, setDelBusy]         = useState(false);
@@ -67,7 +72,9 @@ function MissionParticipantSlots({
       const { goldSwing, remaining } = await adminRemoveCasinoSlot(missionId, playerId, i, mode);
       addToast(mode === 'kick'
         ? `Card kicked — reopened as an open slot. ${remaining} left on this seat, reward now ${goldSwing}g.`
-        : `Card voided — its share returns to the table. ${remaining} left on this seat, reward now ${goldSwing}g.`,
+        : isLive
+          ? `Card voided — its share returns to the table. ${remaining} left on this seat, reward now ${goldSwing}g.`
+          : `Card voided. ${remaining} left on this seat, reward now ${goldSwing}g.`,
         'success');
       setConfirmDel(null);
     } catch (err) {
@@ -82,7 +89,9 @@ function MissionParticipantSlots({
     setSeatBusy(true);
     try {
       await adminVoidCasinoSeat(missionId, playerId);
-      addToast(`${participant.playerName}'s seat voided — its whole share returns to the table.`, 'success');
+      addToast(isLive
+        ? `${participant.playerName}'s seat voided — its whole share returns to the table.`
+        : `${participant.playerName} removed from the table — they forfeit what they anted in.`, 'success');
       setConfirmSeat(null);
     } catch (err) {
       addToast(`Could not void seat: ${err instanceof Error ? err.message : String(err)}`, 'error');
@@ -101,18 +110,22 @@ function MissionParticipantSlots({
         {confirmSeat ? (
           <span className="admin-remove-confirm">
             <span className="admin-remove-explain">
-              {confirmSeat === 'kick'
+              {!splitRemoval
                 ? isCasino
-                  ? `Kick ${participant.playerName}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
+                  ? `Remove ${participant.playerName} from this table? Nothing has deployed yet, so there is nothing to hand on — they simply forfeit everything they have anted in. No warning is recorded.`
                   : `Kick ${participant.playerName}? Their slots reopen for a replacement and they are warned.`
-                : `Void ${participant.playerName}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
+                : confirmSeat === 'kick'
+                  ? `Kick ${participant.playerName}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
+                  : `Void ${participant.playerName}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
             </span>
             <button
               className="dash-action-btn danger"
               style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
               disabled={seatBusy}
               onClick={() => void removeSeat(confirmSeat)}
-            >{seatBusy ? '…' : confirmSeat === 'kick' ? 'Confirm Kick' : 'Confirm Void'}</button>
+            >{seatBusy ? '…'
+              : !splitRemoval ? 'Confirm Remove'
+              : confirmSeat === 'kick' ? 'Confirm Kick' : 'Confirm Void'}</button>
             <button
               className="dash-action-btn"
               style={{ fontSize: '0.6rem', padding: '0.18rem 0.45rem' }}
@@ -122,17 +135,24 @@ function MissionParticipantSlots({
           </span>
         ) : (
           <span style={{ display: 'flex', gap: '0.3rem' }}>
-            {isCasino && (
+            {/* Void vs kick is a LIVE-table distinction: it only means something once
+                there is an Archipelago slot that could be handed to someone else. On a
+                forming table both collapse into one no-fault removal — the forfeited
+                ante is the whole penalty, so there is no second choice to offer. */}
+            {splitRemoval && (
               <button className="dash-void-btn" onClick={() => setConfirmSeat('void')}
                 title="Void the whole seat — kills every card, returns its share to the table, no warning">
                 ⊘⊘ Void seat
               </button>
             )}
-            <button className="dash-kick-btn" onClick={() => setConfirmSeat('kick')}
-              title={isCasino
-                ? "Kick the whole seat — every card reopens as an open slot for someone else, and the player is warned"
-                : 'Kick this player from the mission'}>
-              {isCasino ? '✕✕ Kick seat' : 'Kick'}
+            <button className={splitRemoval || !isCasino ? 'dash-kick-btn' : 'dash-void-btn'}
+              onClick={() => setConfirmSeat(splitRemoval || !isCasino ? 'kick' : 'void')}
+              title={!splitRemoval && isCasino
+                ? 'Remove this seat — no replacement, no warning; they forfeit what they anted in'
+                : isCasino
+                  ? 'Kick the whole seat — every card reopens as an open slot for someone else, and the player is warned'
+                  : 'Kick this player from the mission'}>
+              {!isCasino ? 'Kick' : splitRemoval ? '✕✕ Kick seat' : '⊘ Remove seat'}
             </button>
           </span>
         )}
@@ -193,9 +213,11 @@ function MissionParticipantSlots({
               <span className="admin-remove-explain">
                 {confirmDel.mode === 'kick'
                   ? 'Reopen this card as an open slot? Its share of the pot is held for whoever takes it — and goes unpaid if nobody does. The player is warned.'
-                  : isCasino
-                    ? "Void this card? Nobody can take it over, and its share of the pot returns to the table. The player keeps the rest of their hand and isn't warned."
-                    : 'Remove this slot?'}
+                  : !isCasino
+                    ? 'Remove this slot?'
+                    : isLive
+                      ? "Void this card? Nobody can take it over, and its share of the pot returns to the table. The player keeps the rest of their hand and isn't warned."
+                      : "Void this card? The table has not deployed, so no pot shares exist yet — the seat simply loses this card and its value. The player can still re-pick their own cards while the table is forming, which is usually the better route."}
               </span>
               <button
                 className="dash-action-btn danger"

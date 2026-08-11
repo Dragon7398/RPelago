@@ -2124,8 +2124,10 @@ exports.adminRemoveCasinoSlot = (0, https_1.onCall)(async (request) => {
             auto: true,
         };
     }
-    else if (fraction > 0) {
+    else if (fraction > 0 && mission.state === 'inprogress') {
         // Released: shrinks the settle denominator, raising every survivor's share.
+        // Pre-deploy there is no denominator yet (casinoShareUnits is banked at deploy
+        // from the seats still present), so a forming void needs no bookkeeping.
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoVoidedShare`)] = database_2.ServerValue.increment(fraction);
     }
     await db.ref().update(updates);
@@ -2195,7 +2197,12 @@ exports.adminVoidCasinoSeat = (0, https_1.onCall)(async (request) => {
         ...clearSeatSecrets(seasonId, missionId, playerId),
         [logPath]: logEntry,
     };
-    if (released > 0) {
+    // Only meaningful once the table is live. `casinoShareUnits` is banked at deploy
+    // from whoever is still seated, so a seat pulled before that was never counted —
+    // releasing its weight would shrink a denominator it was never part of. (deploy
+    // also resets casinoVoidedShare, so this is belt-and-braces, but the arithmetic
+    // should be right on its own rather than rescued downstream.)
+    if (released > 0 && mission.state === 'inprogress') {
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/casinoVoidedShare`)] = database_2.ServerValue.increment(released);
     }
     // Forming tables reset their decay clock when the last seat leaves, exactly as
@@ -2368,18 +2375,27 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('not-found', 'Participant not found.');
     const label = gmMissionLabel(mission);
     const now = Date.now();
-    const warnRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push();
     const updates = {
         [(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
         [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
         // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
         ...clearSeatSecrets(seasonId, missionId, playerId),
-        [(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${warnRef.key}`)]: {
+    };
+    // The void/kick distinction — and the warning that comes with a kick — only
+    // exists once a table is LIVE. Pulling someone off a still-forming casino table
+    // is always no-fault: they forfeit everything they anted in, and that lost wager
+    // is the whole penalty. Marking their record on top of it would punish twice for
+    // a table that never even ran. (Non-casino missions have no wager to forfeit, so
+    // they keep warning on any kick.)
+    const noFault = mission.state === 'forming' && mission.type === 'casino';
+    if (!noFault) {
+        const warnRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push();
+        updates[(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${warnRef.key}`)] = {
             timestamp: now,
             message: `Removed from ${label} by admin.`,
             auto: true,
-        },
-    };
+        };
+    }
     if (mission.state === 'forming') {
         // Reset the decay timer if this was the last participant.
         const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
