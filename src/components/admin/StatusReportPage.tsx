@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { missionDisplayLabel } from '../../lib/missionLogic';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown, warnItemText,
-  type ReportCandidate, type ReportPlayerFinding,
+  excuseKey, type ExcuseMap, type ReportCandidate, type ReportPlayerFinding,
 } from '../../lib/statusReport';
-import { runOfficialStatusReport, markStatusWarningHandled } from '../../firebase/db';
-import type { OfficialReport, OfficialWarnWorld } from '../../types';
+import { runOfficialStatusReport, markStatusWarningHandled, excuseStatusProblem } from '../../firebase/db';
+import type { OfficialReport, OfficialProblemPlayer, OfficialProblemWorld, OfficialWarnWorld } from '../../types';
 
 const HOUR = 3_600_000;
 const RECENT_RUN_HOURS = 36;
@@ -19,10 +19,17 @@ const arr = <T,>(v: T[] | Record<string, T> | undefined | null): T[] =>
 
 // ── Live report: one candidate card (unchanged from the live view) ───────────
 
-function PlayerBlock({ player }: { player: ReportPlayerFinding }) {
+// `excuse` is supplied only for candidates that an official run would actually
+// report on (the Active list) — and only rendered for players who have a Problem,
+// since warnings never count against anyone and so have nothing to excuse.
+function PlayerBlock({ player, excuse }: { player: ReportPlayerFinding; excuse?: ReactNode }) {
+  const hasProblem = player.findings.some(f => f.tier === 'problem');
   return (
     <div className="sr-player">
-      <div className="sr-player-handle">{player.handle}</div>
+      <div className="sr-player-handle">
+        <span>{player.handle}</span>
+        {hasProblem && excuse}
+      </div>
       <ul className="sr-slot-list">
         {player.findings.map((f, i) => (
           <li key={i} className={`sr-slot sr-slot-${f.tier}`}>
@@ -42,7 +49,7 @@ function PlayerBlock({ player }: { player: ReportPlayerFinding }) {
   );
 }
 
-function CandidateCard({ c }: { c: ReportCandidate }) {
+function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode }) {
   const problems = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'problem').length, 0);
   const warnings = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'warning').length, 0);
   return (
@@ -57,7 +64,7 @@ function CandidateCard({ c }: { c: ReportCandidate }) {
           {warnings > 0 && <span className="sr-count sr-count-warning">{warnings}⚠</span>}
         </span>
       </div>
-      {c.players.map(p => <PlayerBlock key={p.playerId} player={p} />)}
+      {c.players.map(p => <PlayerBlock key={p.playerId} player={p} excuse={excuseFor?.(p.playerId)} />)}
     </div>
   );
 }
@@ -129,10 +136,68 @@ function WarnWorldRow({ reportId, reportTs, index, world }: { reportId: string; 
   );
 }
 
+// One player's problems on a stored report, with the after-the-fact excuse control.
+// Excusing here refunds the incident the run charged; there is no un-excuse, so the
+// reason input is confirmed explicitly rather than firing on the first click.
+function ProblemPlayerRow({ reportId, world, worldIndex, playerIndex, player }: {
+  reportId: string; world: OfficialProblemWorld; worldIndex: number; playerIndex: number; player: OfficialProblemPlayer;
+}) {
+  const { addToast } = useToast();
+  const uid = useAuth().user?.id;
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const slots = [...arr(player.stalled), ...arr(player.unstarted)];
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await excuseStatusProblem(
+        reportId, worldIndex, playerIndex, { kind: world.kind, id: world.id }, player.playerId, reason, uid,
+      );
+      addToast(`${player.handle} excused — incident refunded.`, 'success');
+      setOpen(false);
+    } catch (e) {
+      addToast(`Could not excuse: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className={`sr-prob-player${player.excused ? ' excused' : ''}`}>
+      <div className="sr-prob-player-head">
+        <span className="sr-prob-handle">{player.handle}</span>
+        <span className="sr-prob-slots">{slots.join(', ')}</span>
+        {player.excused
+          ? <span className="sr-excused-tag" title={player.excusedReason || 'Excused — no ping, no incident'}>
+              ✓ excused{player.excusedReason ? ` · ${player.excusedReason}` : ''}
+            </span>
+          : <button
+              className="sr-handled-btn" disabled={busy} onClick={() => setOpen(o => !o)}
+              title="Excuse this player: drop them from the ping and refund the incident this report charged"
+            >excuse</button>}
+      </div>
+      {open && !player.excused && (
+        <div className="sr-excuse-row">
+          <input
+            className="sr-excuse-reason" type="text" maxLength={120} autoFocus
+            placeholder="reason (optional) — e.g. explained in Discord"
+            value={reason} onChange={e => setReason(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+          />
+          <button className="dash-action-btn" disabled={busy} onClick={submit}>{busy ? '…' : 'Confirm'}</button>
+          <button className="dash-action-btn" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OfficialReportView({ reportId, report }: { reportId: string; report: OfficialReport }) {
   const problemsMd = renderProblemsMarkdown(report);
   const warningsMd = renderWarningsMarkdown(report);
   const warns = arr(report.warnings);
+  const probs = arr(report.problems);
 
   return (
     <div className="sr-report">
@@ -144,7 +209,19 @@ function OfficialReportView({ reportId, report }: { reportId: string; report: Of
         </div>
         {problemsMd
           ? <pre className="sr-md">{problemsMd}</pre>
-          : <div className="dash-empty">No problems in this report.</div>}
+          : <div className="dash-empty">No problems to ping in this report.</div>}
+        {/* The excuse ledger sits under the copy block: excusing rewrites the block
+            above (the player drops out of it) and refunds their incident. */}
+        {probs.map((w, wi) => (
+          <div className="sr-prob-world" key={`${w.kind}-${w.id}`}>
+            <div className="sr-prob-world-name">{w.name}</div>
+            {arr(w.players).map((p, pi) => (
+              <ProblemPlayerRow
+                key={p.playerId} reportId={reportId} world={w} worldIndex={wi} playerIndex={pi} player={p}
+              />
+            ))}
+          </div>
+        ))}
       </div>
 
       {/* Warnings — admin-facing, handled manually */}
@@ -196,6 +273,16 @@ export default function StatusReportPage() {
   const [running, setRunning] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  // Pre-run excuses, keyed by excuseKey → reason ('' when none typed). Presence of
+  // the key IS the excuse, so an empty reason still counts. Session-local: it feeds
+  // the next run and is cleared once that run lands.
+  const [excuses, setExcuses] = useState<ExcuseMap>({});
+  const toggleExcuse = (k: string) => setExcuses(prev => {
+    const next = { ...prev };
+    if (k in next) delete next[k]; else next[k] = '';
+    return next;
+  });
+
   const candidates = computeStatusReport(
     gameState?.missions ?? {},
     gameState?.tiles ?? {},
@@ -213,11 +300,38 @@ export default function StatusReportPage() {
   const lastRunAgoH = latest ? (now - latest[1].ts) / HOUR : Infinity;
   const ranRecently = lastRunAgoH < RECENT_RUN_HOURS;
 
+  // Excuse control for a live candidate — pre-run, so nothing has been charged yet
+  // and un-excusing is just removing the key.
+  const excuseFor = (c: ReportCandidate) => (playerId: string) => {
+    const k  = excuseKey(c.kind, c.id, playerId);
+    const on = k in excuses;
+    return (
+      <span className="sr-excuse">
+        <button
+          className={`sr-handled-btn${on ? ' done' : ''}`}
+          onClick={() => toggleExcuse(k)}
+          title={on
+            ? 'Excused — this run will not ping them or count an incident. Click to undo.'
+            : 'Excuse this player from the next run: no ping, no incident'}
+        >{on ? '✓ excused' : 'excuse'}</button>
+        {on && (
+          <input
+            className="sr-excuse-reason" type="text" maxLength={120}
+            placeholder="reason (optional)"
+            value={excuses[k]}
+            onChange={e => setExcuses(prev => ({ ...prev, [k]: e.target.value }))}
+          />
+        )}
+      </span>
+    );
+  };
+
   const doRun = async () => {
     setRunning(true);
     try {
-      await runOfficialStatusReport(buildOfficialReport(active, Date.now(), uid));
+      await runOfficialStatusReport(buildOfficialReport(active, Date.now(), uid, excuses));
       addToast('Official report generated.', 'success');
+      setExcuses({});
     } catch (e) {
       addToast(`Could not run report: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
@@ -271,7 +385,7 @@ export default function StatusReportPage() {
       <h3 className="sr-subhead">Live Candidates</h3>
       {active.length === 0
         ? <div className="dash-empty">No active report candidates — every in-progress mission and challenge is healthy.</div>
-        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} />)}
+        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} excuseFor={excuseFor(c)} />)}
 
       <CollapsibleSection title="Too Early" list={tooEarly} />
       <CollapsibleSection title="Recently Reported" list={recentlyReported} />

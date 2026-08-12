@@ -313,6 +313,9 @@ export interface GameState {
 // ── Official Status Report snapshots ─────────────────────────────────────────
 // Persisted when an admin runs an official report; see src/lib/statusReport.ts.
 
+// ⚠️ `allIdle60` is a persisted WIRE VALUE, not a live threshold. It predates the
+// 60h→72h move and stored reports still carry it, so the string stays put while
+// WARN_ALL_STALE_HOURS supplies the number the text renders. Do not rename it.
 export type StatusWarnCode = 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60';
 
 export interface OfficialProblemPlayer {
@@ -320,6 +323,17 @@ export interface OfficialProblemPlayer {
   handle:    string;    // "@discordHandle"
   stalled:   string[];  // In-Progress problem slot names ("Status on …?")
   unstarted: string[];  // Unstarted problem slot names ("Don't forget to start …")
+  // ── Excused ────────────────────────────────────────────────────────────────
+  // The admin accepted an explanation given OUTSIDE the tracker (typically in
+  // Discord) — the automated signals can't see it, so the flag is manual. An
+  // excused player is kept in the snapshot for the audit trail but is dropped
+  // from the player-facing Problems block and never charged a statusIncident.
+  // Set either before the run (from the live card) or after it (on the stored
+  // report, which refunds the incident it already charged).
+  excused?:       boolean;
+  excusedReason?: string;   // optional free text, e.g. "explained in Discord"
+  excusedAt?:     number;
+  excusedBy?:     string;   // admin uid
 }
 
 export interface OfficialProblemWorld {
@@ -333,6 +347,11 @@ export interface OfficialWarnItem {
   code:     StatusWarnCode;
   playerId?: string;    // present for player-specific codes (all but allIdle60)
   handle?:   string;
+  // Names of the slots that actually tripped this warning. For player-specific
+  // codes these are that player's slots; for the world-general allIdle60 they
+  // are every idle slot in the world, across players. Optional because reports
+  // stored before this field existed have none.
+  slots?:    string[];
 }
 
 export interface OfficialWarnWorld {

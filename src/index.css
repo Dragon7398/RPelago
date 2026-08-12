@@ -2459,6 +2459,121 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .dash-curse-save:hover { background: oklch(22% 0.08 145 / 0.5); color: oklch(72% 0.14 145); }
 
+/* ── Stats page ──
+   The In Progress / Complete columns are deliberately NOT colour-coded against
+   each other: the two state tokens collapse to the same hue on the light themes
+   (parchment/sakura map both --state-prog-border and --state-done-border into the
+   warm 50s), so hue would carry no information there and none at all for a
+   colour-blind reader. The column headers carry the meaning; the only colour here
+   is emphasis (gold = live, muted = settled, parchment = sum), each drawn from a
+   token every theme already tunes for its own background contrast. */
+.dash-stat-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Crimson Pro', serif; font-size: 0.82rem;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 2px;
+}
+.dash-stat-table th, .dash-stat-table td {
+  padding: 0.35rem 0.6rem; text-align: left;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.45);
+}
+.dash-stat-table tbody tr:last-child th,
+.dash-stat-table tbody tr:last-child td { border-bottom: none; }
+.dash-stat-table thead th {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--gold-dim); font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.dash-stat-table tbody th {
+  font-family: 'Cinzel', serif; font-size: 0.62rem; letter-spacing: 0.05em;
+  color: var(--parchment); font-weight: 500;
+}
+.dash-stat-table td.num, .dash-stat-table th.num {
+  text-align: right; font-variant-numeric: tabular-nums; width: 5.5rem;
+}
+.dash-stat-table td.live  { color: var(--gold); }
+.dash-stat-table td.done  { color: var(--text-muted); }
+.dash-stat-table td.total { color: var(--parchment); font-weight: 600; }
+.dash-stat-table tbody tr.zero th,
+.dash-stat-table tbody tr.zero td { opacity: 0.4; }
+.dash-stat-table tbody tr:hover th,
+.dash-stat-table tbody tr:hover td { background: oklch(from var(--border) l c h / 0.16); }
+.dash-stat-table tfoot th, .dash-stat-table tfoot td {
+  border-top: 1px solid var(--border); border-bottom: none;
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--gold-dim); font-weight: 600;
+}
+.dash-stat-table tfoot td { font-size: 0.82rem; letter-spacing: 0; text-transform: none; }
+
+.dash-stat-figures { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.dash-stat-fig {
+  display: flex; flex-direction: column; gap: 0.1rem; align-items: center;
+  flex: 1 1 6rem; min-width: 5.5rem;
+  padding: 0.4rem 0.6rem; border-radius: 2px;
+  background: var(--bg-card); border: 1px solid var(--border);
+}
+.dash-stat-fig-val {
+  font-family: 'Cinzel', serif; font-size: 1.15rem; line-height: 1.1;
+  color: var(--gold); font-variant-numeric: tabular-nums;
+}
+.dash-stat-fig-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-muted); text-align: center;
+}
+.dash-stat-note {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem;
+  line-height: 1.35; color: var(--text-muted);
+}
+.dash-stat-note code {
+  font-family: 'Courier New', monospace; font-style: normal; font-size: 0.68rem;
+  padding: 0 0.2rem; border-radius: 2px; color: var(--gold-dim);
+  background: oklch(from var(--border) l c h / 0.28);
+}
+.dash-stat-scope { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.dash-stat-scope-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-muted); margin-right: 0.2rem;
+}
+.dash-stat-scope-btn {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.06em;
+  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.12s;
+}
+.dash-stat-scope-btn:hover { border-color: var(--border-glow); color: var(--parchment); }
+.dash-stat-scope-btn.active {
+  background: oklch(from var(--gold) l c h / 0.14);
+  border-color: var(--gold-dim); color: var(--gold);
+}
+
+.dash-gold-board { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; }
+.dash-gold-row {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.3rem 0.5rem; border-radius: 2px;
+  background: var(--bg-card); border: 1px solid oklch(from var(--border) l c h / 0.55);
+}
+.dash-gold-row.disabled { opacity: 0.55; border-color: var(--ban-border); }
+.dash-gold-rank {
+  font-family: 'Cinzel', serif; font-size: 0.7rem; color: var(--text-dim);
+  width: 1.4rem; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums;
+}
+.dash-gold-row:nth-child(-n+3) .dash-gold-rank { color: var(--gold); }
+.dash-gold-who { display: flex; align-items: baseline; gap: 0.4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
+.dash-gold-name {
+  font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.04em;
+  color: var(--parchment);
+}
+.dash-gold-handle { font-size: 0.7rem; color: var(--text-dim); }
+.dash-gold-off {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.09em;
+  padding: 0.1rem 0.32rem; border-radius: 2px; flex-shrink: 0;
+  background: var(--ban-bg); border: 1px solid var(--ban-border); color: var(--ban-fg);
+}
+.dash-gold-amt {
+  font-family: 'Cinzel', serif; font-size: 0.8rem; color: var(--gold);
+  font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+.dash-gold-unit { font-size: 0.6rem; color: var(--gold-dim); margin-left: 0.1rem; }
+
 /* ══ TOASTS ══════════════════════════════════════════════════════════════════ */
 .toast-container {
   position: fixed; bottom: 5rem; right: 1.2rem; z-index: 500;
@@ -4555,7 +4670,10 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
   padding: 0.3rem 0 0.3rem 0.55rem; margin-bottom: 0.5rem;
   border-left: 2px solid oklch(from var(--gold-dim) l c h / 0.35);
 }
-.sr-player-handle { font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--gold); margin-bottom: 0.3rem; }
+.sr-player-handle {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  font-family: 'Cinzel', serif; font-size: 0.72rem; color: var(--gold); margin-bottom: 0.3rem;
+}
 
 .sr-slot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.32rem; }
 .sr-slot { display: flex; gap: 0.45rem; align-items: flex-start; }
@@ -4635,3 +4753,39 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 
 .sr-stored { margin-bottom: 0.5rem; }
 .sr-stored .casino-log-toggle { margin-bottom: 0.4rem; }
+
+/* Excuse controls — the admin clearing a player on evidence from outside the
+   trackers. Reuses .sr-handled-btn (incl. its `.done` green) so the "excused" and
+   "handled" affordances read as the same class of action across every theme. The
+   ✓ glyph and the "excused" word carry the state without relying on hue. */
+.sr-excuse { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.sr-excuse-reason {
+  font-family: inherit; font-size: 0.64rem; padding: 0.18rem 0.4rem; min-width: 11rem; flex: 1 1 11rem;
+  color: var(--parchment); background: oklch(from var(--bg-card) calc(l - 0.03) c h);
+  border: 1px solid oklch(from var(--gold-dim) l c h / 0.4); border-radius: 4px;
+}
+.sr-excuse-reason:focus { outline: none; border-color: var(--gold); }
+.sr-excuse-reason::placeholder { color: oklch(from var(--gold-dim) l c h / 0.65); }
+
+/* Stored-report problem ledger (post-run excusing) */
+.sr-prob-world { margin-top: 0.55rem; }
+.sr-prob-world-name { font-family: 'Cinzel', serif; font-size: 0.7rem; color: var(--parchment); margin-bottom: 0.2rem; }
+.sr-prob-player {
+  padding: 0.25rem 0 0.25rem 0.55rem;
+  border-left: 2px solid oklch(from var(--gold-dim) l c h / 0.35);
+}
+.sr-prob-player.excused { border-left-color: var(--state-avail-border); opacity: 0.72; }
+.sr-prob-player-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sr-prob-handle { font-family: 'Cinzel', serif; font-size: 0.7rem; color: var(--gold); }
+.sr-prob-slots { font-size: 0.64rem; color: var(--gold-dim); word-break: break-word; }
+.sr-prob-player.excused .sr-prob-handle,
+.sr-prob-player.excused .sr-prob-slots { text-decoration: line-through; }
+.sr-excused-tag {
+  margin-left: auto; flex-shrink: 0; font-size: 0.6rem; letter-spacing: 0.04em;
+  padding: 0.18rem 0.45rem; border-radius: 4px;
+  color: var(--state-avail-fg); border: 1px solid var(--state-avail-border);
+  background: oklch(from var(--bg-card) calc(l - 0.04) 0.03 145);
+}
+.sr-prob-player-head .sr-handled-btn { margin-left: auto; }
+.sr-excuse-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.3rem; }
+.sr-excuse-row .dash-action-btn { font-size: 0.6rem; padding: 0.2rem 0.5rem; }

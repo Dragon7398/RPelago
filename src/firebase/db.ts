@@ -9,6 +9,7 @@ import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
+import { hasUnexcusedProblem } from '../lib/statusReport';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -975,16 +976,21 @@ const worldBase = (kind: 'mission' | 'tile', id: string) =>
   kind === 'mission' ? `missions/${id}` : `tiles/${id}`;
 
 // Persist an official report and apply its side effects in one atomic update:
-//   • +1 statusIncident for every player who appears in a Problem world
-//   • reset lastReportAt (= report.ts) on every Problem world
+//   • +1 statusIncident for every UNEXCUSED player in a Problem world
+//   • reset lastReportAt (= report.ts) on every Problem world that pinged someone
 //   • store the report, then prune to the newest 10
+// An excused player was cleared by the admin on evidence the trackers can't see,
+// so they are charged nothing; a world where everyone was excused sent no ping at
+// all and keeps its old timer, staying visible instead of going "Recently Reported".
 export async function runOfficialStatusReport(report: OfficialReport): Promise<void> {
   assertDb();
   const updates: Record<string, unknown> = {};
 
   for (const w of report.problems) {
+    if (!hasUnexcusedProblem(w)) continue;
     updates[sPath(`${worldBase(w.kind, w.id)}/lastReportAt`)] = report.ts;
     for (const p of w.players) {
+      if (p.excused) continue;
       updates[sPath(`${worldBase(w.kind, w.id)}/statusIncidents/${p.playerId}`)] = increment(1);
     }
   }
@@ -1021,6 +1027,36 @@ export async function markStatusWarningHandled(
   const cur = await get(sRef(db!, `${worldBase(world.kind, world.id)}/lastReportAt`));
   const curVal = cur.exists() ? (cur.val() as number) : 0;
   if (reportTs > curVal) updates[sPath(`${worldBase(world.kind, world.id)}/lastReportAt`)] = reportTs;
+  await update(ref(db!), updates);
+}
+
+// Excuse a player's problems on a stored report, after the fact — they explained
+// themselves somewhere the trackers can't see (typically Discord). Marks the
+// snapshot row (which drops them from the Problems copy block) and refunds the
+// incident this report charged them on that world.
+//
+// The refund is read-then-write, NOT increment(-1): a player excused before the
+// run was never charged, and a blind decrement would push their count negative
+// and hide a later real incident from the ≥5 auto-warning.
+export async function excuseStatusProblem(
+  reportId: string, worldIndex: number, playerIndex: number,
+  world: { kind: 'mission' | 'tile'; id: string }, playerId: string,
+  reason: string, by?: string,
+): Promise<void> {
+  assertDb();
+  const row = `statusReports/${reportId}/problems/${worldIndex}/players/${playerIndex}`;
+  const updates: Record<string, unknown> = {
+    [sPath(`${row}/excused`)]:   true,
+    [sPath(`${row}/excusedAt`)]: Date.now(),
+  };
+  if (reason.trim()) updates[sPath(`${row}/excusedReason`)] = reason.trim();
+  if (by)            updates[sPath(`${row}/excusedBy`)]     = by;
+
+  const incPath = `${worldBase(world.kind, world.id)}/statusIncidents/${playerId}`;
+  const cur = await get(sRef(db!, incPath));
+  const n = cur.exists() ? Number(cur.val()) || 0 : 0;
+  if (n > 0) updates[sPath(incPath)] = n - 1 > 0 ? n - 1 : null;
+
   await update(ref(db!), updates);
 }
 

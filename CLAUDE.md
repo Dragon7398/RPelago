@@ -297,6 +297,17 @@ Admin **Report** tab (`StatusReportPage.tsx`) surfaces in-progress missions and 
 
 Running an **official report** (`runOfficialStatusReport` in `db.ts`) does one atomic update: +1 `statusIncidents[playerId]` on each Problem world (per-report, per-world), resets `lastReportAt = report.ts` on Problem worlds, stores the snapshot to `seasons/{id}/statusReports/{key}`, and prunes to the newest 10. `buildOfficialReport` + `renderProblemsMarkdown` / `renderWarningsMarkdown` produce the two copy-paste blocks (player-facing Problems; admin-facing Warnings). Marking a Warning world **handled** (`markStatusWarningHandled`) resets its timer to the report's `ts` but **never moves a newer `lastReportAt` backward**. At world completion, players with ≥5 `statusIncidents` get an auto `PlayerWarning` (see `onTileComplete` / `onMissionComplete`).
 
+Warning items carry **`slots`** — the names of the slots that actually tripped each code. Player-specific codes list that player's slots; the world-general `allIdle60` lists every idle slot across players. `warnItemText(it, wrap?)` takes a name decorator: identity for the on-screen list, `codeSpan` for the markdown block (so backticks aren't rendered literally in the UI).
+
+> **`allIdle60` is a persisted wire value, not a threshold.** `WARN_ALL_STALE_HOURS` moved 60h → 72h (alongside `PROBLEM_STALE_HOURS`) but the code string stays `allIdle60`, because stored reports in `statusReports/` still carry it. The rendered text reads the constant, so the line says "72 hours" while the key says 60. Do not rename it.
+
+**Excused problems.** Some players explain themselves in Discord — evidence the trackers structurally cannot see — so an admin can **excuse** a player's Problems on one world, which drops them from the player-facing ping and costs them no `statusIncident`. The unit is one player on one world (`excuseKey(kind, id, playerId)`), and it works from both sides of a run:
+
+- **Before** — the live candidate card's `excuse` toggle builds an `ExcuseMap` (key → optional reason) passed as `buildOfficialReport`'s 4th arg. Excused players are still written into the snapshot (audit trail) carrying `excused` / `excusedReason` / `excusedAt` / `excusedBy`, but `runOfficialStatusReport` skips their increment. **Presence of the key IS the excuse** — an empty reason still counts, so test with `in`/`hasOwnProperty`, never truthiness.
+- **After** — `excuseStatusProblem` on a stored report marks the snapshot row and **refunds** the incident. The refund is read-then-write, **not `increment(-1)`**: a player excused pre-run was never charged, and a blind decrement would go negative and mask a later real incident from the ≥5 auto-warning.
+
+`renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
+
 ### Player customization
 
 - **Name color**: 12 color options (`NAME_COLORS` in `constants.ts`). Requires owning the "Coat of Many Colors" item. Stored as `player.nameColor`.
@@ -437,8 +448,8 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/components/HelpModal.tsx` | Help modal shell |
 | `src/components/help/` | Help section components (11 sections: Overview, Map, Adventurers, Feats, Traits, Boss, Challenges, Shop, Orbs, Yaml, Missions) |
 | `src/components/lightbox/` | Lightbox sub-components (AvailableState, InProgressState, CompleteState, TownLightbox, BossSection, AdvRow, PublicSlotsList, ClaimableSlots, TileDetails, lbHelpers, GuildmasterMissions) |
-| `src/components/AdminDashboard.tsx` | Admin dashboard shell (tabs: challenges, missions, casino, report, kmk, map, players, shops, orbs) |
-| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage, StatusReportPage |
+| `src/components/AdminDashboard.tsx` | Admin dashboard shell (tabs: challenges, missions, casino, report, stats, kmk, map, players, shops, orbs) |
+| `src/components/admin/` | Admin dashboard tabs: ChallengesPage, PlayersPage, ShopsPage, OrbsPage, MapPage, MissionsPage, StatusReportPage, StatsPage |
 | `src/components/admin/kmk/` | KmkPage (tab shell), KmkImport (CSV import form), KmkLedger (task list UI) |
 | `src/components/admin/mapPage/` | Map page sub-editors: MapGridPanel, AdvSlotEditor, PublicSlotEditor, ClaimableBonusEditor, TraitEditor |
 | `src/components/admin/playersPage/` | PlayerCard sub-component |

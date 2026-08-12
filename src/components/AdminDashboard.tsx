@@ -9,10 +9,11 @@ import OrbsPage from './admin/OrbsPage';
 import MapPage from './admin/MapPage';
 import MissionsPage from './admin/MissionsPage';
 import StatusReportPage from './admin/StatusReportPage';
+import StatsPage from './admin/StatsPage';
 import KmkPage from './admin/kmk/KmkPage';
 import SeasonSwitcher from './SeasonSwitcher';
 
-type DashPage = 'challenges' | 'missions' | 'casino' | 'report' | 'players' | 'shops' | 'orbs' | 'map' | 'kmk';
+type DashPage = 'challenges' | 'missions' | 'casino' | 'report' | 'stats' | 'players' | 'shops' | 'orbs' | 'map' | 'kmk';
 type Shell = 'map' | 'casino';
 
 // The visible tab set is season-driven (see season-architecture-plan.md's tab
@@ -24,6 +25,7 @@ const ALL_PAGES: { id: DashPage; label: string; shells: Shell[] }[] = [
   { id: 'missions',   label: '⚜ Missions',   shells: ['map'] },
   { id: 'casino',     label: '🂡 Casino',     shells: ['map', 'casino'] },
   { id: 'report',     label: '📋 Report',     shells: ['map', 'casino'] },
+  { id: 'stats',      label: '📊 Stats',      shells: ['map', 'casino'] },
   { id: 'kmk',        label: '🗝 Keep',       shells: ['map', 'casino'] },
   { id: 'map',        label: '🗺 Map',        shells: ['map'] },
   { id: 'players',    label: '👥 Players',    shells: ['map', 'casino'] },
@@ -183,6 +185,7 @@ export default function AdminDashboard() {
         {activePage === 'missions'   && <MissionsPage filter="noncasino" />}
         {activePage === 'casino'     && <MissionsPage filter="casino" />}
         {activePage === 'report'     && <StatusReportPage />}
+        {activePage === 'stats'      && <StatsPage />}
         {activePage === 'kmk'        && <KmkPage />}
         {activePage === 'map'        && <MapPage initialCoord={mapInitCoord} />}
         {activePage === 'players'    && <PlayersPage />}
