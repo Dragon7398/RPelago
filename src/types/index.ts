@@ -10,7 +10,7 @@ export type TileTypeKey =
   | 'castle' | 'dungeon' | 'tower';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
-export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
+export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
 // Which card game a casino table is pinned to (S1.5 multi-table model).
 export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack';
 

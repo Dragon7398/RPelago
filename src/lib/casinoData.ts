@@ -45,51 +45,55 @@ export const CARD_TYPES: Readonly<Record<CardTypeKey, CardTypeDef>> = {
   narrow:    { key: 'narrow',    label: 'Narrow',    suit: '♣', copies: 1, range: [50, 100], order: 4 },
 };
 
-// Raw category data: [name, type, gameCount]
+// Raw category data: [name, type, gameCount]. Gold values are NOT stored here —
+// computeCategories() derives each one from the type's range in CARD_TYPES above,
+// so the ranges quoted below are echoes of that table, not a second source.
 const RAW: readonly [string, CardTypeKey, number][] = [
-  // Broad (3 copies each, gold range 15–30)
+  // Broad (3 copies each, gold range 30–60)
   ['2D platformer',           'broad',     57],
   ['3D platformer',           'broad',     24],
   ['Action RPG',              'broad',     35],
   ['Turn-based RPG',          'broad',     35],
   ['Roguelike / roguelite',   'broad',     19],
-  ['Puzzle',                  'broad',     21],
-  ['FPS / shooter',           'broad',     11],
-  ['Strategy',                'broad',     12],
+  ['Puzzle',                  'broad',     22],
+  ['FPS / shooter',           'broad',     23],
+  ['Strategy',                'broad',     45],
   ['Simulation / builder',    'broad',     15],
-  ['Exploration / open world','broad',     17],
-  // Narrow (1 copy each, gold range 25–50)
+  ['Exploration / open world','broad',     20],
+  // Narrow (1 copy each, gold range 50–100)
   ['Metroidvania',            'narrow',    35],
   ['Factory builder',         'narrow',     6],
   ['Survival / sandbox',      'narrow',     9],
   ['Horror / unsettling',     'narrow',    10],
-  ['Cozy games',              'narrow',    19],
+  ['Cozy games',              'narrow',    25],
   ['Card games',              'narrow',    14],
   ['Rhythm / music game',     'narrow',     8],
   ['Tactical RPG',            'narrow',     6],
   ['Racing / driving',        'narrow',     8],
-  // Franchise (1 copy each, gold range 25–40)
+  // Franchise (1 copy each, gold range 50–80)
   ['Zelda',                   'franchise', 14],
   ['Mario',                   'franchise', 25],
   ['Pokemon',                 'franchise', 14],
   ['Castlevania',             'franchise',  5],
-  ['Mega Man',                'franchise',  6],
+  ['Mega Man',                'franchise', 12],
   ['Kingdom Hearts',          'franchise',  5],
-  ['Final Fantasy',           'franchise',  9],
-  ['Sonic',                   'franchise',  9],
-  ['Metroid',                 'franchise',  5],
+  ['Final Fantasy',           'franchise', 12],
+  ['Sonic',                   'franchise', 12],
+  ['Metroid',                 'franchise',  4],
   ['Donkey Kong',             'franchise',  7],
-  // Platform (2 copies each, gold range 20–35)
-  ['NES / Famicom',           'platform',   9],
+  // Platform (2 copies each, gold range 40–70)
+  ['NES / Famicom',           'platform',  10],
   ['SNES / Super Famicom',    'platform',  30],
-  ['Game Boy',                'platform',  25],
-  ['Non-Nintendo Console',    'platform',  10],
-  ['AP-original',             'platform',  30],
+  ['Game Boy',                'platform',  30],
+  ['DS / 3DS',                'platform',  15],
+  ['Non-Nintendo Console',    'platform',  45],
+  ['AP-original',             'platform',  35],
+  ['N64 / Nintendo 64',       'platform',  27],
 ];
 
 // Optional flavour notes displayed on a card's details line
 const CARD_NOTES: Readonly<Record<string, string>> = {
-  'Game Boy':  'e.g. GB, GBA, GBC, DS, 3DS',
+  'Game Boy':  'e.g. GB, GBA, GBC',
   'AP-original': 'A game made specifically for Archipelago',
 };
 
@@ -126,7 +130,8 @@ export const WILD_DEF: CardDef = {
 // All unique card definitions (wild first, then one per category)
 export const CARD_DEFS: readonly CardDef[] = [WILD_DEF, ...computeCategories()];
 
-// The full deck as a multiset: CARD_DEFS expanded by copies count (64 cards total).
+// The full deck as a multiset: CARD_DEFS expanded by copies count (68 cards at
+// present — DECK_TOTAL is the live figure; don't rely on the number quoted here).
 // Pass excludeTypes to strip whole categories out for a deck variant (see DECK_VARIANTS).
 export function buildDeck(excludeTypes: readonly CardTypeKey[] = []): DeckCard[] {
   const excl = new Set(excludeTypes);
@@ -148,7 +153,8 @@ export interface DeckVariant {
   key:          CasinoDeckChoice;
   label:        string;
   excludeTypes: CardTypeKey[];  // card types stripped entirely from this seat's deck
-  gpBoost:      number;         // flat fraction added to this seat's own reward at settlement
+  gpBoost:      number;         // SIGNED fraction applied to this seat's own reward at settlement
+                                // (Purist +0.10, Safety −0.10, others 0) — see applyDeckBoost
   blurb:        string;
 }
 
@@ -161,23 +167,30 @@ export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
   unconsoled: {
     key: 'unconsoled', label: 'Unconsoled',
     excludeTypes: ['platform'], gpBoost: 0,
-    blurb: 'Pulls every Platform card from the deck — no NES, SNES, Game Boy or AP-original.',
+    blurb: 'Pulls every Platform card from the deck — no console or handheld categories.',
   },
   indie: {
     key: 'indie', label: 'Indie',
     excludeTypes: ['franchise'], gpBoost: 0,
     blurb: 'Pulls every Franchise card from the deck — no Zelda, Mario, Pokemon.',
   },
+  safety: {
+    key: 'safety', label: 'Safety',
+    excludeTypes: ['platform', 'franchise'], gpBoost: -0.10,
+    blurb: 'Unconsoled and Indie combined — no console, handheld or Franchise categories at all. '
+         + 'The narrowest deck, and you pay for the comfort: −10% GP on everything you win.',
+  },
 };
 
-export const DECK_VARIANT_ORDER: CasinoDeckChoice[] = ['purist', 'unconsoled', 'indie'];
+export const DECK_VARIANT_ORDER: CasinoDeckChoice[] = ['purist', 'unconsoled', 'indie', 'safety'];
 
 // Participant records predate this feature — treat a missing value as Purist.
 export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
   return seat.deckChoice ?? 'purist';
 }
 
-// How many cards a given deck variant plays with — for the picker's "N of 64" line.
+// How many cards a given deck variant plays with — for the picker's "N of M" line
+// (the picker passes deckSizeFor('purist') as M, so both sides stay derived).
 export function deckSizeFor(choice: CasinoDeckChoice): number {
   const excl = new Set(DECK_VARIANTS[choice].excludeTypes);
   return CARD_DEFS.reduce((s, d) => (excl.has(d.type) ? s : s + d.copies), 0);
@@ -256,9 +269,10 @@ export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
   },
 };
 
-// The cheapest ante across all games — the gold a player must hold to sit at
-// SOME table. Mirrors the hardcoded CASINO_MIN_ENLIST_GOLD; keep them in step.
-// (= Hold 'Em's 80g ante.)
+// The cheapest ante across all games (= Hold 'Em's 80g). Display/reference only:
+// enlisting does NOT gate on this. Both enlistInMission and computeMissionCard
+// require the table's FULL finish cost — seatSpend(game, { playedOn: true }) —
+// so a seat can never lock in and then be unable to play on (forced fold).
 export function minCasinoAnte(): number {
   return Math.min(...CASINO_GAME_ORDER.map(g => CASINO_GAMES[g].ante));
 }

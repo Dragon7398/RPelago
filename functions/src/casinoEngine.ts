@@ -5,7 +5,7 @@
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type CardTypeKey = 'wild' | 'broad' | 'platform' | 'franchise' | 'narrow';
-export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
+export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
 
 export interface DeckCard {
   name:      string;
@@ -158,16 +158,16 @@ const RAW: readonly [string, CardTypeKey, number][] = [
   ['Action RPG',               'broad',      35],
   ['Turn-based RPG',           'broad',      35],
   ['Roguelike / roguelite',    'broad',      19],
-  ['Puzzle',                   'broad',      21],
-  ['FPS / shooter',            'broad',      11],
-  ['Strategy',                 'broad',      12],
+  ['Puzzle',                   'broad',      22],
+  ['FPS / shooter',            'broad',      23],
+  ['Strategy',                 'broad',      45],
   ['Simulation / builder',     'broad',      15],
-  ['Exploration / open world', 'broad',      17],
+  ['Exploration / open world', 'broad',      20],
   ['Metroidvania',             'narrow',     35],
   ['Factory builder',          'narrow',      6],
   ['Survival / sandbox',       'narrow',      9],
   ['Horror / unsettling',      'narrow',     10],
-  ['Cozy games',               'narrow',     19],
+  ['Cozy games',               'narrow',     25],
   ['Card games',               'narrow',     14],
   ['Rhythm / music game',      'narrow',      8],
   ['Tactical RPG',             'narrow',      6],
@@ -176,21 +176,23 @@ const RAW: readonly [string, CardTypeKey, number][] = [
   ['Mario',                    'franchise',  25],
   ['Pokemon',                  'franchise',  14],
   ['Castlevania',              'franchise',   5],
-  ['Mega Man',                 'franchise',   6],
+  ['Mega Man',                 'franchise',  12],
   ['Kingdom Hearts',           'franchise',   5],
-  ['Final Fantasy',            'franchise',   9],
-  ['Sonic',                    'franchise',   9],
-  ['Metroid',                  'franchise',   5],
+  ['Final Fantasy',            'franchise',  12],
+  ['Sonic',                    'franchise',  12],
+  ['Metroid',                  'franchise',   4],
   ['Donkey Kong',              'franchise',   7],
-  ['NES / Famicom',            'platform',    9],
+  ['NES / Famicom',            'platform',   10],
   ['SNES / Super Famicom',     'platform',   30],
-  ['Game Boy',                 'platform',   25],
-  ['Non-Nintendo Console',     'platform',   10],
-  ['AP-original',              'platform',   30],
+  ['Game Boy',                 'platform',   30],
+  ['DS / 3DS',                 'platform',   15],
+  ['Non-Nintendo Console',     'platform',   45],
+  ['AP-original',              'platform',   35],
+  ['N64 / Nintendo 64',        'platform',   27],
 ];
 
 const CARD_NOTES: Record<string, string> = {
-  'Game Boy':    'e.g. GB, GBA, GBC, DS, 3DS',
+  'Game Boy':    'e.g. GB, GBA, GBC',
   'AP-original': 'A game made specifically for Archipelago',
 };
 
@@ -255,12 +257,18 @@ export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
   unconsoled: {
     key: 'unconsoled', label: 'Unconsoled',
     excludeTypes: ['platform'], gpBoost: 0,
-    blurb: 'Pulls every Platform card from the deck — no NES, SNES, Game Boy or AP-original.',
+    blurb: 'Pulls every Platform card from the deck — no console or handheld categories.',
   },
   indie: {
     key: 'indie', label: 'Indie',
     excludeTypes: ['franchise'], gpBoost: 0,
     blurb: 'Pulls every Franchise card from the deck — no Zelda, Mario, Pokemon.',
+  },
+  safety: {
+    key: 'safety', label: 'Safety',
+    excludeTypes: ['platform', 'franchise'], gpBoost: -0.10,
+    blurb: 'Unconsoled and Indie combined — no console, handheld or Franchise categories at all. '
+         + 'The narrowest deck, and you pay for the comfort: −10% GP on everything you win.',
   },
 };
 
@@ -343,9 +351,11 @@ export function selectCommitted(
 }
 
 // Mirror of applyDeckBoost in src/lib/casinoSlots.ts.
+// ⚠️ The guard is `!== 0`, NOT `> 0`: gpBoost is signed (Safety is −0.10), and a
+// `> 0` test silently drops every penalty deck, paying the full unmodified stake.
 export function applyDeckBoost(reward: number, choice: CasinoDeckChoice): number {
   const boost = DECK_VARIANTS[choice].gpBoost;
-  return boost > 0 ? Math.round(reward * (1 + boost)) : reward;
+  return boost !== 0 ? Math.round(reward * (1 + boost)) : reward;
 }
 
 // ── Gambit deck ──────────────────────────────────────────────────────────────

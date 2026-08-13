@@ -2,7 +2,8 @@ import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } fro
 import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
-import { countUnfinishedSets } from './slotHelpers';
+import { countUnfinishedSets, normalizeSlots, claimEntries } from './slotHelpers';
+import { parseApYaml } from './apYaml';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -462,6 +463,78 @@ export function fmtDayClock(totalSec: number): string {
   const m   = Math.floor((s % 3600) / 60);
   const pad = (n: number) => String(n).padStart(2, '0');
   return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`;
+}
+
+// ── Game titles the host has already had to source ────────────────────────────
+//
+// The host installs an APworld for every game a config asks for, so when
+// verifying a table's uploads the useful question is "have I had to source this
+// one before?". A mission counts as having sourced its games once its room
+// actually exists — an in-progress table WITH a link, or a finished one. A
+// forming table contributes nothing: nothing has been generated, seats can still
+// be voided, and its games are still hypothetical.
+//
+// Titles are folded exactly as StatsPage folds them — case- and whitespace-
+// insensitive, and nothing fuzzier. On a casino seat `slot.game` is lifted
+// verbatim from the config's `game:` field by parseApYaml, and AP itself demands
+// an exact APworld-name match, so two titles differing by more than case or
+// spacing are two different games.
+
+export const foldGameTitle = (raw: string) => raw.trim().replace(/\s+/g, ' ');
+export const gameTitleKey  = (raw: string) => foldGameTitle(raw).toLowerCase();
+
+/** Has this mission reached the point where its games had to be downloaded? */
+export function hasSourcedGames(m: GMMission): boolean {
+  return m.state === 'complete' || (m.state === 'inprogress' && !awaitingRoom(m));
+}
+
+/**
+ * Folded titles of every game running on — or finished on — a sourced mission
+ * other than `excludeId`. Pass the union of `missions` and `missionsHistory`:
+ * `archivedMission` stamps `state: 'complete'`, so both nodes filter identically.
+ *
+ * Claimable slots are counted alongside seated ones: a claimable slot was carved
+ * off a live seat on a table that already has a room, so its game is downloaded
+ * whether or not anybody has taken it over.
+ */
+export function sourcedGameTitles(missions: Iterable<GMMission>, excludeId?: string): Set<string> {
+  const seen = new Set<string>();
+  const add = (slots: AdvSlot[]) => {
+    for (const s of slots) {
+      const key = gameTitleKey(s.game ?? '');
+      if (key) seen.add(key);
+    }
+  };
+  for (const m of missions) {
+    if (m.id === excludeId || !hasSourcedGames(m)) continue;
+    for (const p of Object.values(m.participants ?? {})) add(normalizeSlots(p.slots));
+    for (const [, entry] of claimEntries(m)) add(entry.slots);
+  }
+  return seen;
+}
+
+/**
+ * Games in one uploaded config that no other sourced mission has asked for yet —
+ * i.e. APworlds the host must go and download before this room can be generated.
+ * Returned as display titles, deduped within the file, so an empty array means
+ * "nothing new here".
+ *
+ * A weighted `game:` block can't be pinned to one world, so its viable candidates
+ * are judged individually: if any is unsourced the roll may still land on a
+ * download, and the title is marked "(?)" to say it's a maybe rather than a
+ * certainty. A weighted block with no viable option resolves to no candidates and
+ * is ignored — that file is broken in a way `parseApYaml` already reports.
+ */
+export function newGamesInYaml(text: string, sourced: Set<string>): string[] {
+  const out = new Map<string, string>();   // folded key → display title
+  for (const s of parseApYaml(text).slots) {
+    for (const t of s.randomized ? (s.candidates ?? []) : [s.game]) {
+      const key = gameTitleKey(t);
+      if (!key || sourced.has(key) || out.has(key)) continue;
+      out.set(key, foldGameTitle(t) + (s.randomized ? ' (?)' : ''));
+    }
+  }
+  return [...out.values()];
 }
 
 // Thin wrappers over the shared slot-completion core (slotHelpers.ts). Missions

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Client (canonical) casino modules.
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend, buildDeck,
+  DECK_VARIANTS, DECK_VARIANT_ORDER,
   type CasinoGame,
 } from '../../src/lib/casinoData';
 import {
@@ -180,11 +181,20 @@ describe('scoring is a plain sum for every variant', () => {
 });
 
 describe('applyDeckBoost', () => {
-  it('adds 10% for Purist, rounded once, and leaves others untouched', () => {
+  it('adds 10% for Purist, rounded once, and leaves the flat decks untouched', () => {
     expect(clientApplyDeckBoost(100, 'purist')).toBe(110);
     expect(clientApplyDeckBoost(105, 'purist')).toBe(116); // round(115.5)
     expect(clientApplyDeckBoost(100, 'unconsoled')).toBe(100);
     expect(clientApplyDeckBoost(100, 'indie')).toBe(100);
+  });
+
+  // Regression: the guard used to be `boost > 0`, which paid Safety the full
+  // unmodified stake. A penalty deck MUST come out below the raw reward.
+  it('subtracts 10% for Safety, rounded once', () => {
+    expect(clientApplyDeckBoost(100, 'safety')).toBe(90);
+    expect(clientApplyDeckBoost(105, 'safety')).toBe(95);  // round(94.5)
+    expect(clientApplyDeckBoost(0,   'safety')).toBe(0);
+    expect(clientApplyDeckBoost(250, 'safety')).toBeLessThan(250);
   });
 });
 
@@ -738,6 +748,34 @@ describe('client and server casino engines stay in sync', () => {
     expect(server.minCasinoAnte()).toBe(minCasinoAnte());
     expect(server.CASINO_XP_FLOOR).toBe(CASINO_XP_FLOOR);
     expect(server.CASINO_POT_CUT_PCT).toBe(CASINO_POT_CUT_PCT);
+  });
+
+  // The card table (RAW + the per-type gold ranges) is hand-duplicated in both
+  // files, and every card's gold value is DERIVED from it — so a one-row edit on
+  // one side reprices cards on the other, and worse, changing a type's MIN or MAX
+  // count re-scales every other card of that type. A seat then gets dealt one
+  // value and paid another, with nothing to catch it.
+  // Comparing the fully built decks covers names, types, counts, derived values,
+  // copies, blurbs and uid numbering in one assertion.
+  it('buildDeck is identical on both sides, for every deck variant', () => {
+    expect(server.buildDeck().length).toBe(buildDeck().length);
+    expect(server.buildDeck()).toEqual(buildDeck());
+    for (const key of DECK_VARIANT_ORDER) {
+      const excl = DECK_VARIANTS[key].excludeTypes;
+      expect(server.buildDeck(excl)).toEqual(buildDeck(excl));
+    }
+  });
+
+  // A deck variant is duplicated across both files (key, excludeTypes, gpBoost),
+  // and a seat's reward is computed server-side but PREVIEWED client-side — so a
+  // drift here quotes the player one number and pays them another.
+  it('DECK_VARIANTS and applyDeckBoost are identical on both sides', () => {
+    expect(server.DECK_VARIANTS).toEqual(DECK_VARIANTS);
+    for (const key of DECK_VARIANT_ORDER) {
+      for (const reward of [0, 1, 37, 100, 105, 250, 999]) {
+        expect(server.applyDeckBoost(reward, key)).toBe(clientApplyDeckBoost(reward, key));
+      }
+    }
   });
 
   it('seatSpend matches for every game and flag combination', () => {

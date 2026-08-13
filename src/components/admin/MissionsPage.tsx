@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally, sourcedGameTitles, newGamesInYaml } from '../../lib/missionLogic';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
@@ -400,6 +400,7 @@ function yamlFileNames(yamls: CasinoYaml[]): string[] {
 // all seats, never a combined single file.
 function CasinoYamlDownload({ missionId, label }: { missionId: string; label: string }) {
   const { addToast } = useToast();
+  const { gameState } = useGameState();
   const [yamls, setYamls]     = useState<CasinoYaml[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDeny, setConfirmDeny] = useState<string | null>(null);
@@ -444,6 +445,18 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
 
   const names = yamls ? yamlFileNames(yamls) : [];
 
+  // Every game already downloaded for some OTHER room — a live table with a link
+  // or a settled one. This table is excluded on purpose: its own games are the
+  // ones being verified right now, and none of them has been sourced yet, so two
+  // seats here asking for the same unfamiliar game are both correctly flagged.
+  const sourced = useMemo(
+    () => sourcedGameTitles(
+      [...Object.values(gameState?.missions ?? {}), ...Object.values(gameState?.missionsHistory ?? {})],
+      missionId,
+    ),
+    [gameState?.missions, gameState?.missionsHistory, missionId],
+  );
+
   return (
     <div className="casino-yaml-block">
       {yamls === null ? (
@@ -463,10 +476,20 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
+            // Flags the seats that will cost the host a download before this room
+            // can be generated, so unfamiliar APworlds are spotted at verify time
+            // rather than mid-generation.
+            const fresh = newGamesInYaml(y.text, sourced);
             return (
             <div key={y.uid} className="casino-yaml-row">
               <span className="casino-yaml-name">
                 {y.playerName}
+                {fresh.length > 0 && (
+                  <span className="casino-yaml-new"
+                        title={`Not seen on any other in-progress (with a room) or completed mission — ${fresh.length === 1 ? 'download needed' : 'downloads needed'}: ${fresh.join(', ')}`}>
+                    NEW{fresh.length > 1 ? ` ×${fresh.length}` : ''}
+                  </span>
+                )}
                 {pb.map((f, j) => (
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>

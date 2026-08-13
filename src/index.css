@@ -32,6 +32,13 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --open-bg:     oklch(16% 0.08 320 / 0.36);
   --open-bg-hi:  oklch(24% 0.11 320 / 0.55);
   --open-border: oklch(46% 0.14 320);
+  /* "New here" surface — a neutral heads-up, never an error. Cyan keeps it clear
+     of the gold (warn) and red (reject) badges it sits beside, and stays legible
+     on the Deutan/Protan themes, whose blue-yellow axis leaves cyan readable. The
+     badge always carries the word NEW, so hue is never the only cue. */
+  --new-fg:      oklch(74% 0.13 195);
+  --new-bg:      oklch(18% 0.07 195 / 0.42);
+  --new-border:  oklch(48% 0.12 195);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -1102,6 +1109,15 @@ header p {
 .casino-yaml-pb.reject {
   color: oklch(72% 0.19 25); background: oklch(55% 0.16 25 / 0.14);
   border: 1px solid oklch(55% 0.16 25 / 0.55);
+}
+/* "This seat wants an APworld you haven't downloaded for any other room yet."
+   Shares the PB badges' geometry so the row reads as one strip of flags, but uses
+   the neutral --new-* surface: it is information for the host, not a fault. */
+.casino-yaml-new {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em;
+  padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
+  color: var(--new-fg); background: var(--new-bg);
+  border: 1px solid var(--new-border);
 }
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
 .casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -3829,6 +3845,9 @@ body.theme-lapis {
   --open-bg:     oklch(94% 0.04 320 / 0.5);
   --open-bg-hi:  oklch(88% 0.07 320 / 0.65);
   --open-border: oklch(54% 0.15 320);
+  --new-fg:      oklch(38% 0.13 195);
+  --new-bg:      oklch(93% 0.04 195 / 0.55);
+  --new-border:  oklch(52% 0.12 195);
 }
 /* Unban stays green, and green-on-cream has the same wash problem. */
 body.theme-parchment .dash-ban-lift,
