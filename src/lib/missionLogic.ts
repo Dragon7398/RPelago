@@ -430,6 +430,17 @@ export function casinoTableShares(m: GMMission, rng: () => number = Math.random)
   return casinoPotShares(m.pot ?? 0, weights, casinoShareDenominator(m), rng);
 }
 
+/**
+ * The pre-settlement ESTIMATE of one seat's cut — a floor split of the current
+ * pot across the seats expected to take a share. Display only: it assumes a
+ * full one-unit seat (no voids, no claims) and the pot is still growing as
+ * later seats ante in, so it is a floor, not a promise. `casinoTableShares` is
+ * the real math. Shared so the pot chip and the play readout can't drift.
+ */
+export function estimatedSeatShare(pot: number, seats: number): number {
+  return pot > 0 && seats > 0 ? Math.floor(pot / seats) : 0;
+}
+
 // What a seat actually paid at this table, read back off the audit log rather
 // than re-derived from `seatSpend`: the log is the only record that captures the
 // optional spends (reroll, Hold 'Em play-on) *and* gambit gold — including a

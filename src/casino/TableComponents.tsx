@@ -1,11 +1,27 @@
 // Seat rail, pot chip, challenge panel, readout, gauge, and reveal row components.
 
 import { useState } from 'react';
-import type { DeckCard } from '../lib/casinoData';
+import { DECK_VARIANTS, type DeckCard } from '../lib/casinoData';
 import type { CasinoStats, CasinoDeckChoice } from '../types';
 import type { GambitDef } from '../lib/casinoGambits';
 import { applyDeckBoost } from '../lib/casinoSlots';
+import { estimatedSeatShare } from '../lib/missionLogic';
 import { discordAvatarUrl } from '../lib/discordAvatar';
+
+// The deck-variant GP modifier badge. ⚠️ `gpBoost` is SIGNED, so both the label
+// and the up/down class are read off its sign — this used to be hardcoded to
+// "+10% Purist", which meant a Safety seat saw its correctly-REDUCED reward
+// captioned as a bonus. Renders nothing for the flat variants.
+function DeckBoostBadge({ choice, lead }: { choice?: CasinoDeckChoice; lead?: boolean }) {
+  const v = choice ? DECK_VARIANTS[choice] : null;
+  if (!v || v.gpBoost === 0) return null;
+  const up = v.gpBoost > 0;
+  return (
+    <span className={`cz-ch-diff ${up ? 'up' : 'down'}`}>
+      {lead ? ' ' : ''}{up ? '+' : '−'}{Math.round(Math.abs(v.gpBoost) * 100)}% {v.label}
+    </span>
+  );
+}
 
 // A seat avatar: the player's Discord avatar, falling back to the letter circle.
 function SeatAvatar({ cls, playerId, avatarHash, name, style }: {
@@ -28,8 +44,9 @@ interface PotDisplayProps {
 }
 
 export function PotDisplay({ amount, bump, seats }: PotDisplayProps) {
-  // Mirrors casinoPotShares: an even floor split, remainder to the earliest seats.
-  const share = seats != null && seats > 0 ? Math.floor(amount / seats) : null;
+  // Same estimate the play readout adds into its Net line — shared so the two
+  // can never quote the player different numbers for the same pot.
+  const share = seats != null && seats > 0 ? estimatedSeatShare(amount, seats) : null;
   return (
     <div className="cz-pot">
       <div className="cz-pot-coins">
@@ -183,13 +200,21 @@ export function ChallengePanel({ stats, open, roll, showXp = true }: ChallengePa
 
 // ── Poker readout ─────────────────────────────────────────────────────────────
 
-interface PokerReadoutProps { cards: DeckCard[]; spent: number; deckChoice?: CasinoDeckChoice; }
+interface PokerReadoutProps {
+  cards: DeckCard[];
+  spent: number;
+  deckChoice?: CasinoDeckChoice;
+  potShare?: number;   // estimated cut of the pot; omit to show the bare reward − entry line
+}
 
-export function PokerReadout({ cards, spent, deckChoice }: PokerReadoutProps) {
-  const raw     = cards.reduce((s, c) => s + c.value, 0);
-  const total   = deckChoice ? applyDeckBoost(raw, deckChoice) : raw;
-  const boosted = total !== raw;
-  const net     = total - spent;
+export function PokerReadout({ cards, spent, deckChoice, potShare }: PokerReadoutProps) {
+  const raw   = cards.reduce((s, c) => s + c.value, 0);
+  const total = deckChoice ? applyDeckBoost(raw, deckChoice) : raw;
+  // Reward − entry + pot = net. The pot term is what stops a modest hand reading
+  // as a straight loss: a thin reward is often carried by a healthy pot, and the
+  // player can only judge that if all three terms sit in the same equation.
+  const share = potShare ?? 0;
+  const net   = total - spent + share;
   return (
     <div className="cz-readout">
       <div className="ro-block">
@@ -200,11 +225,30 @@ export function PokerReadout({ cards, spent, deckChoice }: PokerReadoutProps) {
       <div className="ro-block">
         <span className="ro-label">Reward</span>
         <span className="ro-val ro-total">{total}g</span>
-        {boosted && <span className="cz-ch-diff up">+10% Purist</span>}
+        <DeckBoostBadge choice={deckChoice} />
       </div>
-      <span className="ro-x">·</span>
+      <span className="ro-op">−</span>
       <div className="ro-block">
-        <span className="ro-label">Net of entry</span>
+        <span className="ro-label">Cost of entry</span>
+        <span className="ro-val ro-spend">{spent}g</span>
+      </div>
+      {potShare != null && (
+        <>
+          <span className="ro-op">+</span>
+          <div className="ro-block">
+            <span className="ro-label">Est. pot</span>
+            <span
+              className="ro-val ro-pot"
+              title="Your estimated cut of the pot — an even split of what's in it now. It grows as more seats buy in."
+            >
+              ≈{share}g
+            </span>
+          </div>
+        </>
+      )}
+      <span className="ro-op eq">=</span>
+      <div className="ro-block">
+        <span className="ro-label">Est. Net</span>
         <span className={`ro-val ${net >= 0 ? 'ro-net-pos' : 'ro-net-neg'}`}>
           {net >= 0 ? '+' : '−'}{Math.abs(net)}g
         </span>
@@ -218,15 +262,17 @@ export function PokerReadout({ cards, spent, deckChoice }: PokerReadoutProps) {
 interface BlackjackGaugeProps { shownCards: DeckCard[]; allCards: DeckCard[]; deckChoice?: CasinoDeckChoice; }
 
 export function BlackjackGauge({ shownCards, allCards, deckChoice }: BlackjackGaugeProps) {
+  const boost      = (n: number) => (deckChoice ? applyDeckBoost(n, deckChoice) : n);
   const sorted     = [...allCards].sort((a, b) => b.value - a.value);
-  const potential  = sorted.slice(0, Math.min(5, sorted.length)).reduce((s, c) => s + c.value, 0);
-  const keptSumRaw = shownCards.reduce((s, c) => s + c.value, 0);
-  const keptSum    = deckChoice ? applyDeckBoost(keptSumRaw, deckChoice) : keptSumRaw;
-  const boosted    = keptSum !== keptSumRaw;
+  // Both ends of the gauge are deck-boosted. Boosting only the kept sum made a
+  // Purist keeping every card read "110g · 5 games / of 100g possible" — a
+  // headline above its own stated ceiling, on a bar already pinned at 100%.
+  const potential  = boost(sorted.slice(0, Math.min(5, sorted.length)).reduce((s, c) => s + c.value, 0));
+  const keptSum    = boost(shownCards.reduce((s, c) => s + c.value, 0));
   const count      = shownCards.length;
-  const leaving    = Math.max(0, potential - keptSumRaw);
+  const leaving    = Math.max(0, potential - keptSum);
   const note       = leaving > 0 ? `leaving ${leaving}g behind` : 'keeping the maximum';
-  const pct        = potential > 0 ? Math.min(100, Math.round((keptSumRaw / potential) * 100)) : 0;
+  const pct        = potential > 0 ? Math.min(100, Math.round((keptSum / potential) * 100)) : 0;
   const capped     = allCards.length >= 6;
 
   return (
@@ -241,7 +287,7 @@ export function BlackjackGauge({ shownCards, allCards, deckChoice }: BlackjackGa
       <div className="cz-gauge-nums">
         <span className="cz-gauge-sum">
           {keptSum}g · {count} {count === 1 ? 'game' : 'games'}
-          {boosted && <span className="cz-ch-diff up"> +10% Purist</span>}
+          <DeckBoostBadge choice={deckChoice} lead />
         </span>
         <span className="cz-gauge-tgt">{note}</span>
       </div>

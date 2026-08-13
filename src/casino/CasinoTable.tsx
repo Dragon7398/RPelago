@@ -15,7 +15,7 @@ import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlot
 import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
-import { seatTally } from '../lib/missionLogic';
+import { seatTally, estimatedSeatShare } from '../lib/missionLogic';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -475,6 +475,10 @@ export function CasinoTable() {
       // decay has since dropped the cap below the fill count.
       ? Math.max(1, seatTally(mission, now).max)
       : Math.max(1, allSeats.filter(p => p.played).length);
+
+  // The pot term in the play readout's Reward − Entry + Pot = Net line, and the
+  // same figure the pot chip quotes.
+  const potShare = estimatedSeatShare(pot, potSeats);
 
   // Fill empty seats up to baseMax. All baseMax seats stay drawn so decay is
   // visible, but any seat past the max is closed, not open — mirrors the seat pips
@@ -1144,7 +1148,12 @@ export function CasinoTable() {
               {cfg.subsetSelect && (
                 <BlackjackGauge shownCards={committedCards} allCards={hand} deckChoice={effectiveDeckChoice} />
               )}
-              <PokerReadout cards={committedCards} spent={spent} deckChoice={effectiveDeckChoice} />
+              <PokerReadout
+                cards={committedCards}
+                spent={spent}
+                deckChoice={effectiveDeckChoice}
+                potShare={potShare}
+              />
 
               <div className="cz-actions">
                 {resubmitting && (
@@ -1245,6 +1254,7 @@ export function CasinoTable() {
                 cards={committedCards}
                 spent={rePicking ? spent : spent + cfg.playOn}
                 deckChoice={effectiveDeckChoice}
+                potShare={potShare}
               />
               <div className="cz-actions">
                 <button className="cz-btn primary" onClick={doPlayOn} disabled={busy || !canCommit}>

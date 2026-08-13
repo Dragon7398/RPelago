@@ -150,6 +150,13 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-readout .ro-net-pos { color: var(--pos); }
 .cz-readout .ro-net-neg { color: var(--neg); }
 .cz-readout .ro-x { color: var(--gold-dim); font-size: 1rem; align-self: center; }
+/* Operators in the Reward − Entry + Pot = Net sequence. Dimmer and lighter than
+   the figures they join, so the eye reads the numbers first and the arithmetic
+   second. `=` is brightened to mark where the sequence resolves. */
+.cz-readout .ro-op { color: var(--gold-dim); font-size: 1.15rem; font-weight: 400; align-self: center; opacity: 0.7; }
+.cz-readout .ro-op.eq { opacity: 1; color: oklch(from var(--gold) calc(l + 0.06) c h); }
+.cz-readout .ro-spend { color: oklch(from var(--parch) calc(l - 0.12) c h); }
+.cz-readout .ro-pot { color: var(--gold); cursor: help; }
 
 /* ── blackjack gauge ── */
 .cz-gauge { width: min(520px, 90%); }
