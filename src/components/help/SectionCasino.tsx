@@ -1,7 +1,11 @@
-import { CASINO_GAMES, CASINO_GAME_ORDER, type CasinoGame } from '../../lib/casinoData';
+import {
+  CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor,
+  type CasinoGame,
+} from '../../lib/casinoData';
 
-// Costs are read from the engine's cost model rather than retyped, so this page
-// can never drift from what the table actually charges.
+// Costs and deck variants are read from the engine rather than retyped, so this
+// page can never drift from what the table actually charges or deals. Adding a
+// deck variant lands here automatically — do not re-enumerate them in prose.
 function costLine(g: CasinoGame): string {
   const c = CASINO_GAMES[g];
   return [
@@ -89,12 +93,22 @@ export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | '
 
       <h4>Your Deck</h4>
       <p>
-        Before you're dealt in, you choose the <strong>deck</strong> you draw from.{' '}
-        <strong>Purist</strong> keeps every card and pays <strong>+10%</strong> on your own
-        reward for the flexibility. <strong>Unconsoled</strong> strips every Platform card, and{' '}
-        <strong>Indie</strong> strips every Franchise card — no bonus, but no cards you'd
-        rather not play.
+        Before you're dealt in, you choose the <strong>deck</strong> you draw from. A narrower
+        deck means fewer cards you'd rather not play — but the wider the deck you accept, the
+        better it pays. Any bonus or penalty applies to <em>your own hand only</em>: your share
+        of the pot and anything a gambit pays you are never affected.
       </p>
+      <div className="help-tile-list">
+        {DECK_VARIANT_ORDER.map(key => (
+          <div className="help-tile-row" key={key}>
+            <span className="help-tile-icon" style={{ fontSize: '0.8em', opacity: 0.7 }}>🂠</span>
+            <div>
+              <strong>{DECK_VARIANTS[key].label}</strong> — {DECK_VARIANTS[key].blurb}{' '}
+              <em>{deckSizeFor(key)} of {deckSizeFor('purist')} cards.</em>
+            </div>
+          </div>
+        ))}
+      </div>
 
       <h4>Gambits</h4>
       <p>
