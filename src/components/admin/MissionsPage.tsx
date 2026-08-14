@@ -4,7 +4,8 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally, sourcedGameTitles, newGamesInYaml } from '../../lib/missionLogic';
+import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, type GameToFetch } from '../../lib/missionLogic';
+import { currentApList } from '../../lib/apLists';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
@@ -393,6 +394,26 @@ function yamlFileNames(yamls: CasinoYaml[]): string[] {
   });
 }
 
+// One flag beside a seat's name for the APworlds it still costs the host:
+//   NEW — never downloaded for any other room; fetch it from the current sheet.
+//   OLD — downloaded, but back on an older sheet, so it may have been updated
+//         since; check it against the current one before generating.
+// A game already fetched under the current list is in neither bucket and shows
+// nothing. The word carries the meaning, so the colours are only reinforcement.
+function FetchBadge({ kind, games }: { kind: 'new' | 'old'; games: GameToFetch[] }) {
+  if (games.length === 0) return null;
+  const list  = currentApList().label;
+  const names = games.map(g => (kind === 'old' && g.seenOn ? `${g.title} — last got it ${g.seenOn.label}` : g.title));
+  const lead  = kind === 'new'
+    ? `Never downloaded for another room. Grab from the ${list} list:`
+    : `Downloaded before the ${list} list — check it there for an update:`;
+  return (
+    <span className={`casino-yaml-fetch ${kind}`} title={`${lead}\n• ${names.join('\n• ')}`}>
+      {kind === 'new' ? 'NEW' : 'OLD'}{games.length > 1 ? ` ×${games.length}` : ''}
+    </span>
+  );
+}
+
 // The host verifies + generates the Archipelago room from these. Fetched on demand
 // (admin-only callable, which reads the owner-scoped bucket via the Admin SDK).
 // Deliberately kept as separate files — YAMLs are verified one at a time and later
@@ -446,11 +467,12 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
   const names = yamls ? yamlFileNames(yamls) : [];
 
   // Every game already downloaded for some OTHER room — a live table with a link
-  // or a settled one. This table is excluded on purpose: its own games are the
-  // ones being verified right now, and none of them has been sourced yet, so two
-  // seats here asking for the same unfamiliar game are both correctly flagged.
+  // or a settled one — mapped to the newest APworld-list era it was fetched under.
+  // This table is excluded on purpose: its own games are the ones being verified
+  // right now, and none of them has been sourced yet, so two seats here asking for
+  // the same unfamiliar game are both correctly flagged.
   const sourced = useMemo(
-    () => sourcedGameTitles(
+    () => sourcedGameLists(
       [...Object.values(gameState?.missions ?? {}), ...Object.values(gameState?.missionsHistory ?? {})],
       missionId,
     ),
@@ -468,7 +490,12 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
       ) : (
         <div className="casino-yaml-list">
           <div className="casino-yaml-head">
-            <span>{yamls.length} YAML{yamls.length === 1 ? '' : 's'} uploaded</span>
+            <span>
+              {yamls.length} YAML{yamls.length === 1 ? '' : 's'} uploaded
+              {/* Names the sheet the NEW/OLD flags below are judged against, so the
+                  badges never have to be taken on trust after a list changes. */}
+              <span className="casino-yaml-list-note"> · vs. {currentApList().label} list</span>
+            </span>
             <button className="dash-action-btn" onClick={downloadZip}>⬇ All (.zip)</button>
           </div>
           {yamls.map((y, i) => {
@@ -476,20 +503,16 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
-            // Flags the seats that will cost the host a download before this room
-            // can be generated, so unfamiliar APworlds are spotted at verify time
-            // rather than mid-generation.
-            const fresh = newGamesInYaml(y.text, sourced);
+            // Flags the APworlds this seat still costs the host before the room can
+            // be generated: NEW = never downloaded, OLD = downloaded off an earlier
+            // sheet and due a look at the current one's "updated" column.
+            const { brandNew, outdated } = gameNoveltyInYaml(y.text, sourced);
             return (
             <div key={y.uid} className="casino-yaml-row">
               <span className="casino-yaml-name">
                 {y.playerName}
-                {fresh.length > 0 && (
-                  <span className="casino-yaml-new"
-                        title={`Not seen on any other in-progress (with a room) or completed mission — ${fresh.length === 1 ? 'download needed' : 'downloads needed'}: ${fresh.join(', ')}`}>
-                    NEW{fresh.length > 1 ? ` ×${fresh.length}` : ''}
-                  </span>
-                )}
+                <FetchBadge kind="new" games={brandNew} />
+                <FetchBadge kind="old" games={outdated} />
                 {pb.map((f, j) => (
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>

@@ -14,7 +14,7 @@ import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
-import { CASINO_START_STATS, nameColorValue } from '../lib/constants';
+import { CASINO_START_STATS, DRAGOS_LIST_URL, nameColorValue } from '../lib/constants';
 import { seatTally, estimatedSeatShare } from '../lib/missionLogic';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
@@ -1369,7 +1369,7 @@ export function CasinoTable() {
                 </div>
                 <div className="sf-reminder">
                   Please also check that your games are included in{' '}
-                  <a href="https://docs.google.com/spreadsheets/d/1YdsVZWxICS7NF0y68NMW-jXIwljZJcKOAHN_wiJh2Ms"
+                  <a href={DRAGOS_LIST_URL}
                      target="_blank" rel="noopener noreferrer">Drago's List</a>{' '}
                   on the 'Complete List' sheet as ready for Async or Sync before submitting. If they are{' '}
                   <em>not</em> included here, please ping <strong>@Brisbe</strong> in the channel with the game

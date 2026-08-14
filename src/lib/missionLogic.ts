@@ -4,6 +4,7 @@ import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
 import { countUnfinishedSets, normalizeSlots, claimEntries } from './slotHelpers';
 import { parseApYaml } from './apYaml';
+import { AP_LISTS, apListIndexAt, isCurrentApList, type ApList } from './apLists';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -500,52 +501,98 @@ export function hasSourcedGames(m: GMMission): boolean {
 }
 
 /**
- * Folded titles of every game running on — or finished on — a sourced mission
- * other than `excludeId`. Pass the union of `missions` and `missionsHistory`:
- * `archivedMission` stamps `state: 'complete'`, so both nodes filter identically.
+ * When a mission's APworlds were downloaded. Generating the room IS the download,
+ * so `linkedAt` is the true answer and the rest is fallback for records that
+ * predate it. `firstJoinAt` is deliberately not in the chain — a player joining a
+ * forming table downloads nothing — leaving `createdAt` as the floor.
+ *
+ * A null here resolves to the earliest list era, i.e. "assume old, re-check it".
+ */
+export function sourcedAt(m: GMMission): number | null {
+  return m.linkedAt ?? m.deployedAt ?? m.createdAt ?? null;
+}
+
+/**
+ * Every game a sourced mission other than `excludeId` has asked for, mapped to
+ * the NEWEST list era it was downloaded under (an index into `AP_LISTS`). Pass the
+ * union of `missions` and `missionsHistory`: `archivedMission` stamps
+ * `state: 'complete'`, so both nodes filter identically.
+ *
+ * The era matters because Drago's list is republished — a game downloaded two
+ * sheets ago may have been updated since, so "we have it" is not the same answer
+ * as "we have the current build of it". Keeping the newest era per game means one
+ * re-download under the current sheet clears the game for every later config.
  *
  * Claimable slots are counted alongside seated ones: a claimable slot was carved
  * off a live seat on a table that already has a room, so its game is downloaded
  * whether or not anybody has taken it over.
  */
-export function sourcedGameTitles(missions: Iterable<GMMission>, excludeId?: string): Set<string> {
-  const seen = new Set<string>();
-  const add = (slots: AdvSlot[]) => {
+export type SourcedGames = Map<string, number>;   // folded title → AP_LISTS index
+
+export function sourcedGameLists(missions: Iterable<GMMission>, excludeId?: string): SourcedGames {
+  const seen: SourcedGames = new Map();
+  const add = (slots: AdvSlot[], era: number) => {
     for (const s of slots) {
       const key = gameTitleKey(s.game ?? '');
-      if (key) seen.add(key);
+      if (!key) continue;
+      seen.set(key, Math.max(seen.get(key) ?? -1, era));
     }
   };
   for (const m of missions) {
     if (m.id === excludeId || !hasSourcedGames(m)) continue;
-    for (const p of Object.values(m.participants ?? {})) add(normalizeSlots(p.slots));
-    for (const [, entry] of claimEntries(m)) add(entry.slots);
+    const era = apListIndexAt(sourcedAt(m));
+    for (const p of Object.values(m.participants ?? {})) add(normalizeSlots(p.slots), era);
+    for (const [, entry] of claimEntries(m)) add(entry.slots, era);
   }
   return seen;
 }
 
+/** A game in an uploaded config that the host still has work to do on. */
+export interface GameToFetch {
+  /** Display title, suffixed "(?)" when it's one option of a weighted `game:`. */
+  title: string;
+  /**
+   * The newest list era this game was downloaded under, or null if it has never
+   * been downloaded at all. Non-null means "we have it, but off an older sheet —
+   * check that sheet's updated column", null means a first-time fetch.
+   */
+  seenOn: ApList | null;
+}
+
+export interface YamlGameNovelty {
+  /** Never downloaded for any other room — a first-time fetch. Badge: NEW. */
+  brandNew: GameToFetch[];
+  /** Downloaded, but only under an older list — re-check it. Badge: OLD. */
+  outdated: GameToFetch[];
+}
+
 /**
- * Games in one uploaded config that no other sourced mission has asked for yet —
- * i.e. APworlds the host must go and download before this room can be generated.
- * Returned as display titles, deduped within the file, so an empty array means
- * "nothing new here".
+ * Sort one uploaded config's games against what has already been downloaded.
+ * A game last fetched under the CURRENT list is in neither bucket: it has already
+ * been checked against the sheet in force, so there is nothing to flag.
  *
  * A weighted `game:` block can't be pinned to one world, so its viable candidates
- * are judged individually: if any is unsourced the roll may still land on a
- * download, and the title is marked "(?)" to say it's a maybe rather than a
- * certainty. A weighted block with no viable option resolves to no candidates and
- * is ignored — that file is broken in a way `parseApYaml` already reports.
+ * are judged individually: if any needs attention the roll may still land on it,
+ * and the title is marked "(?)" to say it's a maybe rather than a certainty. A
+ * weighted block with no viable option resolves to no candidates and is ignored —
+ * that file is broken in a way `parseApYaml` already reports.
  */
-export function newGamesInYaml(text: string, sourced: Set<string>): string[] {
-  const out = new Map<string, string>();   // folded key → display title
+export function gameNoveltyInYaml(text: string, sourced: SourcedGames): YamlGameNovelty {
+  const out: YamlGameNovelty = { brandNew: [], outdated: [] };
+  const done = new Set<string>();   // dedupe titles repeated across worlds
   for (const s of parseApYaml(text).slots) {
     for (const t of s.randomized ? (s.candidates ?? []) : [s.game]) {
       const key = gameTitleKey(t);
-      if (!key || sourced.has(key) || out.has(key)) continue;
-      out.set(key, foldGameTitle(t) + (s.randomized ? ' (?)' : ''));
+      if (!key || done.has(key)) continue;
+      done.add(key);
+      const era = sourced.get(key);
+      if (era != null && isCurrentApList(era)) continue;   // already fetched this list
+      const title = foldGameTitle(t) + (s.randomized ? ' (?)' : '');
+      if (era == null) out.brandNew.push({ title, seenOn: null });
+      else             out.outdated.push({ title, seenOn: AP_LISTS[era] });
     }
   }
-  return [...out.values()];
+  return out;
 }
 
 // Thin wrappers over the shared slot-completion core (slotHelpers.ts). Missions

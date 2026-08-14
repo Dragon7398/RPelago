@@ -32,13 +32,18 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --open-bg:     oklch(16% 0.08 320 / 0.36);
   --open-bg-hi:  oklch(24% 0.11 320 / 0.55);
   --open-border: oklch(46% 0.14 320);
-  /* "New here" surface — a neutral heads-up, never an error. Cyan keeps it clear
-     of the gold (warn) and red (reject) badges it sits beside, and stays legible
-     on the Deutan/Protan themes, whose blue-yellow axis leaves cyan readable. The
-     badge always carries the word NEW, so hue is never the only cue. */
-  --new-fg:      oklch(74% 0.13 195);
-  --new-bg:      oklch(18% 0.07 195 / 0.42);
-  --new-border:  oklch(48% 0.12 195);
+  /* "Go fetch this APworld" surfaces — a heads-up for the host, never an error.
+     NEW (never downloaded) is cyan and OLD (downloaded off an older list, so due
+     an update check) is violet: both stay clear of the gold-warn and red-reject
+     badges they sit beside, and both survive the Deutan/Protan themes, whose
+     blue-yellow axis leaves them readable. The badges always carry the words NEW
+     and OLD, so hue is only ever reinforcement. */
+  --fetch-new-fg:      oklch(74% 0.13 195);
+  --fetch-new-bg:      oklch(18% 0.07 195 / 0.42);
+  --fetch-new-border:  oklch(48% 0.12 195);
+  --fetch-old-fg:      oklch(72% 0.12 300);
+  --fetch-old-bg:      oklch(18% 0.06 300 / 0.42);
+  --fetch-old-border:  oklch(46% 0.11 300);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -1110,15 +1115,25 @@ header p {
   color: oklch(72% 0.19 25); background: oklch(55% 0.16 25 / 0.14);
   border: 1px solid oklch(55% 0.16 25 / 0.55);
 }
-/* "This seat wants an APworld you haven't downloaded for any other room yet."
+/* "This seat wants an APworld you still have to go and get" — NEW for one never
+   downloaded, OLD for one downloaded off an earlier list and due an update check.
    Shares the PB badges' geometry so the row reads as one strip of flags, but uses
-   the neutral --new-* surface: it is information for the host, not a fault. */
-.casino-yaml-new {
+   the neutral --fetch-* surfaces: this is work for the host, not a fault in the
+   config. */
+.casino-yaml-fetch {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em;
   padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
-  color: var(--new-fg); background: var(--new-bg);
-  border: 1px solid var(--new-border);
 }
+.casino-yaml-fetch.new {
+  color: var(--fetch-new-fg); background: var(--fetch-new-bg);
+  border: 1px solid var(--fetch-new-border);
+}
+.casino-yaml-fetch.old {
+  color: var(--fetch-old-fg); background: var(--fetch-old-bg);
+  border: 1px solid var(--fetch-old-border);
+}
+/* Which sheet the flags above were judged against. */
+.casino-yaml-list-note { color: var(--text-muted); letter-spacing: 0.04em; }
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
 .casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
 
@@ -3845,9 +3860,12 @@ body.theme-lapis {
   --open-bg:     oklch(94% 0.04 320 / 0.5);
   --open-bg-hi:  oklch(88% 0.07 320 / 0.65);
   --open-border: oklch(54% 0.15 320);
-  --new-fg:      oklch(38% 0.13 195);
-  --new-bg:      oklch(93% 0.04 195 / 0.55);
-  --new-border:  oklch(52% 0.12 195);
+  --fetch-new-fg:      oklch(38% 0.13 195);
+  --fetch-new-bg:      oklch(93% 0.04 195 / 0.55);
+  --fetch-new-border:  oklch(52% 0.12 195);
+  --fetch-old-fg:      oklch(38% 0.14 300);
+  --fetch-old-bg:      oklch(93% 0.04 300 / 0.55);
+  --fetch-old-border:  oklch(52% 0.13 300);
 }
 /* Unban stays green, and green-on-cream has the same wash problem. */
 body.theme-parchment .dash-ban-lift,
