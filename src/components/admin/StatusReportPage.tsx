@@ -17,6 +17,27 @@ const RECENT_RUN_HOURS = 36;
 const arr = <T,>(v: T[] | Record<string, T> | undefined | null): T[] =>
   v == null ? [] : Array.isArray(v) ? v : Object.values(v);
 
+// Cheesetracker shortcut beside a world's name. The id is resolved live from
+// gameState (never persisted onto the report snapshot), so a stored report links
+// to the tracker too — including after its mission moved to missionsHistory.
+// Renders nothing when no tracker has been synced for that world.
+function WorldCheeseLink({ kind, id }: { kind: 'mission' | 'tile'; id: string }) {
+  const { gameState } = useGameState();
+  const cheese = kind === 'mission'
+    ? (gameState?.missions?.[id]?.cheese ?? gameState?.missionsHistory?.[id]?.cheese)
+    : gameState?.tiles?.[id]?.cheese;
+  if (!cheese) return null;
+  return (
+    <a
+      className="sr-cheese-link"
+      href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${cheese}`}
+      target="_blank" rel="noopener noreferrer"
+      onClick={e => e.stopPropagation()}
+      title="Open Cheesetracker"
+    >🧀</a>
+  );
+}
+
 // ── Live report: one candidate card (unchanged from the live view) ───────────
 
 // `excuse` is supplied only for candidates that an official run would actually
@@ -59,6 +80,7 @@ function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (play
           {c.kind === 'mission' ? '⚜' : '⚔'}
         </span>
         <span className="dash-tile-name">{c.name}</span>
+        <WorldCheeseLink kind={c.kind} id={c.id} />
         <span className="sr-card-counts">
           {problems > 0 && <span className="sr-count sr-count-problem">{problems}⛔</span>}
           {warnings > 0 && <span className="sr-count sr-count-warning">{warnings}⚠</span>}
@@ -121,7 +143,10 @@ function WarnWorldRow({ reportId, reportTs, index, world }: { reportId: string; 
   return (
     <div className="sr-warn-world">
       <div className="sr-warn-world-head">
-        <span className="sr-warn-world-name">{world.name}</span>
+        <span className="sr-warn-world-name">
+          {world.name}
+          <WorldCheeseLink kind={world.kind} id={world.id} />
+        </span>
         <button
           className={`sr-handled-btn${world.handled ? ' done' : ''}`}
           disabled={busy || world.handled}
@@ -214,7 +239,10 @@ function OfficialReportView({ reportId, report }: { reportId: string; report: Of
             above (the player drops out of it) and refunds their incident. */}
         {probs.map((w, wi) => (
           <div className="sr-prob-world" key={`${w.kind}-${w.id}`}>
-            <div className="sr-prob-world-name">{w.name}</div>
+            <div className="sr-prob-world-name">
+              {w.name}
+              <WorldCheeseLink kind={w.kind} id={w.id} />
+            </div>
             {arr(w.players).map((p, pi) => (
               <ProblemPlayerRow
                 key={p.playerId} reportId={reportId} world={w} worldIndex={wi} playerIndex={pi} player={p}
