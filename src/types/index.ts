@@ -370,13 +370,20 @@ export interface OfficialReport {
   warnings: OfficialWarnWorld[];
 }
 
-// One weekly gold-floor top-up: a player below the floor was raised to it.
+// One gold injection from outside the game economy. Two sources write here:
+// `weeklyGoldTopUp` (a player below the floor raised to it) and the admin's manual
+// grant on the Players page. Both belong in the same ledger — the money-in audit
+// only means anything if it accounts for every coin that wasn't won at a table.
 export interface GoldTopUpEntry {
   ts:               number;  // epoch ms of the top-up
   uid:              string;
   playerName:       string;
-  granted:          number;  // gold added (floor − prior balance)
-  resultingBalance: number;  // always the floor
+  granted:          number;  // gold added — the floor gap, or the admin's amount (may be NEGATIVE on a manual clawback)
+  resultingBalance: number;  // the floor for weekly; the expected new balance for manual
+  // Absent on every entry weeklyGoldTopUp has ever written, so a MISSING kind
+  // reads as 'weekly' — never default it the other way.
+  kind?:            'weekly' | 'manual';
+  reason?:          string;  // manual only, optional (why the admin adjusted it)
 }
 
 export interface AuthUser {

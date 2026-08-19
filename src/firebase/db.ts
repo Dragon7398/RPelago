@@ -2,7 +2,7 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
@@ -489,6 +489,57 @@ export async function deletePlayerWarning(playerId: string, warnKey: string): Pr
 
 export async function clearPlayerWarnings(playerId: string): Promise<void> {
   await remove(sRef(db!, `players/${playerId}/warnings`));
+}
+
+// ── Admin: manual gold grant ─────────────────────────────────────────────────
+// Hand-adjust a balance: comp a player for a bug that cost them gold, or fund
+// alpha testing. Admin-only by rule (`players/$playerId` validates that xp/gold
+// only move for `config/adminId`), so this stays a client write like the rest of
+// the admin player actions — no callable to deploy ahead of the frontend.
+//
+// Two things make it safe to do from the client:
+//   • The balance moves via `increment`, NOT read-then-set, so it cannot clobber
+//     a casino ante the player commits in the same instant.
+//   • The audit entry goes into `goldTopUpLog` in the SAME atomic update. Manual
+//     gold is outside money entering the economy — precisely what the season
+//     money-in audit exists to total — so the grant and its ledger line either
+//     both land or neither does.
+//
+// A negative `amount` is a clawback, clamped so it can't drive the balance below
+// zero (the DB rule would reject the write outright, which just looks broken).
+// Returns the expected new balance.
+export async function adminGrantGold(
+  playerId: string,
+  amount: number,
+  reason?: string,
+): Promise<number> {
+  assertDb();
+  const snap = await get(sRef(db!, `players/${playerId}`));
+  const player = snap.val() as Player | null;
+  if (!player) throw new Error('That player has no record in this season.');
+
+  const current = player.gold ?? 0;
+  const delta   = amount < 0 ? Math.max(amount, -current) : amount;
+  if (delta === 0) return current;
+
+  const logKey = push(sRef(db!, 'goldTopUpLog')).key!;
+  const entry: GoldTopUpEntry = {
+    ts:   Date.now(),
+    uid:  playerId,
+    playerName: player.displayName ?? playerId,
+    granted: delta,
+    // Best-effort: the balance we read, plus the delta. The `increment` above is
+    // the authoritative arithmetic, so a spend landing in the same instant can
+    // leave this a hair stale — it's an audit note, not a source of truth.
+    resultingBalance: current + delta,
+    kind: 'manual',
+    ...(reason ? { reason } : {}),
+  };
+  await update(ref(db!), {
+    [sPath(`players/${playerId}/gold`)]:    increment(delta),
+    [sPath(`goldTopUpLog/${logKey}`)]:      entry,
+  });
+  return current + delta;
 }
 
 // ── Player: claim a claimable slot ───────────────────────────────────────────

@@ -1017,6 +1017,11 @@ function GoldTopUpAudit() {
   const entries = Object.entries(gameState?.goldTopUpLog ?? {}).sort((a, b) => b[1].ts - a[1].ts);
   const topupTotal = entries.reduce((s, [, e]) => s + (e.granted ?? 0), 0);
   const players    = new Set(entries.map(([, e]) => e.uid)).size;
+  // The ledger holds two kinds of injection. `kind` is absent on every entry
+  // weeklyGoldTopUp has ever written, so a missing value means WEEKLY.
+  const manual      = entries.filter(([, e]) => e.kind === 'manual');
+  const manualTotal = manual.reduce((s, [, e]) => s + (e.granted ?? 0), 0);
+  const weeklyTotal = topupTotal - manualTotal;
 
   // Pot seeds are variable per table (rollTableSetup), banked as casinoOpenPot at
   // creation. Sum the actual opening pots — the injected-via-pot money — across
@@ -1038,18 +1043,29 @@ function GoldTopUpAudit() {
       {open && (
         <>
           <div className="casino-topup-sums">
-            <span>Gold-floor top-ups: <b>{topupTotal.toLocaleString()}g</b> · {entries.length} event{entries.length === 1 ? '' : 's'} · {players} player{players === 1 ? '' : 's'}</span>
+            <span>Gold-floor top-ups: <b>{weeklyTotal.toLocaleString()}g</b> · {entries.length - manual.length} event{entries.length - manual.length === 1 ? '' : 's'} · {players} player{players === 1 ? '' : 's'}</span>
+            <span>Admin grants: <b>{manualTotal.toLocaleString()}g</b> · {manual.length} adjustment{manual.length === 1 ? '' : 's'}</span>
             <span>Pot seeds: <b>{potSeedTotal.toLocaleString()}g</b> · opening pots across {tableCount} table{tableCount === 1 ? '' : 's'}</span>
           </div>
           <div className="casino-log-list">
             {entries.length === 0
-              ? <div className="casino-log-row casino-topup-empty">No floor top-ups yet — nobody has dipped below the gold floor.</div>
+              ? <div className="casino-log-row casino-topup-empty">No outside gold yet — nobody has dipped below the floor, and no hand-adjustments have been made.</div>
               : entries.map(([id, e]) => (
                   <div key={id} className="casino-log-row casino-topup-row">
                     <span className="casino-topup-when">{fmtWhen(e.ts)}</span>
                     <span className="casino-topup-name">{e.playerName}</span>
-                    <span className="casino-topup-amt">+{e.granted.toLocaleString()}g</span>
+                    {e.kind === 'manual' && (
+                      <span className="casino-topup-tag" title={e.reason || 'Hand-adjusted by the admin on the Players page'}>
+                        ADMIN
+                      </span>
+                    )}
+                    {/* granted may be negative (a manual clawback), so the sign is
+                        formatted rather than hardcoded to "+". */}
+                    <span className={`casino-topup-amt${e.granted < 0 ? ' neg' : ''}`}>
+                      {e.granted < 0 ? '−' : '+'}{Math.abs(e.granted).toLocaleString()}g
+                    </span>
                     <span className="casino-topup-bal">→ {e.resultingBalance.toLocaleString()}g</span>
+                    {e.reason && <span className="casino-topup-why">{e.reason}</span>}
                   </div>
                 ))}
           </div>

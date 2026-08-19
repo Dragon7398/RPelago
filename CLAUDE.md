@@ -252,6 +252,15 @@ The Players page shows a count badge and an inline list with AUTO/ADMIN tags, da
 
 `playerReset()` in `db.ts` archives the player's XP, zeroes all stats, clears inventory and feats, and trims to one adventurer. It mirrors kick behavior for any tiles the player is currently on: tile adventurer entries are removed, and a claimable slot is created for any tile that is `inprogress`. All writes are atomic in a single multi-path `update()`.
 
+### Manual gold grants
+
+**🪙 Adjust Gold** on each admin Players card (`adminGrantGold` in `db.ts`) hand-adjusts a balance — comping a player for a bug, or funding alpha testing. It stays a **client** write, like the other admin player actions: the `players/$playerId` rule already validates that `xp`/`gold` only move for `config/adminId`, so no callable (and no functions deploy ahead of the frontend) is involved. Two things make that safe:
+
+- **The balance moves via `increment`, never read-then-set**, so a grant landing at the same instant as a casino ante can't clobber the debit.
+- **The audit entry is written in the SAME atomic `update()`.** Manual gold is *outside* money entering the economy — exactly what the season money-in audit totals — so `goldTopUpLog` gains a second writer alongside `weeklyGoldTopUp`. Entries are tagged **`kind: 'manual'`** with an optional `reason`; `kind` is **absent on every entry the weekly job has ever written, so a missing value reads as `'weekly'`** — never default it the other way.
+
+A **negative amount is a clawback**, clamped client-side to a zero floor (the DB rule `gold >= 0` would otherwise reject the whole update, which just looks broken). `granted` is therefore **signed** — anything rendering it must format the sign rather than hardcoding `+`. The `GoldTopUpAudit` panel (top of the admin Casino tab) splits its totals into floor top-ups vs admin grants and badges manual rows `ADMIN`.
+
 ### Guildmaster Missions
 
 A parallel progression system independent of the tile map. Missions are stored in `game/missions/` and completed missions are moved to `game/missionsHistory/`. Three mission types are defined in `MISSION_DEFS` (`constants.ts`):

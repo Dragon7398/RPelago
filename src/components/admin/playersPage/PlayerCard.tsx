@@ -18,15 +18,19 @@ interface Props {
 export default function PlayerCard({ player, tiles, adminId, missions }: Props) {
   const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
           adminAddWarning, adminDeleteWarning, adminClearWarnings,
-          adminGrantMissingAdventurers } = useGameState();
+          adminGrantGold, adminGrantMissingAdventurers } = useGameState();
   const { addToast } = useToast();
   // The adventurer roster is a map-season concept — a casino-season player having
   // no adventurers isn't a gap to fix, so the grant action is hidden there.
   const isCasino = useSeason().season?.shell === 'casino';
   const [addingWarning, setAddingWarning] = useState(false);
   const [warningDraft, setWarningDraft]   = useState('');
+  const [adjustingGold, setAdjustingGold] = useState(false);
+  const [goldDraft, setGoldDraft]         = useState('');
+  const [goldReason, setGoldReason]       = useState('');
   const [resetting, setResetting]         = useState(false);
   const [granting, setGranting]           = useState(false);
+  const [goldBusy, setGoldBusy]           = useState(false);
   const [syncing, setSyncing]             = useState(false);
   const [banning, setBanning]             = useState(false);
 
@@ -58,6 +62,31 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
     adminAddWarning(player.id, warningDraft.trim());
     setAddingWarning(false);
     setWarningDraft('');
+  };
+
+  // Manual gold adjustment. A negative amount is a clawback; `adminGrantGold`
+  // clamps it so the balance can't go below zero, and the preview clamps the same
+  // way so the admin sees the figure that will actually land.
+  const rawGold   = Math.trunc(Number(goldDraft));
+  const goldValid = goldDraft.trim() !== '' && Number.isFinite(rawGold) && rawGold !== 0;
+  const goldDelta = goldValid ? (rawGold < 0 ? Math.max(rawGold, -gold) : rawGold) : 0;
+  const signed    = (n: number) => `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString()}g`;
+
+  const closeGold = () => { setAdjustingGold(false); setGoldDraft(''); setGoldReason(''); };
+
+  const submitGold = async () => {
+    if (!goldValid || goldBusy) return;
+    setGoldBusy(true);
+    try {
+      const balance = await adminGrantGold(player.id, goldDelta, goldReason.trim() || undefined);
+      addToast(`${player.displayName}: ${signed(goldDelta)} → ${balance.toLocaleString()}g.`, 'success');
+      closeGold();
+    } catch (err) {
+      addToast((err as { message?: string }).message
+        ?? `Failed to adjust gold for ${player.displayName}.`, 'error');
+    } finally {
+      setGoldBusy(false);
+    }
   };
 
   return (
@@ -191,6 +220,62 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
         </div>
       )}
 
+      {adjustingGold && (
+        <div className="dash-grant-panel">
+          <div className="dash-player-section-label">Adjust gold</div>
+          <div className="dash-grant-row">
+            <input
+              className="dash-grant-amt"
+              type="number"
+              step="1"
+              value={goldDraft}
+              onChange={e => setGoldDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitGold();
+                else if (e.key === 'Escape') closeGold();
+              }}
+              placeholder="500"
+              aria-label={`Gold adjustment for ${player.displayName}`}
+              autoFocus
+            />
+            <input
+              className="dash-grant-reason"
+              value={goldReason}
+              onChange={e => setGoldReason(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitGold();
+                else if (e.key === 'Escape') closeGold();
+              }}
+              placeholder="Reason (optional — shown in the money-in audit)…"
+              aria-label="Reason for the adjustment"
+            />
+            <button
+              className="dash-grant-submit"
+              disabled={!goldValid || goldBusy}
+              onClick={submitGold}
+            >{goldBusy ? 'Applying…' : 'Apply'}</button>
+            <button className="dash-grant-cancel" onClick={closeGold}>Cancel</button>
+          </div>
+          <div className="dash-grant-preview">
+            {goldValid ? (
+              <>
+                🪙 {gold.toLocaleString()}g <span className="dash-grant-arrow">→</span>{' '}
+                <b className={goldDelta < 0 ? 'down' : 'up'}>{(gold + goldDelta).toLocaleString()}g</b>
+                <span className="dash-grant-delta">({signed(goldDelta)})</span>
+                {/* A clawback bigger than the balance is clamped, not rejected. */}
+                {goldDelta !== rawGold && (
+                  <span className="dash-grant-clamp">clamped — can't go below 0</span>
+                )}
+              </>
+            ) : (
+              <span className="dash-grant-hint">
+                Negative takes gold away. Logged either way to the season money-in audit.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="dash-player-actions">
         {!isCasino && missingAdventurers > 0 && (
           <button
@@ -246,6 +331,15 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           }}
         >
           {syncing ? 'Syncing…' : 'Sync Profile'}
+        </button>
+        <button
+          className="dash-grant-btn"
+          onClick={() => {
+            if (adjustingGold) closeGold();
+            else { setAdjustingGold(true); setGoldDraft(''); setGoldReason(''); }
+          }}
+        >
+          🪙 Adjust Gold
         </button>
         <button
           className="dash-warning-add-btn"

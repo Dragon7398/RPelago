@@ -18,6 +18,7 @@ import {
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
+  adminGrantGold as dbAdminGrantGold,
   setAdventurerStatusNote as dbSetAdventurerStatusNote,
   enlistInMission as dbEnlistInMission,
   standDownFromMission as dbStandDownFromMission,
@@ -405,6 +406,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await clearPlayerWarnings(playerId);
   }, []);
 
+  const adminGrantGold = useCallback(async (playerId: string, amount: number, reason?: string) => {
+    return await dbAdminGrantGold(playerId, amount, reason);
+  }, []);
+
   const setAdventurerStatusNote = useCallback(async (coord: string, advId: string, text: string | null) => {
     await dbSetAdventurerStatusNote(coord, advId, text);
   }, []);
@@ -484,7 +489,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
-      adminAddWarning, adminDeleteWarning, adminClearWarnings,
+      adminAddWarning, adminDeleteWarning, adminClearWarnings, adminGrantGold,
       setAdventurerStatusNote,
       enlistInMission, standDownFromMission, setMissionParticipantStatusNote,
       adminSetParticipantSlots, adminUpdateParticipantSlotStatus,
