@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { slotsAllFree, countUnfinishedSets } from '../../src/lib/slotHelpers';
-import { hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
+import { slotsAllFree, countUnfinishedSets, normalizeClaimEntry, claimableCount } from '../../src/lib/slotHelpers';
+import { awaitingRoom, hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
 import { missionClaimCapacity } from '../../src/lib/gameLogic';
-import type { AdvSlot, GMMission, GMParticipant, Player } from '../../src/types';
+import type { AdvSlot, ClaimableEntry, GMMission, GMParticipant, Player } from '../../src/types';
 
 const slot = (status?: AdvSlot['status']): AdvSlot => ({ name: 'n', game: 'g', ...(status ? { status } : {}) });
 
@@ -81,6 +81,43 @@ describe('seatTally — the displayed seat count', () => {
   });
 });
 
+describe('awaitingRoom — deployed but no room generated yet', () => {
+  const m = (over: Partial<GMMission>): GMMission => ({
+    id: 'm1', type: 'patrol', series: 1, label: 'Patrol', state: 'forming',
+    baseMax: 4, xp: 10, gp: 10, release: 'off', collect: 'off', hint: 0,
+    firstJoinAt: null, createdAt: 0, participants: {}, ...over,
+  });
+
+  it('is true once deployed with no link — the gap between deploy and generation', () => {
+    expect(awaitingRoom(m({ state: 'inprogress' }))).toBe(true);
+    expect(awaitingRoom(m({ state: 'inprogress', link: '' }))).toBe(true);
+  });
+
+  it('is false the moment a room link exists', () => {
+    expect(awaitingRoom(m({ state: 'inprogress', link: 'https://archipelago.gg/room/x' }))).toBe(false);
+  });
+
+  it('is false for a linkless FORMING cohort — it has no room because it has not dealt in', () => {
+    expect(awaitingRoom(m({ state: 'forming' }))).toBe(false);
+    expect(awaitingRoom(m({ state: 'complete' }))).toBe(false);
+  });
+
+  // The trap: computeMissionCard reports status 'inprogress' for a full-but-forming
+  // cohort, so keying the notice off card.status would tell a table that hasn't
+  // deployed that its room is late. awaitingRoom reads m.state instead.
+  it('stays false for a full forming cohort that already reports status "inprogress"', () => {
+    const full = m({
+      baseMax: 2, firstJoinAt: 0,
+      participants: {
+        a: { playerId: 'a', playerName: 'A', joinedAt: 0 },
+        b: { playerId: 'b', playerName: 'B', joinedAt: 0 },
+      },
+    });
+    expect(computeMissionCard(full, 'a', 0, 1, false, 1_000).status).toBe('inprogress');
+    expect(awaitingRoom(full)).toBe(false);
+  });
+});
+
 describe('computeMissionCard — pooled-claim gating', () => {
   const baseMission = (): GMMission => ({
     id: 'm1', type: 'patrol', series: 1, label: 'Patrol', state: 'forming',
@@ -108,5 +145,50 @@ describe('computeMissionCard — pooled-claim gating', () => {
     expect(card.youIn).toBe(true);
     expect(card.doneLabel).toBe('YOU ARE ENLISTED');
     expect(card.takeable).toBe(false);
+  });
+});
+
+// ── Claimable entries ─────────────────────────────────────────────────────────
+// Two shapes exist on the wire: the legacy/non-casino bare AdvSlot[], and the
+// casino ClaimableEntry that also carries the card (its gold value survives
+// nowhere else once the seat is gone) and the pot fraction the slot is worth.
+// Every reader goes through the normalizer, so a table kicked before the shape
+// change must still render and still be claimable.
+describe('normalizeClaimEntry', () => {
+  it('reads a legacy bare array as slots with no card or fraction', () => {
+    const e = normalizeClaimEntry([slot('Goaled')]);
+    expect(e.slots).toHaveLength(1);
+    expect(e.card).toBeUndefined();
+    expect(e.potFraction).toBeUndefined();
+  });
+
+  it('preserves the card and fraction on a casino entry', () => {
+    const e = normalizeClaimEntry({
+      slots: [slot('In-Progress')],
+      card: { uid: 3, name: 'SNES', value: 20, type: 'platform' },
+      potFraction: 0.25,
+      fromPlayerName: 'Quitter',
+    } as ClaimableEntry);
+    expect(e.card?.value).toBe(20);
+    expect(e.potFraction).toBe(0.25);
+    expect(e.fromPlayerName).toBe('Quitter');
+  });
+
+  it('handles Firebase object-keyed slot arrays and absent entries', () => {
+    expect(normalizeClaimEntry({ slots: { 0: slot(), 1: slot() } } as unknown as ClaimableEntry).slots).toHaveLength(2);
+    expect(normalizeClaimEntry(undefined).slots).toEqual([]);
+  });
+});
+
+describe('claimableCount', () => {
+  it('counts open spots regardless of entry shape', () => {
+    const m = {
+      claimableSlots: {
+        a: [slot()],
+        b: { slots: [slot()], potFraction: 0.5 },
+      },
+    } as unknown as GMMission;
+    expect(claimableCount(m)).toBe(2);
+    expect(claimableCount({} as GMMission)).toBe(0);
   });
 });

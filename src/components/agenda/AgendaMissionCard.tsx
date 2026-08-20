@@ -72,10 +72,12 @@ export default function AgendaMissionCard({ mission, onClose }: Props) {
           </div>
         )}
 
-        {mission.link && (
+        {mission.link ? (
           <a href={mission.link} target="_blank" rel="noreferrer" className="ag-archi-link" style={{ justifyContent: 'center' }}>
             ↗ OPEN ARCHIPELAGO
           </a>
+        ) : mission.awaitingRoom && (
+          <div className="ag-room-pending">⏳ ROOM NOT GENERATED YET</div>
         )}
 
         <div className="ag-mc-footer">

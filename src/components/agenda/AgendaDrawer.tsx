@@ -135,12 +135,15 @@ export default function AgendaDrawer({ open, onClose, onTileClick }: Props) {
                     ))}
                   </div>
                 )}
-                {(mission!.link || mission!.cheese) && (
+                {(mission!.link || mission!.cheese || mission!.awaitingRoom) && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                     {mission!.link && (
                       <a href={mission!.link} target="_blank" rel="noreferrer" className="ag-archi-link">
                         ↗ ARCHIPELAGO
                       </a>
+                    )}
+                    {!mission!.link && mission!.awaitingRoom && (
+                      <span className="ag-room-pending">⏳ ROOM NOT GENERATED YET</span>
                     )}
                     {mission!.cheese && (
                       <a href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission!.cheese}`} target="_blank" rel="noreferrer" className="ag-tracker-link">

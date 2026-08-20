@@ -18,6 +18,7 @@ import {
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
+  adminGrantGold as dbAdminGrantGold,
   setAdventurerStatusNote as dbSetAdventurerStatusNote,
   enlistInMission as dbEnlistInMission,
   standDownFromMission as dbStandDownFromMission,
@@ -405,6 +406,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await clearPlayerWarnings(playerId);
   }, []);
 
+  const adminGrantGold = useCallback(async (playerId: string, amount: number, reason?: string) => {
+    return await dbAdminGrantGold(playerId, amount, reason);
+  }, []);
+
   const setAdventurerStatusNote = useCallback(async (coord: string, advId: string, text: string | null) => {
     await dbSetAdventurerStatusNote(coord, advId, text);
   }, []);
@@ -460,9 +465,14 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const claimMissionSlot = useCallback(async (missionId: string, slotKey: string) => {
+    const isCasino = gameState?.missions?.[missionId]?.type === 'casino';
     await dbClaimMissionSlot(missionId, slotKey);
-    addToast('You have claimed the open spot and are now committed to this mission.', 'success');
-  }, [addToast]);
+    // A casino claim costs neither gold nor one of the player's mission claims, so
+    // saying they're "committed" would misdescribe what they just agreed to.
+    addToast(isCasino
+      ? 'Slot claimed — it cost you nothing, and its card and share of the pot are yours.'
+      : 'You have claimed the open spot and are now committed to this mission.', 'success');
+  }, [addToast, gameState]);
 
   const adminGrantMissingAdventurers = useCallback(async (playerId: string) => {
     if (!gameState) return 0;
@@ -479,7 +489,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
-      adminAddWarning, adminDeleteWarning, adminClearWarnings,
+      adminAddWarning, adminDeleteWarning, adminClearWarnings, adminGrantGold,
       setAdventurerStatusNote,
       enlistInMission, standDownFromMission, setMissionParticipantStatusNote,
       adminSetParticipantSlots, adminUpdateParticipantSlotStatus,

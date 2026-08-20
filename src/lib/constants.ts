@@ -58,8 +58,14 @@ export const ALL_ORBS: OrbDef[] = [
 export const SLOT_STATUSES = ['Unstarted', 'In-Progress', '100%', 'Goaled', 'Done'] as const;
 export const FREE_COMPLETED_STATUSES = new Set(['100%', 'Goaled', 'Done']);
 
+// `default` is deliberately a CSS var, not a literal: it used to be the hard-coded
+// Gilded parchment (oklch(92% 0.03 80)), which vanished against the creme background
+// of the light themes (parchment / sakura / mint / lapis, where --parchment is ~L22%).
+// Resolving it per theme keeps the un-coloured name readable everywhere. The other 11
+// are player-chosen accents and stay literal so a swatch means the same thing in every
+// theme. Any consumer must apply these inside a themed body (all current ones do).
 export const NAME_COLORS: readonly { id: string; label: string; value: string }[] = [
-  { id: 'default',  label: 'Default',  value: 'oklch(92% 0.03 80)'  },
+  { id: 'default',  label: 'Default',  value: 'var(--parchment)'    },
   { id: 'gold',     label: 'Gold',     value: 'oklch(76% 0.14 75)'  },
   { id: 'crimson',  label: 'Crimson',  value: 'oklch(65% 0.20 25)'  },
   { id: 'ember',    label: 'Ember',    value: 'oklch(72% 0.18 50)'  },
@@ -133,6 +139,15 @@ export const ITEM_TRAIT_REFS: Readonly<Record<string, readonly string[]>> = {
 // These will need to be changed for future seasons as the map grows and/or the XP distribution changes.
 export const LEVEL_THRESHOLDS = [0, 100, 300, 500, 800, 1150, 1500];
 export const MAX_LEVEL = LEVEL_THRESHOLDS.length;
+
+export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
+
+// ── External links ────────────────────────────────────────────────────────────
+// Shared in several places (help YAML section, casino YAML rules lightbox, the
+// mission manifest reminder). The sheet gets re-published under a new id from
+// time to time — update it HERE only, so every surface stays in sync.
+export const DRAGOS_LIST_URL =
+  'https://docs.google.com/spreadsheets/d/1udTGPA2yJ1OLaKMzJIQBESGSxGWgr9wIh4Xr2x2N_SQ';
 
 // ── Boss orb-reactive traits ───────────────────────────────────────────────────
 // Elemental orb → trait IDs applied to the boss while that orb is ungathered

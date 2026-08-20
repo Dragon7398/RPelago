@@ -27,8 +27,11 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { claimEntries } from '../../lib/slotHelpers';
 import { useSeason } from '../../contexts/SeasonContext';
+import { useGameState } from '../../contexts/GameStateContext';
+import { useToast } from '../../contexts/ToastContext';
 import OddsTrio from './OddsTrio';
 import { CardFace } from '../../casino/CardFace';
 import '../../casino/cards.css';
@@ -63,7 +66,10 @@ const STATUS_CLS: Record<SlotStatus, string> = {
 
 // One committed game at the table: the slot's real game (once filled) paired with
 // the card it came from (suit/hue/flavour) via the persisted lockedCards.
-interface SeatGame { slot: string; game: string; cardName: string; type?: CardTypeKey; status: SlotStatus; }
+interface SeatGame {
+  slot: string; game: string; cardName: string; type?: CardTypeKey; status: SlotStatus;
+  claimed?: boolean; claimedFrom?: string;
+}
 function seatGames(seat: GMParticipant): SeatGame[] {
   const slots = seat.slots ?? [];
   const cards = seat.lockedCards ?? [];
@@ -73,6 +79,9 @@ function seatGames(seat: GMParticipant): SeatGame[] {
     cardName: cards[i]?.name ?? '',
     type:     cards[i]?.type,
     status:   s.status ?? 'Unstarted',
+    // A slot taken over from someone who left. Worth showing: it explains why a
+    // seat holds more cards than it was dealt, and who was originally on the hook.
+    ...(s.claimed ? { claimed: true, claimedFrom: s.claimedFrom } : {}),
   }));
 }
 
@@ -367,7 +376,11 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
 // admin-set after deploy, so each appears only once available. Mirrors the map
 // mission card (link) and agenda drawer (🧀 tracker).
 function ChallengeLinks({ m }: { m: GMMission }) {
-  if (!m.link && !m.cheese) return null;
+  // The play button is ABSENT, not disabled, while the room is pending — an empty
+  // gap where the only actionable control lives reads as "something is broken /
+  // everyone else got a link but me". Say so instead.
+  const pending = awaitingRoom(m);
+  if (!m.link && !m.cheese && !pending) return null;
   return (
     <div className="rl-chlinks">
       {m.link && (
@@ -375,11 +388,111 @@ function ChallengeLinks({ m }: { m: GMMission }) {
           🗺 Open Archipelago Game →
         </a>
       )}
+      {pending && (
+        <div className="rl-pending">
+          <span className="rl-pending-icon">⏳</span>
+          <div className="rl-pending-txt">
+            <b>The room isn't up yet.</b>
+            <span>
+              Your seat is locked in and your host is still generating this table — it can take a
+              while. Nothing for you to do; the Archipelago link appears right here the moment it's
+              ready.
+            </span>
+          </div>
+        </div>
+      )}
       {m.cheese && (
         <a className="rl-chlink-cheese" title="Open Cheesetracker — challenge progress"
            href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${m.cheese}`}
            target="_blank" rel="noopener noreferrer">🧀 Tracker</a>
       )}
+    </div>
+  );
+}
+
+// ── Open (claimable) slots ────────────────────────────────────────────────────
+//
+// A slot someone vacated after the table went live. Because the Archipelago room
+// already exists, taking one over is instant: no ante, no deal, no config to
+// submit — the claimant adopts the live slot exactly as it stands. It also costs
+// nothing, neither gold nor one of the player's mission claims, so the only limit
+// is one claimed slot per player per table.
+
+/** The claimed slot's cut of the pot, as a share of what one full seat takes. */
+function shareLabel(fraction: number | undefined): string | null {
+  if (!fraction || fraction <= 0) return null;
+  const pct = Math.round(fraction * 100);
+  return pct >= 100 ? 'a full seat share' : `${pct}% of a seat share`;
+}
+
+function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
+  const { claimMissionSlot } = useGameState();
+  const { addToast } = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const entries = claimEntries(m);
+  if (entries.length === 0) return null;
+
+  const seat = uid ? m.participants?.[uid] : undefined;
+  // One claimed slot per player per table — otherwise a single player could absorb
+  // an entire vacated hand. Holding your own seat here does NOT block you.
+  const alreadyClaimed = !!seat && (seat.slots ?? []).some(s => s?.claimed);
+
+  const take = async (key: string) => {
+    setBusy(key);
+    try { await claimMissionSlot(m.id, key); }
+    catch (err) {
+      const code = (err as { message?: string }).message ?? '';
+      addToast(
+        code.includes('already-claimed-here') ? 'You already hold an open slot at this table.'
+        : code.includes('Slot no longer available') ? 'Someone else just took that slot.'
+        : 'Could not claim that slot. Please try again.', 'error');
+    }
+    finally { setBusy(null); }
+  };
+
+  return (
+    <div className="mp-open">
+      <div className="mp-cell-lbl">
+        Open slots <span className="mp-open-count">{entries.length}</span>
+      </div>
+      <p className="mp-open-note">
+        A player left these behind. The room is already running, so taking one over is
+        instant — no buy-in, and it doesn&apos;t use up a mission claim.
+      </p>
+      <div className="mp-open-grid">
+        {entries.map(([key, entry]) => {
+          const slot  = entry.slots[0];
+          const share = shareLabel(entry.potFraction);
+          return (
+            <div key={key} className="mp-openslot" style={{ '--th': hueOf(entry.card?.type as CardTypeKey | undefined) } as React.CSSProperties}>
+              <div className="mp-openslot-head">
+                <span className="mp-openslot-suit">{suitOf(entry.card?.type as CardTypeKey | undefined)}</span>
+                <span className="mp-openslot-card">{entry.card?.name ?? slot?.name ?? 'Open slot'}</span>
+                {entry.card?.value != null && <span className="mp-openslot-gold">{entry.card.value}<small>g</small></span>}
+              </div>
+              <div className="mp-openslot-game">{slot?.game?.trim() || 'Game not recorded'}</div>
+              <div className="mp-openslot-meta">
+                {slot?.status && <StatusPill status={slot.status} />}
+                {share && <span className="mp-openslot-share" title="Paid out on top of the card's value when the table settles">+{share}</span>}
+              </div>
+              {entry.fromPlayerName && (
+                <div className="mp-openslot-from">vacated by {entry.fromPlayerName}</div>
+              )}
+              {!uid
+                ? <div className="mp-openslot-login">Sign in to take this slot.</div>
+                : (
+                  <button className="rl-btn primary mp-openslot-btn"
+                    disabled={alreadyClaimed || busy !== null}
+                    title={alreadyClaimed ? 'You already hold an open slot at this table' : undefined}
+                    onClick={() => void take(key)}>
+                    {busy === key ? '…' : alreadyClaimed ? 'Already holding one' : '⚐ Take this slot'}
+                  </button>
+                )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -442,7 +555,13 @@ function TileGrid({ tiles, wide }: { tiles: OwnedGame[]; wide?: boolean }) {
         return (
           <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
                style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
-            <div className="mp-tile-status"><StatusPill status={t.status} /></div>
+            <div className="mp-tile-status">
+              <StatusPill status={t.status} />
+              {t.claimed && (
+                <span className="mp-tile-claimed"
+                      title={t.claimedFrom ? `Taken over from ${t.claimedFrom}` : 'Taken over from a vacated seat'}>⚐</span>
+              )}
+            </div>
             <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
             <div className="mp-tile-game">{t.game}</div>
             <div className="mp-tile-owner">
@@ -481,30 +600,44 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
   const sinceDeploy = m.deployedAt ? fmtDayClock((now - m.deployedAt) / 1000) : '—';
   const href      = tableHref(m, seasonId);
   const seat      = m.participants?.[uid];
+  const pending   = awaitingRoom(m);
 
   return (
     <div className="mp-ct">
       <div className="mp-ct-rim" />
       <div className="mp-ct-head">
         <div>
-          <div className="mp-ct-kick">Your table · live</div>
+          <div className="mp-ct-kick">Your table · {pending ? 'awaiting room' : 'live'}</div>
           <div className="mp-ct-name">{missionDisplayLabel(m)}</div>
-          <div className="mp-ct-room">{CASINO_GAMES[tableGame(m)].label} · deployed {sinceDeploy} ago</div>
+          {/* "deployed 14h ago" is the most prominent time on the panel and reads as
+              "playable for 14h and you haven't started" — exactly wrong while the room
+              is pending. Same clock, honest framing. */}
+          <div className="mp-ct-room">
+            {CASINO_GAMES[tableGame(m)].label} · {pending ? `seats locked ${sinceDeploy} ago` : `deployed ${sinceDeploy} ago`}
+          </div>
         </div>
-        <span className="mp-phase-chip inprogress">In progress</span>
+        <span className={`mp-phase-chip ${pending ? 'pending' : 'inprogress'}`}>
+          {pending ? 'Awaiting room' : 'In progress'}
+        </span>
       </div>
 
       <div className="mp-ct-body">
         {seat && <DenyNotice seat={seat} href={href} />}
         <div className="mp-row" style={{ gap: '1.6rem', alignItems: 'flex-start' }}>
-          <Completion goaled={goaled} total={all.length} />
+          {/* No room means no play, so 0/N goaled is a foregone zero — a full-width
+              empty meter that only reads as failure. Hidden until there's a room. */}
+          {!pending && <Completion goaled={goaled} total={all.length} />}
           <Telemetry m={m} elapsed={elapsed} />
         </div>
 
         <ChallengeLinks m={m} />
 
+        <OpenSlots m={m} uid={uid} />
+
         <div className="mp-mine">
-          <div className="mp-cell-lbl">Your games <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span></div>
+          <div className="mp-cell-lbl">
+            Your games {!pending && <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span>}
+          </div>
           {mine.length
             ? <TileGrid tiles={mine} wide={wide} />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
@@ -545,8 +678,10 @@ export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
   const goaled = tiles.filter(g => isGoaled(g.status)).length;
   return (
     <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
-      <Completion goaled={goaled} total={tiles.length} />
+      {/* Mirrors BoardView: no room yet ⇒ the completion meter is a guaranteed zero. */}
+      {!awaitingRoom(m) && <Completion goaled={goaled} total={tiles.length} />}
       <ChallengeLinks m={m} />
+      <OpenSlots m={m} uid={uid} />
       {tiles.length
         ? <div style={{ marginTop: '1rem' }}><TileGrid tiles={tiles} wide /></div>
         : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}

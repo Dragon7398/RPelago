@@ -1,6 +1,7 @@
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
+import { DRAGOS_LIST_URL } from '../../lib/constants';
 
 function YamlVal({ base, bonus }: { base: number; bonus: number }) {
   if (bonus === 0) return <strong>{base}</strong>;
@@ -48,7 +49,7 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
         <li>
           <strong>Game eligibility:</strong> Unsupported games are allowed if they are listed as
           allowed for Async or Sync on{' '}
-          <a href="https://docs.google.com/spreadsheets/d/1YdsVZWxICS7NF0y68NMW-jXIwljZJcKOAHN_wiJh2Ms" target="_blank" rel="noopener noreferrer">Drago's list</a>.
+          <a href={DRAGOS_LIST_URL} target="_blank" rel="noopener noreferrer">Drago's list</a>.
           Manuals and Keymaster's Keep are not allowed.
         </li>
         <li>

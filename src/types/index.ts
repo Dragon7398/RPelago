@@ -10,7 +10,7 @@ export type TileTypeKey =
   | 'castle' | 'dungeon' | 'tower';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
-export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie';
+export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
 // Which card game a casino table is pinned to (S1.5 multi-table model).
 export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack';
 
@@ -38,6 +38,15 @@ export interface AdvSlot {
   //                  (e.g. "I'm stuck"); may be inaccurate.
   lastActivity?: number | null;
   lastChecked?: number | null;
+  // Casino only: this slot was CLAIMED from a vacated seat rather than dealt to
+  // its holder. Its card pays out flat (no deck boost — the claimant never chose
+  // the deck), and it carries its OWN pot weight rather than a slice of the
+  // holder's hand, because it was carved off a different seat with a different
+  // `lockedCount`. Storing the fraction on the slot keeps that unambiguous: a
+  // seat-level total could not say which slot contributed what.
+  claimed?: boolean;
+  claimedFraction?: number;
+  claimedFrom?: string;   // the vacating player's name, for provenance
 }
 
 export interface AdvStatusNote {
@@ -304,6 +313,9 @@ export interface GameState {
 // ── Official Status Report snapshots ─────────────────────────────────────────
 // Persisted when an admin runs an official report; see src/lib/statusReport.ts.
 
+// ⚠️ `allIdle60` is a persisted WIRE VALUE, not a live threshold. It predates the
+// 60h→72h move and stored reports still carry it, so the string stays put while
+// WARN_ALL_STALE_HOURS supplies the number the text renders. Do not rename it.
 export type StatusWarnCode = 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60';
 
 export interface OfficialProblemPlayer {
@@ -311,6 +323,17 @@ export interface OfficialProblemPlayer {
   handle:    string;    // "@discordHandle"
   stalled:   string[];  // In-Progress problem slot names ("Status on …?")
   unstarted: string[];  // Unstarted problem slot names ("Don't forget to start …")
+  // ── Excused ────────────────────────────────────────────────────────────────
+  // The admin accepted an explanation given OUTSIDE the tracker (typically in
+  // Discord) — the automated signals can't see it, so the flag is manual. An
+  // excused player is kept in the snapshot for the audit trail but is dropped
+  // from the player-facing Problems block and never charged a statusIncident.
+  // Set either before the run (from the live card) or after it (on the stored
+  // report, which refunds the incident it already charged).
+  excused?:       boolean;
+  excusedReason?: string;   // optional free text, e.g. "explained in Discord"
+  excusedAt?:     number;
+  excusedBy?:     string;   // admin uid
 }
 
 export interface OfficialProblemWorld {
@@ -324,6 +347,11 @@ export interface OfficialWarnItem {
   code:     StatusWarnCode;
   playerId?: string;    // present for player-specific codes (all but allIdle60)
   handle?:   string;
+  // Names of the slots that actually tripped this warning. For player-specific
+  // codes these are that player's slots; for the world-general allIdle60 they
+  // are every idle slot in the world, across players. Optional because reports
+  // stored before this field existed have none.
+  slots?:    string[];
 }
 
 export interface OfficialWarnWorld {
@@ -342,13 +370,20 @@ export interface OfficialReport {
   warnings: OfficialWarnWorld[];
 }
 
-// One weekly gold-floor top-up: a player below the floor was raised to it.
+// One gold injection from outside the game economy. Two sources write here:
+// `weeklyGoldTopUp` (a player below the floor raised to it) and the admin's manual
+// grant on the Players page. Both belong in the same ledger — the money-in audit
+// only means anything if it accounts for every coin that wasn't won at a table.
 export interface GoldTopUpEntry {
   ts:               number;  // epoch ms of the top-up
   uid:              string;
   playerName:       string;
-  granted:          number;  // gold added (floor − prior balance)
-  resultingBalance: number;  // always the floor
+  granted:          number;  // gold added — the floor gap, or the admin's amount (may be NEGATIVE on a manual clawback)
+  resultingBalance: number;  // the floor for weekly; the expected new balance for manual
+  // Absent on every entry weeklyGoldTopUp has ever written, so a MISSING kind
+  // reads as 'weekly' — never default it the other way.
+  kind?:            'weekly' | 'manual';
+  reason?:          string;  // manual only, optional (why the admin adjusted it)
 }
 
 export interface AuthUser {
@@ -372,7 +407,11 @@ export interface CasinoLogEntry {
   ts:           number;
   uid:          string;
   playerName:   string;
-  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon' | 'adminvoid';
+  // 'adminvoid' — a card (or a whole seat) was VOIDED: killed outright, no
+  // replacement possible, its pot weight released back to the table.
+  // 'adminkick' — a card (or a whole seat) was KICKED: the AP slot survives and is
+  // reopened as a claimable slot, its pot weight reserved for whoever takes it.
+  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon' | 'adminvoid' | 'adminkick' | 'claim';
   game?:        CasinoGame;
   amount?:      number;           // gold the player paid for this event (negative = paid TO the player)
   potAdd?:      number;           // gold added to the shared pot from this event
@@ -397,6 +436,12 @@ export interface GMParticipant {
                                      // lock so the landing can show them (they map 1:1 to the public
                                      // slots, so nothing secret is exposed). Only set once played.
   casinoXp?:    number;              // XP earned from gambits; merged into mission.xp at deploy
+  // The number of cards this seat held when it LOCKED — the denominator for every
+  // pot fraction carved off it. Stamped once at lock and never moved, so repeated
+  // voids/kicks each carve a consistent 1/lockedCount rather than an ever-growing
+  // slice of a shrinking hand. Claimed cards never change it (they carry their own
+  // fraction from the seat they came from).
+  lockedCount?: number;
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
   gambitOffer?:  string[];           // the gambit defIds the server dealt this seat (authoritative — the
                                      // only ones playCasinoGambit will accept); drawn from the shared deck
@@ -448,7 +493,11 @@ export interface GMMission {
   createdAt:       number;
   deployedAt?:     number;
   participants:    Record<string, GMParticipant>;
-  claimableSlots?: Record<string, AdvSlot[]>;
+  // Vacated slots waiting for a replacement. Two shapes are accepted on read (see
+  // `normalizeClaimEntry`): a bare AdvSlot[] is the legacy/non-casino form, while
+  // casino tables write the richer ClaimableEntry so the card's gold value and pot
+  // fraction survive the kick — a bare array destroys both.
+  claimableSlots?: Record<string, AdvSlot[] | ClaimableEntry>;
   slotsLocked?:   boolean;
   // casino-only fields
   variableReward?: boolean;                         // true → show "50+ XP / ? GP" until locked
@@ -468,6 +517,31 @@ export interface GMMission {
   casinoGame?:     CasinoGame;                      // which game this table is pinned to (multi-table)
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards (post-reveal)
   communityDrawnAt?: number;                        // Hold 'Em: when community was dealt; also the phase-2 gate
+  // ── Pot-share bookkeeping (casino) ──────────────────────────────────────────
+  // The number of seats that had LOCKED a hand when this table deployed — the
+  // denominator every pot share is measured against. Banked because a voided or
+  // kicked seat is deleted from `participants`, which makes the original count
+  // unrecoverable at settle.
+  casinoShareUnits?: number;
+  // Running total of pot weight RELEASED back to the table by voids. Voiding kills
+  // a slot outright, so its weight rejoins the split: the effective denominator is
+  // `casinoShareUnits − casinoVoidedShare`, which raises every survivor's share.
+  // Kicks deliberately do NOT touch this — their weight stays reserved on the
+  // claimable slot for whoever takes it, and goes unpaid if nobody does.
+  casinoVoidedShare?: number;
+}
+
+// A vacated slot offered up for another player to take over. Only created from an
+// in-progress table, so the Archipelago room already exists and the claimant is
+// adopting a live slot — there is no config to collect, which is why claiming is
+// instant. Written by the kick paths; voids deliberately create none.
+export interface ClaimableEntry {
+  slots:         AdvSlot[];   // the live slot(s), carried whole: name, game, details, status, timestamps
+  card?:         DeckCard;    // casino: the card behind the slot — the ONLY surviving record of its gold value
+  potFraction?:  number;      // casino: share of one seat's pot unit this slot carries (1 / lockedCount)
+  fromPlayerId?:   string;    // provenance: who vacated it
+  fromPlayerName?: string;
+  createdAt?:    number;
 }
 
 export interface CompletedChallenge {

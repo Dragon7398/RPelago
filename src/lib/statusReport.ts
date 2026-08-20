@@ -22,10 +22,12 @@ import type {
 
 const HOUR = 3_600_000;
 
-// Slot-level thresholds (hours).
-export const PROBLEM_STALE_HOURS      = 60;   // In-Progress: no activity AND no self-report in this long → problem
+// Slot-level thresholds (hours). The two 72s are the check-in cadence and move
+// together; the warn code `allIdle60` keeps its old name because it is a stored
+// wire value (see StatusWarnCode) — its rendered text reads the constant.
+export const PROBLEM_STALE_HOURS      = 72;   // In-Progress: no activity AND no self-report in this long → problem
 export const WARN_NO_ACTIVITY_HOURS   = 144;  // In-Progress: no server activity in this long → warning
-export const WARN_ALL_STALE_HOURS     = 60;   // every In-Progress slot here idle (no activity) this long → warning
+export const WARN_ALL_STALE_HOURS     = 72;   // every In-Progress slot here idle (no activity) this long → warning
 
 // Candidate-level bucket thresholds (hours).
 export const TOO_EARLY_HOURS        = 48;  // not yet elapsed this long → "Too Early"
@@ -281,7 +283,22 @@ export function computeStatusReport(
 // Snapshot the given candidates (the live "Active" section) into the persisted
 // shape. Problems drive the player-facing pings; warnings are admin-facing.
 
-export function buildOfficialReport(active: ReportCandidate[], ts: number, runBy?: string): OfficialReport {
+// RTDB drops empty arrays to null and hands dense arrays back as-is; normalize any
+// array-ish value (including objects with numeric keys) to a plain array.
+const asArr = <T,>(v: T[] | Record<string, T> | undefined | null): T[] =>
+  v == null ? [] : Array.isArray(v) ? v : Object.values(v);
+
+// Key identifying one player's problems on one world — the unit an excuse acts on.
+// Shared so the pre-run UI and buildOfficialReport agree on the shape.
+export const excuseKey = (kind: 'mission' | 'tile', id: string, playerId: string): string =>
+  `${kind}:${id}:${playerId}`;
+
+// Pre-run excuses: excuseKey → optional reason ('' when none was typed).
+export type ExcuseMap = Record<string, string>;
+
+export function buildOfficialReport(
+  active: ReportCandidate[], ts: number, runBy?: string, excuses: ExcuseMap = {},
+): OfficialReport {
   const problems: OfficialProblemWorld[] = [];
   const warnings: OfficialWarnWorld[]    = [];
 
@@ -296,54 +313,74 @@ export function buildOfficialReport(active: ReportCandidate[], ts: number, runBy
         if (f.codes.includes('unstarted')) unstarted.push(f.slotName);
         if (f.codes.includes('stalled'))   stalled.push(f.slotName);
       }
-      if (stalled.length || unstarted.length) {
-        players.push({ playerId: p.playerId, handle: p.handle, stalled, unstarted });
+      if (!stalled.length && !unstarted.length) continue;
+
+      // An excused player still goes into the snapshot (audit trail) but carries
+      // the flag that keeps them out of the ping and off the incident count.
+      const key    = excuseKey(c.kind, c.id, p.playerId);
+      const reason = Object.prototype.hasOwnProperty.call(excuses, key) ? excuses[key] : null;
+      const row: OfficialProblemPlayer = { playerId: p.playerId, handle: p.handle, stalled, unstarted };
+      if (reason != null) {
+        row.excused   = true;
+        row.excusedAt = ts;
+        if (runBy) row.excusedBy = runBy;
+        if (reason.trim()) row.excusedReason = reason.trim();
       }
+      players.push(row);
     }
     if (players.length) problems.push({ kind: c.kind, id: c.id, name: c.name, players });
 
-    // Warnings → deduped items. Player-specific codes carry the handle; allIdle60
-    // is world-general (collapsed to a single item).
-    const items: OfficialWarnItem[] = [];
-    const seen = new Set<string>();
-    let allIdle = false;
-    const add = (code: OfficialWarnItem['code'], p?: ReportCandidate['players'][number]) => {
+    // Warnings → deduped items, each carrying the slot names that tripped it.
+    // Player-specific codes carry the handle; allIdle60 is world-general (a
+    // single item, whose slots span every player idle here).
+    const items = new Map<string, OfficialWarnItem>();
+    const allIdleSlots: string[] = [];
+    const add = (code: OfficialWarnItem['code'], slot: string, p?: ReportCandidate['players'][number]) => {
       const key = `${code}|${p?.playerId ?? ''}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      items.push(p ? { code, playerId: p.playerId, handle: p.handle } : { code });
+      const cur = items.get(key);
+      if (cur) { cur.slots!.push(slot); return; }
+      items.set(key, p ? { code, playerId: p.playerId, handle: p.handle, slots: [slot] } : { code, slots: [slot] });
     };
     for (const p of c.players) {
       for (const f of p.findings) {
         if (f.tier !== 'warning') continue;
-        if (f.codes.includes('lastPlayer'))    add('lastPlayer', p);
-        if (f.codes.includes('lastChecker'))   add('lastChecker', p);
-        if (f.codes.includes('noActivity144')) add('noActivity144', p);
-        if (f.codes.includes('allIdle60'))     allIdle = true;
+        if (f.codes.includes('lastPlayer'))    add('lastPlayer', f.slotName, p);
+        if (f.codes.includes('lastChecker'))   add('lastChecker', f.slotName, p);
+        if (f.codes.includes('noActivity144')) add('noActivity144', f.slotName, p);
+        if (f.codes.includes('allIdle60'))     allIdleSlots.push(f.slotName);
       }
     }
-    if (allIdle) add('allIdle60');
-    if (items.length) warnings.push({ kind: c.kind, id: c.id, name: c.name, handled: false, items });
+    // Appended last so allIdle60 keeps its trailing position in the item list.
+    for (const s of allIdleSlots) add('allIdle60', s);
+
+    const list = [...items.values()];
+    // Two players can own same-named slots; dedupe so the line reads once each.
+    for (const it of list) it.slots = [...new Set(it.slots)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    if (list.length) warnings.push({ kind: c.kind, id: c.id, name: c.name, handled: false, items: list });
   }
 
   return { ts, runBy, problems, warnings };
 }
 
+// Did this world actually ping anyone? A world whose every problem player was
+// excused was reported on paper only, so it must not reset its own report timer.
+export const hasUnexcusedProblem = (w: OfficialProblemWorld): boolean =>
+  asArr(w.players).some(p => !p.excused);
+
 const codeSpan = (s: string) => '``' + s + '``';
 
-// RTDB drops empty arrays to null and hands dense arrays back as-is; normalize any
-// array-ish value (including objects with numeric keys) to a plain array.
-const asArr = <T,>(v: T[] | Record<string, T> | undefined | null): T[] =>
-  v == null ? [] : Array.isArray(v) ? v : Object.values(v);
-
 // Player-facing Problems block (the primary copy-paste, to ping players).
+// Excused players are omitted entirely — the whole point of an excuse is that
+// they don't get pinged — and a world left with nobody to ping drops its heading.
 export function renderProblemsMarkdown(r: OfficialReport): string {
   const worlds = asArr(r.problems);
   if (!worlds.length) return '';
-  const lines: string[] = ['## Status Report'];
+  const lines: string[] = [];
   for (const w of worlds) {
+    const pingable = asArr(w.players).filter(p => !p.excused);
+    if (!pingable.length) continue;
     lines.push(`### ${w.name}`);
-    for (const p of asArr(w.players)) {
+    for (const p of pingable) {
       const stalled = asArr(p.stalled);
       const unstarted = asArr(p.unstarted);
       const clauses: string[] = [];
@@ -352,15 +389,19 @@ export function renderProblemsMarkdown(r: OfficialReport): string {
       lines.push(`${p.handle} ${clauses.join(' ')}`);
     }
   }
-  return lines.join('\n');
+  return lines.length ? ['## Status Report', ...lines].join('\n') : '';
 }
 
-export function warnItemText(it: OfficialWarnItem): string {
+// `wrap` decorates the slot names: identity for the on-screen list, codeSpan for
+// the copy-paste markdown (where backticks are wanted, not shown literally).
+export function warnItemText(it: OfficialWarnItem, wrap: (s: string) => string = s => s): string {
+  const slots = asArr(it.slots);
+  const tail  = slots.length ? ` (Slots: ${slots.map(wrap).join(', ')})` : '';
   switch (it.code) {
-    case 'lastPlayer':    return `${it.handle} is the last to finish this world.`;
-    case 'lastChecker':   return `${it.handle} is the last still finding checks — others here are at 100% and may be waiting on an item from them.`;
-    case 'noActivity144': return `${it.handle} — no activity in over ${WARN_NO_ACTIVITY_HOURS} hours.`;
-    case 'allIdle60':     return `No activity by players in last ${WARN_ALL_STALE_HOURS} hours.`;
+    case 'lastPlayer':    return `${it.handle} is the last to finish this world.${tail}`;
+    case 'lastChecker':   return `${it.handle} is the last still finding checks — others here are at 100% and may be waiting on an item from them.${tail}`;
+    case 'noActivity144': return `${it.handle} — no activity in over ${WARN_NO_ACTIVITY_HOURS} hours.${tail}`;
+    case 'allIdle60':     return `No activity by players in last ${WARN_ALL_STALE_HOURS} hours.${tail}`;
   }
 }
 
@@ -371,7 +412,7 @@ export function renderWarningsMarkdown(r: OfficialReport): string {
   const lines: string[] = ['## Status Report — Warnings'];
   for (const w of worlds) {
     lines.push(`${w.name}:`);
-    for (const it of asArr(w.items)) lines.push(warnItemText(it));
+    for (const it of asArr(w.items)) lines.push(warnItemText(it, codeSpan));
   }
   return lines.join('\n');
 }

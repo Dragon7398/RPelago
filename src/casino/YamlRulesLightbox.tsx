@@ -4,6 +4,8 @@
 // a casino season has no feats, so there are no feat-bonus values to show here.
 // Keep the rules text in sync with that component.
 
+import { DRAGOS_LIST_URL } from '../lib/constants';
+
 interface YamlRulesLightboxProps {
   onClose: () => void;
 }
@@ -30,7 +32,7 @@ export function YamlRulesLightbox({ onClose }: YamlRulesLightboxProps) {
             <li>
               <strong>Game eligibility:</strong> Unsupported games are allowed if they are listed as
               allowed for Async or Sync on{' '}
-              <a href="https://docs.google.com/spreadsheets/d/1YdsVZWxICS7NF0y68NMW-jXIwljZJcKOAHN_wiJh2Ms" target="_blank" rel="noopener noreferrer">Drago's list</a>.
+              <a href={DRAGOS_LIST_URL} target="_blank" rel="noopener noreferrer">Drago's list</a>.
               Manuals and Keymaster's Keep are not allowed.
             </li>
             <li>

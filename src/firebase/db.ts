@@ -2,13 +2,14 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, KmkStatus, CasinoGame, OfficialReport, DiscordBan } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoPotShares, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
+import { hasUnexcusedProblem } from '../lib/statusReport';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -490,6 +491,57 @@ export async function clearPlayerWarnings(playerId: string): Promise<void> {
   await remove(sRef(db!, `players/${playerId}/warnings`));
 }
 
+// ── Admin: manual gold grant ─────────────────────────────────────────────────
+// Hand-adjust a balance: comp a player for a bug that cost them gold, or fund
+// alpha testing. Admin-only by rule (`players/$playerId` validates that xp/gold
+// only move for `config/adminId`), so this stays a client write like the rest of
+// the admin player actions — no callable to deploy ahead of the frontend.
+//
+// Two things make it safe to do from the client:
+//   • The balance moves via `increment`, NOT read-then-set, so it cannot clobber
+//     a casino ante the player commits in the same instant.
+//   • The audit entry goes into `goldTopUpLog` in the SAME atomic update. Manual
+//     gold is outside money entering the economy — precisely what the season
+//     money-in audit exists to total — so the grant and its ledger line either
+//     both land or neither does.
+//
+// A negative `amount` is a clawback, clamped so it can't drive the balance below
+// zero (the DB rule would reject the write outright, which just looks broken).
+// Returns the expected new balance.
+export async function adminGrantGold(
+  playerId: string,
+  amount: number,
+  reason?: string,
+): Promise<number> {
+  assertDb();
+  const snap = await get(sRef(db!, `players/${playerId}`));
+  const player = snap.val() as Player | null;
+  if (!player) throw new Error('That player has no record in this season.');
+
+  const current = player.gold ?? 0;
+  const delta   = amount < 0 ? Math.max(amount, -current) : amount;
+  if (delta === 0) return current;
+
+  const logKey = push(sRef(db!, 'goldTopUpLog')).key!;
+  const entry: GoldTopUpEntry = {
+    ts:   Date.now(),
+    uid:  playerId,
+    playerName: player.displayName ?? playerId,
+    granted: delta,
+    // Best-effort: the balance we read, plus the delta. The `increment` above is
+    // the authoritative arithmetic, so a spend landing in the same instant can
+    // leave this a hair stale — it's an audit note, not a source of truth.
+    resultingBalance: current + delta,
+    kind: 'manual',
+    ...(reason ? { reason } : {}),
+  };
+  await update(ref(db!), {
+    [sPath(`players/${playerId}/gold`)]:    increment(delta),
+    [sPath(`goldTopUpLog/${logKey}`)]:      entry,
+  });
+  return current + delta;
+}
+
 // ── Player: claim a claimable slot ───────────────────────────────────────────
 export async function claimClaimableSlot(
   coord: string,
@@ -611,6 +663,18 @@ export async function adminUpdateAdvSlotStatus(coord: string, advId: string, slo
 export async function adminUpdatePublicSlotStatus(coord: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
   await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/status`), status);
+}
+
+// Adopts the slot name Archipelago actually generated for a `{NUMBER}` slot (see
+// resolveNumberedSlotName) — the stored token would never match the room again.
+export async function adminUpdateAdvSlotName(coord: string, advId: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `tiles/${coord}/adventurers/${advId}/slots/${slotIndex}/name`), name);
+}
+
+export async function adminUpdatePublicSlotName(coord: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `tiles/${coord}/publicSlots/${slotIndex}/name`), name);
 }
 
 // Cheesetracker activity timestamps (ms epoch, or null to clear). See AdvSlot —
@@ -855,17 +919,47 @@ export async function playerReset(playerId: string): Promise<void> {
         updates[sPath(`missions/${missionId}/firstJoinAt`)] = null;
       }
     } else if (mission.state === 'inprogress') {
-      // Full kick: create claimable slot + warning
+      // Full kick: create claimable slot(s) + warning
       const participant = mission.participants?.[playerId];
-      const slotsToAdd: AdvSlot[] = participant?.slots?.length
-        ? participant.slots.map(s => ({
-            name: s.name, game: s.game,
-            ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
-            ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
-          }))
-        : [{ name: '', game: '' }];
-      const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
-      updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
+      if (mission.type === 'casino') {
+        // Mirrors adminKickMissionParticipant: a casino seat reopens one card at a
+        // time, each entry carrying its card (the only record of its gold value)
+        // and its 1/lockedCount slice of the pot. Bundling them would force one
+        // replacement to take the whole hand.
+        const slots = (participant?.slots ?? []).filter(Boolean);
+        const cards = (participant?.lockedCards ?? []).filter(Boolean);
+        const owned = slots.filter(s => !s.claimed).length;
+        const denom = participant?.lockedCount && participant.lockedCount > 0
+          ? participant.lockedCount : owned;
+        slots.forEach((slot, i) => {
+          const fraction = slot.claimed
+            ? (slot.claimedFraction ?? 0)
+            : (denom > 0 ? 1 / denom : 0);
+          const clean: AdvSlot = { ...slot };
+          delete clean.claimed;
+          delete clean.claimedFraction;
+          delete clean.claimedFrom;
+          const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
+          updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = {
+            slots: [clean],
+            ...(cards[i] ? { card: cards[i] } : {}),
+            potFraction:    fraction,
+            fromPlayerId:   playerId,
+            fromPlayerName: participant?.playerName ?? '',
+            createdAt:      Date.now(),
+          } satisfies ClaimableEntry;
+        });
+      } else {
+        const slotsToAdd: AdvSlot[] = participant?.slots?.length
+          ? participant.slots.map(s => ({
+              name: s.name, game: s.game,
+              ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}),
+              ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}),
+            }))
+          : [{ name: '', game: '' }];
+        const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
+        updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = slotsToAdd;
+      }
 
       const warnRef = push(sRef(db!, `players/${playerId}/warnings`));
       updates[sPath(`players/${playerId}/warnings/${warnRef.key}`)] = {
@@ -933,16 +1027,21 @@ const worldBase = (kind: 'mission' | 'tile', id: string) =>
   kind === 'mission' ? `missions/${id}` : `tiles/${id}`;
 
 // Persist an official report and apply its side effects in one atomic update:
-//   • +1 statusIncident for every player who appears in a Problem world
-//   • reset lastReportAt (= report.ts) on every Problem world
+//   • +1 statusIncident for every UNEXCUSED player in a Problem world
+//   • reset lastReportAt (= report.ts) on every Problem world that pinged someone
 //   • store the report, then prune to the newest 10
+// An excused player was cleared by the admin on evidence the trackers can't see,
+// so they are charged nothing; a world where everyone was excused sent no ping at
+// all and keeps its old timer, staying visible instead of going "Recently Reported".
 export async function runOfficialStatusReport(report: OfficialReport): Promise<void> {
   assertDb();
   const updates: Record<string, unknown> = {};
 
   for (const w of report.problems) {
+    if (!hasUnexcusedProblem(w)) continue;
     updates[sPath(`${worldBase(w.kind, w.id)}/lastReportAt`)] = report.ts;
     for (const p of w.players) {
+      if (p.excused) continue;
       updates[sPath(`${worldBase(w.kind, w.id)}/statusIncidents/${p.playerId}`)] = increment(1);
     }
   }
@@ -982,6 +1081,36 @@ export async function markStatusWarningHandled(
   await update(ref(db!), updates);
 }
 
+// Excuse a player's problems on a stored report, after the fact — they explained
+// themselves somewhere the trackers can't see (typically Discord). Marks the
+// snapshot row (which drops them from the Problems copy block) and refunds the
+// incident this report charged them on that world.
+//
+// The refund is read-then-write, NOT increment(-1): a player excused before the
+// run was never charged, and a blind decrement would push their count negative
+// and hide a later real incident from the ≥5 auto-warning.
+export async function excuseStatusProblem(
+  reportId: string, worldIndex: number, playerIndex: number,
+  world: { kind: 'mission' | 'tile'; id: string }, playerId: string,
+  reason: string, by?: string,
+): Promise<void> {
+  assertDb();
+  const row = `statusReports/${reportId}/problems/${worldIndex}/players/${playerIndex}`;
+  const updates: Record<string, unknown> = {
+    [sPath(`${row}/excused`)]:   true,
+    [sPath(`${row}/excusedAt`)]: Date.now(),
+  };
+  if (reason.trim()) updates[sPath(`${row}/excusedReason`)] = reason.trim();
+  if (by)            updates[sPath(`${row}/excusedBy`)]     = by;
+
+  const incPath = `${worldBase(world.kind, world.id)}/statusIncidents/${playerId}`;
+  const cur = await get(sRef(db!, incPath));
+  const n = cur.exists() ? Number(cur.val()) || 0 : 0;
+  if (n > 0) updates[sPath(incPath)] = n - 1 > 0 ? n - 1 : null;
+
+  await update(ref(db!), updates);
+}
+
 export async function adminSetParticipantSlots(missionId: string, playerId: string, slots: AdvSlot[]): Promise<void> {
   assertDb();
   await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots`), slots);
@@ -990,6 +1119,13 @@ export async function adminSetParticipantSlots(missionId: string, playerId: stri
 export async function adminUpdateParticipantSlotStatus(missionId: string, playerId: string, slotIndex: number, status: SlotStatus): Promise<void> {
   assertDb();
   await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/status`), status);
+}
+
+// Adopts the slot name Archipelago actually generated for a `{NUMBER}` slot — the
+// mission twin of adminUpdateAdvSlotName.
+export async function adminUpdateParticipantSlotName(missionId: string, playerId: string, slotIndex: number, name: string): Promise<void> {
+  assertDb();
+  await set(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}/name`), name);
 }
 
 // Stamps a slot's Cheesetracker activity timestamps (ms epoch, or null to clear —
@@ -1054,14 +1190,53 @@ export async function adminDenyCasinoYaml(missionId: string, playerId: string, r
 // fields that must move together — slots, the index-aligned lockedCards, and the
 // stored goldSwing that settlement pays. Editing slots alone leaves the seat
 // over-paying and mis-maps games to cards on the player's next resubmit.
+/**
+ * Remove ONE committed card from a casino seat. `mode` decides where the removed
+ * slot's share of the pot goes, which is the whole difference between the two:
+ *
+ *   'void' — the slot is dead, nobody can take it over, and its pot weight is
+ *            released back to the table (every remaining seat's share goes up).
+ *            No warning: the card was unplayable, not abandoned.
+ *   'kick' — the Archipelago slot survives and reopens as a claimable slot with
+ *            its card and pot fraction attached, reserved for whoever takes it.
+ *            Punitive, so it also writes a PlayerWarning.
+ */
 export async function adminRemoveCasinoSlot(
-  missionId: string, playerId: string, slotIndex: number,
+  missionId: string, playerId: string, slotIndex: number, mode: 'void' | 'kick' = 'void',
 ): Promise<{ goldSwing: number; remaining: number }> {
   assertFunctions();
   const res = await httpsCallable<object, { ok: boolean; goldSwing: number; remaining: number }>(
     functions!, 'adminRemoveCasinoSlot',
-  )({ missionId, playerId, slotIndex, seasonId: getCurrentSeason() });
+  )({ missionId, playerId, slotIndex, mode, seasonId: getCurrentSeason() });
   return { goldSwing: res.data.goldSwing, remaining: res.data.remaining };
+}
+
+/**
+ * Remove a WHOLE casino seat without reopening any of it — the no-fault twin of
+ * kicking the player. Every card dies, all of the seat's pot weight returns to the
+ * table, and no warning is recorded. Use `adminKickMissionParticipant` instead when
+ * the slots are still playable and should go to replacements.
+ */
+export async function adminVoidCasinoSeat(
+  missionId: string, playerId: string,
+): Promise<{ released: number }> {
+  assertFunctions();
+  const res = await httpsCallable<object, { ok: boolean; released: number }>(
+    functions!, 'adminVoidCasinoSeat',
+  )({ missionId, playerId, seasonId: getCurrentSeason() });
+  return { released: res.data.released };
+}
+
+/**
+ * Withdraw an unclaimed claimable slot. The reserved pot weight it was holding is
+ * released back to the table, so this converts a kick nobody took up into a void
+ * rather than leaving that share permanently unpaid.
+ */
+export async function adminReleaseClaimableSlot(missionId: string, slotKey: string): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'adminReleaseClaimableSlot')({
+    missionId, slotKey, seasonId: getCurrentSeason(),
+  });
 }
 
 export async function claimMissionSlot(missionId: string, slotKey: string): Promise<void> {
@@ -1132,14 +1307,14 @@ export async function completeMission(
   const label    = missionDisplayLabel(mission);
   const updates: Record<string, unknown> = {};
 
-  // For casino missions, pre-compute each played player's pot share.
-  // Gold comes from goldSwing (card values) + equal pot split; no feat multiplier on gambling winnings.
+  // For casino missions, pre-compute each recipient's weighted pot share. Weights
+  // are in seat units (see casinoTableShares): a full hand is one unit, voids
+  // release their fraction back to the table, kicks reserve theirs for a claimant.
+  // Gold comes from goldSwing (card values) + that share; no feat multiplier on
+  // gambling winnings.
   let potShares = new Map<string, number>();
   if (mission.type === 'casino') {
-    const winnerIds = Object.entries(mission.participants ?? {})
-      .filter(([, p]) => p.played)
-      .map(([pid]) => pid);
-    potShares = casinoPotShares(mission.pot ?? 0, winnerIds);
+    potShares = casinoTableShares(mission);
   }
 
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
@@ -1149,7 +1324,10 @@ export async function completeMission(
     const isCasino = mission.type === 'casino';
 
     // A folded / never-played casino seat wins nothing — just free its claim.
-    if (isCasino && !participant.played) {
+    // Someone who only ever CLAIMED a vacated slot has no `played` flag of their
+    // own but is still owed the slot's card value and its fraction of the pot, so
+    // they must not be swept up by this.
+    if (isCasino && !participant.played && claimedWeight(participant) <= 0) {
       updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
       continue;
     }
@@ -1215,7 +1393,12 @@ export async function completeMission(
     // Casino Coat earn path: mark this game type completed; grant the Coat once
     // the player has successfully completed a table of all four game types. Works
     // in either season — the tracking is the same.
-    if (isCasino && mission.casinoGame) {
+    //
+    // Gated on `played`: the Coat is earned by SITTING a table of each game, and a
+    // pure claimant never played the game at all — they took over an abandoned slot
+    // without anteing, being dealt to, or locking a hand. Crediting them would let
+    // four claims buy the Coat without ever playing a hand.
+    if (isCasino && mission.casinoGame && participant.played) {
       updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
       const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
       const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);

@@ -180,6 +180,10 @@ body.casino-scope #root { width: 100%; }
 .rl-badge.open { color: var(--gold-dim); border-color: var(--line); }
 .rl-badge.seated { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.55); background: oklch(from var(--gold) l c h / 0.14); }
 .rl-badge.live { color: var(--pos); border-color: oklch(from var(--pos) l c h / 0.55); background: oklch(from var(--pos) l c h / 0.16); display: inline-flex; align-items: center; gap: 0.35rem; }
+/* Deployed, no room yet. Gold rather than --pos/--neg: it is neither running nor
+   wrong, and gold vs pos sits on the yellow–blue axis the Deutan/Protan themes are
+   built around (the label carries the meaning regardless). */
+.rl-badge.pending { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.5); background: oklch(from var(--gold) l c h / 0.13); }
 .rl-live-dot { width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 0 oklch(from var(--pos) l c h / 0.5); animation: rl-livepulse 1.8s ease-out infinite; }
 @keyframes rl-livepulse { 70% { box-shadow: 0 0 0 0.3rem oklch(from var(--pos) l c h / 0); } 100% { box-shadow: 0 0 0 0 oklch(from var(--pos) l c h / 0); } }
 
@@ -202,6 +206,30 @@ body.casino-scope #root { width: 100%; }
 .rl-deny-txt { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 12ch; }
 .rl-deny-txt b { font-family:'Cinzel',serif; font-size: 0.62rem; letter-spacing: 0.05em; color: oklch(from var(--neg) l c h / 0.95); }
 .rl-deny-txt span { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.82rem; color: var(--ink-soft); }
+
+/* Room-pending notice — the table dealt in but the host hasn't generated it yet.
+   Same shape as .rl-deny (it sits in the same slots) but gold, not --neg: nothing
+   has gone wrong and nothing is owed by the player. */
+.rl-pending {
+  flex: 1 1 100%;
+  display: flex; align-items: flex-start; gap: 0.7rem;
+  padding: 0.65rem 0.8rem; border-radius: 5px;
+  border: 1px dashed oklch(from var(--gold) l c h / 0.5); background: oklch(from var(--gold) l c h / 0.09);
+}
+.rl-pending-icon { font-size: 1.15rem; line-height: 1.2; }
+.rl-pending-txt { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 12ch; }
+.rl-pending-txt b { font-family:'Cinzel',serif; font-size: 0.62rem; letter-spacing: 0.05em; color: var(--gold); }
+.rl-pending-txt span { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.82rem; color: var(--ink-soft); }
+
+/* Compact variant standing in for the completion meter on a live table card. */
+.rl-pending-mini {
+  display: flex; align-items: center; gap: 0.5rem; min-width: 220px; flex: 1;
+  font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.8rem; color: var(--ink-soft);
+  padding: 0.5rem 0.6rem; border-radius: 5px;
+  border: 1px dashed oklch(from var(--gold) l c h / 0.4); background: oklch(from var(--gold) l c h / 0.07);
+}
+/* A pending table must not wear the live card's success rim. */
+.rl-tcard-pending .rl-tcard-felt { border-bottom-color: oklch(from var(--gold) l c h / 0.4); }
 
 .rl-time { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--gold-dim); }
 
@@ -511,6 +539,7 @@ body.casino-scope #root { width: 100%; }
 
 .mp-phase-chip { font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.24rem 0.66rem; border-radius: 999px; border: 1px solid; white-space: nowrap; }
 .mp-phase-chip.inprogress { color: oklch(78% 0.13 235); border-color: oklch(78% 0.13 235 / 0.5); background: oklch(78% 0.13 235 / 0.12); }
+.mp-phase-chip.pending { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.5); background: oklch(from var(--gold) l c h / 0.12); }
 
 /* headline completion + meter */
 .mp-complete-wrap { display: flex; flex-direction: column; gap: 0.5rem; min-width: 220px; flex: 1; }
@@ -624,6 +653,61 @@ body.casino-scope #root { width: 100%; }
   .st-lnum:nth-of-type(5)::before { content: 'Entries'; }
   .st-lnum:nth-of-type(6)::before { content: 'Net'; }
 }
+
+/* ── Open (claimable) slots ───────────────────────────────────────────────────
+   A slot someone vacated mid-table, free for anyone to take over. Coloured with
+   --mission (defined in all ten themes, like every token used here) rather than
+   --gold: gold already means "pending / awaiting room" on these cards, and the
+   two can appear together. The palette is derived with oklch(from …) so contrast
+   tracks each theme's own lightness — including the light and color-blind ones —
+   instead of being pinned to a fixed colour. */
+.rl-badge.open-slots {
+  color: var(--mission);
+  border-color: oklch(from var(--mission) l c h / 0.55);
+  background: oklch(from var(--mission) l c h / 0.15);
+}
+.rl-sec-open { color: var(--mission); }
+
+.mp-open { margin-top: 0.9rem; }
+.mp-open-count {
+  font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em;
+  color: var(--mission); margin-left: 0.4rem; text-transform: none;
+}
+.mp-open-note {
+  font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.8rem;
+  color: var(--ink-soft); margin: 0 0 0.55rem;
+}
+.mp-open-grid {
+  display: grid; gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+}
+.mp-openslot {
+  display: flex; flex-direction: column; gap: 0.34rem;
+  padding: 0.6rem 0.7rem; border-radius: 0.5rem;
+  border: 1px solid oklch(from var(--mission) l c h / 0.42);
+  background: oklch(from var(--mission) l c h / 0.07);
+}
+.mp-openslot-head { display: flex; align-items: baseline; gap: 0.4rem; }
+.mp-openslot-suit { color: oklch(72% 0.14 var(--th,75)); font-size: 0.9rem; }
+.mp-openslot-card {
+  font-family:'Cinzel',serif; font-size: 0.68rem; letter-spacing: 0.04em;
+  color: var(--parchment); flex: 1;
+}
+.mp-openslot-gold { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.8rem; color: var(--gold); }
+.mp-openslot-gold small { font-size: 0.62em; }
+.mp-openslot-game { font-family:'Crimson Pro',serif; font-size: 0.86rem; color: var(--parchment); }
+.mp-openslot-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.mp-openslot-share {
+  font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.06em;
+  color: var(--mission); border: 1px solid oklch(from var(--mission) l c h / 0.45);
+  border-radius: 999px; padding: 0.1rem 0.4rem;
+}
+.mp-openslot-from, .mp-openslot-login {
+  font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; color: var(--ink-soft);
+}
+.mp-openslot-btn { margin-top: 0.15rem; }
+/* Provenance mark on a board tile whose slot was taken over from someone else. */
+.mp-tile-claimed { color: var(--mission); font-size: 0.72rem; margin-left: 0.3rem; }
 
 @media (prefers-reduced-motion: reduce) {
   .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-sitflash-chip::after,

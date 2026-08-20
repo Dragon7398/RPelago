@@ -3,7 +3,7 @@ import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSeason } from '../../contexts/SeasonContext';
 import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
-import { computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
+import { awaitingRoom, computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, missionClaimCapacity } from '../../lib/gameLogic';
 import { AdvFeatIcons, CopyButton } from './AdvRow';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
@@ -556,10 +556,22 @@ function MissionCard({ card, uid, claimsFull, basicTrainingDone, onEnlist, onSta
           deployed={card.status === 'inprogress'}
         />
       )}
-      {/* Archipelago game link — shown for all mission types when set */}
-      {card.mission.link && (
+      {/* Archipelago game link — shown for all mission types when set. Deployed with
+          no link yet gets an explicit notice in its place: an empty gap where the
+          play button lives reads as a bug, not as "your host isn't done". Keyed on
+          `awaitingRoom` (mission.state), not `card.status`, which already says
+          'inprogress' for a full-but-forming cohort. */}
+      {card.mission.link ? (
         <div className="lb-archipelago-link">
           <a href={card.mission.link} target="_blank" rel="noopener noreferrer">🗺 Open Archipelago Game →</a>
+        </div>
+      ) : awaitingRoom(card.mission) && (
+        <div className="lb-room-pending">
+          <span className="lb-room-pending-icon">⏳</span>
+          <span>
+            <b>Room not generated yet.</b> Your host is still setting this one up — the
+            Archipelago link appears here when it's ready.
+          </span>
         </div>
       )}
 

@@ -7,6 +7,31 @@ export function extractApSlotName(name: string): string {
   return m ? m[1].trim() : name;
 }
 
+// Players may end a slot name with `{NUMBER}` so the room still generates when two
+// people pick the same name: Archipelago expands the token to nothing for the first
+// such slot and to a digit for each one after it ("jam_minit", then "jam_minit2").
+// The name we store keeps the token, so it never matches what the room reports.
+const NUMBER_TOKEN_RE = /\{NUMBER\}$/i;
+
+export function hasNumberToken(name: string): boolean {
+  return NUMBER_TOKEN_RE.test(name);
+}
+
+// Resolve a `{NUMBER}` slot name against the names the room actually generated.
+// Only an UNAMBIGUOUS token resolves — exactly one room name matching the base
+// (bare, or with the digits AP appended). Zero matches and 2+ matches both return
+// null and stay for the admin to map by hand, which is the whole point: with two
+// real `jam_minit` slots there is no way to tell whose is whose from the name.
+// A name without the token returns null too (nothing to resolve).
+export function resolveNumberedSlotName(name: string, apNames: Iterable<string>): string | null {
+  if (!hasNumberToken(name)) return null;
+  const base = name.replace(NUMBER_TOKEN_RE, '');
+  if (!base) return null;
+  const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d*$`);
+  const matches = Array.from(new Set(apNames)).filter(n => re.test(n));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // Cheesetracker timestamps (last_checked / last_activity) arrive as ISO strings,
 // or are absent. Normalize to ms epoch, or null when missing/unparseable.
 export function parseCheeseTs(v?: string | null): number | null {

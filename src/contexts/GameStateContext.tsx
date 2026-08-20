@@ -43,6 +43,8 @@ export interface GameStateContextValue {
   adminAddWarning: (playerId: string, message: string) => Promise<void>;
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;
   adminClearWarnings: (playerId: string) => Promise<void>;
+  // Manual balance adjustment (negative = clawback). Resolves to the new balance.
+  adminGrantGold: (playerId: string, amount: number, reason?: string) => Promise<number>;
   setAdventurerStatusNote: (coord: string, advId: string, text: string | null) => Promise<void>;
 
   // Mission actions

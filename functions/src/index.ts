@@ -694,13 +694,31 @@ interface GMSlot {
   bonusGold?: number;
   lastActivity?: number | null;   // Cheesetracker: STRONG — last server-verified activity
   lastChecked?:  number | null;   // Cheesetracker: WEAK — last manual self-report
+  claimed?:         boolean;      // casino: taken over from a vacated seat (pays flat, no deck boost)
+  claimedFraction?: number;       // casino: the pot weight this slot arrived with (see src/types)
+  claimedFrom?:     string;       // casino: the vacating player's name, for provenance
+}
+
+// A vacated slot offered up for a replacement. Mirrors ClaimableEntry in
+// src/types/index.ts. Kicks write this; voids deliberately write nothing.
+interface ClaimableEntry {
+  slots:           GMSlot[];
+  card?:           DeckCard;   // the ONLY surviving record of the slot's gold value
+  potFraction?:    number;     // share of one seat unit this slot carries (1 / lockedCount)
+  fromPlayerId?:   string;
+  fromPlayerName?: string;
+  createdAt?:      number;
 }
 
 interface CasinoLogEntry {
   ts:           number;
   uid:          string;
   playerName:   string;
-  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon' | 'adminvoid';
+  // 'adminvoid' — killed outright; no replacement possible, pot weight RELEASED
+  //               back to the table (raises every survivor's share).
+  // 'adminkick' — the AP slot survives and is reopened as a claimable slot; its
+  //               pot weight is RESERVED for whoever takes it, unpaid if nobody does.
+  event:        'deal' | 'reroll' | 'gambit' | 'lock' | 'fold' | 'playon' | 'adminvoid' | 'adminkick' | 'claim';
   game?:        CasinoGame;
   amount?:      number;
   potAdd?:      number;
@@ -735,6 +753,9 @@ interface GMParticipant {
   deckChoice?:  CasinoDeckChoice;         // which deck variant this seat is drawing from this cohort
   holeLocked?:  boolean;                   // Hold 'Em sitting 1: hole cards anted + locked
   playedOn?:    boolean;                   // Hold 'Em sitting 2: paid the play-on and selected
+  // Cards held at lock — the fixed denominator for every pot fraction carved off
+  // this seat, so repeated voids/kicks each take a consistent 1/lockedCount.
+  lockedCount?: number;
 }
 
 interface GMMission {
@@ -1049,6 +1070,12 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
     updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
     updates[sp(seasonId, `missions/${missionId}/hint`)]    = m.casinoStats.hint;
     updates[sp(seasonId, `missions/${missionId}/xp`)]      = m.casinoStats.xp;
+    // Bank the pot denominator. Every share at settle is measured in these units,
+    // and a voided or kicked seat is DELETED from participants — so counting them
+    // later is impossible. Frozen here, at the last moment the roster is complete.
+    updates[sp(seasonId, `missions/${missionId}/casinoShareUnits`)] =
+      Object.values(m.participants ?? {}).filter(p => p.played).length;
+    updates[sp(seasonId, `missions/${missionId}/casinoVoidedShare`)] = 0;
     // Secrets live outside the season tree — clear the DRAW DECK now that the table
     // is live: no reroll, no hit, nothing left to draw once deployed.
     //
@@ -1092,6 +1119,88 @@ function clearSeatSecrets(seasonId: string, missionId: string, uid: string): Rec
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)]: null,
+  };
+}
+
+// ── Casino seat arithmetic (void / kick / claim) ──────────────────────────────
+//
+// A casino seat is three index-aligned things that must always agree: `slots`,
+// `lockedCards`, and the `goldSwing` that settlement actually pays. Claimed slots
+// live in the same two arrays (so every existing consumer keeps working) but are
+// flagged, because they pay differently: a claimed card is worth its face value
+// flat, with NO deck boost — the claimant never chose the deck.
+
+interface SeatCard { card: DeckCard; slot: GMSlot; index: number }
+
+/**
+ * A seat's cards split into what it was dealt and what it took over from someone
+ * else. Both arrays are compacted first: RTDB serialises these as arrays and a
+ * past repair can leave a null hole, which would otherwise shift every index.
+ */
+function splitSeatCards(seat: GMParticipant): { own: SeatCard[]; claimed: SeatCard[]; paired: SeatCard[] } {
+  const cards = (seat.lockedCards ?? []).filter(Boolean);
+  const slots = (seat.slots ?? []).filter(Boolean);
+  const paired: SeatCard[] = [];
+  for (let i = 0; i < Math.min(cards.length, slots.length); i++) {
+    paired.push({ card: cards[i], slot: slots[i], index: i });
+  }
+  return {
+    own:     paired.filter(p => !p.slot.claimed),
+    claimed: paired.filter(p => p.slot.claimed),
+    paired,
+  };
+}
+
+/** Reward for a seat: its own hand takes the deck boost, claimed cards pay flat. */
+function seatGoldSwing(seat: GMParticipant, own: SeatCard[], claimed: SeatCard[]): number {
+  const boosted = applyDeckBoost(handStake(own.map(p => p.card)), deckChoiceOf(seat));
+  return boosted + handStake(claimed.map(p => p.card));
+}
+
+/**
+ * The denominator for pot fractions carved off this seat. `lockedCount` is stamped
+ * at lock; tables locked before it existed fall back to the seat's current own-card
+ * count, which makes a full hand worth exactly one unit as it always was.
+ */
+function seatLockedCount(seat: GMParticipant, own: SeatCard[]): number {
+  return seat.lockedCount && seat.lockedCount > 0 ? seat.lockedCount : own.length;
+}
+
+/** Pot weight held by slots this seat CLAIMED — each carries the fraction it arrived with. */
+function claimedWeight(seat: GMParticipant): number {
+  return (seat.slots ?? [])
+    .filter(s => s && s.claimed)
+    .reduce((sum, s) => sum + (s.claimedFraction ?? 0), 0);
+}
+
+/** Pot weight the seat itself holds right now — its surviving own cards, plus anything it claimed. */
+function seatTotalWeight(seat: GMParticipant, own: SeatCard[]): number {
+  const denom = seatLockedCount(seat, own);
+  const ownW  = denom > 0 ? own.length / denom : 0;
+  return ownW + claimedWeight(seat);
+}
+
+/**
+ * Build the claimable entry a KICK leaves behind. The slot is carried whole —
+ * name, game, status and both Cheesetracker timestamps — because the Archipelago
+ * room already exists and the claimant is adopting a live slot, not creating one.
+ */
+function makeClaimEntry(
+  slot: GMSlot, card: DeckCard | undefined, potFraction: number, seat: GMParticipant, now: number,
+): ClaimableEntry {
+  // Strip the claim marks: a re-kicked slot is offered fresh, and the next holder's
+  // provenance is whoever they took it from now, not the original vacating player.
+  const clean: GMSlot = { ...slot };
+  delete clean.claimed;
+  delete clean.claimedFraction;
+  delete clean.claimedFrom;
+  return {
+    slots: [clean],
+    ...(card ? { card } : {}),
+    potFraction,
+    fromPlayerId:   seat.playerId,
+    fromPlayerName: seat.playerName,
+    createdAt:      now,
   };
 }
 
@@ -1260,32 +1369,97 @@ export const claimMissionSlot = onCall(async (request) => {
   const player  = playerSnap.val() as { displayName: string; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean };
   const mission = missionSnap.val() as GMMission;
 
+  const isCasino = mission.type === 'casino';
+  const seat     = mission.participants?.[uid];
+
   if (player.disabled)      throw new HttpsError('permission-denied',  'Account restricted.');
-  if (heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
-    throw new HttpsError('failed-precondition', 'no-claims-free');
   if (mission.state !== 'inprogress')
     throw new HttpsError('failed-precondition', 'Mission is not in progress.');
-  if (uid in (mission.participants ?? {}))
-    throw new HttpsError('failed-precondition', 'already-a-participant');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
+
+  if (isCasino) {
+    // A casino claim is FREE — it costs no gold and, unlike enlisting, it does not
+    // consume one of the player's mission claims. Taking over an abandoned slot is
+    // a favour to the table, so it is never rationed by claim capacity.
+    //
+    // What IS rationed is how much of one table a single player can absorb: one
+    // claimed slot each, whether or not they already hold a seat here. Without
+    // that, one player could hoover up an entire vacated hand.
+    if (seat && claimedWeight(seat) > 0)
+      throw new HttpsError('failed-precondition', 'already-claimed-here');
+  } else {
+    if (heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
+      throw new HttpsError('failed-precondition', 'no-claims-free');
+    if (uid in (mission.participants ?? {}))
+      throw new HttpsError('failed-precondition', 'already-a-participant');
+  }
 
   const slotSnap = await db.ref(sp(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)).get();
   if (!slotSnap.exists()) throw new HttpsError('not-found', 'Slot no longer available.');
 
-  const inheritedSlots = slotSnap.val() as GMSlot[] | null;
-  const participant: GMParticipant = {
-    playerId:   uid,
-    playerName: player.displayName,
-    joinedAt:   now,
-    ...(inheritedSlots?.length ? { slots: inheritedSlots } : {}),
+  const raw = slotSnap.val() as GMSlot[] | ClaimableEntry | null;
+  // Two shapes on the wire: the legacy/non-casino bare array, and the casino entry
+  // that additionally carries the card and its pot fraction.
+  const entry: ClaimableEntry = Array.isArray(raw)
+    ? { slots: (raw ?? []).filter(Boolean) }
+    : { ...(raw ?? { slots: [] }), slots: ((raw?.slots ?? []) as GMSlot[]).filter(Boolean) };
+  const inheritedSlots = entry.slots;
+
+  const updates: Record<string, unknown> = {
+    [sp(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)]: null,
   };
 
-  await db.ref().update({
-    [sp(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)]: null,
-    [sp(seasonId, `missions/${missionId}/participants/${uid}`)]:        participant,
-    [sp(seasonId, `players/${uid}/activeMissions/${missionId}`)]:       true,
-  });
+  if (isCasino) {
+    // The Archipelago room already exists, so the claimant is adopting a LIVE slot:
+    // it keeps its name, game, status and tracker timestamps, and there is no config
+    // to submit. Only the claim marks are added — `claimedFraction` is what the slot
+    // is worth in the pot, and the flag is what makes settlement pay its card flat
+    // (no deck boost; the claimant never chose the deck).
+    const claimedSlots: GMSlot[] = inheritedSlots.map(s => ({
+      ...s,
+      claimed:         true,
+      claimedFraction: entry.potFraction ?? 0,
+      ...(entry.fromPlayerName ? { claimedFrom: entry.fromPlayerName } : {}),
+    }));
+    const nextSlots = [...((seat?.slots ?? []).filter(Boolean)), ...claimedSlots];
+    const nextCards = [
+      ...((seat?.lockedCards ?? []).filter(Boolean)),
+      ...(entry.card ? [entry.card] : []),
+    ];
+
+    const base: GMParticipant = seat ?? {
+      playerId:   uid,
+      playerName: player.displayName,
+      joinedAt:   now,
+    };
+    const nextSeat: GMParticipant = { ...base, slots: nextSlots, lockedCards: nextCards };
+    const split = splitSeatCards(nextSeat);
+
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/playerId`)]   = uid;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/playerName`)] = base.playerName;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/joinedAt`)]   = base.joinedAt;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]      = nextSlots;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = nextCards;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]  =
+      seatGoldSwing(nextSeat, split.own, split.claimed);
+
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+      uid, playerName: base.playerName, event: 'claim',
+      game: mission.casinoGame, cardName: entry.card?.name,
+    });
+    updates[logPath] = logEntry;
+  } else {
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}`)] = {
+      playerId:   uid,
+      playerName: player.displayName,
+      joinedAt:   now,
+      ...(inheritedSlots.length ? { slots: inheritedSlots } : {}),
+    } satisfies GMParticipant;
+    updates[sp(seasonId, `players/${uid}/activeMissions/${missionId}`)] = true;
+  }
+
+  await db.ref().update(updates);
 
   return { success: true };
 });
@@ -1765,6 +1939,10 @@ export const lockCasinoResult = onCall(async (request) => {
     // 1:1 to the slots above (same genre + value), so this exposes nothing the
     // slots don't already; the secret hand/deck below are still cleared.
     [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)]: hand,
+    // The denominator for every pot fraction later carved off this seat. Stamped
+    // once, here, and never moved: voiding or kicking a card must always carve
+    // 1/lockedCount, not a growing slice of a shrinking hand.
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCount`)]: hand.length,
     // Clear the draw DECK (seeing the remaining cards lets a player engineer their
     // hand). The HAND is deliberately KEPT — it's owner-read-only, and while the
     // table is still forming it lets the player re-select cards on a resubmit
@@ -1869,9 +2047,8 @@ export const resubmitCasinoYaml = onCall(async (request) => {
     if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
     const committed = sel.committed;
 
-    const choice    = deckChoiceOf(seat);
-    const goldSwing = applyDeckBoost(handStake(committed), choice);
-    const slots     = cardsToSlots(committed);
+    const choice = deckChoiceOf(seat);
+    const slots  = cardsToSlots(committed);
     committed.forEach((card, i) => {
       const m    = manifest?.[String(card.uid)];
       const game = clip(m?.game, 120);
@@ -1881,9 +2058,24 @@ export const resubmitCasinoYaml = onCall(async (request) => {
       if (name) slots[i].name = name;
     });
 
-    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = committed;
+    // Slots this seat CLAIMED from someone else are not part of the re-selection —
+    // they were never in this player's dealt pool and `selectCommitted` cannot see
+    // them. Rebuilding the arrays without re-appending them would silently delete a
+    // live Archipelago slot (and the pot fraction riding on it), so they are carried
+    // through untouched, after the re-picked hand.
+    const carried    = splitSeatCards(seat).claimed;
+    const nextSlots  = [...slots, ...carried.map(c => c.slot)];
+    const nextCards  = [...committed, ...carried.map(c => c.card)];
+    const nextSeat: GMParticipant = { ...seat, slots: nextSlots, lockedCards: nextCards };
+    const split      = splitSeatCards(nextSeat);
+    const goldSwing  = seatGoldSwing(nextSeat, split.own, split.claimed);
+
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = nextCards;
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]   = goldSwing;
-    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]       = slots;
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]       = nextSlots;
+    // The re-pick changes how many cards this seat was dealt, so the pot denominator
+    // moves with it. Claimed cards are excluded — they carry their own fraction.
+    updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCount`)] = committed.length;
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
       uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
     });
@@ -1892,9 +2084,14 @@ export const resubmitCasinoYaml = onCall(async (request) => {
     // ── Config-only: re-stamp the (possibly reordered) manifest onto existing slots.
     // Slots map 1:1 to the committed cards by index; only game/name change — details,
     // status and bonuses set during play are preserved. Every card still needs a game.
+    //
+    // Claimed slots are skipped: they arrived complete from a live room, their card
+    // came from another seat's deck (so it is absent from this player's manifest),
+    // and demanding a game for one would fail a resubmit that is otherwise valid.
     const cards = seat.lockedCards ?? [];
     const slots = seat.slots ?? [];
     const nextSlots = slots.map((s, i) => {
+      if (s?.claimed) return s;
       const card = cards[i];
       const m    = card ? manifest[String(card.uid)] : undefined;
       const game = clip(m?.game, 120);
@@ -2238,8 +2435,20 @@ export const adminDenyCasinoYaml = onCall(async (request) => {
   return { ok: true };
 });
 
-// Admin: strike one committed card (and its slot) from a casino seat, recomputing
-// the seat's reward in the same atomic write.
+// Admin: remove ONE committed card (and its slot) from a casino seat, recomputing
+// the seat's reward in the same atomic write. Two modes, and the difference is
+// entirely about what happens to the removed slot's share of the pot:
+//
+//   VOID (default) — the slot is dead. Nobody can take it over, and its pot weight
+//     is RELEASED back to the table: `casinoVoidedShare` grows, which shrinks the
+//     settle denominator and raises every remaining seat's share. Use it when the
+//     card is simply unplayable (broken game, unfillable genre). No warning — the
+//     player did nothing wrong, they just lose that card's value and its fraction.
+//
+//   KICK — the Archipelago slot is fine and someone else can finish it, so it is
+//     reopened as a claimable slot carrying the card and its 1/lockedCount pot
+//     fraction. That weight is RESERVED: paid to whoever claims it, and simply
+//     never paid if nobody does. Punitive, so it also writes a PlayerWarning.
 //
 // A casino seat is THREE fields that must agree: `slots` (what the player plays),
 // `lockedCards` (index-aligned 1:1 to the slots, and the only surviving record of
@@ -2249,21 +2458,23 @@ export const adminDenyCasinoYaml = onCall(async (request) => {
 // and the next resubmit maps games onto the wrong cards because the index-alignment
 // is broken. This callable is the only safe way to shorten a casino seat.
 //
-// Use it when a denied player genuinely cannot source a game for a card and the
-// table is already in progress. While the table is FORMING — or on any deny — the
-// player can re-pick their own cards through resubmitCasinoYaml, which is always
-// preferable to a host edit.
+// While the table is FORMING — or on any deny — the player can re-pick their own
+// cards through resubmitCasinoYaml, which is always preferable to a host edit.
 export const adminRemoveCasinoSlot = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
   await requireAdmin(request.auth.uid);
 
-  const { missionId, playerId, slotIndex, seasonId: reqSeason } = request.data as {
-    missionId?: string; playerId?: string; slotIndex?: number; seasonId?: string;
+  const { missionId, playerId, slotIndex, mode, seasonId: reqSeason } = request.data as {
+    missionId?: string; playerId?: string; slotIndex?: number;
+    mode?: 'void' | 'kick';   // omitted = void, preserving the original behaviour
+    seasonId?: string;
   };
   if (!missionId || !playerId || typeof slotIndex !== 'number' || !Number.isInteger(slotIndex))
     throw new HttpsError('invalid-argument', 'Missing missionId, playerId or slotIndex.');
+  const kick = mode === 'kick';
 
   const db = getDatabase();
+  const now = Date.now();
   const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
   const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
@@ -2272,11 +2483,14 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
   if (mission.state === 'complete') throw new HttpsError('failed-precondition', 'This table has already settled.');
   const seat = mission.participants?.[playerId];
   if (!seat) throw new HttpsError('not-found', 'Player not seated at this table.');
-  if (!seat.played) throw new HttpsError('failed-precondition', 'This seat has not locked a hand yet.');
+  if (!seat.played && claimedWeight(seat) <= 0)
+    throw new HttpsError('failed-precondition', 'This seat has not locked a hand yet.');
+  // A kicked slot is offered to a replacement, which only makes sense once the AP
+  // room exists — before deploy there is nothing to take over.
+  if (kick && mission.state !== 'inprogress')
+    throw new HttpsError('failed-precondition',
+      'A slot can only be kicked once the table is in progress — void it instead.');
 
-  // RTDB serialises these as arrays, and a past hand-repair can leave a null hole
-  // where an element was deleted in place. Compact both before indexing, or the
-  // caller's index means something different to the server than it did in the UI.
   const cards = (seat.lockedCards ?? []).filter(Boolean);
   const slots = (seat.slots ?? []).filter(Boolean);
   if (cards.length !== slots.length)
@@ -2286,27 +2500,148 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Slot index out of range.');
   if (slots.length <= 1)
     throw new HttpsError('failed-precondition',
-      'A seat must keep at least one slot — kick the player instead of emptying the seat.');
+      'A seat must keep at least one slot — void or kick the whole seat instead of emptying it.');
 
-  const struck    = cards[slotIndex];
-  const nextCards = cards.filter((_, i) => i !== slotIndex);
-  const nextSlots = slots.filter((_, i) => i !== slotIndex);
-  const choice    = deckChoiceOf(seat);
-  const goldSwing = applyDeckBoost(handStake(nextCards), choice);
+  const struckCard = cards[slotIndex];
+  const struckSlot = slots[slotIndex];
+  const nextCards  = cards.filter((_, i) => i !== slotIndex);
+  const nextSlots  = slots.filter((_, i) => i !== slotIndex);
+
+  // The removed slot's pot fraction. A slot the seat CLAIMED carries the fraction
+  // it arrived with — it was carved off a DIFFERENT seat with its own lockedCount,
+  // so this seat's denominator has nothing to do with it.
+  const { own }    = splitSeatCards(seat);
+  const wasClaimed = !!struckSlot.claimed;
+  const denom      = seatLockedCount(seat, own);
+  const fraction   = wasClaimed
+    ? (struckSlot.claimedFraction ?? 0)
+    : (denom > 0 ? 1 / denom : 0);
+
+  const nextSeat: GMParticipant = { ...seat, lockedCards: nextCards, slots: nextSlots };
+  const split     = splitSeatCards(nextSeat);
+  const goldSwing = seatGoldSwing(nextSeat, split.own, split.claimed);
 
   const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
-    uid: playerId, playerName: seat.playerName, event: 'adminvoid',
-    game: mission.casinoGame, goldSwing, deckChoice: choice, cardName: struck?.name,
+    uid: playerId, playerName: seat.playerName, event: kick ? 'adminkick' : 'adminvoid',
+    game: mission.casinoGame, goldSwing, deckChoice: deckChoiceOf(seat), cardName: struckCard?.name,
   });
 
-  await db.ref().update({
+  const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${playerId}/lockedCards`)]: nextCards,
     [sp(seasonId, `missions/${missionId}/participants/${playerId}/slots`)]:       nextSlots,
     [sp(seasonId, `missions/${missionId}/participants/${playerId}/goldSwing`)]:   goldSwing,
     [logPath]: logEntry,
+  };
+
+  if (kick) {
+    // Reserved: the fraction rides on the claimable slot, not back to the table.
+    const claimRef = db.ref(sp(seasonId, `missions/${missionId}/claimableSlots`)).push();
+    updates[sp(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] =
+      makeClaimEntry(struckSlot, struckCard, fraction, seat, now);
+    const warnRef = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push();
+    updates[sp(seasonId, `players/${playerId}/warnings/${warnRef.key}`)] = {
+      timestamp: now,
+      message:   `Slot removed from ${gmMissionLabel(mission)} by admin.`,
+      auto:      true,
+    };
+  } else if (fraction > 0 && mission.state === 'inprogress') {
+    // Released: shrinks the settle denominator, raising every survivor's share.
+    // Pre-deploy there is no denominator yet (casinoShareUnits is banked at deploy
+    // from the seats still present), so a forming void needs no bookkeeping.
+    updates[sp(seasonId, `missions/${missionId}/casinoVoidedShare`)] = ServerValue.increment(fraction);
+  }
+
+  await db.ref().update(updates);
+  return { ok: true, goldSwing, remaining: nextSlots.length, mode: kick ? 'kick' : 'void' };
+});
+
+// Admin: withdraw a claimable slot nobody took up. The pot weight reserved on it
+// would otherwise stay unpaid forever, so releasing it hands that share back to
+// the table — turning an unanswered kick into a void after the fact.
+export const adminReleaseClaimableSlot = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, slotKey, seasonId: reqSeason } = request.data as {
+    missionId?: string; slotKey?: string; seasonId?: string;
+  };
+  if (!missionId || !slotKey) throw new HttpsError('invalid-argument', 'Missing missionId or slotKey.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const snap = await db.ref(sp(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)).get();
+  if (!snap.exists()) throw new HttpsError('not-found', 'That open spot is already gone.');
+
+  const raw      = snap.val() as GMSlot[] | ClaimableEntry;
+  const fraction = Array.isArray(raw) ? 0 : (raw?.potFraction ?? 0);
+
+  const updates: Record<string, unknown> = {
+    [sp(seasonId, `missions/${missionId}/claimableSlots/${slotKey}`)]: null,
+  };
+  if (fraction > 0) {
+    updates[sp(seasonId, `missions/${missionId}/casinoVoidedShare`)] = ServerValue.increment(fraction);
+  }
+  await db.ref().update(updates);
+  return { ok: true, released: fraction };
+});
+
+// Admin: remove a whole casino seat WITHOUT reopening any of it — the no-fault
+// counterpart to kicking the player. Every card the seat holds is killed, all of
+// its pot weight is released back to the table (raising the survivors' shares),
+// and nothing is left for anyone to claim. No warning and no status incident: a
+// void says the seat was unplayable, not that the player abandoned it.
+export const adminVoidCasinoSeat = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, playerId, seasonId: reqSeason } = request.data as {
+    missionId?: string; playerId?: string; seasonId?: string;
+  };
+  if (!missionId || !playerId) throw new HttpsError('invalid-argument', 'Missing missionId or playerId.');
+
+  const db  = getDatabase();
+  const now = Date.now();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = snap.val() as GMMission;
+  if (mission.type !== 'casino') throw new HttpsError('failed-precondition', 'Not a casino mission.');
+  if (mission.state === 'complete') throw new HttpsError('failed-precondition', 'This table has already settled.');
+  const seat = mission.participants?.[playerId];
+  if (!seat) throw new HttpsError('not-found', 'Player not seated at this table.');
+
+  const { own } = splitSeatCards(seat);
+  const released = seatTotalWeight(seat, own);
+
+  const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+    uid: playerId, playerName: seat.playerName, event: 'adminvoid',
+    game: mission.casinoGame, deckChoice: deckChoiceOf(seat), goldSwing: 0,
   });
 
-  return { ok: true, goldSwing, remaining: nextSlots.length };
+  const updates: Record<string, unknown> = {
+    [sp(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
+    [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
+    ...clearSeatSecrets(seasonId, missionId, playerId),
+    [logPath]: logEntry,
+  };
+  // Only meaningful once the table is live. `casinoShareUnits` is banked at deploy
+  // from whoever is still seated, so a seat pulled before that was never counted —
+  // releasing its weight would shrink a denominator it was never part of. (deploy
+  // also resets casinoVoidedShare, so this is belt-and-braces, but the arithmetic
+  // should be right on its own rather than rescued downstream.)
+  if (released > 0 && mission.state === 'inprogress') {
+    updates[sp(seasonId, `missions/${missionId}/casinoVoidedShare`)] = ServerValue.increment(released);
+  }
+  // Forming tables reset their decay clock when the last seat leaves, exactly as
+  // a kick does — otherwise the replacement cohort inherits a stale countdown.
+  if (mission.state === 'forming') {
+    const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== playerId);
+    if (remaining.length === 0) updates[sp(seasonId, `missions/${missionId}/firstJoinAt`)] = null;
+  }
+
+  await db.ref().update(updates);
+  await deleteSeatYaml(seasonId, missionId, playerId);
+  return { ok: true, released, at: now };
 });
 
 // Admin: disable/enable a player as a real kill-switch. Sets the per-season game
@@ -2484,19 +2819,30 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   if (!participant) throw new HttpsError('not-found', 'Participant not found.');
 
   const label   = gmMissionLabel(mission);
-  const warnRef = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push();
+  const now     = Date.now();
 
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${playerId}`)]:  null,
     [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
     // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
     ...clearSeatSecrets(seasonId, missionId, playerId),
-    [sp(seasonId, `players/${playerId}/warnings/${warnRef.key}`)]: {
-      timestamp: Date.now(),
+  };
+
+  // The void/kick distinction — and the warning that comes with a kick — only
+  // exists once a table is LIVE. Pulling someone off a still-forming casino table
+  // is always no-fault: they forfeit everything they anted in, and that lost wager
+  // is the whole penalty. Marking their record on top of it would punish twice for
+  // a table that never even ran. (Non-casino missions have no wager to forfeit, so
+  // they keep warning on any kick.)
+  const noFault = mission.state === 'forming' && mission.type === 'casino';
+  if (!noFault) {
+    const warnRef = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push();
+    updates[sp(seasonId, `players/${playerId}/warnings/${warnRef.key}`)] = {
+      timestamp: now,
       message:   `Removed from ${label} by admin.`,
       auto:      true,
-    },
-  };
+    };
+  }
 
   if (mission.state === 'forming') {
     // Reset the decay timer if this was the last participant.
@@ -2504,8 +2850,30 @@ export const adminKickMissionParticipant = onCall(async (request) => {
     if (remaining.length === 0) {
       updates[sp(seasonId, `missions/${missionId}/firstJoinAt`)] = null;
     }
+  } else if (mission.type === 'casino') {
+    // A casino seat is reopened one card at a time. Each card is an independent
+    // Archipelago slot with its own gold value, so bundling them into a single
+    // claimable entry would force one replacement to take the whole hand — and
+    // would throw away the per-card values, which survive nowhere else. Each entry
+    // carries its card and its 1/lockedCount share of the pot; a slot this seat had
+    // itself claimed is passed on with the fraction it arrived with.
+    const { own, paired } = splitSeatCards(participant);
+    const denom = seatLockedCount(participant, own);
+    for (const { card, slot } of paired) {
+      const fraction = slot.claimed
+        ? (slot.claimedFraction ?? 0)
+        : (denom > 0 ? 1 / denom : 0);
+      const claimRef = db.ref(sp(seasonId, `missions/${missionId}/claimableSlots`)).push();
+      updates[sp(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] =
+        makeClaimEntry(slot, card, fraction, participant, now);
+    }
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+      uid: playerId, playerName: participant.playerName, event: 'adminkick',
+      game: mission.casinoGame, deckChoice: deckChoiceOf(participant), goldSwing: 0,
+    });
+    updates[logPath] = logEntry;
   } else {
-    // inprogress — preserve slot info as a claimable slot for a replacement.
+    // inprogress, non-casino — preserve slot info as one claimable entry.
     const slotsToAdd: GMSlot[] = participant.slots?.length
       ? participant.slots.map(s => ({
           name: s.name, game: s.game,
@@ -2862,6 +3230,21 @@ function extractApSlotName(name: string): string {
   return m ? m[1].trim() : name;
 }
 
+// A slot name ending in `{NUMBER}` is a collision guard the player wrote so the room
+// would still generate: AP expands the token to nothing for the first such slot and
+// to a digit for each one after it. Resolve it to the name the room really has, but
+// ONLY when exactly one candidate matches — 2+ are genuinely ambiguous and are left
+// for the admin to map by hand. Mirrors resolveNumberedSlotName in
+// src/lib/archipelagoApi.ts.
+function resolveNumberedSlotName(name: string, apNames: Iterable<string>): string | null {
+  if (!/\{NUMBER\}$/i.test(name)) return null;
+  const base = name.replace(/\{NUMBER\}$/i, '');
+  if (!base) return null;
+  const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d*$`);
+  const matches = Array.from(new Set(apNames)).filter(n => re.test(n));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // ── Scheduled tick: auto-sync slot statuses from Cheesetracker ───────────────
 
 export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
@@ -2927,6 +3310,21 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
     if (t.lastActivity !== (slot.lastActivity ?? null)) updates[`${basePath}/lastActivity`] = t.lastActivity;
   }
 
+  // The names to sync a slot list against: a `{NUMBER}` name resolves to the one the
+  // room actually generated (and is adopted permanently, so the token stops needing
+  // resolution); everything else, including an ambiguous token, stays as written.
+  function resolveSlotNames(
+    slots: Array<{ name: string }>,
+    apNames: string[],
+    basePath: (i: number) => string,
+  ): string[] {
+    return slots.map((s, i) => {
+      const real = resolveNumberedSlotName(s.name, apNames);
+      if (real) updates[`${basePath(i)}/name`] = real;
+      return real ?? s.name;
+    });
+  }
+
   type RawAdv = { busy?: boolean; busyTile?: string | null };
 
   // Fan out over live + draft seasons (scheduled functions have no season param).
@@ -2957,6 +3355,7 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           if (!hasActiveSlots(roomSlots)) continue;
           const games = await getCheeseGames(cheeseId);
           if (!games) continue;
+          const apNames = games.map(g => extractApSlotName(g.name));
           const statusMap = new Map(games.flatMap(g => {
             const s = deriveStatus(g);
             return s ? [[extractApSlotName(g.name), s] as [string, SlotStatus]] : [];
@@ -2964,17 +3363,19 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           const timeMap = buildTimeMap(games);
           for (const adv of roomAdvs) {
             const slots = adv.slots ?? [];
+            const advBase = (i: number) => sp(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}`);
+            const names = resolveSlotNames(slots, apNames, advBase);
             for (let i = 0; i < slots.length; i++) {
-              const newStatus = statusMap.get(slots[i].name);
+              const newStatus = statusMap.get(names[i]);
               if (newStatus && slots[i].status !== newStatus) {
-                updates[sp(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}/status`)] = newStatus;
+                updates[`${advBase(i)}/status`] = newStatus;
               }
-              stampSlotTimes(sp(seasonId, `tiles/${coord}/adventurers/${adv.advId}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
+              stampSlotTimes(advBase(i), slots[i], timeMap.get(names[i]));
             }
             if (
               slots.length > 0 &&
-              slots.every(s => {
-                const resolved = statusMap.get(s.name) ?? s.status;
+              slots.every((s, i) => {
+                const resolved = statusMap.get(names[i]) ?? s.status;
                 return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
               }) &&
               rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
@@ -2986,11 +3387,13 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           for (let i = 0; i < allPubSlots.length; i++) {
             const ps = allPubSlots[i];
             if (isBifurcated && ps.room && ps.room !== roomNum) continue;
-            const newStatus = statusMap.get(ps.name);
+            const psBase = sp(seasonId, `tiles/${coord}/publicSlots/${i}`);
+            const psName = resolveSlotNames([ps], apNames, () => psBase)[0];
+            const newStatus = statusMap.get(psName);
             if (newStatus && ps.status !== newStatus) {
-              updates[sp(seasonId, `tiles/${coord}/publicSlots/${i}/status`)] = newStatus;
+              updates[`${psBase}/status`] = newStatus;
             }
-            stampSlotTimes(sp(seasonId, `tiles/${coord}/publicSlots/${i}`), ps, timeMap.get(ps.name));
+            stampSlotTimes(psBase, ps, timeMap.get(psName));
           }
         }
       }
@@ -3006,6 +3409,7 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
         if (!hasActiveSlots(allSlots)) continue;
         const games = await getCheeseGames(mission.cheese);
         if (!games) continue;
+        const apNames = games.map(g => extractApSlotName(g.name));
         const statusMap = new Map(games.flatMap(g => {
           const s = deriveStatus(g);
           return s ? [[extractApSlotName(g.name), s] as [string, SlotStatus]] : [];
@@ -3013,12 +3417,14 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
         const timeMap = buildTimeMap(games);
         for (const [pid, p] of Object.entries(mission.participants ?? {})) {
           const slots = p.slots ?? [];
+          const slotBase = (i: number) => sp(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`);
+          const names = resolveSlotNames(slots, apNames, slotBase);
           for (let i = 0; i < slots.length; i++) {
-            const newStatus = statusMap.get(slots[i].name);
+            const newStatus = statusMap.get(names[i]);
             if (newStatus && slots[i].status !== newStatus) {
-              updates[sp(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}/status`)] = newStatus;
+              updates[`${slotBase(i)}/status`] = newStatus;
             }
-            stampSlotTimes(sp(seasonId, `missions/${missionId}/participants/${pid}/slots/${i}`), slots[i], timeMap.get(slots[i].name));
+            stampSlotTimes(slotBase(i), slots[i], timeMap.get(names[i]));
           }
           // Pooled claims: once all a participant's slots are terminal and they
           // still hold this mission's claim, release it so the claim returns to
@@ -3026,8 +3432,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           // above. The participant record stays; only the claim is freed.
           if (
             slots.length > 0 &&
-            slots.every(s => {
-              const resolved = statusMap.get(s.name) ?? s.status;
+            slots.every((s, i) => {
+              const resolved = statusMap.get(names[i]) ?? s.status;
               return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
             }) &&
             rawPlayers[pid]?.activeMissions?.[missionId]

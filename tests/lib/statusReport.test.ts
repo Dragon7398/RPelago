@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown,
+  excuseKey, hasUnexcusedProblem,
   type ReportCandidate,
 } from '../../src/lib/statusReport';
 import type { GMMission, Tile, Player, AdvSlot } from '../../src/types';
@@ -51,25 +52,34 @@ describe('computeStatusReport — slot classification', () => {
     expect(f.reasons[0]).toMatch(/Unstarted/);
   });
 
-  it('flags In-Progress with 60h+ since last activity/self-report as a problem', () => {
+  it('flags In-Progress with 72h+ since last activity/self-report as a problem', () => {
     const r = run({ m1: mission({ linkedAt: ago(100), participants: {
-      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(70) })]),
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(80) })]),
       b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),  // fresh → suppresses warn-c/a
     } }) });
     const aFindings = r[0].players.find(p => p.handle === '@Zed')!.findings;
     expect(aFindings[0].tier).toBe('problem');
-    expect(aFindings[0].reasons[0]).toMatch(/60h/);
+    expect(aFindings[0].reasons[0]).toMatch(/72h/);
     // The fresh player has nothing wrong and must not appear.
     expect(r[0].players.map(p => p.handle)).toEqual(['@Zed']);
   });
 
-  it('does NOT flag problem when a WEAK self-report (lastChecked) is recent though activity is old', () => {
+  it('leaves a slot idle just under 72h alone (the check-in window moved 60h → 72h)', () => {
     const r = run({ m1: mission({ linkedAt: ago(100), participants: {
-      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(60), lastChecked: ago(1) })]),
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(70) })]),
       b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
     } }) });
-    // problem-b is "later of the two" — the recent self-report clears the 60h problem.
-    // (It won't clear the 144h activity warning, but 60h < 144h so nothing fires.)
+    // 70h used to be a problem under the old 60h threshold; it is now within tolerance.
+    expect(r).toHaveLength(0);
+  });
+
+  it('does NOT flag problem when a WEAK self-report (lastChecked) is recent though activity is old', () => {
+    const r = run({ m1: mission({ linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
+      b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
+    } }) });
+    // problem-b is "later of the two" — the recent self-report clears the 72h problem.
+    // (It won't clear the 144h activity warning, but 80h < 144h so nothing fires.)
     expect(r).toHaveLength(0);
   });
 
@@ -185,14 +195,14 @@ describe('computeStatusReport — slot classification', () => {
     expect(f.reasons.some(x => /144h/.test(x))).toBe(true);
   });
 
-  it('warns every slot when all In-Progress slots are idle 60h+ (but self-report recent)', () => {
+  it('warns every slot when all In-Progress slots are idle 72h+ (but self-report recent)', () => {
     const r = run({ m1: mission({ linkedAt: ago(100), participants: {
-      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
-      b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
+      a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
+      b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
     } }) });
     expect(r[0].players).toHaveLength(2);
     expect(r[0].players.every(p => p.findings[0].tier === 'warning')).toBe(true);
-    expect(r[0].players[0].findings.some(f => /60h/.test(f.reasons.join()))).toBe(true);
+    expect(r[0].players[0].findings.some(f => /72h/.test(f.reasons.join()))).toBe(true);
   });
 
   it('does NOT raise a time-based flag when timestamps are missing (no "never" warnings)', () => {
@@ -277,8 +287,8 @@ describe('buildOfficialReport + markdown', () => {
   it('renders player-facing Problems grouped by world, players alphabetical', () => {
     const rep = buildOfficialReport(active({
       m1: mission({ label: 'World1', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
-                           slot({ name: 'S2', status: 'In-Progress', lastActivity: ago(70) })]),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(80) }),
+                           slot({ name: 'S2', status: 'In-Progress', lastActivity: ago(80) })]),
         b: part('b', 'B', [slot({ name: 'S3', status: 'Unstarted' }),
                            slot({ name: 'S4', status: 'Unstarted' })]),
       } }),
@@ -294,7 +304,7 @@ describe('buildOfficialReport + markdown', () => {
   it('combines a player\'s stalled + unstarted problems into one line', () => {
     const rep = buildOfficialReport(active({
       m1: mission({ label: 'World1', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(80) }),
                            slot({ name: 'S2', status: 'Unstarted' })]),
       } }),
     }), NOW);
@@ -304,54 +314,71 @@ describe('buildOfficialReport + markdown', () => {
   it('renders admin Warnings: last-player and deduped world-general idle', () => {
     const lastPlayer = buildOfficialReport(active({
       m1: mission({ label: 'World4', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
-        b: part('b', 'B', [slot({ status: 'Goaled' })]),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(1) })]),
+        b: part('b', 'B', [slot({ name: 'S2', status: 'Goaled' })]),
       } }),
     }), NOW);
     expect(renderWarningsMarkdown(lastPlayer)).toBe(
-      '## Status Report — Warnings\nWorld4:\n@Zed is the last to finish this world.',
+      '## Status Report — Warnings\nWorld4:\n@Zed is the last to finish this world. (Slots: ``S1``)',
     );
 
     const idle = buildOfficialReport(active({
       m1: mission({ label: 'World5', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
-        b: part('b', 'B', [slot({ status: 'In-Progress', lastActivity: ago(70), lastChecked: ago(1) })]),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
+        b: part('b', 'B', [slot({ name: 'S2', status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
       } }),
     }), NOW);
-    // allIdle60 is world-general → a single deduped line, not one per player.
+    // allIdle60 is world-general → a single deduped line, not one per player, but it
+    // still names every slot that tripped it (across players).
     expect(renderWarningsMarkdown(idle)).toBe(
-      '## Status Report — Warnings\nWorld5:\nNo activity by players in last 60 hours.',
+      '## Status Report — Warnings\nWorld5:\nNo activity by players in last 72 hours. (Slots: ``S1``, ``S2``)',
     );
 
     // A 100%-but-ungoaled last player rides the same lastPlayer code, so it needs
     // no new markdown branch.
     const ungoaled = buildOfficialReport(active({
       m1: mission({ label: 'World6', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ status: '100%' })]),
-        b: part('b', 'B', [slot({ status: 'Goaled' })]),
+        a: part('a', 'A', [slot({ name: 'S1', status: '100%' })]),
+        b: part('b', 'B', [slot({ name: 'S2', status: 'Goaled' })]),
       } }),
     }), NOW);
     expect(renderWarningsMarkdown(ungoaled)).toBe(
-      '## Status Report — Warnings\nWorld6:\n@Zed is the last to finish this world.',
+      '## Status Report — Warnings\nWorld6:\n@Zed is the last to finish this world. (Slots: ``S1``)',
     );
     expect(ungoaled.problems).toHaveLength(0);
 
     const lastChecker = buildOfficialReport(active({
       m1: mission({ label: 'World7', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ status: 'In-Progress', lastActivity: ago(1) })]),
-        b: part('b', 'B', [slot({ status: '100%' })]),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(1) })]),
+        b: part('b', 'B', [slot({ name: 'S2', status: '100%' })]),
       } }),
     }), NOW);
     expect(renderWarningsMarkdown(lastChecker)).toBe(
       '## Status Report — Warnings\nWorld7:\n' +
-      '@Zed is the last still finding checks — others here are at 100% and may be waiting on an item from them.',
+      '@Zed is the last still finding checks — others here are at 100% and may be waiting on an item from them. (Slots: ``S1``)',
     );
+  });
+
+  it('names each warning\'s own slots, per player and per code', () => {
+    // Zed owns two slots: one merely idle-with-the-world, one 144h dead. The two
+    // codes must not pool their slot names into each other.
+    const rep = buildOfficialReport(active({
+      m1: mission({ label: 'World8', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'Dead', status: 'In-Progress', lastActivity: ago(200), lastChecked: ago(1) }),
+                           slot({ name: 'Idle', status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
+        b: part('b', 'B', [slot({ name: 'Other', status: 'In-Progress', lastActivity: ago(80), lastChecked: ago(1) })]),
+      } }),
+    }), NOW);
+    const items = rep.warnings[0].items;
+    expect(items.find(i => i.code === 'noActivity144')).toMatchObject({ handle: '@Zed', slots: ['Dead'] });
+    // Every In-Progress slot here is idle ≥72h, so all three trip the world flag.
+    expect(items.find(i => i.code === 'allIdle60')!.slots).toEqual(['Dead', 'Idle', 'Other']);
   });
 
   it('carries structured problem data (stalled/unstarted split) for persistence', () => {
     const rep = buildOfficialReport(active({
       m1: mission({ id: 'm1', label: 'World1', linkedAt: ago(100), participants: {
-        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(70) }),
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(80) }),
                            slot({ name: 'S2', status: 'Unstarted' })]),
       } }),
     }), NOW, 'admin-uid');
@@ -361,5 +388,87 @@ describe('buildOfficialReport + markdown', () => {
     expect(rep.problems[0].players[0]).toMatchObject({
       handle: '@Zed', stalled: ['S1'], unstarted: ['S2'],
     });
+  });
+});
+
+describe('buildOfficialReport — excuses', () => {
+  const active = (missions: Record<string, GMMission>): ReportCandidate[] =>
+    run(missions).filter(c => c.bucket === 'active');
+
+  const twoPlayerWorld = () => active({
+    m1: mission({ id: 'm1', label: 'World1', linkedAt: ago(100), participants: {
+      a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(80) })]),
+      b: part('b', 'B', [slot({ name: 'S3', status: 'Unstarted' })]),
+    } }),
+  });
+
+  it('marks an excused player in the snapshot but drops them from the ping', () => {
+    const rep = buildOfficialReport(
+      twoPlayerWorld(), NOW, 'admin-uid',
+      { [excuseKey('mission', 'm1', 'a')]: 'explained in Discord' },
+    );
+    // Still in the snapshot — the excuse is an audit trail, not an erasure.
+    expect(rep.problems[0].players.map(p => p.handle)).toEqual(['@Alice', '@Zed']);
+    expect(rep.problems[0].players.find(p => p.playerId === 'a')).toMatchObject({
+      excused: true, excusedReason: 'explained in Discord', excusedAt: NOW, excusedBy: 'admin-uid',
+    });
+    expect(rep.problems[0].players.find(p => p.playerId === 'b')!.excused).toBeUndefined();
+    // …but out of the player-facing block.
+    const md = renderProblemsMarkdown(rep);
+    expect(md).toContain('@Alice');
+    expect(md).not.toContain('@Zed');
+  });
+
+  it('treats an empty reason as a valid excuse (the key IS the excuse)', () => {
+    const rep = buildOfficialReport(twoPlayerWorld(), NOW, undefined, { [excuseKey('mission', 'm1', 'a')]: '' });
+    const zed = rep.problems[0].players.find(p => p.playerId === 'a')!;
+    expect(zed.excused).toBe(true);
+    expect(zed.excusedReason).toBeUndefined();
+  });
+
+  it('renders no Problems block at all when every player is excused', () => {
+    const rep = buildOfficialReport(twoPlayerWorld(), NOW, undefined, {
+      [excuseKey('mission', 'm1', 'a')]: '', [excuseKey('mission', 'm1', 'b')]: '',
+    });
+    expect(rep.problems).toHaveLength(1);          // snapshot keeps both
+    expect(renderProblemsMarkdown(rep)).toBe('');  // nobody to ping
+    expect(hasUnexcusedProblem(rep.problems[0])).toBe(false);
+  });
+
+  it('keeps the world heading only while someone there is still pingable', () => {
+    const rep = buildOfficialReport(twoPlayerWorld(), NOW, undefined, { [excuseKey('mission', 'm1', 'a')]: '' });
+    expect(hasUnexcusedProblem(rep.problems[0])).toBe(true);
+    expect(renderProblemsMarkdown(rep)).toBe(
+      '## Status Report\n### World1\n@Alice Don\'t forget to start ``S3``.',
+    );
+  });
+
+  it('excuses are scoped per world — the same player elsewhere is untouched', () => {
+    const cands = active({
+      m1: mission({ id: 'm1', label: 'Alpha', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S1', status: 'Unstarted' })]),
+      } }),
+      m2: mission({ id: 'm2', label: 'Beta', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S2', status: 'Unstarted' })]),
+      } }),
+    });
+    const rep = buildOfficialReport(cands, NOW, undefined, { [excuseKey('mission', 'm1', 'a')]: '' });
+    const byName = Object.fromEntries(rep.problems.map(w => [w.name, w]));
+    expect(byName.Alpha.players[0].excused).toBe(true);
+    expect(byName.Beta.players[0].excused).toBeUndefined();
+    expect(renderProblemsMarkdown(rep)).toBe(
+      '## Status Report\n### Beta\n@Zed Don\'t forget to start ``S2``.',
+    );
+  });
+
+  it('does not excuse warnings — they never counted against anyone', () => {
+    const rep = buildOfficialReport(active({
+      m1: mission({ id: 'm1', label: 'World4', linkedAt: ago(100), participants: {
+        a: part('a', 'A', [slot({ name: 'S1', status: 'In-Progress', lastActivity: ago(1) })]),
+        b: part('b', 'B', [slot({ name: 'S2', status: 'Goaled' })]),
+      } }),
+    }), NOW, undefined, { [excuseKey('mission', 'm1', 'a')]: 'excused anyway' });
+    expect(rep.problems).toHaveLength(0);
+    expect(rep.warnings[0].items[0]).toMatchObject({ code: 'lastPlayer', handle: '@Zed' });
   });
 });

@@ -5,8 +5,8 @@ import { typeKeyForCoord } from '../../lib/tileGen';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
-import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, freeAdventurer } from '../../firebase/db';
-import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus } from '../../lib/archipelagoApi';
+import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, adminUpdateAdvSlotName, adminUpdatePublicSlotName, freeAdventurer } from '../../firebase/db';
+import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 
 interface TileBadgeInfo {
   cursed: boolean;
@@ -137,9 +137,30 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
     setSyncing(true);
     try {
       const status = await fetchRoomStatus(roomLink);
-      const apNames = new Set(status.players.map(([name]: [string, string]) => name));
-      const allSlots = roomAdvs.flatMap(adv => adv.slots ?? []);
-      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNames.has(n)));
+      const apNames = status.players.map(([name]: [string, string]) => name);
+      // A `{NUMBER}` name never matches the room as typed — AP expanded the token at
+      // generation. Adopt the generated name when it's unambiguous; anything still
+      // holding a token falls through to the mismatch list for the host to map.
+      const advSlots = roomAdvs.map(adv => ({ adv, slots: (adv.slots ?? []).map(s => ({ ...s })) }));
+      for (const { adv, slots } of advSlots) {
+        for (let i = 0; i < slots.length; i++) {
+          const real = resolveNumberedSlotName(slots[i].name, apNames);
+          if (!real) continue;
+          slots[i].name = real;
+          await adminUpdateAdvSlotName(coord, adv.advId, i, real);
+        }
+      }
+      const pubSlots = (tile.publicSlots ?? []).map(s => ({ ...s }));
+      for (let i = 0; i < pubSlots.length; i++) {
+        if (isBifurcated && pubSlots[i].room && pubSlots[i].room !== room) continue;
+        const real = resolveNumberedSlotName(pubSlots[i].name, apNames);
+        if (!real) continue;
+        pubSlots[i].name = real;
+        await adminUpdatePublicSlotName(coord, i, real);
+      }
+      const apNameSet = new Set(apNames);
+      const allSlots = advSlots.flatMap(a => a.slots);
+      const mismatched = new Set(allSlots.map(s => s.name).filter(n => n && !apNameSet.has(n)));
       setMismatched(mismatched);
       if (status.tracker) {
         await (room === 1 ? setTileTracker(coord, status.tracker) : setTileTracker2(coord, status.tracker));
@@ -156,8 +177,7 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
               if (s) statusMap.set(key, s);
               timeMap.set(key, { lastChecked: parseCheeseTs(g.last_checked), lastActivity: parseCheeseTs(g.last_activity) });
             }
-            for (const adv of roomAdvs) {
-              const slots = adv.slots ?? [];
+            for (const { adv, slots } of advSlots) {
               for (let i = 0; i < slots.length; i++) {
                 const newStatus = statusMap.get(slots[i].name);
                 if (newStatus) await adminUpdateAdvSlotStatus(coord, adv.advId, i, newStatus);
@@ -173,9 +193,8 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                 players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
               ) await freeAdventurer(adv.owner, adv.advId);
             }
-            const allPubSlots = tile.publicSlots ?? [];
-            for (let i = 0; i < allPubSlots.length; i++) {
-              const ps = allPubSlots[i];
+            for (let i = 0; i < pubSlots.length; i++) {
+              const ps = pubSlots[i];
               if (isBifurcated && ps.room && ps.room !== room) continue;
               const newStatus = statusMap.get(ps.name);
               if (newStatus) await adminUpdatePublicSlotStatus(coord, i, newStatus);

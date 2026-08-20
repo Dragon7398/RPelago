@@ -24,11 +24,14 @@ export function handStake(hand: readonly CasinoCard[]): number {
   return hand.reduce((sum, c) => sum + (c.value ?? 0), 0);
 }
 
-// Apply a deck variant's GP boost (currently only Purist, +10%) to a seat's
-// own reward. Rounds once, at the reward, before any spend is subtracted.
+// Apply a deck variant's GP modifier to a seat's own reward — Purist +10%,
+// Safety −10%, the others flat. Rounds once, at the reward, before any spend is
+// subtracted. ⚠️ The guard is `!== 0`, NOT `> 0`: gpBoost is signed, and a `> 0`
+// test silently drops every penalty deck, paying Safety the full unmodified
+// stake. Mirror of applyDeckBoost in functions/src/casinoEngine.ts.
 export function applyDeckBoost(reward: number, choice: CasinoDeckChoice): number {
   const boost = DECK_VARIANTS[choice].gpBoost;
-  return boost > 0 ? Math.round(reward * (1 + boost)) : reward;
+  return boost !== 0 ? Math.round(reward * (1 + boost)) : reward;
 }
 
 // Parse the stake back out of already-written slot details lines.

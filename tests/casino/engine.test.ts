@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Client (canonical) casino modules.
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend, buildDeck,
+  DECK_VARIANTS, DECK_VARIANT_ORDER,
   type CasinoGame,
 } from '../../src/lib/casinoData';
 import {
@@ -20,6 +21,7 @@ import {
 } from '../../src/lib/casinoGambits';
 import {
   casinoEntryCosts, pickNextCasinoGame, freshCasinoTable, casinoPotShares, casinoSeatPaid,
+  seatPotWeight, casinoShareDenominator,
 } from '../../src/lib/missionLogic';
 import type { GMMission } from '../../src/types';
 
@@ -179,11 +181,20 @@ describe('scoring is a plain sum for every variant', () => {
 });
 
 describe('applyDeckBoost', () => {
-  it('adds 10% for Purist, rounded once, and leaves others untouched', () => {
+  it('adds 10% for Purist, rounded once, and leaves the flat decks untouched', () => {
     expect(clientApplyDeckBoost(100, 'purist')).toBe(110);
     expect(clientApplyDeckBoost(105, 'purist')).toBe(116); // round(115.5)
     expect(clientApplyDeckBoost(100, 'unconsoled')).toBe(100);
     expect(clientApplyDeckBoost(100, 'indie')).toBe(100);
+  });
+
+  // Regression: the guard used to be `boost > 0`, which paid Safety the full
+  // unmodified stake. A penalty deck MUST come out below the raw reward.
+  it('subtracts 10% for Safety, rounded once', () => {
+    expect(clientApplyDeckBoost(100, 'safety')).toBe(90);
+    expect(clientApplyDeckBoost(105, 'safety')).toBe(95);  // round(94.5)
+    expect(clientApplyDeckBoost(0,   'safety')).toBe(0);
+    expect(clientApplyDeckBoost(250, 'safety')).toBeLessThan(250);
   });
 });
 
@@ -494,8 +505,10 @@ describe('pickNextCasinoGame', () => {
 });
 
 describe('casinoPotShares', () => {
+  const w = (...pairs: [string, number][]) => new Map(pairs);
+
   it('splits evenly and pays out the whole pot (remainder to one seat)', () => {
-    const shares = casinoPotShares(100, ['a', 'b', 'c'], () => 0); // base 33, rem 1
+    const shares = casinoPotShares(100, w(['a', 1], ['b', 1], ['c', 1]), 3, () => 0); // base 33, rem 1
     const vals = ['a', 'b', 'c'].map(id => shares.get(id)!);
     expect(vals.reduce((s, v) => s + v, 0)).toBe(100);      // nothing leaks
     expect(vals.filter(v => v === 33).length).toBe(2);
@@ -503,13 +516,176 @@ describe('casinoPotShares', () => {
   });
 
   it('divides evenly when there is no remainder', () => {
-    const shares = casinoPotShares(90, ['a', 'b', 'c']);
+    const shares = casinoPotShares(90, w(['a', 1], ['b', 1], ['c', 1]), 3);
     expect([...shares.values()]).toEqual([30, 30, 30]);
   });
 
   it('handles empty winners and a zero pot without leaking', () => {
-    expect(casinoPotShares(50, []).size).toBe(0);
-    expect([...casinoPotShares(0, ['a', 'b']).values()]).toEqual([0, 0]);
+    expect(casinoPotShares(50, w(), 3).size).toBe(0);
+    expect([...casinoPotShares(0, w(['a', 1], ['b', 1]), 2).values()]).toEqual([0, 0]);
+  });
+
+  // ── Void: the released fraction shrinks the denominator ────────────────────
+  it('raises every survivor when a whole seat is voided', () => {
+    // Pot 400 across 4 units; one 4-card seat fully voided releases 1.0 unit.
+    const shares = casinoPotShares(400, w(['a', 1], ['b', 1], ['c', 1]), 4 - 1, () => 0);
+    const vals = ['a', 'b', 'c'].map(id => shares.get(id)!);
+    expect(vals.reduce((s, v) => s + v, 0)).toBe(400);   // whole pot still paid
+    expect(vals.sort()).toEqual([133, 133, 134]);
+  });
+
+  it('gives a partially-voided seat a proportional share', () => {
+    // Seat d had 4 cards, one voided: 0.75 of a unit left, 0.25 released.
+    const shares = casinoPotShares(400, w(['a', 1], ['b', 1], ['c', 1], ['d', 0.75]), 4 - 0.25);
+    expect(shares.get('d')!).toBeLessThan(shares.get('a')!);
+    expect([...shares.values()].reduce((s, v) => s + v, 0)).toBe(400);
+  });
+
+  // ── Kick: the reserved fraction stays in the denominator ───────────────────
+  it('pays claimants their fraction and leaves the unclaimed remainder unpaid', () => {
+    // Seat X (4 cards) fully kicked: 4 quarter-slots, 2 of them claimed. The
+    // quitter's share is reserved, NOT redistributed — so the survivors are
+    // unchanged and the two unclaimed quarters are simply never paid.
+    const shares = casinoPotShares(
+      400, w(['a', 1], ['b', 1], ['c', 1], ['claim1', 0.25], ['claim2', 0.25]), 4, () => 0,
+    );
+    expect(shares.get('a')).toBe(100);
+    expect(shares.get('b')).toBe(100);
+    expect(shares.get('c')).toBe(100);
+    expect(shares.get('claim1')! + shares.get('claim2')!).toBe(50);
+    expect([...shares.values()].reduce((s, v) => s + v, 0)).toBe(350);   // 50g unpaid
+  });
+
+  it('never pays out more than the pot', () => {
+    // Weights summing past the denominator must not mint gold.
+    const shares = casinoPotShares(300, w(['a', 1], ['b', 1], ['c', 1]), 2);
+    expect([...shares.values()].reduce((s, v) => s + v, 0)).toBeLessThanOrEqual(300);
+  });
+
+  it('mixes a void and a claimed kick off the same seat', () => {
+    // Seat X had 4: 1 voided (0.25 released), 1 kicked and claimed, X keeps 2.
+    // Every unit is now accounted for, so the whole pot pays out — but weighted:
+    // full seats > the half-seat X kept > the quarter-slot the claimant took.
+    const denom  = 4 - 0.25;
+    // rng past the end so the rounding leftover lands on the LAST recipient,
+    // leaving the earlier shares at their exact floors.
+    const shares = casinoPotShares(
+      400, w(['a', 1], ['b', 1], ['c', 1], ['x', 0.5], ['claim', 0.25]), denom, () => 0.999,
+    );
+    expect([...shares.values()].reduce((s, v) => s + v, 0)).toBe(400);
+    expect(shares.get('a')).toBe(Math.floor(400 / denom));
+    expect(shares.get('b')).toBe(shares.get('a'));
+    expect(shares.get('x')).toBe(Math.floor((400 * 0.5) / denom));
+    expect(shares.get('x')!).toBeLessThan(shares.get('a')!);
+    expect(shares.get('claim')!).toBeLessThan(shares.get('x')!);
+  });
+});
+
+describe('seatPotWeight', () => {
+  const seat = (p: Partial<GMParticipant>): GMParticipant =>
+    ({ playerId: 'p', playerName: 'P', joinedAt: 0, ...p }) as GMParticipant;
+
+  it('is one full unit for an untouched hand', () => {
+    expect(seatPotWeight(seat({
+      lockedCount: 3,
+      slots: [{ name: '', game: '' }, { name: '', game: '' }, { name: '', game: '' }],
+    }))).toBe(1);
+  });
+
+  // THE invariant: the pot is split per SEAT, not per card. Someone who committed
+  // two games is taking the same sitting as someone who committed five, so they
+  // take the same cut — hand SIZE is rewarded through goldSwing (the sum of the
+  // cards' own values), never through the pot. The weight is deliberately a ratio
+  // (owned / lockedCount) rather than a count, so any intact hand is exactly 1.0.
+  it('pays a 2-card hand exactly what it pays a 5-card hand', () => {
+    const hand = (n: number) => seat({
+      lockedCount: n,
+      slots: Array.from({ length: n }, () => ({ name: '', game: '' })),
+    });
+    expect(seatPotWeight(hand(2))).toBe(1);
+    expect(seatPotWeight(hand(5))).toBe(1);
+    expect(seatPotWeight(hand(2))).toBe(seatPotWeight(hand(5)));
+
+    // …and that carries all the way through the split: equal gold, to the coin.
+    const shares = casinoPotShares(
+      400, new Map([['two', seatPotWeight(hand(2))], ['five', seatPotWeight(hand(5))]]), 2, () => 0.999,
+    );
+    expect(shares.get('two')).toBe(200);
+    expect(shares.get('five')).toBe(200);
+  });
+
+  // The corollary: a fraction is only ever carved by a REMOVAL, and it is always
+  // measured against the hand as originally locked — so losing one card off a
+  // 5-card hand costs a fifth, not the same slice a 2-card hand would lose.
+  it('scales a removal against the hand as it was locked, not its current size', () => {
+    const lost1of5 = seatPotWeight(seat({
+      lockedCount: 5,
+      slots: Array.from({ length: 4 }, () => ({ name: '', game: '' })),
+    }));
+    const lost1of2 = seatPotWeight(seat({
+      lockedCount: 2,
+      slots: [{ name: '', game: '' }],
+    }));
+    expect(lost1of5).toBe(0.8);
+    expect(lost1of2).toBe(0.5);
+  });
+
+  it('shrinks proportionally when cards are removed', () => {
+    // Two of four cards gone (voided or kicked — the seat's own weight is the same
+    // either way; only where the removed fraction GOES differs).
+    expect(seatPotWeight(seat({
+      lockedCount: 4,
+      slots: [{ name: '', game: '' }, { name: '', game: '' }],
+    }))).toBe(0.5);
+  });
+
+  it('adds claimed slots on top, each at the fraction it arrived with', () => {
+    expect(seatPotWeight(seat({
+      lockedCount: 2,
+      slots: [
+        { name: '', game: '' },
+        { name: '', game: '' },
+        { name: '', game: '', claimed: true, claimedFraction: 0.25 },
+      ],
+    }))).toBe(1.25);
+  });
+
+  it('gives a pure claimant only their claimed fraction', () => {
+    expect(seatPotWeight(seat({
+      slots: [{ name: '', game: '', claimed: true, claimedFraction: 0.25 }],
+    }))).toBe(0.25);
+  });
+
+  it('treats a hand locked before lockedCount existed as a full unit', () => {
+    expect(seatPotWeight(seat({
+      slots: [{ name: '', game: '' }, { name: '', game: '' }],
+    }))).toBe(1);
+  });
+});
+
+describe('casinoShareDenominator', () => {
+  const m = (over: Partial<GMMission>): GMMission => ({
+    id: 'm', type: 'casino', series: 1, label: 'T', state: 'inprogress',
+    baseMax: 4, xp: 0, gp: 0, release: 'special', collect: 'special', hint: 0,
+    firstJoinAt: 0, createdAt: 0, participants: {}, ...over,
+  }) as GMMission;
+
+  it('is the banked seat count less everything voids released', () => {
+    expect(casinoShareDenominator(m({ casinoShareUnits: 4, casinoVoidedShare: 0.75 }))).toBe(3.25);
+  });
+
+  it('falls back to the played-seat count for tables banked before the change', () => {
+    expect(casinoShareDenominator(m({
+      participants: {
+        a: { playerId: 'a', playerName: 'A', joinedAt: 0, played: true },
+        b: { playerId: 'b', playerName: 'B', joinedAt: 0, played: true },
+        c: { playerId: 'c', playerName: 'C', joinedAt: 0 },   // folded, never locked
+      },
+    }))).toBe(2);
+  });
+
+  it('never goes negative', () => {
+    expect(casinoShareDenominator(m({ casinoShareUnits: 1, casinoVoidedShare: 3 }))).toBe(0);
   });
 });
 
@@ -572,6 +748,34 @@ describe('client and server casino engines stay in sync', () => {
     expect(server.minCasinoAnte()).toBe(minCasinoAnte());
     expect(server.CASINO_XP_FLOOR).toBe(CASINO_XP_FLOOR);
     expect(server.CASINO_POT_CUT_PCT).toBe(CASINO_POT_CUT_PCT);
+  });
+
+  // The card table (RAW + the per-type gold ranges) is hand-duplicated in both
+  // files, and every card's gold value is DERIVED from it — so a one-row edit on
+  // one side reprices cards on the other, and worse, changing a type's MIN or MAX
+  // count re-scales every other card of that type. A seat then gets dealt one
+  // value and paid another, with nothing to catch it.
+  // Comparing the fully built decks covers names, types, counts, derived values,
+  // copies, blurbs and uid numbering in one assertion.
+  it('buildDeck is identical on both sides, for every deck variant', () => {
+    expect(server.buildDeck().length).toBe(buildDeck().length);
+    expect(server.buildDeck()).toEqual(buildDeck());
+    for (const key of DECK_VARIANT_ORDER) {
+      const excl = DECK_VARIANTS[key].excludeTypes;
+      expect(server.buildDeck(excl)).toEqual(buildDeck(excl));
+    }
+  });
+
+  // A deck variant is duplicated across both files (key, excludeTypes, gpBoost),
+  // and a seat's reward is computed server-side but PREVIEWED client-side — so a
+  // drift here quotes the player one number and pays them another.
+  it('DECK_VARIANTS and applyDeckBoost are identical on both sides', () => {
+    expect(server.DECK_VARIANTS).toEqual(DECK_VARIANTS);
+    for (const key of DECK_VARIANT_ORDER) {
+      for (const reward of [0, 1, 37, 100, 105, 250, 999]) {
+        expect(server.applyDeckBoost(reward, key)).toBe(clientApplyDeckBoost(reward, key));
+      }
+    }
   });
 
   it('seatSpend matches for every game and flag combination', () => {

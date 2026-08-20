@@ -2,7 +2,9 @@ import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } fro
 import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
-import { countUnfinishedSets } from './slotHelpers';
+import { countUnfinishedSets, normalizeSlots, claimEntries } from './slotHelpers';
+import { parseApYaml } from './apYaml';
+import { AP_LISTS, apListIndexAt, isCurrentApList, type ApList } from './apLists';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -50,6 +52,24 @@ export function msToNextDecay(m: GMMission, now: number): number | null {
 
 export function filledCount(m: GMMission): number {
   return Object.keys(m.participants ?? {}).length;
+}
+
+/**
+ * A mission that has dealt in but has no Archipelago room yet.
+ *
+ * Deploying a cohort and generating its room are two separate host actions and can
+ * sit a day apart — the `linkedAt` clock exists precisely because "a table can sit
+ * deployed for a while before it has a room". That gap is a real state players
+ * occupy, not a blink, so it needs its own wording: anything that says *live*,
+ * counts elapsed time, or shows progress must hold off until the room exists, or
+ * the table reads as running while nobody can actually play it.
+ *
+ * Deliberately keyed on `m.state`, NOT `GMMissionCard.status` — a full-but-forming
+ * cohort already reports `status: 'inprogress'` (see `computeMissionCard`) and has
+ * no business claiming its room is late.
+ */
+export function awaitingRoom(m: GMMission): boolean {
+  return m.state === 'inprogress' && !m.link;
 }
 
 // ── Seat tally (what the UI shows) ────────────────────────────────────────────
@@ -305,25 +325,121 @@ export function freshCasinoTable(
   };
 }
 
-// Split a casino pot evenly among the winning (played) seats at settle. The
-// floor-division remainder (0..winners−1 gold) goes to one seat chosen at random
-// so the whole pot is always paid out and never leaks. Empty winners → no split.
+// ── Pot shares ────────────────────────────────────────────────────────────────
+//
+// A casino pot is measured in SEAT UNITS: one unit per seat that locked a hand at
+// deploy (`casinoShareUnits`). A seat that keeps its whole hand is worth one unit;
+// removing cards from a seat carves fractions off it, and where those fractions go
+// is the entire difference between a void and a kick.
+//
+//   VOID  — the slot is killed outright. Its fraction is RELEASED: it rejoins the
+//           split by shrinking the denominator, so every survivor's share grows.
+//           Tracked cumulatively on the mission as `casinoVoidedShare`.
+//   KICK  — the slot survives as a claimable slot. Its fraction is RESERVED: it
+//           stays in the denominator, and is paid only to a player who claims it.
+//           Unclaimed at settle, it is simply never paid — the pot underpays
+//           rather than rewarding the seats that happened to stay.
+//
+// So: denominator D = casinoShareUnits − casinoVoidedShare, unit U = pot / D, and
+// a recipient is paid `weight × U`. Total paid ≤ pot, with the shortfall being
+// exactly the unclaimed kick reserve.
+
+/** Pot weight a participant holds from slots they CLAIMED (each carries its own fraction). */
+export function claimedWeight(p: GMParticipant): number {
+  return (p.slots ?? [])
+    .filter(s => s && s.claimed)
+    .reduce((sum, s) => sum + (s.claimedFraction ?? 0), 0);
+}
+
+/** How much of one seat unit a participant is owed: their own surviving cards plus anything they claimed. */
+export function seatPotWeight(p: GMParticipant): number {
+  const slots  = (p.slots ?? []).filter(Boolean);
+  const owned  = slots.filter(s => !s.claimed).length;
+  // `lockedCount` is stamped at lock; pre-change tables fall back to their current
+  // owned count, which reads as a full unit — the same share they'd have had before.
+  const denom  = p.lockedCount && p.lockedCount > 0 ? p.lockedCount : owned;
+  const ownW   = denom > 0 ? owned / denom : 0;
+  return ownW + claimedWeight(p);
+}
+
+/** Seats that take a cut at settle: anyone who locked a hand, plus pure claimants. */
+export function potRecipients(m: GMMission): GMParticipant[] {
+  return Object.values(m.participants ?? {})
+    .filter(p => p.played || claimedWeight(p) > 0);
+}
+
+/**
+ * The denominator: seat units banked at deploy, less everything voids have
+ * released. Falls back to the recipient count for tables that deployed before
+ * `casinoShareUnits` existed, which reproduces the old even split exactly.
+ */
+export function casinoShareDenominator(m: GMMission): number {
+  const banked = m.casinoShareUnits ?? potRecipients(m).filter(p => p.played).length;
+  return Math.max(0, banked - (m.casinoVoidedShare ?? 0));
+}
+
+/**
+ * Split a casino pot across weighted recipients. Each is floored, then the
+ * rounding leftover goes to one recipient chosen at random so the paid portion
+ * never leaks a gold — but the leftover is bounded by what the weights actually
+ * earn, so an unclaimed kick reserve stays unpaid instead of being handed out.
+ */
 export function casinoPotShares(
   pot: number,
-  winnerIds: string[],
+  weights: Map<string, number>,
+  denominator: number,
   rng: () => number = Math.random,
 ): Map<string, number> {
   const shares = new Map<string, number>();
-  const n = winnerIds.length;
-  if (n === 0 || pot <= 0) {
-    for (const id of winnerIds) shares.set(id, 0);
+  const ids    = [...weights.keys()];
+  if (pot <= 0 || denominator <= 0) {
+    for (const id of ids) shares.set(id, 0);
     return shares;
   }
-  const base = Math.floor(pot / n);
-  const rem  = pot - base * n;
-  const remIdx = Math.min(n - 1, Math.floor(rng() * n));
-  winnerIds.forEach((id, i) => shares.set(id, base + (i === remIdx ? rem : 0)));
+
+  // The whole pot is only on the table when the weights account for every unit;
+  // any reserved-but-unclaimed weight simply never becomes gold.
+  const paidWeight = ids.reduce((sum, id) => sum + Math.max(0, weights.get(id) ?? 0), 0);
+  // Guard against minting. Weights should never outrun the denominator, but a
+  // legacy table or a data repair can leave them inconsistent — and dividing by
+  // the smaller number would pay out more gold than the pot holds. Falling back to
+  // the weight total distributes the pot proportionally instead, which is wrong by
+  // at most a rounding step and can never create gold.
+  const divisor = Math.max(denominator, paidWeight);
+  const payable = Math.min(pot, Math.round((pot * paidWeight) / divisor));
+
+  let handed = 0;
+  for (const id of ids) {
+    const w = Math.max(0, weights.get(id) ?? 0);
+    const g = Math.floor((pot * w) / divisor);
+    shares.set(id, g);
+    handed += g;
+  }
+
+  const leftover = payable - handed;
+  if (leftover > 0 && ids.length > 0) {
+    const idx = Math.min(ids.length - 1, Math.floor(rng() * ids.length));
+    shares.set(ids[idx], (shares.get(ids[idx]) ?? 0) + leftover);
+  }
   return shares;
+}
+
+/** The weights → shares pipeline for a whole table, as settlement uses it. */
+export function casinoTableShares(m: GMMission, rng: () => number = Math.random): Map<string, number> {
+  const weights = new Map<string, number>();
+  for (const p of potRecipients(m)) weights.set(p.playerId, seatPotWeight(p));
+  return casinoPotShares(m.pot ?? 0, weights, casinoShareDenominator(m), rng);
+}
+
+/**
+ * The pre-settlement ESTIMATE of one seat's cut — a floor split of the current
+ * pot across the seats expected to take a share. Display only: it assumes a
+ * full one-unit seat (no voids, no claims) and the pot is still growing as
+ * later seats ante in, so it is a floor, not a promise. `casinoTableShares` is
+ * the real math. Shared so the pot chip and the play readout can't drift.
+ */
+export function estimatedSeatShare(pot: number, seats: number): number {
+  return pot > 0 && seats > 0 ? Math.floor(pot / seats) : 0;
 }
 
 // What a seat actually paid at this table, read back off the audit log rather
@@ -359,6 +475,124 @@ export function fmtDayClock(totalSec: number): string {
   const m   = Math.floor((s % 3600) / 60);
   const pad = (n: number) => String(n).padStart(2, '0');
   return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`;
+}
+
+// ── Game titles the host has already had to source ────────────────────────────
+//
+// The host installs an APworld for every game a config asks for, so when
+// verifying a table's uploads the useful question is "have I had to source this
+// one before?". A mission counts as having sourced its games once its room
+// actually exists — an in-progress table WITH a link, or a finished one. A
+// forming table contributes nothing: nothing has been generated, seats can still
+// be voided, and its games are still hypothetical.
+//
+// Titles are folded exactly as StatsPage folds them — case- and whitespace-
+// insensitive, and nothing fuzzier. On a casino seat `slot.game` is lifted
+// verbatim from the config's `game:` field by parseApYaml, and AP itself demands
+// an exact APworld-name match, so two titles differing by more than case or
+// spacing are two different games.
+
+export const foldGameTitle = (raw: string) => raw.trim().replace(/\s+/g, ' ');
+export const gameTitleKey  = (raw: string) => foldGameTitle(raw).toLowerCase();
+
+/** Has this mission reached the point where its games had to be downloaded? */
+export function hasSourcedGames(m: GMMission): boolean {
+  return m.state === 'complete' || (m.state === 'inprogress' && !awaitingRoom(m));
+}
+
+/**
+ * When a mission's APworlds were downloaded. Generating the room IS the download,
+ * so `linkedAt` is the true answer and the rest is fallback for records that
+ * predate it. `firstJoinAt` is deliberately not in the chain — a player joining a
+ * forming table downloads nothing — leaving `createdAt` as the floor.
+ *
+ * A null here resolves to the earliest list era, i.e. "assume old, re-check it".
+ */
+export function sourcedAt(m: GMMission): number | null {
+  return m.linkedAt ?? m.deployedAt ?? m.createdAt ?? null;
+}
+
+/**
+ * Every game a sourced mission other than `excludeId` has asked for, mapped to
+ * the NEWEST list era it was downloaded under (an index into `AP_LISTS`). Pass the
+ * union of `missions` and `missionsHistory`: `archivedMission` stamps
+ * `state: 'complete'`, so both nodes filter identically.
+ *
+ * The era matters because Drago's list is republished — a game downloaded two
+ * sheets ago may have been updated since, so "we have it" is not the same answer
+ * as "we have the current build of it". Keeping the newest era per game means one
+ * re-download under the current sheet clears the game for every later config.
+ *
+ * Claimable slots are counted alongside seated ones: a claimable slot was carved
+ * off a live seat on a table that already has a room, so its game is downloaded
+ * whether or not anybody has taken it over.
+ */
+export type SourcedGames = Map<string, number>;   // folded title → AP_LISTS index
+
+export function sourcedGameLists(missions: Iterable<GMMission>, excludeId?: string): SourcedGames {
+  const seen: SourcedGames = new Map();
+  const add = (slots: AdvSlot[], era: number) => {
+    for (const s of slots) {
+      const key = gameTitleKey(s.game ?? '');
+      if (!key) continue;
+      seen.set(key, Math.max(seen.get(key) ?? -1, era));
+    }
+  };
+  for (const m of missions) {
+    if (m.id === excludeId || !hasSourcedGames(m)) continue;
+    const era = apListIndexAt(sourcedAt(m));
+    for (const p of Object.values(m.participants ?? {})) add(normalizeSlots(p.slots), era);
+    for (const [, entry] of claimEntries(m)) add(entry.slots, era);
+  }
+  return seen;
+}
+
+/** A game in an uploaded config that the host still has work to do on. */
+export interface GameToFetch {
+  /** Display title, suffixed "(?)" when it's one option of a weighted `game:`. */
+  title: string;
+  /**
+   * The newest list era this game was downloaded under, or null if it has never
+   * been downloaded at all. Non-null means "we have it, but off an older sheet —
+   * check that sheet's updated column", null means a first-time fetch.
+   */
+  seenOn: ApList | null;
+}
+
+export interface YamlGameNovelty {
+  /** Never downloaded for any other room — a first-time fetch. Badge: NEW. */
+  brandNew: GameToFetch[];
+  /** Downloaded, but only under an older list — re-check it. Badge: OLD. */
+  outdated: GameToFetch[];
+}
+
+/**
+ * Sort one uploaded config's games against what has already been downloaded.
+ * A game last fetched under the CURRENT list is in neither bucket: it has already
+ * been checked against the sheet in force, so there is nothing to flag.
+ *
+ * A weighted `game:` block can't be pinned to one world, so its viable candidates
+ * are judged individually: if any needs attention the roll may still land on it,
+ * and the title is marked "(?)" to say it's a maybe rather than a certainty. A
+ * weighted block with no viable option resolves to no candidates and is ignored —
+ * that file is broken in a way `parseApYaml` already reports.
+ */
+export function gameNoveltyInYaml(text: string, sourced: SourcedGames): YamlGameNovelty {
+  const out: YamlGameNovelty = { brandNew: [], outdated: [] };
+  const done = new Set<string>();   // dedupe titles repeated across worlds
+  for (const s of parseApYaml(text).slots) {
+    for (const t of s.randomized ? (s.candidates ?? []) : [s.game]) {
+      const key = gameTitleKey(t);
+      if (!key || done.has(key)) continue;
+      done.add(key);
+      const era = sourced.get(key);
+      if (era != null && isCurrentApList(era)) continue;   // already fetched this list
+      const title = foldGameTitle(t) + (s.randomized ? ' (?)' : '');
+      if (era == null) out.brandNew.push({ title, seenOn: null });
+      else             out.outdated.push({ title, seenOn: AP_LISTS[era] });
+    }
+  }
+  return out;
 }
 
 // Thin wrappers over the shared slot-completion core (slotHelpers.ts). Missions
