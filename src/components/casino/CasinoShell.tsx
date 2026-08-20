@@ -412,7 +412,7 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
       </div>
 
       <button className="rl-btn rl-full" style={{ marginTop: '1.1rem' }} onClick={onSignOut}>
-        Leave the Casino
+        Sign Out
       </button>
     </Modal>
   );
