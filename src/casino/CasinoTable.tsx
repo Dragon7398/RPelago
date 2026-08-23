@@ -1365,7 +1365,7 @@ export function CasinoTable() {
                 </div>
                 <div className="sf-reminder">
                   Remember to <strong>test and generate your YAML</strong> before submitting. It should
-                  generate at or below <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
+                  generate between <strong>50 checks</strong> and <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
                 </div>
                 <div className="sf-reminder">
                   Please also check that your games are included in{' '}
