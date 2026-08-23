@@ -2,7 +2,7 @@ import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from 
 import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, FREE_COMPLETED_STATUSES } from './constants';
 import { getAdjCoords } from './board';
 import { slotsFromEntry } from './slotHelpers';
-import { randomAdvName, randomAdvClass } from './tileGen';
+import { randomAdvName, randomAdvClass, isPassThroughType, typeKeyForCoord } from './tileGen';
 
 export function calcLevel(xp: number): number {
   let lv = 1;
@@ -330,10 +330,17 @@ export function getFeatWarnings(player: Player, tiles: Record<string, Tile>): st
 
 // Pure function — given a tile state change, returns only the coords whose
 // state differs from the current map (hidden→available derivation included).
+//
+// `isPassThrough` is injected so this stays pure and unit-testable; it defaults
+// to the tileGen type lookup. A pass-through tile (S2 dungeon / Tower) reveals
+// its neighbours while merely REVEALED, without ever completing — see
+// isPassThroughType. On an S1 board nothing is pass-through and the behaviour is
+// byte-for-byte what it always was.
 export function computeRecalcUpdates(
   tiles: Record<string, Tile>,
   coord: string,
   newState: TileState,
+  isPassThrough: (coord: string) => boolean = defaultIsPassThrough,
 ): Record<string, TileState> {
   const map: Record<string, TileState> = {};
   for (const [c, t] of Object.entries(tiles)) map[c] = t.state;
@@ -350,9 +357,29 @@ export function computeRecalcUpdates(
     }
   }
 
+  // Fixpoint: a revealed pass-through tile reveals its own neighbours, which may
+  // reveal a further pass-through tile. Dungeons are ≥3 apart today so chains
+  // can't actually occur, but the loop costs nothing and survives a layout
+  // change. Bounded by the tile count — each pass reveals at least one tile or
+  // stops.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [c, state] of Object.entries(map)) {
+      if (state === 'hidden' || !isPassThrough(c)) continue;
+      for (const adjCoord of getAdjCoords(c)) {
+        if (map[adjCoord] === 'hidden') { map[adjCoord] = 'available'; changed = true; }
+      }
+    }
+  }
+
   const updates: Record<string, TileState> = {};
   for (const [c, s] of Object.entries(map)) {
     if (tiles[c]?.state !== s) updates[c] = s;
   }
   return updates;
+}
+
+function defaultIsPassThrough(coord: string): boolean {
+  return isPassThroughType(typeKeyForCoord(coord));
 }

@@ -827,11 +827,29 @@ stay reachable (§Economy notes).
 >
 > Fix: **stamp `decayHours` onto the mission record** in `gmFreshMission` /
 > `freshMission` (add it to `GMMission`, which doesn't carry it today) and have
-> both decay functions read `m.decayHours ?? 24`. Stamping beats looking the def
-> up because in-flight cohorts keep the decay they were created with when a def
-> is retuned mid-season, and it avoids adding another client/server mirrored
-> table. The two decay functions are already an undocumented dual copy — add
-> them to the `CLAUDE.md` mirror list while touching them.
+> both decay functions read it. Stamping beats looking the def up because
+> in-flight cohorts keep the decay they were created with when a def is retuned
+> mid-season, and it avoids adding another client/server mirrored table. The two
+> decay functions are already an undocumented dual copy — add them to the
+> `CLAUDE.md` mirror list while touching them.
+>
+> **Decay is per mission type, and casino stays 36h in S2:**
+>
+> | Type | `decayHours` |
+> |------|--------------|
+> | `casino` | **36** |
+> | `fields` | **30** |
+> | `basic` / `patrol` | **24** |
+>
+> ⚠️ **`MISSION_DEFS.casino.decayHours` currently says `24` and is wrong** — it
+> is dead code, and the live 36h comes from the hardcoded ternary. Correct the
+> def to **36** in the same change that starts reading it, or plumbing the field
+> will silently cut every casino table's decay by a third.
+>
+> ⚠️ **The legacy fallback must be type-aware, not a flat 24.** Missions created
+> before the field exists carry no `decayHours`, so read
+> `m.decayHours ?? (m.type === 'casino' ? 36 : 24)`. A flat `?? 24` would
+> accelerate decay on every casino table already in flight.
 
 - `GMMissionType` gains `'fields'`.
 - **YAML at enlist** per §0.5 — `enlistInMission` is already a callable, so this

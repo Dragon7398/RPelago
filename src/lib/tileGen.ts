@@ -4,9 +4,11 @@ import {
   ALL_ORBS, NON_CENTER_SHOP_IDS, BOSS_ELEMENTAL_TRAIT_VALUES,
 } from './constants';
 import {
-  BOARD_SPECS, coordFromRC as coordFromRCOn, rcFromCoord as rcFromCoordOn,
+  BOARD_SPECS, activeBoard, coordFromRC as coordFromRCOn, rcFromCoord as rcFromCoordOn,
   getAdjRC as getAdjRCOn, isEdgeTile as isEdgeTileOn,
 } from './board';
+import { seededShuffle } from './seededRng';
+import { buildTypeGridS2, S2_CASTLE } from './tileGenS2';
 
 // ── This module's geometry is PINNED to S1 ────────────────────────────────────
 // Everything below generates the S1 map, so it must emit a 5×7 grid even when an
@@ -19,21 +21,8 @@ const ROWS = S1.rows;
 const COLS = S1.cols;
 
 const coordFromRC = (r: number, c: number) => coordFromRCOn(r, c, S1);
-const rcFromCoord = (coord: string) => rcFromCoordOn(coord, S1);
 const getAdjRC    = (r: number, c: number) => getAdjRCOn(r, c, S1);
 const isEdgeTile  = (r: number, c: number) => isEdgeTileOn(r, c, S1);
-
-// ── Seeded shuffle (LCG) ──────────────────────────────────────────────────────
-function seededShuffle<T>(arr: T[], seed: number): T[] {
-  const a = [...arr];
-  let s = seed;
-  for (let i = a.length - 1; i > 0; i--) {
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    const j = Math.abs(s) % (i + 1);
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 // ── Boss corner placement ─────────────────────────────────────────────────────
 const CORNER_POSITIONS: [number, number][] = [
@@ -58,7 +47,7 @@ function isInBossCornerRegion(r: number, c: number, bossR: number, bossC: number
 }
 
 // ── Type grid ─────────────────────────────────────────────────────────────────
-function buildTypeGrid(seed: number): TileTypeKey[][] {
+function buildTypeGridS1(seed: number): TileTypeKey[][] {
   const [bossR, bossC] = getBossPosition(seed);
 
   const grid: TileTypeKey[][] = Array.from({ length: ROWS }, () =>
@@ -133,7 +122,7 @@ function buildOrbPositions(
   let edgeBattlePos: [number, number] | null  = null;
   let edgePuzzlePos: [number, number] | null  = null;
 
-  // Use the same shuffle order as buildTypeGrid for consistent edge tile selection
+  // Use the same shuffle order as buildTypeGridS1 for consistent edge tile selection
   const fixedSet = new Set([2 * COLS + 3, bossR * COLS + bossC]);
   const freePositions: [number, number][] = [];
   for (let r = 0; r < ROWS; r++)
@@ -168,23 +157,47 @@ function buildOrbPositions(
 // ── Runtime grid state (re-initialized from Firebase seed on each load/reset) ──
 const DEFAULT_SEED = 42;
 
-let _typeGrid     = buildTypeGrid(DEFAULT_SEED);
+// Elite positions scanned row-major, so orbConfig.eliteDrops indexes stay stable
+// and human-predictable in the admin Orbs editor. S2 has no towns, shop tiles or
+// edge orbs, so those fields stay empty (see plan §1.6).
+function buildOrbPositionsS2(typeGrid: TileTypeKey[][]): OrbPositions {
+  const elitePositions: [number, number][] = [];
+  for (let r = 0; r < typeGrid.length; r++) {
+    for (let c = 0; c < typeGrid[r].length; c++) {
+      if (typeGrid[r][c] === 'elite') elitePositions.push([r, c]);
+    }
+  }
+  return { elitePositions, shopTownPositions: [], edgeBattlePos: null, edgePuzzlePos: null };
+}
+
+// Seeded at import with the S1 board — NOT the active one. This runs at module
+// scope in the main bundle, before any season has resolved, so it must not
+// depend on board state that isn't set yet. initializeGrid replaces it once the
+// season is known.
+let _typeGrid     = buildTypeGridS1(DEFAULT_SEED);
 let _bossPos      = getBossPosition(DEFAULT_SEED);
 let _orbPositions = buildOrbPositions(_typeGrid, _bossPos[0], _bossPos[1], DEFAULT_SEED);
 
 export function initializeGrid(seed: number): void {
-  _typeGrid     = buildTypeGrid(seed);
+  if (activeBoard().id === 's2') {
+    _typeGrid     = buildTypeGridS2(seed);
+    _orbPositions = buildOrbPositionsS2(_typeGrid);
+    // _bossPos stays at its S1 value and is never read on an S2 board: the S2
+    // boss is the Sorcerer on Tower Floor 3, not a surface tile.
+    return;
+  }
+  _typeGrid     = buildTypeGridS1(seed);
   _bossPos      = getBossPosition(seed);
   _orbPositions = buildOrbPositions(_typeGrid, _bossPos[0], _bossPos[1], seed);
 }
 
 export function getTypeKey(r: number, c: number): TileTypeKey {
-  return _typeGrid[r][c];
+  return _typeGrid[r]?.[c] ?? 'battle';
 }
 
 export function typeKeyForCoord(coord: string): TileTypeKey {
-  const [r, c] = rcFromCoord(coord);
-  return _typeGrid[r][c];
+  const [r, c] = rcFromCoordOn(coord, activeBoard());
+  return _typeGrid[r]?.[c] ?? 'battle';
 }
 
 // ── Orb lookup helpers ────────────────────────────────────────────────────────
@@ -277,7 +290,14 @@ function calcGold(seed: number, r: number, c: number, xp: number): number {
 }
 
 export function generateTileStats(seed: number, r: number, c: number, typeKey: TileTypeKey): Partial<Tile> {
-  if (typeKey === 'town' || typeKey === 'town_center') return {};
+  // Non-challenge tiles carry no challenge stats.
+  //   town / town_center — S1 facilities.
+  //   castle             — S2's auto-complete start tile.
+  //   dungeon / tower    — S2 DOORWAYS. The challenges live inside them
+  //                        (Phase 3); the surface tile is never joinable, so it
+  //                        gets required: 0 and no release/collect/hint/XP.
+  if (typeKey === 'town' || typeKey === 'town_center' || typeKey === 'castle') return {};
+  if (typeKey === 'dungeon' || typeKey === 'tower') return { required: 0 };
 
   if (typeKey === 'boss') {
     const required = 20;
@@ -336,7 +356,7 @@ export function getBossLiveStats(
 const SHOP_SHUFFLE_SEED = 0xC0FFEE;
 
 export function computeTownShopIds(seed: number): Record<string, string> {
-  const typeGrid  = buildTypeGrid(seed);
+  const typeGrid  = buildTypeGridS1(seed);
   const [bossR, bossC] = getBossPosition(seed);
   const orbPos    = buildOrbPositions(typeGrid, bossR, bossC, seed);
   const shuffled  = seededShuffle([...NON_CENTER_SHOP_IDS], seed ^ SHOP_SHUFFLE_SEED);
@@ -365,8 +385,24 @@ function makeBlankTile(overrides: Partial<Tile> = {}): Tile {
   };
 }
 
+/**
+ * Tile types that reveal their neighbours WITHOUT ever completing (decision 6).
+ * S1 towns did this by auto-completing; S2's dungeons and Tower take dozens of
+ * internal challenges to finish, so they cascade while merely revealed. Without
+ * this a dungeon would be a dead end and could strand the cells behind it.
+ */
+export function isPassThroughType(t: TileTypeKey): boolean {
+  return t === 'dungeon' || t === 'tower';
+}
+
 export function buildDefaultTileData(seed: number): Record<string, Tile> {
-  const typeGrid   = buildTypeGrid(seed);
+  return activeBoard().id === 's2'
+    ? buildDefaultTileDataS2(seed)
+    : buildDefaultTileDataS1(seed);
+}
+
+function buildDefaultTileDataS1(seed: number): Record<string, Tile> {
+  const typeGrid   = buildTypeGridS1(seed);
   const shopIds    = computeTownShopIds(seed);
   const tiles: Record<string, Tile> = {};
 
@@ -376,7 +412,7 @@ export function buildDefaultTileData(seed: number): Record<string, Tile> {
       const typeKey = typeGrid[r][c];
       const stats   = generateTileStats(seed, r, c, typeKey);
       const shopId  = shopIds[coord];
-      tiles[coord]  = makeBlankTile({ ...stats, ...(shopId ? { shopId } : {}) });
+      tiles[coord]  = makeBlankTile({ ...stats, typeKey, ...(shopId ? { shopId } : {}) });
     }
   }
 
@@ -385,7 +421,7 @@ export function buildDefaultTileData(seed: number): Record<string, Tile> {
     state: 'complete', required: 0,
     name: 'The Crossroads',
     release: 'on', collect: 'on', hint: 0, xp: 0, gold: 0,
-    shopId: 'centralia',
+    shopId: 'centralia', typeKey: 'town_center',
   });
 
   // Reveal neighbors of center; towns auto-complete and cascade their neighbors
@@ -399,6 +435,59 @@ export function buildDefaultTileData(seed: number): Record<string, Tile> {
       }
     } else {
       tiles[adjCoord].state = 'available';
+    }
+  }
+
+  return tiles;
+}
+
+function buildDefaultTileDataS2(seed: number): Record<string, Tile> {
+  const S2      = BOARD_SPECS.s2;
+  const typeGrid = buildTypeGridS2(seed);
+  const tiles: Record<string, Tile> = {};
+
+  const at = (r: number, c: number) => coordFromRCOn(r, c, S2);
+
+  for (let r = 0; r < S2.rows; r++) {
+    for (let c = 0; c < S2.cols; c++) {
+      const typeKey = typeGrid[r][c];
+      tiles[at(r, c)] = makeBlankTile({ ...generateTileStats(seed, r, c, typeKey), typeKey });
+    }
+  }
+
+  // The Castle is the start tile: always complete, never a challenge.
+  tiles[S2_CASTLE] = makeBlankTile({
+    state: 'complete', required: 0,
+    name: 'The Castle',
+    release: 'on', collect: 'on', hint: 0, xp: 0, gold: 0,
+    typeKey: 'castle',
+  });
+
+  // Reveal outward from the Castle. Dungeons and the Tower are pass-through, so
+  // revealing one immediately reveals ITS neighbours too — iterate to a fixpoint
+  // rather than one pass. (They are ≥3 apart today so chains can't occur, but
+  // the loop costs nothing and survives a layout change.)
+  const revealAround = (r: number, c: number): boolean => {
+    let changed = false;
+    for (const [ar, ac] of getAdjRCOn(r, c, S2)) {
+      const t = tiles[at(ar, ac)];
+      if (t.state === 'hidden') { t.state = 'available'; changed = true; }
+    }
+    return changed;
+  };
+
+  const [castleR, castleC] = rcFromCoordOn(S2_CASTLE, S2);
+  revealAround(castleR, castleC);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let r = 0; r < S2.rows; r++) {
+      for (let c = 0; c < S2.cols; c++) {
+        if (!isPassThroughType(typeGrid[r][c])) continue;
+        if (tiles[at(r, c)].state === 'hidden') continue;
+        if (revealAround(r, c)) changed = true;
+      }
     }
   }
 

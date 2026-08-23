@@ -67,6 +67,12 @@ export interface TileAdventurer {
 
 export interface Tile {
   state: TileState;
+  // The tile's generated type, persisted from S2 onward. It is derived from the
+  // season seed at runtime (tileGen), but the DB rules cannot run that code —
+  // and "you may not join a dungeon/tower/castle" has to be enforced
+  // server-side. Absent on S1 records, which predate it; read it through
+  // typeKeyForCoord, never directly.
+  typeKey?: TileTypeKey;
   required: number;
   adventurers: Record<string, TileAdventurer>;  // keyed by advId
   name: string;
