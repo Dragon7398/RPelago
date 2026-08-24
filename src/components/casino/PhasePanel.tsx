@@ -2,7 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
-import { nameColorValue } from '../../lib/constants';
+import { FREE_COMPLETED_STATUSES, nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 
 // The player's chosen name-color, resolved LIVE per playerId so a mid-mission
@@ -740,6 +740,78 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
   );
 }
 
+/**
+ * Sort tier for the three-band ordering the boards use: still owed work, then
+ * finished-but-still-owning-the-slot, then Done.
+ *
+ * Tier 1 is exactly `FREE_COMPLETED_STATUSES` minus Done, so the band that sits
+ * below the divider stays the same set the rest of the app calls "completed" —
+ * there is no second definition of finished to drift.
+ */
+const finishTier = (s: SlotStatus): 0 | 1 | 2 =>
+  (s === 'Done' ? 2 : FREE_COMPLETED_STATUSES.has(s) ? 1 : 0);
+
+/**
+ * Tier first, then alphabetical by the title the tile leads with. Ties fall
+ * through to the owner so a table running two copies of one game keeps a stable,
+ * non-jittery order across re-renders.
+ */
+const byTierThenName = (a: OwnedGame, b: OwnedGame): number =>
+  finishTier(a.status) - finishTier(b.status)
+  || (a.game || a.slot).localeCompare(b.game || b.slot, undefined, { sensitivity: 'base' })
+  || a.ownerName.localeCompare(b.ownerName);
+
+/**
+ * A board's game tiles, ordered by `byTierThenName` and — for anyone else's games
+ * — split at a divider: only Unstarted / In-Progress above it, everything
+ * finished below. Done games have nothing left to act on at all, so they start
+ * collapsed behind a toggle inside that lower section.
+ *
+ * `mine` renders the flat variant: your own games get the same three-band sort
+ * but are never divided or hidden, because your own seat is the one place you
+ * always want the whole picture. On a mixed board (the peek, where you may hold a
+ * seat) that rule survives per tile — your own Done games ignore the toggle and
+ * the count only ever offers to hide other players'.
+ */
+function GamesBoard({ tiles, wide, missionId, linkedAt, now, mine }: {
+  tiles: OwnedGame[]; wide?: boolean; missionId: string; linkedAt?: number | null; now: number;
+  mine?: boolean;
+}) {
+  const [showDone, setShowDone] = useState(false);
+  const sorted = [...tiles].sort(byTierThenName);
+  const grid = (list: OwnedGame[]) =>
+    <TileGrid tiles={list} wide={wide} missionId={missionId} linkedAt={linkedAt} now={now} />;
+
+  if (mine) return grid(sorted);
+
+  const active   = sorted.filter(t => finishTier(t.status) === 0);
+  const finished = sorted.filter(t => finishTier(t.status) > 0);
+  if (!finished.length) return grid(active);
+
+  // Only someone else's Done tile is ever hidden, so it is also the only kind the
+  // toggle should count — offering to "hide 2 done" and hiding none reads broken.
+  const hidden   = (t: OwnedGame) => t.status === 'Done' && !t.you;
+  const hideable = finished.filter(hidden);
+  const shown    = showDone ? finished : finished.filter(t => !hidden(t));
+
+  return (
+    <>
+      {active.length ? grid(active) : <span className="mp-muted">Nothing left unstarted or in progress.</span>}
+      <div className="mp-split">
+        <span className="mp-split-lbl">Finished · {finished.length}</span>
+        <span className="mp-split-rule" />
+        {hideable.length > 0 && (
+          <button type="button" className="mp-split-btn" onClick={() => setShowDone(v => !v)}
+                  aria-expanded={showDone}>
+            {showDone ? 'Hide' : 'Show'} {hideable.length} done
+          </button>
+        )}
+      </div>
+      {shown.length > 0 && grid(shown)}
+    </>
+  );
+}
+
 function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string; now: number; seasonId: string; view: View }) {
   // The Lounge has room to breathe, so its game cards get a wider minimum before
   // the grid adds another column; the Floor keeps its tighter rail.
@@ -801,14 +873,14 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
             Your games {!pending && <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span>}
           </div>
           {mine.length
-            ? <TileGrid tiles={mine} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} />
+            ? <GamesBoard tiles={mine} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} mine />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
         </div>
 
         {others.length > 0 && (
           <div>
             <div className="mp-cell-lbl">The rest of the table</div>
-            <TileGrid tiles={others} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} />
+            <GamesBoard tiles={others} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} />
           </div>
         )}
 
@@ -846,7 +918,7 @@ export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
       <OpenSlots m={m} uid={uid} />
       {tiles.length
         ? <div style={{ marginTop: '1rem' }}>
-            <TileGrid tiles={tiles} wide missionId={m.id} linkedAt={m.linkedAt} now={now} />
+            <GamesBoard tiles={tiles} wide missionId={m.id} linkedAt={m.linkedAt} now={now} />
           </div>
         : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}
     </PlayerCtx>

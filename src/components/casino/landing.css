@@ -591,6 +591,24 @@ body.casino-scope #root { width: 100%; }
 /* Lounge: fewer, roomier cards. `min(100%, …)` keeps the track from outgrowing a
    narrow phone — the card still shrinks to the column rather than overflowing. */
 .mp-board-wide { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
+/* Divider between the games a table still owes work on and the finished ones.
+   The label sits on the rule with the Done toggle parked at its far end, so the
+   whole split costs one line rather than a second section heading. All four
+   colours are theme tokens — the rule fades from the theme's own gold and the
+   button borrows the card ground, so light and colour-blind themes need no
+   override. */
+.mp-split { display: flex; align-items: center; gap: 0.55rem; margin: 1rem 0 0.55rem; }
+.mp-split-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); white-space: nowrap; }
+.mp-split-rule { flex: 1; height: 1px; min-width: 1rem; background: linear-gradient(90deg, oklch(from var(--gold) l c h / 0.4), oklch(from var(--gold) l c h / 0.05)); }
+.mp-split-btn {
+  font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--gold-dim); background: oklch(from var(--bg-card) l c h / 0.7);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0.24rem 0.62rem;
+  cursor: pointer; white-space: nowrap;
+}
+.mp-split-btn:hover { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.5); }
+.mp-split-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
 .mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
 .mp-tile.goaled { border-top-color: var(--pos); box-shadow: 0 0 0 1px oklch(from var(--pos) l c h / 0.25); }
 .mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
