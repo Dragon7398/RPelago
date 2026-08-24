@@ -23,6 +23,7 @@ import {
   enlistInMission as dbEnlistInMission,
   standDownFromMission as dbStandDownFromMission,
   setMissionParticipantStatusNote as dbSetMissionParticipantStatusNote,
+  setSlotStatusNote as dbSetSlotStatusNote,
   adminSetParticipantSlots as dbAdminSetParticipantSlots,
   adminUpdateParticipantSlotStatus as dbAdminUpdateParticipantSlotStatus,
   adminSetMissionLink as dbAdminSetMissionLink,
@@ -429,6 +430,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await dbSetMissionParticipantStatusNote(missionId, note);
   }, []);
 
+  const setSlotStatusNote = useCallback(async (missionId: string, slotIndex: number, note: string | null) => {
+    await dbSetSlotStatusNote(missionId, slotIndex, note);
+  }, []);
+
   const adminSetParticipantSlots = useCallback(async (missionId: string, playerId: string, slots: AdvSlot[]) => {
     await dbAdminSetParticipantSlots(missionId, playerId, slots);
   }, []);
@@ -491,7 +496,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
       adminAddWarning, adminDeleteWarning, adminClearWarnings, adminGrantGold,
       setAdventurerStatusNote,
-      enlistInMission, standDownFromMission, setMissionParticipantStatusNote,
+      enlistInMission, standDownFromMission, setMissionParticipantStatusNote, setSlotStatusNote,
       adminSetParticipantSlots, adminUpdateParticipantSlotStatus,
       adminSetMissionLink, adminSetMissionRoomSettings,
       adminKickMissionParticipant, adminForceDeploy, adminCompleteMission,

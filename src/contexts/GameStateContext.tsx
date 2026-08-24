@@ -51,6 +51,7 @@ export interface GameStateContextValue {
   enlistInMission: (missionId: string, missionLabel: string) => Promise<void>;
   standDownFromMission: (missionId: string, missionLabel: string) => Promise<void>;
   setMissionParticipantStatusNote: (missionId: string, note: string | null) => Promise<void>;
+  setSlotStatusNote: (missionId: string, slotIndex: number, note: string | null) => Promise<void>;
   adminSetParticipantSlots: (missionId: string, playerId: string, slots: AdvSlot[]) => Promise<void>;
   adminUpdateParticipantSlotStatus: (missionId: string, playerId: string, slotIndex: number, status: SlotStatus) => Promise<void>;
   adminSetMissionLink: (missionId: string, link: string) => Promise<void>;

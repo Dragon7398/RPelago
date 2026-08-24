@@ -4816,6 +4816,16 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-slot-game { color: var(--gold-dim); }
 .sr-slot-reasons { font-size: 0.64rem; color: var(--gold-dim); word-break: break-word; }
 .sr-slot-problem .sr-slot-reasons { color: oklch(from var(--bg-card) calc(1 - l) 0.13 25); }
+/* The player's status note, quoted under the reasons. Deliberately quiet — it is
+   context for the excuse decision, not another finding. */
+.sr-slot-note {
+  display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap;
+  margin-top: 0.15rem; padding: 0.15rem 0.4rem;
+  border-left: 2px solid oklch(from var(--gold) l c h / 0.4); border-radius: 0 2px 2px 0;
+  background: oklch(from var(--bg-card) l c h / 0.5);
+}
+.sr-slot-note-text { font-size: 0.66rem; font-style: italic; color: var(--ink-soft); word-break: break-word; }
+.sr-slot-note-time { font-size: 0.58rem; color: var(--gold-dim); white-space: nowrap; }
 
 .sr-section { margin-top: 1.15rem; }
 .sr-section .casino-log-toggle { margin-bottom: 0.6rem; }

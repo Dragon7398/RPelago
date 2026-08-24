@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown,
-  excuseKey, hasUnexcusedProblem,
+  excuseKey, hasUnexcusedProblem, lastSignOfLife, slotIdleTier,
+  PROBLEM_STALE_HOURS, SLOT_CAUTION_HOURS,
   type ReportCandidate,
 } from '../../src/lib/statusReport';
 import type { GMMission, Tile, Player, AdvSlot } from '../../src/types';
@@ -470,5 +471,106 @@ describe('buildOfficialReport — excuses', () => {
     }), NOW, undefined, { [excuseKey('mission', 'm1', 'a')]: 'excused anyway' });
     expect(rep.problems).toHaveLength(0);
     expect(rep.warnings[0].items[0]).toMatchObject({ code: 'lastPlayer', handle: '@Zed' });
+  });
+});
+
+// ── lastReported: a slot note counts as a sign of life ───────────────────────
+//
+// This is the whole of the notes feature's report integration. `lastReported` is
+// weighted exactly like `lastChecked`, so a note CLEARS the stalled problem and
+// therefore costs the player no statusIncident. Deliberate — see the file header.
+
+describe('lastReported', () => {
+  // A second, freshly-active player keeps the world-general allIdle60 warning from
+  // firing, so each assertion below is about player a's own codes only.
+  const stalledWorld = (s: AdvSlot) => run({
+    m1: mission({ id: 'm1', label: 'W', linkedAt: ago(200), participants: {
+      a: part('a', 'A', [s]),
+      b: part('b', 'B', [slot({ name: 'Other', status: 'In-Progress', lastActivity: ago(1) })]),
+    } }),
+  });
+
+  // A world with nothing left to flag drops off the candidate list entirely, so an
+  // EMPTY report is the strongest possible "cleared" — not a missing case.
+  const codesFor = (rep: ReportCandidate[]) =>
+    rep[0]?.players.find(p => p.playerId === 'a')?.findings.flatMap(f => f.codes) ?? [];
+
+  it('clears the stalled problem when the note is recent', () => {
+    const codes = codesFor(stalledWorld(slot({
+      name: 'S', status: 'In-Progress', lastActivity: ago(100), lastReported: ago(2),
+    })));
+    expect(codes).not.toContain('stalled');
+  });
+
+  it('does not clear it when the note is older than the threshold', () => {
+    const codes = codesFor(stalledWorld(slot({
+      name: 'S', status: 'In-Progress', lastActivity: ago(100), lastReported: ago(PROBLEM_STALE_HOURS + 1),
+    })));
+    expect(codes).toContain('stalled');
+  });
+
+  it('still raises noActivity144 despite a fresh note — a note must not launder a dead slot', () => {
+    const codes = codesFor(stalledWorld(slot({
+      name: 'S', status: 'In-Progress', lastActivity: ago(200), lastReported: ago(1),
+    })));
+    expect(codes).toContain('noActivity144');
+  });
+
+  it('surfaces the note on the finding so the host can read it before excusing', () => {
+    const rep = stalledWorld(slot({
+      name: 'S', status: 'In-Progress', lastActivity: ago(100),
+      note: { text: 'stuck behind a Varia gate', timestamp: ago(2) },
+    }));
+    const f = rep[0].players.find(p => p.playerId === 'a')!.findings[0];
+    expect(f.note?.text).toBe('stuck behind a Varia gate');
+  });
+
+  it('lastSignOfLife takes the newest present stamp, and null when there are none', () => {
+    expect(lastSignOfLife(slot({ lastActivity: ago(10), lastChecked: ago(5), lastReported: ago(20) }))).toBe(ago(5));
+    expect(lastSignOfLife(slot({ lastActivity: ago(10), lastReported: ago(2) }))).toBe(ago(2));
+    expect(lastSignOfLife(slot({}))).toBeNull();
+  });
+});
+
+// ── slotIdleTier: the landing page's badge ───────────────────────────────────
+
+describe('slotIdleTier', () => {
+  const inprog = (h: number) => slot({ status: 'In-Progress', lastActivity: ago(h) });
+
+  it('is quiet below the caution threshold', () => {
+    expect(slotIdleTier(inprog(SLOT_CAUTION_HOURS - 1), NOW)).toBeNull();
+  });
+
+  it('cautions from 48h and alerts from 72h', () => {
+    expect(slotIdleTier(inprog(SLOT_CAUTION_HOURS), NOW)).toMatchObject({ tier: 'caution', hours: SLOT_CAUTION_HOURS });
+    expect(slotIdleTier(inprog(PROBLEM_STALE_HOURS - 1), NOW)).toMatchObject({ tier: 'caution' });
+    expect(slotIdleTier(inprog(PROBLEM_STALE_HOURS), NOW)).toMatchObject({ tier: 'alert', hours: PROBLEM_STALE_HOURS });
+  });
+
+  it('is suppressed for every status that already frees a mission claim', () => {
+    for (const status of ['100%', 'Goaled', 'Done'] as const) {
+      expect(slotIdleTier(slot({ status, lastActivity: ago(500) }), NOW)).toBeNull();
+    }
+  });
+
+  it('a note resets the clock like any other sign of life', () => {
+    const s = slot({ status: 'In-Progress', lastActivity: ago(100), lastReported: ago(1) });
+    expect(slotIdleTier(s, NOW)).toBeNull();
+  });
+
+  it('falls back to the room link for an Unstarted slot, and flags it', () => {
+    const s = slot({ status: 'Unstarted' });
+    expect(slotIdleTier(s, NOW, ago(80))).toMatchObject({ tier: 'alert', hours: 80, fromRoom: true });
+    expect(slotIdleTier(s, NOW, ago(50))).toMatchObject({ tier: 'caution', fromRoom: true });
+  });
+
+  it('shows nothing when there is no room link yet — there was nothing to start', () => {
+    expect(slotIdleTier(slot({ status: 'Unstarted' }), NOW)).toBeNull();
+    expect(slotIdleTier(slot({ status: 'Unstarted' }), NOW, null)).toBeNull();
+  });
+
+  it('prefers a real stamp over the room link', () => {
+    const s = slot({ status: 'In-Progress', lastActivity: ago(1) });
+    expect(slotIdleTier(s, NOW, ago(500))).toBeNull();
   });
 });

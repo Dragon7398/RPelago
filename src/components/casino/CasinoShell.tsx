@@ -747,7 +747,7 @@ export default function CasinoShell() {
           title={CASINO_GAMES[(slotsMission.casinoGame ?? 'five_card_draw') as CasinoGame].label}
           tag={`Cohort ${toRoman(slotsMission.series)} · Table Slots`}
           onClose={() => setSlotsId(null)}>
-          <TableSlotsBoard m={slotsMission} uid={user?.id ?? null}
+          <TableSlotsBoard m={slotsMission} uid={user?.id ?? null} now={now}
             colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
             handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null} />
         </Modal>

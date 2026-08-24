@@ -30,14 +30,25 @@ export interface AdvSlot {
   room?: 1 | 2;       // bifurcated tiles: which room this slot belongs to
   bonusXP?: number;   // extra XP awarded to the player who completes this slot
   bonusGold?: number; // extra gold awarded to the player who completes this slot
-  // Stamped from Cheesetracker on sync (ms epoch, or null when the tracker has no
-  // value yet). Drive the status report.
+  // Three timestamps of unequal weight (ms epoch, or null). They drive the status
+  // report AND the landing page's idle badges. The first two are stamped from
+  // Cheesetracker on sync; the third is written by the player here.
   //   lastActivity — STRONG: last server-verified activity from the Archipelago
   //                  server (the real "still playing / making progress" signal).
   //   lastChecked  — WEAK: the player's last manual self-report vouching status
   //                  (e.g. "I'm stuck"); may be inaccurate.
+  //   lastReported — WEAK: stamped when the player saves `note` below. The same
+  //                  kind of unverified claim as lastChecked, made in our UI
+  //                  instead of Cheese's, and weighted identically. Deleting the
+  //                  note does NOT clear it — the report was still made.
   lastActivity?: number | null;
   lastChecked?: number | null;
+  lastReported?: number | null;
+  // The player's own explanation of where this slot stands ("stuck behind a Varia
+  // gate", "travelling until Sunday"). Written via the `setSlotStatusNote`
+  // callable, which stamps `lastReported` in the same update. Readable by anyone
+  // at the table; editable only by the slot's owner.
+  note?: AdvStatusNote;
   // Casino only: this slot was CLAIMED from a vacated seat rather than dealt to
   // its holder. Its card pays out flat (no deck boost — the claimant never chose
   // the deck), and it carries its OWN pot weight rather than a slice of the

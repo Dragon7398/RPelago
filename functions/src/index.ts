@@ -1345,6 +1345,58 @@ export const setMissionParticipantStatusNote = onCall(async (request) => {
   return { success: true };
 });
 
+/**
+ * Per-SLOT status note — the player explaining where one game stands.
+ *
+ * Distinct from `setMissionParticipantStatusNote` above, which is one note for a
+ * whole seat: a five-card seat could never say which game it meant. Both exist.
+ *
+ * Saving stamps `lastReported` alongside the text in ONE update, so the landing
+ * page's idle badge and the report's `stalled` check see the same instant.
+ * Clearing deletes the text but deliberately LEAVES `lastReported` — the player
+ * did report; deleting the words does not un-ring that bell.
+ */
+export const setSlotStatusNote = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId, slotIndex, note, seasonId: reqSeason } = request.data as {
+    missionId?: string; slotIndex?: number; note?: string | null; seasonId?: string;
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+  if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
+    throw new HttpsError('invalid-argument', 'Missing or invalid slotIndex.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const now = Date.now();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+
+  const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = missionSnap.val() as GMMission;
+
+  const seat = mission.participants?.[uid];
+  if (!seat) throw new HttpsError('failed-precondition', 'Not a participant.');
+  // Bounds-check against the seat's OWN slots — a note may only ever be attached
+  // to a slot the caller actually holds.
+  if (slotIndex >= (seat.slots ?? []).length)
+    throw new HttpsError('failed-precondition', 'No such slot on your seat.');
+
+  const base = sp(seasonId, `missions/${missionId}/participants/${uid}/slots/${slotIndex}`);
+  const updates: Record<string, unknown> = {};
+
+  if (note == null || note.trim() === '') {
+    updates[`${base}/note`] = null;
+  } else {
+    const text = note.trim().slice(0, 280);
+    updates[`${base}/note`]         = { text, timestamp: now };
+    updates[`${base}/lastReported`] = now;
+  }
+
+  await db.ref().update(updates);
+  return { success: true };
+});
+
 // ── Claim an open spot on an in-progress mission (kicked player replacement) ──
 
 export const claimMissionSlot = onCall(async (request) => {

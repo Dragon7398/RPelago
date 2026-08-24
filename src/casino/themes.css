@@ -11,6 +11,23 @@
    so the 5 types stay distinct in greyscale/colour-blind simulation.
    Suits (✦ ♦ ♠ ♥ ♣) and labels supply the redundant non-color cue.
    Gilded Hearth and the remaining themes keep equal-lightness hues.
+
+   --caution is the landing page's idle-badge tier below --neg (its alert tier
+   reuses --neg directly; see landing.css .mp-idle). It is deliberately ORANGE in
+   every theme, not amber: amber IS gold here, so an amber badge reads as
+   decoration rather than a warning. On the six DARK themes the value is
+   `oklch(from var(--neg) calc(l + 0.12) calc(c + 0.02) calc(h + 25))` resolved --
+   twelve points lighter than the theme's red, slightly hotter, rotated a quarter
+   of the way toward amber. The four LIGHT themes are hand-picked because that
+   rule inverts: on a near-white page `l + 0.12` walks the badge toward the
+   background instead of away from it.
+
+   Lapis is the exception to look at twice. It is the only theme that is both
+   light AND CB-safe, so caution must be dark enough for a near-white page and
+   separated from --neg by LIGHTNESS rather than hue. Both forces point the same
+   way, so its caution sits 14pt BELOW its alert instead of above. That inversion
+   is intentional -- no user sees two themes at once, so only within-theme
+   separation matters.
 */
 
 /* The table is a standalone document that does NOT load index.css, so it needs its
@@ -57,6 +74,8 @@ body.casino-scope.theme-gilded {
 
   --pos:     oklch(76% 0.15 145);
   --neg:     oklch(66% 0.17 28);
+  /* orange, clear of --gold 76% 0.14 75 */
+  --caution: oklch(78% 0.19 53);
   --xp:      oklch(78% 0.10 250);
   --mission: oklch(66% 0.16 350);
   --stat-l:  82%;
@@ -94,6 +113,8 @@ body.casino-scope.theme-moonlit {
 
   --pos:     oklch(80% 0.11 235);
   --neg:     oklch(64% 0.17 38);
+  /* CB: 12pt lighter than --neg; clear of --acc-wild 86% 0.12 92 */
+  --caution: oklch(76% 0.19 63);
   --xp:      oklch(80% 0.09 280);
   --mission: oklch(70% 0.13 320);
   --stat-l:  80%;
@@ -131,6 +152,8 @@ body.casino-scope.theme-verdant {
 
   --pos:     oklch(72% 0.18 140);
   --neg:     oklch(64% 0.18 22);
+  /* orange, hotter than --gold 70% 0.14 50 */
+  --caution: oklch(78% 0.20 47);
   --xp:      oklch(74% 0.14 295);
   --mission: oklch(66% 0.16 350);
   --stat-l:  72%;
@@ -170,6 +193,8 @@ body.casino-scope.theme-aether {
 
   --pos:     oklch(72% 0.18 130);
   --neg:     oklch(62% 0.20 18);
+  /* orange, clear of --acc-wild 68% 0.14 65 */
+  --caution: oklch(74% 0.22 43);
   --xp:      oklch(74% 0.14 215);
   --mission: oklch(62% 0.18 330);
   --stat-l:  78%;
@@ -209,6 +234,8 @@ body.casino-scope.theme-obsidian {
 
   --pos:     oklch(80% 0.18 150);
   --neg:     oklch(72% 0.22 28);
+  /* CB: 12pt under --neg; gold AND wild are both 90% 0.17 95 here */
+  --caution: oklch(84% 0.24 53);
   --xp:      oklch(80% 0.14 220);
   --mission: oklch(74% 0.20 320);
   --stat-l:  88%;
@@ -244,6 +271,8 @@ body.casino-scope.theme-tidepool {
 
   --pos:     oklch(82% 0.13 195);
   --neg:     oklch(62% 0.19 35);
+  /* CB: 12pt lighter than --neg; under --gold 85% 0.14 90 */
+  --caution: oklch(74% 0.21 60);
   --xp:      oklch(80% 0.11 250);
   --mission: oklch(68% 0.18 320);
   --stat-l:  82%;
@@ -289,6 +318,8 @@ body.casino-scope.theme-parchment {
   /* dark enough for legibility on light page bg */
   --pos:     oklch(44% 0.14 155);
   --neg:     oklch(46% 0.18 30);
+  /* LIGHT: dark amber, yellower than --gold 45% 0.13 55 */
+  --caution: oklch(52% 0.15 82);
   --xp:      oklch(40% 0.14 240);
   --mission: oklch(42% 0.16 320);
   --stat-l:  46%;
@@ -325,6 +356,8 @@ body.casino-scope.theme-sakura {
 
   --pos:     oklch(44% 0.15 150);
   --neg:     oklch(46% 0.20 18);
+  /* LIGHT: orange, far from the pink-red --gold 50% 0.18 12 */
+  --caution: oklch(52% 0.17 65);
   --xp:      oklch(40% 0.15 280);
   --mission: oklch(46% 0.20 350);
   --stat-l:  46%;
@@ -360,6 +393,8 @@ body.casino-scope.theme-mint {
 
   --pos:     oklch(40% 0.15 152);
   --neg:     oklch(44% 0.18 30);
+  /* LIGHT: yellower than --gold 48% 0.12 60 */
+  --caution: oklch(52% 0.16 88);
   --xp:      oklch(38% 0.14 250);
   --mission: oklch(40% 0.16 318);
   --stat-l:  44%;
@@ -396,6 +431,8 @@ body.casino-scope.theme-lapis {
   /* dark enough for light page bg */
   --pos:     oklch(48% 0.15 215);
   --neg:     oklch(52% 0.20 35);
+  /* LIGHT + CB: INVERTED — 14pt DARKER than --neg (see note) */
+  --caution: oklch(38% 0.14 68);
   --xp:      oklch(46% 0.13 255);
   --mission: oklch(44% 0.18 318);
   --stat-l:  44%;

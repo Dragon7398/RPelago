@@ -154,7 +154,8 @@ All in `functions/src/index.ts`:
 | `tickSlotStatuses` | Scheduled every 15 minutes | Auto-syncs slot statuses + activity timestamps from Cheesetracker across live + draft seasons (see Archipelago / Cheesetracker sync). Also **auto-reclaims mission claims** — frees `activeMissions/{id}` when a participant's slots go all-terminal (mirrors its tile adventurer-free block). |
 | `enlistInMission` | Callable | Adds player to a forming mission; auto-deploys if now full. Rejects `no-claims-free` when the player's held claims (`activeMissions`) meet `MISSION_CLAIM_CAPACITY`. |
 | `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed); frees that mission's claim. |
-| `setMissionParticipantStatusNote` | Callable | Updates a participant's status note. |
+| `setMissionParticipantStatusNote` | Callable | Updates a participant's **seat-wide** status note. |
+| `setSlotStatusNote` | Callable | Updates one **slot's** note + stamps `lastReported` (see Slot status notes). |
 | `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). **Casino claims are free** — no gold, no mission claim consumed; see Casino: void vs kick. |
 | `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot — **one per card** for a casino seat. |
 | `adminVoidCasinoSeat` | Callable | Removes a whole casino seat with no replacement; releases all its pot weight, writes no warning. |
@@ -291,10 +292,13 @@ Real-time event feed stored in `game/activityLog` in Firebase, automatically pru
 
 Slot statuses (`SlotStatus`: `Unstarted | In-Progress | 100% | Goaled | Done`) are synced from the Cheesetracker API for both tile adventurer/public slots and mission participant slots. Two paths write the same data: the admin **Sync** button on ChallengesPage / MapPage / MissionsPage (via `fetchCheeseDetails`), and the scheduled `tickSlotStatuses` (every 15 min, across live + draft seasons). Both call **`deriveSlotStatus`** (`archipelagoApi.ts`, mirrored server-side in `functions/src/index.ts`) — the single source of truth for status derivation.
 
-Two timestamps are stamped on **every** synced slot (ms epoch, or null): **`lastActivity`** and **`lastChecked`**. Their weights are the crux and easy to invert:
+Two timestamps are stamped on **every** synced slot (ms epoch, or null): **`lastActivity`** and **`lastChecked`**. A third, **`lastReported`**, is written by the player rather than the sync. Their weights are the crux and easy to invert:
 
 - **`lastActivity`** (Cheese `last_activity`) — **STRONG**: server-verified activity from the Archipelago server; the real "is actually playing / making progress" signal.
 - **`lastChecked`** (Cheese `last_checked`) — **WEAK**: a manual self-report by the player (e.g. vouching they're stuck); may be inaccurate.
+- **`lastReported`** (not from Cheese) — **WEAK**: stamped by `setSlotStatusNote` when the player saves a note on the slot. Weighted **identically to `lastChecked`** (see Slot status notes).
+
+Both sync paths write **leaf fields** (`slots/{i}/status`, `/lastChecked`, `/lastActivity`, `/name`), so a slot's `note` and `lastReported` survive a status sync untouched. Two writers *do* replace the array wholesale and drop notes: `resubmitCasinoYaml`'s card re-pick (correct — the cards changed, so the notes no longer describe anything) and `adminSetParticipantSlots`.
 
 **`{NUMBER}` slot names.** A player may end a slot name with `{NUMBER}` so the room still generates through a name collision — Archipelago expands the token to nothing for the first such slot and to a digit for each one after (`jam_minit`, then `jam_minit2`). The stored name keeps the token, so it matches nothing on the tracker. Every sync path resolves it through **`resolveNumberedSlotName`** (`archipelagoApi.ts`, mirrored server-side in `tickSlotStatuses`) and **adopts the generated name permanently** — the client paths write it via `adminUpdate{Adv,Public,Participant}SlotName`, the tick folds it into its `updates` batch. Resolution is deliberately **only for the unambiguous case**: exactly one room name matching the base (bare or AP-numbered). Two or more real candidates return null, keep the token, and surface in the admin mismatch list — with two genuine `jam_minit` slots nothing in the name says whose is whose, so that mapping stays a manual call.
 
@@ -303,6 +307,8 @@ Two timestamps are stamped on **every** synced slot (ms epoch, or null): **`last
 ### Status reports
 
 Admin **Report** tab (`StatusReportPage.tsx`) surfaces in-progress missions and challenges that need attention, with all logic in the pure/tested **`statusReport.ts`**. `computeStatusReport` classifies each owned slot into **Problem** (red) or **Warning** (yellow), buckets each world as **Active** / **Too Early** (<48h elapsed) / **Recently Reported** (`lastReportAt` <24h). Elapsed clock origin mirrors the mission card: `linkedAt ?? deployedAt ?? firstJoinAt ?? createdAt` (tiles: `linkedAt` only, stamped on first room-link set). Slot thresholds are exported constants (`PROBLEM_STALE_HOURS`, `WARN_NO_ACTIVITY_HOURS`, `WARN_ALL_STALE_HOURS`); a **missing timestamp is "unknown", never "stale"** (`stale()` returns false on null — this prevents false "no activity in never" flags).
+
+The `stalled` problem reads the newest of **all three** timestamps via `lastSignOfLife()`, so **a slot note clears it and therefore costs no `statusIncident`**. That is intended — `lastChecked` already did exactly this from the tracker side — but it means a player who writes a note every few days without playing accrues no incidents. The backstop is `noActivity144`, which reads `lastActivity` **alone**: a note must never launder a slot with no server activity. Findings carry `note` so the Report tab shows the player's own words next to the excuse toggle.
 
 Running an **official report** (`runOfficialStatusReport` in `db.ts`) does one atomic update: +1 `statusIncidents[playerId]` on each Problem world (per-report, per-world), resets `lastReportAt = report.ts` on Problem worlds, stores the snapshot to `seasons/{id}/statusReports/{key}`, and prunes to the newest 10. `buildOfficialReport` + `renderProblemsMarkdown` / `renderWarningsMarkdown` produce the two copy-paste blocks (player-facing Problems; admin-facing Warnings). Marking a Warning world **handled** (`markStatusWarningHandled`) resets its timer to the report's `ts` but **never moves a newer `lastReportAt` backward**. At world completion, players with ≥5 `statusIncidents` get an auto `PlayerWarning` (see `onTileComplete` / `onMissionComplete`).
 
@@ -316,6 +322,18 @@ Warning items carry **`slots`** — the names of the slots that actually tripped
 - **After** — `excuseStatusProblem` on a stored report marks the snapshot row and **refunds** the incident. The refund is read-then-write, **not `increment(-1)`**: a player excused pre-run was never charged, and a blind decrement would go negative and mask a later real incident from the ≥5 auto-warning.
 
 `renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
+
+### Slot status notes + idle badges
+
+Players can leave a note on **one slot** explaining where that game stands, and see on the casino landing when a slot of theirs has gone quiet. Casino landing only — the map shell keeps its per-adventurer `AdvNoteEditor`.
+
+- **Two different notes exist.** `GMParticipant.statusNote` is **seat-wide** (`setMissionParticipantStatusNote`); `AdvSlot.note` is **per-slot** (`setSlotStatusNote`). A five-card seat could never say which game a seat-wide note meant, which is why the second exists. Both are kept.
+- **Saving stamps `lastReported` in the SAME update** as the text. **Clearing the note deliberately leaves `lastReported` alone** — the player did report; deleting the words does not un-ring that bell.
+- **Badges** (`slotIdleTier` in `statusReport.ts`, rendered by `IdleBadge`/`SlotNote` in `PhasePanel.tsx`): caution at `SLOT_CAUTION_HOURS` (48), alert at **`PROBLEM_STALE_HOURS`** — reused, *not* a second 72, so the red badge always means "you are on the host's next report" and the two can never drift.
+- **Suppressed for `FREE_COMPLETED_STATUSES`** (100% / Goaled / Done). Note the **deliberate divergence**: `statusReport` keeps `100%` in scope on purpose (its header forbids unifying with that set), so a 100% slot can raise a `lastPlayer` warning while showing no badge. The badge nudges the player; it does not mirror the report.
+- **Unstarted slots badge from the room link.** With no stamps at all the clock falls back to `mission.linkedAt` and `fromRoom` flips the copy to *"Not started — Nh since the room went up"* (saying "since last activity" about a slot that never had any is a lie). No link ⇒ no badge — there was nothing to start. This is the **one** departure from `stale()`'s unknown-is-never-stale rule; `stale()` itself is untouched.
+- Badges render on **every** slot a board draws — your own, the rest of your table, and other tables opened through the `TableSlotsBoard` peek. A stalled table is the room's problem, so seeing whose slot holds it up is the point. The **copy is owner-aware**: the actionable half (*"Please play this slot or report on your status"*) is an instruction to the holder, so it appears only on your own; someone else's reads *"Tamsin — 78h since last activity."* Note *buttons* are likewise visible to everyone; your own note renders open, others' collapse behind the button.
+- **`--caution` is the only new colour**, defined per theme in `casino/themes.css` (`--alert` is an alias of that theme's `--neg`, set in `.rl-root`). It is **orange, not amber, in every theme** — amber *is* gold here, so an amber badge reads as decoration. Dark themes follow one rule off `--neg`; the four light themes are hand-picked because that rule inverts. **Lapis is both light and CB-safe, so its caution sits *below* its alert** — see the themes.css header before "fixing" it.
 
 ### Player customization
 

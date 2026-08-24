@@ -1,0 +1,235 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #141009; --bg-card: #252010;
+      --border: #4a3c22; --border-glow: #9a7838; --line: #4a3c22; --line-glow: #9a7838;
+      --gold: oklch(76% 0.14 75); --gold-dim: oklch(62% 0.10 75);
+      --parchment: oklch(92% 0.03 80); --ink-soft: oklch(86% 0.035 82 / 0.82);
+      --pos: oklch(76% 0.15 145); --neg: oklch(66% 0.17 28);
+      --caution: oklch(80% 0.13 78); --alert: var(--neg);
+    }
+    body { margin: 0; background: var(--bg-deep); color: var(--parchment); font-size: 16px; }
+    a { color: var(--gold); } a:hover { color: var(--parchment); }
+
+    .mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border:1px solid var(--line);
+      border-top:2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius:10px; padding:0.8rem;
+      display:flex; flex-direction:column; gap:0.4rem; }
+    .mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
+    .mp-tile-status { display:flex; align-items:center; gap:0.3rem; flex-wrap:wrap; }
+    .mp-tile-game { font-family:'Crimson Pro',serif; font-size:0.92rem; color:var(--parchment); line-height:1.2; }
+    .mp-tile-slot { font-family:'Cinzel',serif; font-size:0.6rem; color:var(--gold); overflow-wrap:anywhere; }
+    .mp-tile-owner { display:flex; align-items:center; gap:0.35rem; font-family:'Crimson Pro',serif; font-size:0.74rem; font-style:italic; color:var(--gold-dim); }
+    .mp-tile-who { display:flex; flex-direction:column; line-height:1.25; min-width:0; overflow-wrap:anywhere; }
+    .mp-tile-handle { font-style:normal; font-size:0.66rem; color: oklch(from var(--gold-dim) l c h / 0.8); overflow-wrap:anywhere; }
+    .mp-pav { width:1.15rem; height:1.15rem; border-radius:50%; display:grid; place-items:center;
+      font-family:'Cinzel',serif; font-weight:700; font-size:0.5rem; color: oklch(18% 0.03 70);
+      background: linear-gradient(150deg, oklch(80% 0.11 var(--ph,75)), oklch(58% 0.12 var(--ph,75))); }
+    .mp-st { font-family:'Cinzel',serif; font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase;
+      padding:0.18rem 0.55rem; border-radius:999px; border:1px solid; white-space:nowrap;
+      display:inline-flex; align-items:center; gap:0.28rem; flex-shrink:0; }
+    .mp-st .dot { width:0.5rem; height:0.5rem; border-radius:50%; }
+    .mp-st.inprog { color: oklch(80% 0.12 235); border-color: oklch(80% 0.12 235 / 0.5); background: oklch(80% 0.12 235 / 0.1); }
+    .mp-st.inprog .dot { background: oklch(80% 0.12 235); }
+
+    .mp-idle { display:inline-flex; align-items:center; gap:0.24rem; flex-shrink:0;
+      font-family:'Cinzel',serif; font-size:0.54rem; letter-spacing:0.06em; font-weight:600;
+      padding:0.18rem 0.5rem; border-radius:999px; border:1px solid; white-space:nowrap; cursor:default; }
+    .mp-idle svg { width:0.68rem; height:0.68rem; flex-shrink:0; }
+    .mp-idle.caution { color:var(--caution); border-color: oklch(from var(--caution) l c h / 0.5); background: oklch(from var(--caution) l c h / 0.1); }
+    .mp-idle.alert { color: var(--bg-deep); background: var(--alert); border-color: var(--alert); font-weight:800; }
+
+    .mp-note-btn { display:inline-flex; align-items:center; gap:0.24rem; flex-shrink:0;
+      font-family:'Cinzel',serif; font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase;
+      padding:0.18rem 0.5rem; border-radius:999px; cursor:pointer;
+      border:1px solid var(--line); background:transparent; color:var(--gold-dim); transition:all 0.15s; }
+    .mp-note-btn svg { width:0.68rem; height:0.68rem; flex-shrink:0; }
+    .mp-note-btn.has { color:var(--gold); border-color: oklch(from var(--gold) l c h / 0.45); background: oklch(from var(--gold) l c h / 0.1); }
+    .mp-note-btn:hover { color:var(--gold); border-color:var(--line-glow); }
+    .mp-note-btn.focus { color:var(--gold); border-color:var(--line-glow); box-shadow: 0 0 0 2px oklch(from var(--gold) l c h / 0.22); }
+
+    .mp-note { display:flex; flex-direction:column; gap:0.15rem;
+      border-left:2px solid oklch(from var(--gold) l c h / 0.45); border-radius:0 3px 3px 0;
+      background: oklch(from var(--bg-deep) l c h / 0.55); padding:0.32rem 0.45rem; }
+    .mp-note-text { font-family:'Crimson Pro',serif; font-style:italic; font-size:0.76rem; line-height:1.35; color:var(--ink-soft); text-wrap:pretty; }
+    .mp-note-meta { display:flex; align-items:baseline; gap:0.4rem; font-family:'Cinzel',serif; font-size:0.5rem; letter-spacing:0.06em; color:var(--gold-dim); }
+    .mp-note-edit { background:none; border:none; padding:0; cursor:pointer; font:inherit; color:var(--gold-dim); text-transform:uppercase; letter-spacing:0.08em; opacity:0.85; }
+    .mp-note-edit:hover { color:var(--gold); opacity:1; }
+
+    /* Editor — the .lb-adv-note-editor pattern from src/index.css, re-tokenised and
+       scaled up: the lightbox original sits in a dense row list, this sits in a
+       card with room. Its hardcoded oklch(16% 0.04 75) input fill becomes a token. */
+    .mp-note-editor { display:flex; flex-direction:column; gap:0.3rem; }
+    .mp-note-input { width:100%; box-sizing:border-box; padding:0.36rem 0.45rem; resize:vertical; min-height:3.2rem;
+      background: oklch(from var(--bg-deep) l c h / 0.8); border:1px solid var(--border-glow); color:var(--parchment);
+      font-family:'Crimson Pro',serif; font-size:0.78rem; border-radius:3px; outline:none; line-height:1.45; }
+    .mp-note-actions { display:flex; align-items:center; gap:0.3rem; }
+    .mp-note-chars { font-family:'Cinzel',serif; font-size:0.5rem; letter-spacing:0.06em; color:var(--gold-dim); margin-right:auto; }
+    .mp-note-cancel { background:transparent; border:1px solid var(--line); border-radius:3px;
+      font-family:'Cinzel',serif; font-size:0.52rem; letter-spacing:0.08em; text-transform:uppercase;
+      color:var(--gold-dim); padding:0.2rem 0.55rem; cursor:pointer; }
+    .mp-note-save { background: oklch(from var(--gold) l c h / 0.18); border:1px solid var(--gold-dim); border-radius:3px;
+      font-family:'Cinzel',serif; font-size:0.52rem; letter-spacing:0.08em; text-transform:uppercase;
+      color:var(--gold); padding:0.2rem 0.6rem; cursor:pointer; }
+
+    .step { display:flex; flex-direction:column; gap:0.5rem; }
+    .step-hd { display:flex; align-items:baseline; gap:0.5rem; }
+    .step-n { font-family:'Cinzel',serif; font-weight:800; font-size:0.7rem; color: oklch(from var(--gold) l c h / 0.55); }
+    .step-t { font-family:'Cinzel',serif; font-size:0.58rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--gold-dim); }
+    .step-d { font-family:'Crimson Pro',serif; font-style:italic; font-size:0.84rem; color: oklch(from var(--gold-dim) l c h / 0.9); line-height:1.4; text-wrap:pretty; }
+    .rule { height:1px; background: oklch(from var(--gold) l c h / 0.16); }
+    .cap { font-family:'Cinzel',serif; font-size:0.5rem; letter-spacing:0.16em; text-transform:uppercase; color: oklch(62% 0.10 75 / 0.75); }
+  </style>
+</helmet>
+
+<div style="padding: 34px 32px 38px; display: flex; flex-direction: column; gap: 20px;">
+
+  <div style="display:flex; flex-direction:column; gap:4px;">
+    <div class="cap">Note lifecycle</div>
+    <div style="font-family:'Cinzel',serif; font-weight:800; font-size:1.2rem; color:var(--gold); letter-spacing:0.04em;">Five states, one card</div>
+    <div style="font-family:'Crimson Pro',serif; font-style:italic; font-size:0.9rem; color:var(--gold-dim); line-height:1.4; text-wrap:pretty;">
+      The editor opens <span style="font-style:normal;color:var(--parchment);">inside</span> the card, replacing the note body. No modal, no navigation — the grid reflows one row and settles.
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- 1 -->
+  <div class="step">
+    <div class="step-hd"><span class="step-n">01</span><span class="step-t">Yours · no note</span></div>
+    <div class="step-d">The button is present but quiet. Restraint matters here — a full board is a grid of these.</div>
+    <div class="mp-tile you" style="--th: 200;">
+      <div class="mp-tile-status">
+        <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+        <button class="mp-note-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          Note
+        </button>
+      </div>
+      <div class="mp-tile-slot">♦ Six of Diamonds</div>
+      <div class="mp-tile-game">Ocarina of Time</div>
+      <div class="mp-tile-owner">
+        <span class="mp-pav" style="--ph: 75;">B</span>
+        <span class="mp-tile-who"><span>Brisbe · brisbeOOT</span><span class="mp-tile-handle">@brisbe</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2 -->
+  <div class="step">
+    <div class="step-hd"><span class="step-n">02</span><span class="step-t">Editing</span></div>
+    <div class="step-d">280 characters, matching the existing note rules. Saving stamps <span style="font-style:normal;color:var(--parchment);">lastReported</span>; clearing the box deletes the note but leaves the timestamp alone.</div>
+    <div class="mp-tile you" style="--th: 200;">
+      <div class="mp-tile-status">
+        <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+        <button class="mp-note-btn focus" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          Note
+        </button>
+      </div>
+      <div class="mp-tile-slot">♦ Six of Diamonds</div>
+      <div class="mp-tile-game">Ocarina of Time</div>
+      <div class="mp-note-editor">
+        <textarea class="mp-note-input" rows="3">Stuck on the Water Temple longshot — anyone holding it, please release.</textarea>
+        <div class="mp-note-actions">
+          <span class="mp-note-chars">71/280</span>
+          <button class="mp-note-cancel" type="button">Cancel</button>
+          <button class="mp-note-save" type="button">Save</button>
+        </div>
+      </div>
+      <div class="mp-tile-owner">
+        <span class="mp-pav" style="--ph: 75;">B</span>
+        <span class="mp-tile-who"><span>Brisbe · brisbeOOT</span><span class="mp-tile-handle">@brisbe</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3 -->
+  <div class="step">
+    <div class="step-hd"><span class="step-n">03</span><span class="step-t">Yours · note saved</span></div>
+    <div class="step-d">The note reads inline — no second click to see your own words. The badge is gone: saving reset the idle clock.</div>
+    <div class="mp-tile you" style="--th: 200;">
+      <div class="mp-tile-status">
+        <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+        <button class="mp-note-btn has" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>
+          Note
+        </button>
+      </div>
+      <div class="mp-tile-slot">♦ Six of Diamonds</div>
+      <div class="mp-tile-game">Ocarina of Time</div>
+      <div class="mp-note">
+        <div class="mp-note-text">Stuck on the Water Temple longshot — anyone holding it, please release.</div>
+        <div class="mp-note-meta"><span>Aug 23, 4:41 PM</span><button class="mp-note-edit" type="button">Edit</button></div>
+      </div>
+      <div class="mp-tile-owner">
+        <span class="mp-pav" style="--ph: 75;">B</span>
+        <span class="mp-tile-who"><span>Brisbe · brisbeOOT</span><span class="mp-tile-handle">@brisbe</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4 -->
+  <div class="step">
+    <div class="step-hd"><span class="step-n">04</span><span class="step-t">Someone else's · collapsed</span></div>
+    <div class="step-d">Other players' notes start collapsed behind the button, so a busy table stays scannable. Clicking expands it in place; there is no Edit affordance.</div>
+    <div class="mp-tile" style="--th: 75;">
+      <div class="mp-tile-status">
+        <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+        <button class="mp-note-btn has" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>
+          Note
+        </button>
+      </div>
+      <div class="mp-tile-slot">✦ Jack of Wilds</div>
+      <div class="mp-tile-game">Timespinner</div>
+      <div class="mp-tile-owner">
+        <span class="mp-pav" style="--ph: 200;">T</span>
+        <span class="mp-tile-who"><span>Tamsin · tamTS</span><span class="mp-tile-handle">@tamsin</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5 -->
+  <div class="step">
+    <div class="step-hd"><span class="step-n">05</span><span class="step-t">Someone else's · expanded</span></div>
+    <div class="step-d">Same body, no Edit. This is the read path from the brief: a button anyone can use to review what a player said about a slot.</div>
+    <div class="mp-tile" style="--th: 75;">
+      <div class="mp-tile-status">
+        <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+        <button class="mp-note-btn focus" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>
+          Note
+        </button>
+      </div>
+      <div class="mp-tile-slot">✦ Jack of Wilds</div>
+      <div class="mp-tile-game">Timespinner</div>
+      <div class="mp-note">
+        <div class="mp-note-text">Travelling until Sunday — I'll release everything I've got when I'm back at a desk.</div>
+        <div class="mp-note-meta"><span>Aug 21, 7:02 AM</span></div>
+      </div>
+      <div class="mp-tile-owner">
+        <span class="mp-pav" style="--ph: 200;">T</span>
+        <span class="mp-tile-who"><span>Tamsin · tamTS</span><span class="mp-tile-handle">@tamsin</span></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

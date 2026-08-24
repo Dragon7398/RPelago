@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setSlotStatusNote = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1016,6 +1016,53 @@ exports.setMissionParticipantStatusNote = (0, https_1.onCall)(async (request) =>
     else {
         await db.ref(path).set({ text: note, timestamp: Date.now() });
     }
+    return { success: true };
+});
+/**
+ * Per-SLOT status note — the player explaining where one game stands.
+ *
+ * Distinct from `setMissionParticipantStatusNote` above, which is one note for a
+ * whole seat: a five-card seat could never say which game it meant. Both exist.
+ *
+ * Saving stamps `lastReported` alongside the text in ONE update, so the landing
+ * page's idle badge and the report's `stalled` check see the same instant.
+ * Clearing deletes the text but deliberately LEAVES `lastReported` — the player
+ * did report; deleting the words does not un-ring that bell.
+ */
+exports.setSlotStatusNote = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    const { missionId, slotIndex, note, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
+    if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
+        throw new https_1.HttpsError('invalid-argument', 'Missing or invalid slotIndex.');
+    const uid = request.auth.uid;
+    const db = (0, database_2.getDatabase)();
+    const now = Date.now();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
+    const missionSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get();
+    if (!missionSnap.exists())
+        throw new https_1.HttpsError('not-found', 'Mission not found.');
+    const mission = missionSnap.val();
+    const seat = mission.participants?.[uid];
+    if (!seat)
+        throw new https_1.HttpsError('failed-precondition', 'Not a participant.');
+    // Bounds-check against the seat's OWN slots — a note may only ever be attached
+    // to a slot the caller actually holds.
+    if (slotIndex >= (seat.slots ?? []).length)
+        throw new https_1.HttpsError('failed-precondition', 'No such slot on your seat.');
+    const base = (0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/slots/${slotIndex}`);
+    const updates = {};
+    if (note == null || note.trim() === '') {
+        updates[`${base}/note`] = null;
+    }
+    else {
+        const text = note.trim().slice(0, 280);
+        updates[`${base}/note`] = { text, timestamp: now };
+        updates[`${base}/lastReported`] = now;
+    }
+    await db.ref().update(updates);
     return { success: true };
 });
 // ── Claim an open spot on an in-progress mission (kicked player replacement) ──

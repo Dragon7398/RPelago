@@ -1,0 +1,51 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Design" },
+    { "id": "page-2", "name": "Theme values" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html",   "x": 0,    "y": 0,    "w": 1060, "h": 1060, "title": "Board — your games" },
+    { "file": "States.dc.html", "x": 1120, "y": 0,    "w": 560,  "h": 1520, "title": "Note lifecycle" },
+    { "file": "Badges.dc.html", "x": 0,    "y": 1120, "w": 1060, "h": 1560, "title": "Badge spec" },
+    { "file": "Model.dc.html",  "x": 1120, "y": 1580, "w": 560,  "h": 1560, "title": "Data model" },
+    { "file": "Themes.dc.html", "x": 0,    "y": 0,    "w": 1180, "h": 1720, "title": "--caution candidates", "page": "page-2" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": -400,
+      "y": 0,
+      "w": 340,
+      "text": "The ask, restated:\n\n1. Add/edit a note next to each game's status.\n2. Other players can read it.\n3. Saving bumps lastReported, weighted the same as lastChecked.\n4. Caution at >48h idle.\n5. Warning at >72h idle.\n\nSuppressed on 100% / Goaled / Done."
+    },
+    {
+      "id": "decision-row",
+      "x": -400,
+      "y": 300,
+      "w": 340,
+      "text": "One real layout change: .mp-tile-status goes from `display:flex` to a wrapping row with a gap.\n\nIt already holds two things — the status pill and the ⚐ claimed flag — and now holds up to four. On a narrow column the note button wraps to a second line rather than squeezing the pill."
+    },
+    {
+      "id": "decision-collapsed",
+      "x": -400,
+      "y": 590,
+      "w": 340,
+      "text": "Your own note renders open; other players' notes stay collapsed behind the button.\n\nA seven-seat table shows ~28 cards. Expanding every note by default would triple the height of the board and bury the thing players come here for — their own progress."
+    },
+    {
+      "id": "decision-threshold",
+      "x": -400,
+      "y": 890,
+      "w": 340,
+      "text": "72h is not a new number. It is PROBLEM_STALE_HOURS, already the point at which the host's report calls a slot stalled.\n\nReusing it means the red badge is a warning shot the player can act on, not a separate standard they have to learn."
+    },
+    {
+      "id": "decision-unstarted",
+      "x": -400,
+      "y": 1180,
+      "w": 340,
+      "text": "Unstarted slots badge too, on a clock that runs from the room link.\n\nThey have no tracker timestamps, so without a fallback they would sit silent forever — the one status where 'you have done nothing' is exactly what needs saying. The link going up is a real event, so it is a legitimate origin, not a guess.\n\nThe hover copy changes to match: 'Not started — 78h since the room went up.'"
+    }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

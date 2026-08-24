@@ -1021,6 +1021,14 @@ export async function setMissionParticipantStatusNote(missionId: string, note: s
   await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note, seasonId: getCurrentSeason() });
 }
 
+// Per-SLOT note (the seat-wide one above is a different thing). The server stamps
+// `lastReported` in the same update; passing null clears the text but keeps that
+// timestamp.
+export async function setSlotStatusNote(missionId: string, slotIndex: number, note: string | null): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'setSlotStatusNote')({ missionId, slotIndex, note, seasonId: getCurrentSeason() });
+}
+
 // ── Official status reports ──────────────────────────────────────────────────
 
 const worldBase = (kind: 'mission' | 'tile', id: string) =>
