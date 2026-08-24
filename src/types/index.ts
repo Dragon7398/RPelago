@@ -544,6 +544,32 @@ export interface ClaimableEntry {
   createdAt?:    number;
 }
 
+// ── Host peek: an admin-only reveal of what a casino seat is holding ──────────
+// Returned by the `adminGetCasinoHands` callable, which reads the seat's pool out
+// of seasonSecrets/ with the Admin SDK — no client, the admin's included, may read
+// that tree. `origin` is what makes the pool readable:
+//   'hole' / 'hand' — the seat's own private cards
+//   'community'     — Hold 'Em's SHARED five: an option for every seat at the table,
+//                     not this player's private holding
+//   'claimed'       — adopted from a vacated seat, so it was never a card this
+//                     player could have chosen differently
+export interface CasinoPeekCard {
+  card:      DeckCard;
+  origin:    'hole' | 'community' | 'hand' | 'claimed';
+  committed: boolean;
+}
+
+export interface CasinoSeatPeek {
+  uid:        string;
+  playerName: string;
+  played:     boolean;
+  // False once the secret pool is gone — a settled table has its secrets purged by
+  // onMissionComplete, leaving only the committed cards. Not an error, but the
+  // "what else could they have picked" half of the answer is unrecoverable.
+  poolKnown:  boolean;
+  cards:      CasinoPeekCard[];
+}
+
 export interface CompletedChallenge {
   coord:       string;
   name:        string;

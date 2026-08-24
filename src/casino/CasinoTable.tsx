@@ -4,7 +4,7 @@ import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath, ownHolePath } from '../firebase/season';
-import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
+import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
   DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
@@ -432,6 +432,72 @@ export function CasinoTable() {
     catch (e) { doFlash((e as { message?: string })?.message ?? fallback); }
     finally { setBusy(false); }
   }
+
+  // ── Host view (admin only) ──────────────────────────────────────────────────
+  //
+  // The host can already see what each seat COMMITTED (`lockedCards` is public and
+  // maps 1:1 to the public slots). What they cannot see is the rest of the pool —
+  // the cards a seat was dealt and left out — because it lives in seasonSecrets/,
+  // which is owner-read only with no admin exception (see database.rules.json: a
+  // read grant there would cascade to every seat's hand). So the reveal goes
+  // through an admin callable, on demand rather than as a live subscription.
+  //
+  // It matters most right before a deny: those uncommitted cards are exactly the
+  // alternative games the seat could re-pick if their config is sent back.
+  const [adminId, setAdminId]     = useState<string | null>(null);
+  const [peekOn, setPeekOn]       = useState(false);
+  const [peekSeats, setPeekSeats] = useState<Record<string, CasinoSeatPeek>>({});
+  const [peekBusy, setPeekBusy]   = useState(false);
+
+  // config/adminId is world-readable (it is a single uid), so this needs no
+  // callable. Held as the id rather than a boolean so signing out can't leave a
+  // stale `true` behind — host-ness is derived from the CURRENT uid below.
+  useEffect(() => {
+    if (!db) return;
+    let cancelled = false;
+    get(ref(db, 'config/adminId'))
+      .then(snap => { if (!cancelled) setAdminId((snap.val() as string | null) ?? null); })
+      .catch(() => { /* not readable → not the host; leave it null */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const isHost = !!uid && adminId === uid;
+
+  const loadPeek = useCallback(async () => {
+    if (!missionId) return;
+    setPeekBusy(true);
+    try {
+      const res = await call<{ missionId: string }, { seats: CasinoSeatPeek[] }>('adminGetCasinoHands')({ missionId });
+      setPeekSeats(Object.fromEntries(res.seats.map(s => [s.uid, s])));
+    } catch (e) {
+      setFlash((e as { message?: string })?.message ?? 'Could not read the seats.');
+      setTimeout(() => setFlash(''), 4000);
+      setPeekOn(false);
+    } finally {
+      setPeekBusy(false);
+    }
+  }, [call, missionId]);
+
+  // What the reveal is a snapshot OF: who is seated, who has locked in, how many
+  // cards each committed, and whether the Hold 'Em community has landed. Any of
+  // those moving makes the shown pool stale, so re-read rather than leave the host
+  // looking at a hand that has since changed.
+  const peekKey = useMemo(
+    () => Object.entries(mission?.participants ?? {})
+      .map(([id, p]) => `${id}:${p?.played ? 1 : 0}:${p?.lockedCards?.length ?? 0}`)
+      .sort()
+      .join('|') + `#${mission?.community?.length ?? 0}`,
+    [mission?.participants, mission?.community],
+  );
+
+  useEffect(() => {
+    if (!peekOn) return;
+    // Reading the seats is a fetch against an external system (the callable), not
+    // derived state — but it flips `peekBusy` before its first await, which is what
+    // the rule sees. Scoped off for this one call.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadPeek();
+  }, [peekOn, peekKey, loadPeek]);
 
   // ── Derived state ────────────────────────────────────────────────────────
 
@@ -980,8 +1046,26 @@ export function CasinoTable() {
             : 'This table has settled · the pot has been paid out'}
       </div>
 
+      {/* ── Host view: reveal every seat's cards (admin only) ── */}
+      {isHost && (
+        <div className="cz-hostbar">
+          <span className="cz-hostbar-tag">Host</span>
+          <button className="cz-hostbar-btn" disabled={peekBusy} onClick={() => setPeekOn(v => !v)}>
+            {peekBusy && !peekOn ? 'Reading…' : peekOn ? 'Hide seat cards' : '👁 Reveal seat cards'}
+          </button>
+          {peekOn && (
+            <button className="cz-hostbar-btn" disabled={peekBusy} title="Re-read the seats"
+                    onClick={() => void loadPeek()}>{peekBusy ? '…' : '↻'}</button>
+          )}
+          <span className="cz-hostbar-note">
+            Every seat's cards, committed and not — the uncommitted ones are what they could still
+            pick if you send a config back. Only you can see this.
+          </span>
+        </div>
+      )}
+
       {/* ── Seat rail ── */}
-      <div className="cz-rail">
+      <div className={`cz-rail${peekOn ? ' peeking' : ''}`}>
         {seatEntries.map(([id, p], i) => {
           const isMe   = id === uid;
           const status = seatStatus(p, isMe, now, i < openMax);
@@ -998,6 +1082,7 @@ export function CasinoTable() {
               isMe={isMe}
               stake={stake}
               startByLabel={status === 'deadline' && sbLeft > 0 ? fmtCountdown(sbLeft) : undefined}
+              peek={peekOn && p ? (peekSeats[id] ?? null) : null}
             />
           );
         })}

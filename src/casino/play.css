@@ -73,6 +73,60 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-seat-startby { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.64rem; color: var(--neg); margin-top: 0.1rem; }
 @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity: 0.35; } }
 
+/* ── host view: admin-only reveal of every seat's cards ── */
+/* All colour flows from theme tokens, so this follows the player's theme like the
+   rest of the table. Card-type tint uses the hue + the theme's own text lightness
+   (--stat-l, 82% dark / ~46% light) rather than --acc-*, which is tuned for a
+   card's dark stock and washes out on the light themes' panels. The ✔/○ mark and
+   the suit glyph are the non-colour cue, for the colour-blind-safe themes. */
+.cz-hostbar {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  background: var(--panel); border: 1px dashed var(--line-glow); border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+}
+.cz-hostbar-tag {
+  font-size: 0.54rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700;
+  color: var(--bg-deep); background: var(--gold); border-radius: 3px; padding: 0.12rem 0.4rem;
+}
+.cz-hostbar-btn {
+  font-family: inherit; font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--gold); background: none; border: 1px solid var(--line-glow); border-radius: 5px;
+  padding: 0.25rem 0.6rem; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.cz-hostbar-btn:hover:not(:disabled) { background: oklch(from var(--gold) l c h / 0.14); }
+.cz-hostbar-btn:disabled { opacity: 0.5; cursor: default; }
+.cz-hostbar-note { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.72rem; color: var(--gold-dim); flex: 1 1 14rem; min-width: 0; }
+
+/* Card names run long ("Exploration / open world"), so the rail widens while the
+   reveal is on rather than ellipsing every row down to nothing. */
+.cz-rail.peeking { grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+
+.cz-peek { margin-top: 0.4rem; border-top: 1px dashed var(--line); padding-top: 0.35rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.cz-peek-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
+.cz-peek-tag { font-size: 0.5rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-dim); }
+.cz-peek-count { font-size: 0.52rem; letter-spacing: 0.08em; color: var(--gold-dim); }
+.cz-peek-note { font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.66rem; color: var(--gold-dim); }
+.cz-peek-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.cz-peek-card {
+  display: flex; align-items: baseline; gap: 0.28rem;
+  font-size: 0.62rem; line-height: 1.35; min-width: 0;
+  border-left: 2px solid oklch(var(--stat-l, 82%) 0.12 var(--hue, 75) / 0.55);
+  padding-left: 0.3rem; border-radius: 2px;
+  /* Not committed: still in hand, still an option — legible, but clearly secondary
+     to the cards this seat actually put on the table. */
+  opacity: 0.62;
+}
+.cz-peek-card.committed { opacity: 1; background: oklch(from var(--gold) l c h / 0.10); border-left-color: oklch(var(--stat-l, 82%) 0.12 var(--hue, 75)); }
+.cz-peek-mark { font-size: 0.58rem; color: var(--gold-dim); flex-shrink: 0; }
+.cz-peek-card.committed .cz-peek-mark { color: var(--gold); }
+.cz-peek-suit { color: oklch(var(--stat-l, 82%) 0.12 var(--hue, 75)); flex-shrink: 0; }
+.cz-peek-name { color: var(--parch); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+.cz-peek-val { color: var(--gold-dim); font-size: 0.58rem; flex-shrink: 0; }
+/* Hold 'Em community cards belong to the whole table, so they are marked apart
+   from the seat's own — dashed edge, and the tooltip says so. */
+.cz-peek-card.shared { border-left-style: dashed; }
+.cz-peek-card.shared .cz-peek-name::after { content: ' · shared'; color: var(--gold-dim); font-size: 0.9em; }
+
 /* ── Archipelago challenge panel ── */
 .cz-challenge { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 1.1rem; width: 100%; }
 .cz-ch-head { font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-dim); text-align: center; margin-bottom: 0.55rem; }

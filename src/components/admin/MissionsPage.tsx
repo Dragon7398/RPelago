@@ -555,6 +555,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
     adminSetMissionLink, adminSetMissionRoomSettings,
     adminKickMissionParticipant, gameState,
   } = useGameState();
+  const seasonId = useSeason().season?.id ?? '';
 
   const [link,    setLink]    = useState(mission.link ?? '');
   const [release, setRelease] = useState<TriState>(mission.release);
@@ -721,14 +722,23 @@ function MissionCard({ mission }: { mission: GMMission }) {
           <span className="dash-complete-ready" title="All slots are Goaled/Done — ready to mark Complete">✓</span>
         )}
         <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }} title={tally.title}>{tally.label}</span>
-        {/* Casino: spectate / test the card table */}
+        {/* Casino: spectate / test the card table. `seasonId` is REQUIRED — the
+            mini-app has no SeasonProvider, so the URL is the only way it learns
+            which season it is in; without it it falls back to config/activeSeasonId
+            and reports "Mission not found or unavailable" for anything being
+            playtested in a draft. */}
         {mission.type === 'casino' && mission.tableUrl && (
           <a
             className="dash-tile-link"
-            href={`${mission.tableUrl}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(toRoman(mission.series))}`}
+            href={`${mission.tableUrl}?${new URLSearchParams({
+              missionId: mission.id,
+              mission:   mission.label,
+              cohort:    toRoman(mission.series),
+              ...(seasonId ? { seasonId } : {}),
+            })}`}
             target="_blank"
             rel="noopener noreferrer"
-            title="Open card table"
+            title="Open card table — reveal seat cards from the Host bar there"
           >🎰</a>
         )}
         {mission.state === 'inprogress' && mission.link && (

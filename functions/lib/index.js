@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1992,6 +1992,71 @@ exports.adminGetCasinoYamls = (0, https_1.onCall)(async (request) => {
     }
     yamls.sort((a, b) => a.playerName.localeCompare(b.playerName));
     return { yamls };
+});
+exports.adminGetCasinoHands = (0, https_1.onCall)(async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
+    await requireAdmin(request.auth.uid);
+    const { missionId, seasonId: reqSeason } = request.data;
+    if (!missionId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing missionId.');
+    const db = (0, database_2.getDatabase)();
+    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(request.auth.uid, reqSeason, db);
+    const [mSnap, hSnap] = await Promise.all([
+        db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}`)).get(),
+        db.ref((0, seasonPaths_1.sp)(seasonId, `missionsHistory/${missionId}`)).get(),
+    ]);
+    const mission = (mSnap.exists() ? mSnap.val() : hSnap.exists() ? hSnap.val() : null);
+    if (!mission)
+        throw new https_1.HttpsError('not-found', 'Mission not found.');
+    if (mission.type !== 'casino')
+        throw new https_1.HttpsError('failed-precondition', 'Not a casino table.');
+    const community = (mission.community ?? []).filter(Boolean);
+    const isHoldem = mission.casinoGame === 'holdem';
+    const seats = [];
+    // One read for the whole table rather than two per seat. It carries each seat's
+    // `deck` as well — the draw deck NOBODY may see, its owner included, since it
+    // would let a hand be engineered — so only `hand` and `hole` are ever unpacked.
+    const secretsSnap = await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/participants`)).get();
+    const secrets = (secretsSnap.val() ?? {});
+    for (const [uid, seat] of Object.entries(mission.participants ?? {})) {
+        if (!seat)
+            continue;
+        const hand = (secrets[uid]?.hand ?? []).filter(Boolean);
+        const hole = (secrets[uid]?.hole ?? []).filter(Boolean);
+        // Hold 'Em's pool spans two decks; every other game is the one dealt hand.
+        // Pre-reveal, a Hold 'Em seat is just its hole cards — community is still empty.
+        const pool = isHoldem
+            ? (0, casinoEngine_1.holdemPool)(hole, community).map((card, i) => ({
+                card, origin: i < hole.length ? 'hole' : 'community', committed: false,
+            }))
+            : hand.map(card => ({ card, origin: 'hand', committed: false }));
+        const { own, claimed } = splitSeatCards(seat);
+        const ownUids = new Set(own.map(p => p.card.uid));
+        for (const entry of pool)
+            if (ownUids.has(entry.card.uid))
+                entry.committed = true;
+        // A committed card the pool can't account for still has to show — it is the
+        // half the host most needs. Happens on a settled table (secrets purged) and on
+        // Hold 'Em hands dealt before the community uid namespacing landed.
+        const cards = [...pool];
+        for (const p of own) {
+            if (!pool.some(e => e.committed && e.card.uid === p.card.uid)) {
+                cards.push({ card: p.card, origin: 'hand', committed: true });
+            }
+        }
+        for (const p of claimed)
+            cards.push({ card: p.card, origin: 'claimed', committed: true });
+        seats.push({
+            uid,
+            playerName: seat.playerName ?? uid,
+            played: seat.played === true,
+            poolKnown: pool.length > 0,
+            cards,
+        });
+    }
+    seats.sort((a, b) => a.playerName.localeCompare(b.playerName));
+    return { seats, game: mission.casinoGame ?? null };
 });
 // Admin: deny a seat's config. Invalidates it (deletes the stored file so the host
 // can't accidentally build the room from a rejected YAML) and flags the seat so the

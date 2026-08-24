@@ -1,13 +1,5 @@
 import type { DeckCard, CardTypeKey } from '../lib/casinoData';
-
-// Per-type rendering metadata (mirrors CARD_TYPES in casinoData.ts)
-const TYPE_META: Record<CardTypeKey, { label: string; suit: string; hue: number }> = {
-  wild:      { label: 'Wild',      suit: '✦', hue: 75  },
-  broad:     { label: 'Broad',     suit: '♦', hue: 200 },
-  platform:  { label: 'Platform',  suit: '♠', hue: 295 },
-  franchise: { label: 'Franchise', suit: '♥', hue: 30  },
-  narrow:    { label: 'Narrow',    suit: '♣', hue: 150 },
-};
+import { TYPE_META } from './cardMeta';
 
 function typeAccent(type: CardTypeKey): string {
   return `oklch(66% 0.145 ${TYPE_META[type].hue})`;
