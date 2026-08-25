@@ -2916,8 +2916,14 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
             { lastChecked: parseTs(g.last_checked), lastActivity: parseTs(g.last_activity) },
         ]));
     }
+    // Should this room still be polled? `Done` is the ONLY final status: a `100%`
+    // slot has every check but has not finished its goal yet (the normal pre-goal
+    // state), and a `Goaled` slot still becomes `Done` when its post-goal release
+    // lands. Treating either as finished froze a room the moment its last
+    // In-Progress slot ticked over — until then the stale slot was only ever
+    // updated as a passenger on some other slot's sync.
     function hasActiveSlots(slots) {
-        return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
+        return slots.some(s => s.status !== 'Done');
     }
     const updates = {};
     // Stamp a slot's activity timestamps into `updates`, but only the fields that

@@ -752,14 +752,17 @@ const finishTier = (s: SlotStatus): 0 | 1 | 2 =>
   (s === 'Done' ? 2 : FREE_COMPLETED_STATUSES.has(s) ? 1 : 0);
 
 /**
- * Tier first, then alphabetical by the title the tile leads with. Ties fall
- * through to the owner so a table running two copies of one game keeps a stable,
- * non-jittery order across re-renders.
+ * Tier first, then the OWNER's display name, then the slot's name. Owner before
+ * title is what keeps one player's games adjacent inside a band — sorting by game
+ * title first scattered a seat's five cards across the whole grid. Within your own
+ * section there is only one owner, so it collapses to slot name. `idx` is the last
+ * tiebreak so two identically-named slots keep a stable, non-jittery order.
  */
 const byTierThenName = (a: OwnedGame, b: OwnedGame): number =>
   finishTier(a.status) - finishTier(b.status)
-  || (a.game || a.slot).localeCompare(b.game || b.slot, undefined, { sensitivity: 'base' })
-  || a.ownerName.localeCompare(b.ownerName);
+  || a.ownerName.localeCompare(b.ownerName, undefined, { sensitivity: 'base' })
+  || a.slot.localeCompare(b.slot, undefined, { sensitivity: 'base' })
+  || a.idx - b.idx;
 
 /**
  * A board's game tiles, ordered by `byTierThenName` and — for anyone else's games
