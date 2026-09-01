@@ -44,6 +44,26 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --fetch-old-fg:      oklch(72% 0.12 300);
   --fetch-old-bg:      oklch(18% 0.06 300 / 0.42);
   --fetch-old-border:  oklch(46% 0.11 300);
+  /* Mission pending-action pill — the admin board's triage flag. Three tiers by
+     WHO is holding things up, because that is what the host does differently:
+       block — waiting on a player (a config that hasn't arrived, or was denied)
+       act   — waiting on the host (deploy it, generate the room)
+       done  — finished, waiting only to be settled
+     Every pill always carries an icon AND words ("2 configs", "needs room",
+     "ready to settle"), so hue is reinforcement and never the message — the
+     red/gold/green split would otherwise be the one triple the Deutan/Protan
+     themes handle worst. `done` is teal rather than green for the same reason:
+     it keeps the finished tier on the blue side of Tidepool's blue-yellow axis
+     instead of collapsing into the gold `act` tier. */
+  --pend-block-fg:     oklch(70% 0.18 25);
+  --pend-block-bg:     oklch(16% 0.09 25 / 0.42);
+  --pend-block-border: oklch(46% 0.15 25);
+  --pend-act-fg:       oklch(78% 0.15 75);
+  --pend-act-bg:       oklch(18% 0.07 75 / 0.42);
+  --pend-act-border:   oklch(48% 0.12 75);
+  --pend-done-fg:      oklch(76% 0.13 175);
+  --pend-done-bg:      oklch(18% 0.06 175 / 0.42);
+  --pend-done-border:  oklch(46% 0.11 175);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -1156,6 +1176,62 @@ header p {
 }
 /* Which sheet the flags above were judged against. */
 .casino-yaml-list-note { color: var(--text-muted); letter-spacing: 0.04em; }
+/* Seats with NO stored config — the ones the download list structurally cannot
+   show, since a denied file is deleted from Storage. Sits above the list and is
+   built from mission state, so it needs no fetch and survives a deny emptying the
+   list. Uses the --pend-block/--pend-act pair the board's triage pill already
+   defines, so it inherits the light and color-blind remaps for free; the tag
+   always spells out DENIED / NOT SUBMITTED, so hue is never the message. */
+/* One severity axis, driven from the block: AMBER by default (seats still open,
+   so a missing config costs nothing yet) and RED only with `.blocking`, when the
+   table is full — or already live — and those configs are the last thing between
+   the host and a room. Locally aliased so every child follows the block without
+   re-stating the pair, and so the two states can never half-apply. The DENIED /
+   NOT SUBMITTED wording always distinguishes the rows, so hue is only ever
+   carrying urgency, never which of the two a row is. */
+.casino-yaml-missing {
+  --miss-fg:     var(--pend-act-fg);
+  --miss-bg:     var(--pend-act-bg);
+  --miss-border: var(--pend-act-border);
+  margin-top: 0.4rem; border: 1px solid var(--miss-border);
+  border-radius: 3px; overflow: hidden; background: var(--miss-bg);
+}
+.casino-yaml-missing.blocking {
+  --miss-fg:     var(--pend-block-fg);
+  --miss-bg:     var(--pend-block-bg);
+  --miss-border: var(--pend-block-border);
+}
+.casino-yaml-missing-head {
+  padding: 0.4rem 0.6rem; border-bottom: 1px solid oklch(from var(--miss-border) l c h / 0.5);
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.06em;
+  color: var(--miss-fg); cursor: default;
+}
+.casino-yaml-missing-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.32rem 0.6rem;
+  border-bottom: 1px solid oklch(from var(--miss-border) l c h / 0.25);
+}
+.casino-yaml-missing-row:last-child { border-bottom: none; }
+.casino-yaml-missing-tag {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  padding: 0.1rem 0.36rem; border-radius: 2px; white-space: nowrap;
+  color: var(--miss-fg); border: 1px solid var(--miss-border);
+}
+.casino-yaml-missing-when { font-size: 0.62rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.casino-yaml-missing-why {
+  font-family: 'Crimson Pro', serif; font-size: 0.72rem; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; max-width: 22rem;
+}
+/* Header doubles as the collapse control (the list also folds itself away once the
+   room syncs). Inherits the head's Cinzel/gold-dim so it reads as the label it
+   replaces, matching the SLOTS ledger toggle. */
+.casino-yaml-collapse {
+  display: inline-flex; align-items: center; gap: 0.4rem; text-align: left;
+  font: inherit; letter-spacing: inherit; color: inherit;
+  padding: 0; background: none; border: none; cursor: pointer;
+  transition: color 0.15s;
+}
+.casino-yaml-collapse:hover { color: var(--gold); }
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
 .casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
 
@@ -1907,6 +1983,25 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-complete-ready {
   color: oklch(72% 0.18 145); font-size: 0.78rem; flex-shrink: 0;
   cursor: default; line-height: 1;
+}
+/* Mission board triage pill. Replaces the bare ⚠/✓ glyphs above on the missions
+   page (Challenges still uses those): the board now SORTS on this, so the flag
+   has to say what the card is waiting on, not just that something is up. */
+.dash-pending-pill {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
+  padding: 0.12rem 0.4rem; border-radius: 2px; line-height: 1.35;
+  cursor: default; border: 1px solid var(--pend-act-border);
+  color: var(--pend-act-fg); background: var(--pend-act-bg);
+}
+.dash-pending-pill.configs,
+.dash-pending-pill.denied {
+  color: var(--pend-block-fg); background: var(--pend-block-bg);
+  border-color: var(--pend-block-border);
+}
+.dash-pending-pill.complete {
+  color: var(--pend-done-fg); background: var(--pend-done-bg);
+  border-color: var(--pend-done-border);
 }
 
 /* Hamburger (mobile) */
@@ -3951,6 +4046,18 @@ body.theme-lapis {
   --fetch-old-fg:      oklch(38% 0.14 300);
   --fetch-old-bg:      oklch(93% 0.04 300 / 0.55);
   --fetch-old-border:  oklch(52% 0.13 300);
+  /* Pending pills: same wash problem as every family above — the dark values are
+     a low-lightness tint meant for near-black. Flip to a light tint behind dark,
+     saturated text. */
+  --pend-block-fg:     oklch(40% 0.19 25);
+  --pend-block-bg:     oklch(92% 0.045 25 / 0.55);
+  --pend-block-border: oklch(52% 0.16 25);
+  --pend-act-fg:       oklch(40% 0.14 65);
+  --pend-act-bg:       oklch(93% 0.05 70 / 0.55);
+  --pend-act-border:   oklch(52% 0.12 68);
+  --pend-done-fg:      oklch(36% 0.12 180);
+  --pend-done-bg:      oklch(93% 0.04 178 / 0.55);
+  --pend-done-border:  oklch(48% 0.11 178);
 }
 /* Unban stays green, and green-on-cream has the same wash problem. */
 body.theme-parchment .dash-ban-lift,

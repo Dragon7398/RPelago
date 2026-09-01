@@ -124,6 +124,199 @@ export function shouldDeploy(m: GMMission, now: number): boolean {
   return true;
 }
 
+// ── Admin triage: what is this mission WAITING ON the host for? ───────────────
+//
+// The admin board is a work queue, not a catalogue. A cohort is either running
+// itself — filling up, or being played — or it has stopped and is waiting on the
+// host to do one specific thing. Everything below answers only that second
+// question, so the board can float the stalled cohorts to the top.
+//
+// Deliberately NOT flagged: a forming cohort still taking seats, and a live one
+// whose players are simply mid-playthrough. Both are healthy; surfacing them
+// would bury the handful that actually need a person.
+
+export type MissionPendingCode =
+  | 'configs'    // forming, full, but one or more seats have no usable YAML
+  | 'deploy'     // forming, full, everything in hand — deploy it (the tick will too)
+  | 'generate'   // in progress with no room link — the AP room still has to be made
+  | 'denied'     // live, and a seat is sitting on a denied config awaiting resubmit
+  | 'complete';  // in progress, every slot terminal — settle it
+
+export interface MissionPendingAction {
+  code:  MissionPendingCode;
+  icon:  string;
+  /** Short pill text, e.g. "2 configs". */
+  label: string;
+  /** Tooltip: what the host actually has to do. */
+  title: string;
+}
+
+/** Why a seat has no usable config behind it. */
+export type MissingConfigReason =
+  | 'denied'       // uploaded, then the host denied it — the file is gone
+  | 'unsubmitted'; // never locked in, so nothing was ever uploaded
+
+export interface SeatMissingConfig {
+  playerId:    string;
+  participant: GMParticipant;
+  reason:      MissingConfigReason;
+}
+
+/**
+ * Does this seat still owe the host a config?
+ *
+ * Two different holes count as the same one: a seat that has never locked in
+ * (`played` is unset, so no YAML was ever uploaded) and a seat whose upload the
+ * host DENIED — deny deletes the stored file but leaves `played` true, so a
+ * denied seat looks locked-in and is exactly as unusable.
+ *
+ * The exception is a PURE CLAIMANT. Claiming adopts a live slot off a vacated
+ * seat: no ante, no deal, no config — `claimMissionSlot` creates the participant
+ * record with `played` left unset, and it stays unset forever. Testing `played`
+ * alone would therefore accuse every claimant of never submitting. They are told
+ * apart by their slots, which are all flagged `claimed`; a seat that both played
+ * and claimed has its own un-claimed slots and is caught by `played` first.
+ */
+export function seatOwesConfig(p: GMParticipant): boolean {
+  if (p.yamlDenied === true) return true;
+  if (p.played === true) return false;
+  const slots = p.slots ?? [];
+  return !(slots.length > 0 && slots.every(s => s.claimed === true));
+}
+
+/**
+ * Every seat the host is still waiting on, denials first — those are the ones a
+ * player has to act on, and the host has already looked at them once.
+ */
+export function seatsAwaitingConfig(m: GMMission): SeatMissingConfig[] {
+  if (m.type !== 'casino') return [];
+  return Object.entries(m.participants ?? {})
+    .filter(([, p]) => seatOwesConfig(p))
+    .map(([playerId, p]) => ({
+      playerId, participant: p,
+      reason: (p.yamlDenied === true ? 'denied' : 'unsubmitted') as MissingConfigReason,
+    }))
+    .sort((a, b) => (a.reason === b.reason ? 0 : a.reason === 'denied' ? -1 : 1));
+}
+
+export function seatsMissingConfig(m: GMMission): number {
+  return seatsAwaitingConfig(m).length;
+}
+
+/**
+ * Are the outstanding configs actually HOLDING UP the room, or just not in yet?
+ *
+ * The distinction is the host's, not the players'. On a table still taking seats
+ * an unsubmitted config costs nothing — the room could not be generated today
+ * regardless — so the list of who hasn't submitted is a heads-up, not a fault.
+ * Once the table is full it inverts: those configs are the only thing left, and
+ * every hour they are missing is an hour the room is late.
+ *
+ * A live table counts as blocked whatever its fill: the room is already out, so
+ * a seat sitting on a denied config is worse than a late one, not better.
+ */
+export function outstandingConfigsBlockRoom(m: GMMission, now: number): boolean {
+  if (seatsMissingConfig(m) === 0) return false;
+  if (m.state === 'inprogress') return true;
+  if (m.state !== 'forming') return false;
+  const filled = filledCount(m);
+  return filled > 0 && filled >= currentMaxSlots(m, now);
+}
+
+/**
+ * Every seat has slots and all of them are terminal — the cohort is finished and
+ * only the host's Complete press is left.
+ *
+ * Terminal here is Goaled/Done only, NOT the wider FREE_COMPLETED_STATUSES: a
+ * slot at 100% has found everything of its own but may still owe items to other
+ * players' worlds, so the room isn't done with it.
+ */
+export function missionReadyToComplete(m: GMMission): boolean {
+  const participants = Object.values(m.participants ?? {});
+  if (participants.length === 0) return false;
+  return participants.every(p => {
+    const slots = p.slots ?? [];
+    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+  });
+}
+
+/**
+ * The one thing this mission needs from the host, or null when it needs nothing.
+ *
+ * At most one is reported, most-blocking first: a table with no room AND a denied
+ * config needs the config before the room can be generated at all, so there is
+ * only ever one next move to show.
+ */
+export function missionPendingAction(m: GMMission, now: number): MissionPendingAction | null {
+  if (m.state === 'inprogress') {
+    const denied = m.type === 'casino'
+      ? Object.values(m.participants ?? {}).filter(p => p.yamlDenied === true).length
+      : 0;
+    // A denial outranks the missing room: regenerating without the resubmitted
+    // config would just have to be done again.
+    if (denied > 0) return {
+      code: 'denied', icon: '⛔',
+      label: `${denied} resubmit${denied === 1 ? '' : 's'}`,
+      title: `${denied} seat${denied === 1 ? ' is' : 's are'} waiting to resubmit a denied config.`,
+    };
+    if (awaitingRoom(m)) return {
+      code: 'generate', icon: '⚠',
+      label: 'needs room',
+      title: 'Deployed with no room URL — generate the Archipelago room and paste the link.',
+    };
+    if (missionReadyToComplete(m)) return {
+      code: 'complete', icon: '✓',
+      label: 'ready to settle',
+      title: 'Every slot is Goaled/Done — ready to mark Complete.',
+    };
+    return null;
+  }
+
+  if (m.state !== 'forming') return null;
+  const filled = filledCount(m);
+  // Still taking seats: the cohort is doing its job and there is nothing to do.
+  if (filled === 0 || filled < currentMaxSlots(m, now)) return null;
+
+  const missing = seatsMissingConfig(m);
+  if (missing > 0) return {
+    code: 'configs', icon: '⛔',
+    label: `${missing} config${missing === 1 ? '' : 's'}`,
+    title: `Table is full but ${missing} seat${missing === 1 ? ' has' : 's have'} no usable config — chase the player${missing === 1 ? '' : 's'} before it can deploy.`,
+  };
+  return {
+    code: 'deploy', icon: '⚠',
+    label: 'ready to deploy',
+    title: 'Full and every config is in — it will auto-deploy shortly, so prepare a room.',
+  };
+}
+
+/**
+ * The instant the card's Elapsed clock counts from.
+ *
+ * The room link going up is when play can actually start, so it wins; before
+ * that, fall back through deploy → first join → creation so a card at any state
+ * always shows something. Shared with the admin sort so the order on screen is
+ * the column the host is reading.
+ */
+export function missionClockOrigin(m: GMMission): number | null {
+  return m.linkedAt ?? m.deployedAt ?? m.firstJoinAt ?? m.createdAt ?? null;
+}
+
+/**
+ * Board order: anything waiting on the host first, then longest-waiting first.
+ *
+ * The secondary key is the card's own Elapsed clock rather than createdAt or
+ * deployedAt, so the list reads top-to-bottom in the same order as the number
+ * printed on each card — a cohort that sat deployed for a day before its room
+ * went up is as fresh as its room, which is what the host is triaging on.
+ */
+export function compareMissionsForAdmin(a: GMMission, b: GMMission, now: number): number {
+  const pa = missionPendingAction(a, now) ? 0 : 1;
+  const pb = missionPendingAction(b, now) ? 0 : 1;
+  if (pa !== pb) return pa - pb;
+  return (missionClockOrigin(a) ?? 0) - (missionClockOrigin(b) ?? 0);
+}
+
 export function missionDisplayLabel(m: GMMission): string {
   const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
