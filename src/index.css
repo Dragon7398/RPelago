@@ -1293,7 +1293,20 @@ header p {
 .admin-tri-btn.active-on      { background: oklch(20% 0.08 145 / 0.6); color: oklch(70% 0.14 145); }
 .admin-tri-btn.active-off     { background: oklch(16% 0.05 25 / 0.5);  color: oklch(65% 0.12 25); }
 .admin-tri-btn.active-special { background: oklch(18% 0.08 60 / 0.5);  color: var(--amber); }
-.admin-tri-btn:hover { filter: brightness(1.25); }
+.admin-tri-btn:hover:not(:disabled) { filter: brightness(1.25); }
+/* Locked room settings. The lock is a guard against a stray keystroke, not a
+   permission boundary — the host can always unlock — so these read as inert
+   rather than forbidden: dimmed and not-allowed, no red, no error styling. */
+.admin-tri-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5); }
+.admin-text-input:disabled,
+.admin-count-input:disabled {
+  opacity: 0.5; cursor: not-allowed;
+  background: oklch(from var(--bg-deep) l c h / 0.6);
+}
+.admin-room-locked-note {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--amber); margin-top: 0.5rem; margin-bottom: 0.1rem;
+}
 .admin-hint-wrap { display: flex; align-items: center; gap: 0.4rem; }
 .admin-hint-wrap span { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); }
 .admin-state-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
@@ -2101,6 +2114,26 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.12em;
   color: var(--gold-dim); border-bottom: 1px solid var(--border);
   padding-bottom: 0.35rem;
+}
+.dash-col-header-right { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* Release control for a held card. Only rendered on the column actually holding
+   one, so it doubles as the signal that the board is not sorting live right now. */
+.dash-col-resort {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  padding: 0.12rem 0.4rem; border-radius: 2px; cursor: pointer;
+  color: var(--pend-act-fg); background: var(--pend-act-bg);
+  border: 1px solid var(--pend-act-border); transition: color 0.15s, border-color 0.15s;
+}
+.dash-col-resort:hover { color: var(--gold); border-color: var(--gold-dim); }
+/* Marks the held card itself, so "why is this one not moving" is answered on the
+   card as well as in the header. Same amber as the release chip — this is a state
+   the host put the board in, not a problem with the cohort. */
+.dash-pin-pill {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  text-transform: uppercase; white-space: nowrap; flex-shrink: 0; cursor: default;
+  padding: 0.12rem 0.4rem; border-radius: 2px; line-height: 1.35;
+  color: var(--pend-act-fg); background: var(--pend-act-bg);
+  border: 1px solid var(--pend-act-border);
 }
 .dash-col-count {
   background: oklch(16% 0.06 75 / 0.5); border: 1px solid var(--border);

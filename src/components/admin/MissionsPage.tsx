@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, type GameToFetch } from '../../lib/missionLogic';
+import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
@@ -612,7 +612,13 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
 
 // ── Unified mission card ───────────────────────────────────────────────────────
 
-function MissionCard({ mission }: { mission: GMMission }) {
+function MissionCard({ mission, pinned, onInteract }: {
+  mission: GMMission;
+  /** This card is currently held at its board position (see holdPinned). */
+  pinned?: boolean;
+  /** Host touched this card — the board pins it where it is. */
+  onInteract?: () => void;
+}) {
   const {
     adminForceDeploy, adminCompleteMission,
     adminSetMissionLink, adminSetMissionRoomSettings,
@@ -706,6 +712,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
     }
   };
   const slotsLocked = mission.slotsLocked ?? false;
+  // One lock, two scopes. `slotsLocked` is the stored flag (unchanged on the wire);
+  // `settingsLocked` is the same flag read for the room fields, named separately so
+  // the room controls don't read as if slots were the thing protecting them.
+  const settingsLocked = slotsLocked;
+  const lockedHint = 'Locked — unlock at SLOTS below to edit.';
   // The slot ledger is the tallest part of a card, so it collapses. A room that
   // already has a link is one you're monitoring, not filling in — start it shut.
   // Mount-time only, deliberately: setting the link on a live panel must not yank
@@ -775,10 +786,22 @@ function MissionCard({ mission }: { mission: GMMission }) {
   };
 
   return (
-    <div className="dash-tile-card">
+    // Capture-phase, so ANY control inside the card counts as "working on this
+    // one" — no per-action wiring to keep in step with. Pointer-down rather than
+    // click, so the pin is in place before the control's own handler (and the
+    // write it fires) can reorder the board out from under the pointer.
+    <div className="dash-tile-card"
+         onPointerDownCapture={onInteract}
+         onFocusCapture={onInteract}>
       {/* Header */}
       <div className="dash-tile-header">
         <span className="dash-tile-name">{label}</span>
+        {pinned && (
+          <span className="dash-pin-pill"
+                title="Held at its place on the board while you work on it — use “re-sort” in the column header, or touch another card, to release it.">
+            📌 held
+          </span>
+        )}
         {mission.type === 'casino' && (
           <span className="dash-mission-type-pill">🎲 CASINO</span>
         )}
@@ -911,15 +934,28 @@ function MissionCard({ mission }: { mission: GMMission }) {
                             label={missionDisplayLabel(mission)} />
       )}
 
-      {/* Room link + settings — inprogress only */}
+      {/* Room link + settings — inprogress only.
+          The lock covers these as well as the slots: once the room is generated the
+          link and the release/collect/hint values describe a room that already
+          EXISTS, and editing them here changes only our record of it — the room
+          itself is untouched, so a stray keystroke silently desynchronises what the
+          players see from what we tell them. Copy Room Text stays live throughout;
+          reading is never the risk. */}
       {mission.state === 'inprogress' && (
         <>
+          {settingsLocked && (
+            <div className="admin-room-locked-note">
+              🔒 Room settings locked — unlock at SLOTS below to edit
+            </div>
+          )}
           <div className="admin-detail-row">
             <div className="admin-detail-label">ARCH. LINK</div>
             <input
               className="admin-text-input"
               placeholder="https://…"
               value={link}
+              disabled={settingsLocked}
+              title={settingsLocked ? lockedHint : undefined}
               onChange={e => setLink(e.target.value)}
               onBlur={() => adminSetMissionLink(mission.id, link)}
             />
@@ -949,6 +985,8 @@ function MissionCard({ mission }: { mission: GMMission }) {
                     <button
                       key={v}
                       className={`admin-tri-btn${current === v ? ` active-${v}` : ''}`}
+                      disabled={settingsLocked}
+                      title={settingsLocked ? lockedHint : undefined}
                       onClick={() => {
                         if (field === 'release') {
                           setRelease(v); adminSetMissionRoomSettings(mission.id, v, collect, hint);
@@ -969,6 +1007,8 @@ function MissionCard({ mission }: { mission: GMMission }) {
               <input
                 type="number" className="admin-count-input" min={0} max={100}
                 value={hint}
+                disabled={settingsLocked}
+                title={settingsLocked ? lockedHint : undefined}
                 onChange={e => setHint(parseInt(e.target.value) || 0)}
                 onBlur={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}
               />
@@ -990,7 +1030,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
             </span>
           )}
         </button>
-        <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`} onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
+        <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`}
+                title={slotsLocked
+                  ? 'Unlock to edit slots, the room link, release/collect and the hint value.'
+                  : 'Lock slots, the room link, release/collect and the hint value against accidental edits.'}
+                onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
           {slotsLocked ? '🔒 LOCKED' : '🔓 LOCK'}
         </button>
       </div>
@@ -1166,6 +1210,9 @@ function GoldTopUpAudit() {
 // details from `mission.type`.
 type MissionFilter = 'casino' | 'noncasino' | 'all';
 
+/** The card the host is working on, held at the board index they last saw it at. */
+type BoardPin = { id: string; column: 'forming' | 'inprog'; index: number };
+
 export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilter }) {
   const { gameState } = useGameState();
   const { addToast }  = useToast();
@@ -1175,6 +1222,8 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
   // moves on a 24/36h window, so a minute's granularity is plenty and avoids
   // re-sorting the whole board every second.
   const [sortNow, setSortNow] = useState(() => Date.now());
+  // The one card held out of the live sort — see holdPinned.
+  const [pin, setPin] = useState<BoardPin | null>(null);
   useEffect(() => {
     const id = setInterval(() => setSortNow(Date.now()), 60_000);
     return () => clearInterval(id);
@@ -1199,8 +1248,41 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
   // the top, and within each half the longest-waiting cohort leads. Recomputed on
   // every render off `sortNow` — a decaying table can become full (and so become
   // actionable) with nothing else changing.
-  const forming  = active.filter(m => m.state === 'forming')   .sort((a, b) => compareMissionsForAdmin(a, b, sortNow));
-  const inprog   = active.filter(m => m.state === 'inprogress').sort((a, b) => compareMissionsForAdmin(a, b, sortNow));
+  const forming  = holdPinned(
+    active.filter(m => m.state === 'forming').sort((a, b) => compareMissionsForAdmin(a, b, sortNow)),
+    pin?.column === 'forming' ? pin : null,
+  );
+  const inprog   = holdPinned(
+    active.filter(m => m.state === 'inprogress').sort((a, b) => compareMissionsForAdmin(a, b, sortNow)),
+    pin?.column === 'inprog' ? pin : null,
+  );
+
+  // Pin whichever card the host just touched, at the position they last SAW it —
+  // read off the rendered order, not re-derived, since the sort key it is about to
+  // change is exactly what we are protecting them from. Touching a different card
+  // moves the pin; the column header's re-sort chip drops it.
+  const handleInteract = (id: string) => {
+    const fi = forming.findIndex(m => m.id === id);
+    if (fi >= 0) { setPin({ id, column: 'forming', index: fi }); return; }
+    const ii = inprog.findIndex(m => m.id === id);
+    if (ii >= 0) setPin({ id, column: 'inprog', index: ii });
+  };
+
+  // One column's header, with the release control when it is the one holding a pin.
+  const colHeader = (title: string, count: number, column: BoardPin['column']) => (
+    <div className="dash-col-header">
+      <span>{title}</span>
+      <span className="dash-col-header-right">
+        {pin?.column === column && (
+          <button className="dash-col-resort" onClick={() => setPin(null)}
+                  title="Release the held card and let the column sort normally">
+            ↕ re-sort
+          </button>
+        )}
+        <span className="dash-col-count">{count}</span>
+      </span>
+    </div>
+  );
 
   const handleSeed = async () => {
     setSeeding(true);
@@ -1229,10 +1311,7 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
 
       <div className="dash-challenges-cols">
         <div className="dash-col">
-          <div className="dash-col-header">
-            <span>Forming</span>
-            <span className="dash-col-count">{forming.length}</span>
-          </div>
+          {colHeader('Forming', forming.length, 'forming')}
           {forming.length === 0 ? (
             <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
               <span>No forming {isCasinoTab ? 'tables' : 'missions'}.</span>
@@ -1247,19 +1326,22 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
               )}
             </div>
           ) : (
-            forming.map(m => <MissionCard key={m.id} mission={m} />)
+            forming.map(m => (
+              <MissionCard key={m.id} mission={m} pinned={pin?.id === m.id}
+                           onInteract={() => handleInteract(m.id)} />
+            ))
           )}
         </div>
 
         <div className="dash-col">
-          <div className="dash-col-header">
-            <span>In Progress</span>
-            <span className="dash-col-count">{inprog.length}</span>
-          </div>
+          {colHeader('In Progress', inprog.length, 'inprog')}
           {inprog.length === 0 ? (
             <div className="dash-empty">No missions in progress.</div>
           ) : (
-            inprog.map(m => <MissionCard key={m.id} mission={m} />)
+            inprog.map(m => (
+              <MissionCard key={m.id} mission={m} pinned={pin?.id === m.id}
+                           onInteract={() => handleInteract(m.id)} />
+            ))
           )}
         </div>
       </div>

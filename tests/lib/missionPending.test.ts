@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   missionPendingAction, missionReadyToComplete, seatsMissingConfig, seatsAwaitingConfig,
   seatOwesConfig, outstandingConfigsBlockRoom, missionClockOrigin, compareMissionsForAdmin,
+  holdPinned,
 } from '../../src/lib/missionLogic';
 import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant } from '../../src/types';
 
@@ -230,5 +231,45 @@ describe('compareMissionsForAdmin', () => {
     const linked   = mission({ id: 'linked',   state: 'inprogress', deployedAt: 4 * HOUR, link: 'r', linkedAt: 5 * HOUR, participants: seats(seated('a', { slots: [slot('Done')] })) });
     expect([deployed, linked].sort((x, y) => compareMissionsForAdmin(x, y, 10 * HOUR)).map(m => m.id))
       .toEqual(['linked', 'deployed']);
+  });
+});
+
+describe('holdPinned — the card the host is working on', () => {
+  const row = (id: string) => ({ id });
+  const list = () => [row('a'), row('b'), row('c'), row('d')];
+  const ids = (xs: { id: string }[]) => xs.map(x => x.id);
+
+  it('is a no-op with no pin, or an empty list', () => {
+    expect(ids(holdPinned(list(), null))).toEqual(['a', 'b', 'c', 'd']);
+    expect(holdPinned([], { id: 'a', index: 0 })).toEqual([]);
+  });
+
+  it('holds a card that the live sort just dropped to the bottom', () => {
+    // The reported case: pasting a room link zeroes the sort key, so 'a' sorts
+    // last — but the host is still typing into it, so it stays at index 0.
+    const resorted = [row('b'), row('c'), row('d'), row('a')];
+    expect(ids(holdPinned(resorted, { id: 'a', index: 0 }))).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('leaves the list untouched when the card has not actually moved', () => {
+    const l = list();
+    expect(holdPinned(l, { id: 'b', index: 1 })).toBe(l);   // same reference, no copy
+  });
+
+  it('ignores a pin whose card is no longer in this list', () => {
+    // Settled, or deployed into the other column: a pin holds a place, it never
+    // resurrects a row.
+    expect(ids(holdPinned(list(), { id: 'zz', index: 0 }))).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('clamps an index the list has since shrunk past', () => {
+    expect(ids(holdPinned([row('b'), row('a')], { id: 'a', index: 9 }))).toEqual(['b', 'a']);
+    expect(ids(holdPinned([row('b'), row('a')], { id: 'a', index: -3 }))).toEqual(['a', 'b']);
+  });
+
+  it('does not mutate the array it was given', () => {
+    const l = [row('b'), row('a')];
+    holdPinned(l, { id: 'a', index: 0 });
+    expect(ids(l)).toEqual(['b', 'a']);
   });
 });

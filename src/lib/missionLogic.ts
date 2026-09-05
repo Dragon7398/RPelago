@@ -317,6 +317,38 @@ export function compareMissionsForAdmin(a: GMMission, b: GMMission, now: number)
   return (missionClockOrigin(a) ?? 0) - (missionClockOrigin(b) ?? 0);
 }
 
+/**
+ * Hold one card at a fixed position in an otherwise live-sorted list.
+ *
+ * The board sorts on data the host is in the middle of changing, and the worst
+ * offender is the room link: pasting it clears the `generate` flag AND resets the
+ * Elapsed clock to zero, so the card the host is working on drops from the top of
+ * the column to the bottom in one frame — while they still have the tracker id,
+ * the Cheese id and Sync to do on it. Freezing the sort wholesale would defeat the
+ * triage order, so instead exactly one card is held where it already was and
+ * everything else keeps sorting around it.
+ *
+ * `index` is the position the card occupied when it was pinned, i.e. where the
+ * host last SAW it — deliberately not a re-derived key, because the whole point is
+ * that its real key just moved. Clamped, so a shrinking list can't strand it, and
+ * ignored entirely once the card is no longer in this list (settled, or deployed
+ * into the other column) — a pin holds a position, it never resurrects a row.
+ */
+export function holdPinned<T extends { id: string }>(
+  sorted: T[],
+  pin: { id: string; index: number } | null,
+): T[] {
+  if (!pin || sorted.length === 0) return sorted;
+  const from = sorted.findIndex(m => m.id === pin.id);
+  if (from < 0) return sorted;
+  const to = Math.min(Math.max(pin.index, 0), sorted.length - 1);
+  if (from === to) return sorted;
+  const next = sorted.slice();
+  const [held] = next.splice(from, 1);
+  next.splice(to, 0, held);
+  return next;
+}
+
 export function missionDisplayLabel(m: GMMission): string {
   const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
