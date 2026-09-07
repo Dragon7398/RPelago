@@ -2789,6 +2789,35 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   border-color: var(--gold-dim); color: var(--gold);
 }
 
+/* Rank prefix on the paged Top Games rows — the number is the row's place in the
+   whole list, so it is the only thing telling page 3 apart from page 1. Muted and
+   tabular so it reads as an index beside the title rather than competing with it. */
+.dash-stat-rank {
+  display: inline-block; min-width: 1.6rem; margin-right: 0.35rem;
+  font-family: 'Cinzel', serif; font-size: 0.58rem;
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+/* Pager. Disabled ends are dimmed AND non-interactive rather than hidden, so the
+   control keeps its position while you page; state is carried by opacity and the
+   cursor, never by hue alone. */
+.dash-stat-pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.6rem; flex-wrap: wrap;
+}
+.dash-stat-pager-btn {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.06em;
+  padding: 0.25rem 0.7rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.12s;
+}
+.dash-stat-pager-btn:hover:not(:disabled) { border-color: var(--border-glow); color: var(--parchment); }
+.dash-stat-pager-btn:disabled { opacity: 0.35; cursor: default; }
+.dash-stat-pager-info {
+  font-family: 'Crimson Pro', serif; font-size: 0.74rem;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.dash-stat-pager-page { color: var(--text-dim); }
+
 .dash-gold-board { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; }
 .dash-gold-row {
   display: flex; align-items: center; gap: 0.55rem;
