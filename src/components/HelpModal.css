@@ -324,6 +324,12 @@
 }
 
 /* ── YAML adjusted values ── */
+/* Footnote under the settings caps explaining that they are screened but never
+   enforced. Muted so it reads as a note on the list above, not a sixth limit. */
+.help-yaml-note {
+  margin: 0.5rem 0 0; font-style: italic; font-size: 0.85rem;
+  color: oklch(from var(--parchment) l c h / 0.72);
+}
 .help-yaml-struck { text-decoration: line-through; opacity: 0.4; }
 .help-yaml-new,
 strong.help-yaml-new { color: oklch(72% 0.18 145); }

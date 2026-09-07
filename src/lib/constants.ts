@@ -1,4 +1,7 @@
 import type { AdvClass, OrbDef, ShopItem, Shop } from '../types';
+// Type-only: apYaml.ts is a standalone primitive (its only import is `yaml`), so
+// naming its shape here can't form a cycle.
+import type { YamlLimits } from './apYaml';
 
 export const COLS = 7;
 export const ROWS = 5;
@@ -243,6 +246,33 @@ export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {
 
 // Non-center shop IDs assigned to the three non-center towns via seeded shuffle
 export const NON_CENTER_SHOP_IDS = ['frostshear', 'flamefell', 'pinereach'] as const;
+
+// ── YAML settings caps ────────────────────────────────────────────────────────
+//
+// The per-game limits the YAML rules state, before any feat raises them. This is
+// the ONE source for both the numbers shown in the rules (help/SectionYaml.tsx,
+// casino/YamlRulesLightbox.tsx) and the numbers a submitted config is screened
+// against (apYaml.checkYamlLimits), so the two can never drift apart.
+//
+// These are SOFT caps: a config over one is warned about, never blocked, because
+// the host grants exceptions per player. Add a feat's bonus via
+// gameLogic.yamlLimitsForFeats, never by editing these base values.
+export const BASE_YAML_LIMITS: YamlLimits = {
+  startInventory:     0,
+  priorityLocations:  2,
+  excludeLocations:   2,
+  startHints:         1,
+  startLocationHints: 1,
+};
+
+// How many items one starting hint may target. Stated in the rules but NOT
+// machine-checkable — an item group's size is only known to the APworld — so
+// nothing screens against it; it exists so the rules text has one home.
+export const START_HINT_ITEM_CAP = 10;
+
+// The progression_balancing band the rules quote. The screening thresholds
+// (warn > 50, reject > 75) live in apYaml.ts with the check itself.
+export const PB_LIMITS = { min: 0, max: 50 } as const;
 
 export interface FeatDef {
   id: string;

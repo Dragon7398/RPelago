@@ -1,16 +1,23 @@
 // Lightwindow surfacing the YAML Rules on the mission manifest (submit) screen.
 // The casino table is a standalone app with no Auth/GameState context, so this
-// mirrors the *casino* variant of the map app's SectionYaml (help/SectionYaml.tsx):
-// a casino season has no feats, so there are no feat-bonus values to show here.
-// Keep the rules text in sync with that component.
+// mirrors the map app's SectionYaml (help/SectionYaml.tsx). Keep the rules text in
+// sync with that component.
+//
+// The settings numbers are NOT written here: they come in as `limits`, the same
+// value the attach box screens the config against (CasinoTable's yamlLimits), so
+// the rules a player reads and the rules they are warned about are one number. A
+// casino season has no feats, so those are usually the base caps — but a casino
+// table inside a map season shows that player's feat-raised allowance.
 
-import { DRAGOS_LIST_URL } from '../lib/constants';
+import { DRAGOS_LIST_URL, PB_LIMITS, START_HINT_ITEM_CAP } from '../lib/constants';
+import type { YamlLimits } from '../lib/apYaml';
 
 interface YamlRulesLightboxProps {
   onClose: () => void;
+  limits:  YamlLimits;
 }
 
-export function YamlRulesLightbox({ onClose }: YamlRulesLightboxProps) {
+export function YamlRulesLightbox({ onClose, limits }: YamlRulesLightboxProps) {
   return (
     <div className="cz-preview-overlay" onClick={onClose}>
       <div className="cz-preview-panel" onClick={e => e.stopPropagation()}>
@@ -54,15 +61,21 @@ export function YamlRulesLightbox({ onClose }: YamlRulesLightboxProps) {
             <li>
               <strong>YAML settings:</strong> Unless approved by special permission, you are limited to:
               <ul>
-                <li><strong>0</strong> starting inventory items per game</li>
-                <li><strong>2</strong> priority locations per game</li>
-                <li><strong>2</strong> excluded locations per game</li>
-                <li>Progression balancing between <strong>0</strong> and <strong>50</strong></li>
+                <li><strong>{limits.startInventory}</strong> starting inventory item{limits.startInventory === 1 ? '' : 's'} per game</li>
+                <li><strong>{limits.priorityLocations}</strong> priority locations per game</li>
+                <li><strong>{limits.excludeLocations}</strong> excluded locations per game</li>
+                <li>Progression balancing between <strong>{PB_LIMITS.min}</strong> and <strong>{PB_LIMITS.max}</strong></li>
                 <li>
-                  <strong>1</strong> starting hint [targeting a maximum of <strong>10</strong> items] and{' '}
-                  <strong>1</strong> hint location per game
+                  <strong>{limits.startHints}</strong> starting hint{limits.startHints === 1 ? '' : 's'}{' '}
+                  [targeting a maximum of <strong>{START_HINT_ITEM_CAP}</strong> items] and{' '}
+                  <strong>{limits.startLocationHints}</strong> hint location{limits.startLocationHints === 1 ? '' : 's'} per game
                 </li>
               </ul>
+              <p className="cz-rules-note">
+                Your config is checked against these when you attach it. Going over is not blocked —
+                sometimes an exception is granted — but it is flagged for you and for your host, so
+                clear it with them first.
+              </p>
             </li>
           </ul>
         </div>

@@ -1145,9 +1145,21 @@ header p {
 /* Progression-balancing flag shown beside a seat's name on download. Amber for a
    discouraged (warn) value, red for a disallowed (reject) one that slipped past the
    player's submit gate. Theme-aware via the same oklch tokens as the deny button. */
-.casino-yaml-pb {
+.casino-yaml-pb, .casino-yaml-cap {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
   padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
+}
+/* Over one of the per-game settings caps (inventory / locations / hints).
+   Deliberately the SAME gold surface as a PB warn, not a colour of its own: the
+   two say exactly the same thing — a setting outside policy that nothing blocked,
+   worth your eyes — so they should read as one family, with the badge text ("PB
+   60" vs "Excluded 6/2") carrying which setting it is. Never the red `reject`
+   surface: these caps have no hard limit, since you grant exceptions to them.
+   (--caution, the casino landing's orange, is scoped to body.casino-scope and does
+   not resolve in the map-shell admin dashboard — do not reach for it here.) */
+.casino-yaml-cap {
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
+  border: 1px solid oklch(from var(--gold) l c h / 0.45);
 }
 .casino-yaml-pb.warn {
   color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
@@ -2120,6 +2132,9 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
    one, so it doubles as the signal that the board is not sorting live right now. */
 .dash-col-resort {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  /* Shorter than the 0.75rem header title that sets the row height, so appearing
+     here can never grow the header and push the cards below it down. */
+  line-height: 1.2;
   padding: 0.12rem 0.4rem; border-radius: 2px; cursor: pointer;
   color: var(--pend-act-fg); background: var(--pend-act-bg);
   border: 1px solid var(--pend-act-border); transition: color 0.15s, border-color 0.15s;
@@ -2127,13 +2142,17 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-col-resort:hover { color: var(--gold); border-color: var(--gold-dim); }
 /* Marks the held card itself, so "why is this one not moving" is answered on the
    card as well as in the header. Same amber as the release chip — this is a state
-   the host put the board in, not a problem with the cohort. */
-.dash-pin-pill {
-  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
-  text-transform: uppercase; white-space: nowrap; flex-shrink: 0; cursor: default;
-  padding: 0.12rem 0.4rem; border-radius: 2px; line-height: 1.35;
-  color: var(--pend-act-fg); background: var(--pend-act-bg);
-  border: 1px solid var(--pend-act-border);
+   the host put the board in, not a problem with the cohort.
+
+   MUST NOT AFFECT LAYOUT. The pin is set from a capture-phase pointerdown, so it
+   re-renders mid-gesture; anything that reflows the card (this was a pill inside
+   the wrapping flex header, which shifted the Sync button and the room links
+   sideways) moves the control out from under the pointer, and the browser then
+   fires no click at all — the host's first click silently does nothing and only
+   the second one lands. An inset shadow is painted, never laid out, so the marker
+   cannot move a single pixel of anything. */
+.dash-tile-card.pinned {
+  box-shadow: inset 3px 0 0 var(--pend-act-fg);
 }
 .dash-col-count {
   background: oklch(16% 0.06 75 / 0.5); border: 1px solid var(--border);

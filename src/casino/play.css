@@ -374,6 +374,7 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .cz-rules li { margin: 0; }
 .cz-rules ul ul { margin-top: 0.5rem; gap: 0.3rem; }
 .cz-rules strong { color: var(--gold); }
+.cz-rules .cz-rules-note { margin: 0.5rem 0 0; font-style: italic; font-size: 0.85rem; color: var(--ink-soft); }
 .cz-rules code { font-family: 'Courier New', monospace; font-size: 0.85em; background: oklch(from var(--bg-deep) l c h / 0.6); padding: 0.05rem 0.3rem; border-radius: 3px; color: var(--gold-dim); }
 .sf-mlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.1rem 1.4rem; margin-bottom: 0.4rem; }
 .sf-mline { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px dashed oklch(from var(--border) l c h / 0.6); }
@@ -414,6 +415,27 @@ body { background: var(--bg-deep, #141009); margin: 0; min-height: 100dvh; }
 .sf-yaml-file { font-family:'Crimson Pro',serif; font-size: 0.82rem; color: var(--pos); margin-top: 0.4rem; }
 .sf-yaml-file.none { color: oklch(78% 0.13 85); }
 .sf-yaml-warn { font-family:'Crimson Pro',serif; font-size: 0.8rem; color: oklch(78% 0.13 85); margin-top: 0.25rem; }
+/* Over-cap YAML settings. Deliberately NOT the red .sf-yaml-err treatment: this
+   never gates the submit, so it borrows the warn amber and gets a box only to keep
+   several rows together. --caution is the theme-aware orange (see themes.css); the
+   amber literal above is legacy and is not reused here. */
+.sf-yaml-cap {
+  margin-top: 0.4rem; padding: 0.45rem 0.6rem; border-radius: 6px;
+  border: 1px solid oklch(from var(--caution) l c h / 0.5);
+  background: oklch(from var(--caution) l c h / 0.1);
+}
+.sf-yaml-cap-head {
+  font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--caution);
+}
+.sf-yaml-cap-row {
+  font-family:'Crimson Pro',serif; font-size: 0.82rem; color: var(--parchment);
+  margin-top: 0.3rem;
+}
+.sf-yaml-cap-foot {
+  font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem;
+  color: var(--ink-soft); margin-top: 0.4rem;
+}
 /* Blocking error (e.g. wrong world count) — distinct red, gates the submit. */
 .sf-yaml-err { font-family:'Crimson Pro',serif; font-size: 0.84rem; color: var(--neg); margin-top: 0.35rem; padding: 0.4rem 0.55rem; border: 1px solid oklch(from var(--neg) l c h / 0.5); border-radius: 6px; background: oklch(from var(--neg) l c h / 0.1); }
 .sf-yaml-hint { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.78rem; color: var(--ink-soft); margin-top: 0.4rem; }

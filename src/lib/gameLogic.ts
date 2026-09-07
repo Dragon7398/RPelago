@@ -1,5 +1,6 @@
 import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, BASE_YAML_LIMITS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
+import type { YamlLimits } from './apYaml';
 import { slotsFromEntry } from './slotHelpers';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
@@ -69,6 +70,33 @@ export function checkAndGrantAdventurers(player: Player, prevLevel: number, newL
 export function getPlayerFeatIds(feats?: PlayerFeats): string[] {
   if (!feats) return [];
   return [feats.level3, feats.level5, feats.level7].filter(Boolean) as string[];
+}
+
+// This player's YAML settings caps: the base limits plus whatever their feats
+// raise. The one place FeatDef.yamlEffect is turned into numbers, so the rules
+// text, the player's attach-time warning and the host's download badge all read
+// the same allowance for the same player.
+//
+// A player with no feats (or a casino season, where feats don't exist) simply
+// gets the base limits back.
+export function yamlLimitsForFeats(featIds: string[]): YamlLimits {
+  const limits: YamlLimits = { ...BASE_YAML_LIMITS };
+  for (const id of featIds) {
+    const eff = FEATS.find(f => f.id === id)?.yamlEffect;
+    if (!eff) continue;
+    limits.startInventory     += eff.startingItems       ?? 0;
+    limits.priorityLocations  += eff.priorityLocations   ?? 0;
+    limits.excludeLocations   += eff.excludedLocations   ?? 0;
+    limits.startHints         += eff.startingHints       ?? 0;
+    // "Hinted locations" in feat terms is AP's start_location_hints.
+    limits.startLocationHints += eff.hintedLocations     ?? 0;
+  }
+  return limits;
+}
+
+// Convenience wrapper for the common "I have a player record" case.
+export function yamlLimitsForPlayer(player?: Player | null): YamlLimits {
+  return yamlLimitsForFeats(getPlayerFeatIds(player?.feats));
 }
 
 // Returns feat IDs still available to pick for the given level slot

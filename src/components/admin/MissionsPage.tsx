@@ -10,7 +10,8 @@ import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
-import { checkProgressionBalancing } from '../../lib/apYaml';
+import { checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
+import { yamlLimitsForPlayer } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -566,6 +567,14 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
+            // Settings over this player's caps (inventory / locations / hints).
+            // Judged against THEIR limits — a Picky player's six exclusions are
+            // allowed and must not be flagged — and advisory on both sides: the
+            // player was warned at attach and let through, since exceptions are
+            // yours to grant. A badge here is "look at this", not "they cheated".
+            const caps = summarizeLimitFindings(
+              checkYamlLimits(y.text, yamlLimitsForPlayer(gameState?.players?.[y.uid])),
+            );
             // Flags the APworlds this seat still costs the host before the room can
             // be generated: NEW = never downloaded, OLD = downloaded off an earlier
             // sheet and due a look at the current one's "updated" column.
@@ -580,6 +589,12 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>
                     {f.severity === 'reject' ? '⛔' : '⚠'} PB {f.value}
+                  </span>
+                ))}
+                {caps.map(c => (
+                  <span key={c.key} className="casino-yaml-cap"
+                        title={`${c.worlds.join(', ')} — ${c.label}: ${c.count} (limit ${c.cap} for this player). Over the cap is allowed by exception; nothing blocked it.`}>
+                    ⚠ {c.short} {c.count}/{c.cap}
                   </span>
                 ))}
               </span>
@@ -790,18 +805,12 @@ function MissionCard({ mission, pinned, onInteract }: {
     // one" — no per-action wiring to keep in step with. Pointer-down rather than
     // click, so the pin is in place before the control's own handler (and the
     // write it fires) can reorder the board out from under the pointer.
-    <div className="dash-tile-card"
+    <div className={`dash-tile-card${pinned ? ' pinned' : ''}`}
          onPointerDownCapture={onInteract}
          onFocusCapture={onInteract}>
       {/* Header */}
       <div className="dash-tile-header">
         <span className="dash-tile-name">{label}</span>
-        {pinned && (
-          <span className="dash-pin-pill"
-                title="Held at its place on the board while you work on it — use “re-sort” in the column header, or touch another card, to release it.">
-            📌 held
-          </span>
-        )}
         {mission.type === 'casino' && (
           <span className="dash-mission-type-pill">🎲 CASINO</span>
         )}
@@ -1263,9 +1272,18 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
   // moves the pin; the column header's re-sort chip drops it.
   const handleInteract = (id: string) => {
     const fi = forming.findIndex(m => m.id === id);
-    if (fi >= 0) { setPin({ id, column: 'forming', index: fi }); return; }
-    const ii = inprog.findIndex(m => m.id === id);
-    if (ii >= 0) setPin({ id, column: 'inprog', index: ii });
+    const [column, index] = fi >= 0
+      ? ['forming' as const, fi]
+      : ['inprog' as const, inprog.findIndex(m => m.id === id)];
+    if (index < 0) return;
+    // Bail before touching state when nothing would change. This fires on every
+    // pointer-down in the board, so a no-op setPin would re-render the whole page
+    // on every click — and a re-render mid-gesture is exactly what this handler
+    // must not cause (see the .pinned styling note: the marker is deliberately
+    // layout-free, because reflowing a control out from under a pointer between
+    // pointerdown and pointerup makes the browser swallow the click entirely).
+    if (pin && pin.id === id && pin.column === column && pin.index === index) return;
+    setPin({ id, column, index });
   };
 
   // One column's header, with the release control when it is the one holding a pin.

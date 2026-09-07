@@ -4,7 +4,7 @@ import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath, ownHolePath } from '../firebase/season';
-import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek } from '../types';
+import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
   DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
@@ -12,7 +12,11 @@ import {
 import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
-import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
+import {
+  parseApYaml, checkWorldCount, checkProgressionBalancing, checkYamlLimits,
+  summarizeLimitFindings, type PbFinding,
+} from '../lib/apYaml';
+import { getPlayerFeatIds, yamlLimitsForFeats } from '../lib/gameLogic';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, DRAGOS_LIST_URL, nameColorValue } from '../lib/constants';
 import { seatTally, estimatedSeatShare } from '../lib/missionLogic';
@@ -164,6 +168,7 @@ export function CasinoTable() {
   const [yamlInfo, setYamlInfo]   = useState<{ name: string; docs: number; filled: number } | null>(null);
   const [yamlWarn, setYamlWarn]   = useState<string[]>([]);
   const [pbFindings, setPbFindings] = useState<PbFinding[]>([]);
+  const [feats, setFeats] = useState<PlayerFeats | null>(null);
   // Manifest drag-reorder: the row being dragged, and the row it would land on.
   const [dragRow, setDragRow]     = useState<number | null>(null);
   const [dropRow, setDropRow]     = useState<number | null>(null);
@@ -303,6 +308,20 @@ export function CasinoTable() {
       setPreferredDeck((snap.val() as CasinoDeckChoice | null) ?? 'purist');
     });
   }, [uid, seasonReady]);
+
+  // Player's feats — three of them raise this player's YAML settings caps, so the
+  // rules lightbox and the attach-time screening below both need them. A casino
+  // season has no feats and this simply stays null (base caps), but a casino table
+  // can also run inside a MAP season, where a Picky player's six exclusions are
+  // legitimate — screening them against the base 2 would cry wolf every time.
+  useEffect(() => {
+    if (!db || !uid || !seasonReady) return;
+    return onValue(sRef(db, `players/${uid}/feats`), snap => {
+      setFeats((snap.val() as PlayerFeats | null) ?? null);
+    });
+  }, [uid, seasonReady]);
+
+  const yamlLimits = useMemo(() => yamlLimitsForFeats(getPlayerFeatIds(feats ?? undefined)), [feats]);
 
   const game = mission?.casinoGame ?? null;
   const cfg  = game ? CASINO_GAMES[game] : null;
@@ -890,6 +909,15 @@ export function CasinoTable() {
   // Reject-level findings are a HARD block; warn-level are non-blocking notices.
   const pbBlock = pbFindings.filter(f => f.severity === 'reject');
   const pbWarn  = pbFindings.filter(f => f.severity === 'warn');
+  // Settings-cap overages, one row per setting. DERIVED rather than stamped at
+  // attach: `feats` loads asynchronously, so a file attached before it arrives
+  // would otherwise stay screened against the base caps and accuse a Picky player
+  // of an overage they are allowed. Deliberately absent from canSubmit — there is
+  // no hard cap here, only a flag the host reads on download.
+  const capSummary = useMemo(
+    () => summarizeLimitFindings(yamlText ? checkYamlLimits(yamlText, yamlLimits) : []),
+    [yamlText, yamlLimits],
+  );
   const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr && pbBlock.length === 0;
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
@@ -1547,6 +1575,24 @@ export function CasinoTable() {
                   {pbWarn.map((f, i) => (
                     <div className="sf-yaml-warn" key={`pbw${i}`}>⚠ {f.world}: {f.message}</div>
                   ))}
+                  {/* Over-cap settings. Grouped in one box so a file over on two
+                      settings across four worlds doesn't bury the rest of the
+                      notices, and worded to make clear the submit still goes
+                      through — these caps are waived by the host, not enforced. */}
+                  {capSummary.length > 0 && (
+                    <div className="sf-yaml-cap">
+                      <div className="sf-yaml-cap-head">
+                        ⚠ Over the YAML settings limits — you can still submit
+                      </div>
+                      {capSummary.map(s => (
+                        <div className="sf-yaml-cap-row" key={s.key}>{s.message}</div>
+                      ))}
+                      <div className="sf-yaml-cap-foot">
+                        If your host has not already approved this, please fix it or say so when you submit —
+                        they see these flags on their side too.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1631,7 +1677,7 @@ export function CasinoTable() {
       </div>
 
       {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
-      {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} />}
+      {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} limits={yamlLimits} />}
     </div>
   );
 }
