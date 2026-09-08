@@ -221,6 +221,11 @@ function RollFlags({ m }: { m: GMMission }) {
   );
 }
 
+// Elapsed matches the Board view: from the room link going up, not from deploy.
+// Shared with the live-table sort so the cards descend in the order of the number
+// each one prints. Undefined while a table is still awaiting its room.
+const liveClockFrom = (m: GMMission): number | undefined => m.linkedAt ?? (m.link ? m.deployedAt : undefined);
+
 function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (m: GMMission) => void }) {
   const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg   = CASINO_GAMES[game];
@@ -231,8 +236,7 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
   // Slots a player vacated. Anyone can take one over for free, so it's the single
   // most actionable thing on this card — it earns a badge of its own.
   const open = claimableCount(m);
-  // Elapsed matches the Board view: from the room link going up, not from deploy.
-  const clockFrom = m.linkedAt ?? (m.link ? m.deployedAt : undefined);
+  const clockFrom = liveClockFrom(m);
   const elapsed   = clockFrom ? fmtDayClock((now - clockFrom) / 1000) : '—';
   // Deployed but no room yet — not "live", and its progress meter is a certain zero.
   const pending   = awaitingRoom(m);
@@ -573,7 +577,12 @@ export default function CasinoShell() {
     const all = Object.values(gameState?.missions ?? {});
     return all
       .filter(m => m.type === 'casino' && m.state === 'inprogress' && !myTableIds.has(m.id))
-      .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
+      // Longest-running room first — the oldest clock origin. A table still
+      // awaiting its room has no elapsed at all, so it sorts to the end.
+      .sort((a, b) =>
+        ((liveClockFrom(a) ?? Infinity) - (liveClockFrom(b) ?? Infinity))
+        || (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '')
+        || a.series - b.series);
   }, [gameState?.missions, myTableIds]);
 
   // Vacated slots across every live table, seated or not — a free seat at a room
