@@ -13,7 +13,7 @@ import {
   completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
-  setPlayerDisabled, setPlayerNameColor, subscribeToActivityLog, logActivity,
+  setPlayerDisabled, setPlayerRestricted, setPlayerNameColor, subscribeToActivityLog, logActivity,
   selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
@@ -37,7 +37,7 @@ import {
 } from '../firebase/db';
 import { useToast } from './ToastContext';
 import { useSeason } from './SeasonContext';
-import { awardTileRewards, computeRecalcUpdates } from '../lib/gameLogic';
+import { awardTileRewards, computeRecalcUpdates, releasesClaimsEarly } from '../lib/gameLogic';
 import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { rcFromCoord } from '../lib/constants';
@@ -352,7 +352,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     const FREE_STATUSES = FREE_COMPLETED_STATUSES;
     const allComplete  = stampedSlots.length > 0 && stampedSlots.every(s => s.status && FREE_STATUSES.has(s.status));
     const stillHeld    = playerAdv?.busy === true && playerAdv?.busyTile === coord;
-    const freeAdventurer = allComplete && stillHeld && tileAdv
+    // A RESTRICTED player keeps the adventurer until the tile completes, so the
+    // early release is skipped for them (awardTileRewards still frees it).
+    const earlyRelease = releasesClaimsEarly(tileAdv ? gameState?.players[tileAdv.owner] : null);
+    const freeAdventurer = allComplete && stillHeld && earlyRelease && tileAdv
       ? { ownerId: tileAdv.owner }
       : undefined;
     await setAdventurerSlots(coord, advId, stampedSlots, freeAdventurer);
@@ -372,6 +375,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   const adminEnablePlayer = useCallback(async (playerId: string) => {
     await setPlayerDisabled(playerId, false);
+  }, []);
+
+  const adminSetPlayerRestricted = useCallback(async (playerId: string, restricted: boolean) => {
+    await setPlayerRestricted(playerId, restricted);
   }, []);
 
   const adminKickAdventurer = useCallback(async (
@@ -493,6 +500,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
+      adminSetPlayerRestricted,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,
       adminAddWarning, adminDeleteWarning, adminClearWarnings, adminGrantGold,
       setAdventurerStatusNote,

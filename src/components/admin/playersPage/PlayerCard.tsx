@@ -3,7 +3,7 @@ import { useGameState } from '../../../contexts/GameStateContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { useSeason } from '../../../contexts/SeasonContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
-import { calcLevel, getFeatWarnings, adventurerCountForLevel } from '../../../lib/gameLogic';
+import { calcLevel, getFeatWarnings, adventurerCountForLevel, playerStatus, type PlayerStatus } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
 import { playerReset, syncPlayerProfile, banDiscordId } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function PlayerCard({ player, tiles, adminId, missions }: Props) {
-  const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer,
+  const { adminConsumeItem, adminDisablePlayer, adminEnablePlayer, adminSetPlayerRestricted,
           adminAddWarning, adminDeleteWarning, adminClearWarnings,
           adminGrantGold, adminGrantMissingAdventurers } = useGameState();
   const { addToast } = useToast();
@@ -33,7 +33,9 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
   const [goldBusy, setGoldBusy]           = useState(false);
   const [syncing, setSyncing]             = useState(false);
   const [banning, setBanning]             = useState(false);
+  const [statusBusy, setStatusBusy]       = useState(false);
 
+  const status         = playerStatus(player);
   const ownedItems     = SHOP_ITEMS.filter(item => (player.inventory?.[item.id] ?? 0) > 0);
   const busyAdvs       = Object.values(player.adventurers ?? {}).filter(a => a.busyTile);
   const isAdmin        = player.id === adminId;
@@ -89,8 +91,56 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
     }
   };
 
+  // ── Status (active / restricted / disabled) ────────────────────────────────
+  // Three states over two independent flags; exactly ONE is ever set on the wire,
+  // so a player who was restricted, then disabled, then re-activated does not
+  // silently come back restricted. `disabled` goes through the callable (it also
+  // kills the Auth account); `restricted` is a plain admin write.
+  const STATUS_COPY: Record<PlayerStatus, { label: string; confirm: string | null; done: string }> = {
+    active: {
+      label:   'Active',
+      confirm: null,
+      done:    `${player.displayName} is active again.`,
+    },
+    restricted: {
+      label:   'Restricted',
+      confirm: `Restrict ${player.displayName}?
+
+`
+             + `They play as normal, but will NOT get a claim back early — each mission `
+             + `claim / adventurer stays tied up until that whole world is finished.`,
+      done:    `${player.displayName} is now restricted.`,
+    },
+    disabled: {
+      label:   'Disabled',
+      confirm: `Disable ${player.displayName}? They will be unable to log in.`,
+      done:    `${player.displayName} has been disabled.`,
+    },
+  };
+
+  const applyStatus = async (next: PlayerStatus) => {
+    if (next === status || statusBusy) return;
+    const copy = STATUS_COPY[next];
+    if (copy.confirm && !confirm(copy.confirm)) return;
+    setStatusBusy(true);
+    try {
+      // Order: lift the heavier flag before setting the lighter one, so the card
+      // never renders a state that is both at once.
+      if (status === 'disabled' && next !== 'disabled') await adminEnablePlayer(player.id);
+      if (next !== 'restricted' && player.restricted)   await adminSetPlayerRestricted(player.id, false);
+      if (next === 'restricted')                        await adminSetPlayerRestricted(player.id, true);
+      if (next === 'disabled')                          await adminDisablePlayer(player.id);
+      addToast(copy.done, next === 'active' ? 'success' : 'info');
+    } catch (err) {
+      addToast((err as { message?: string }).message
+        ?? `Failed to change ${player.displayName}'s status.`, 'error');
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
   return (
-    <div className={`dash-player-card${player.disabled ? ' disabled' : ''}`}>
+    <div className={`dash-player-card${player.disabled ? ' disabled' : ''}${status === 'restricted' ? ' restricted' : ''}`}>
       <div className="dash-player-header">
         <div className="dash-player-name">
           {player.displayName}
@@ -105,8 +155,14 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
               ⚑ {playerWarnings.length}
             </span>
           )}
-          {player.disabled && (
-            <span className="dash-player-disabled-badge">RESTRICTED</span>
+          {status === 'disabled' && (
+            <span className="dash-player-disabled-badge">DISABLED</span>
+          )}
+          {status === 'restricted' && (
+            <span className="dash-player-restricted-badge"
+                  title="Restricted — plays as normal, but claims are only returned when the world resolves.">
+              RESTRICTED
+            </span>
           )}
         </div>
         <div className="dash-player-stats">
@@ -351,21 +407,25 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           <span className="dash-player-admin-badge">ADMIN</span>
         ) : (
           <>
-            {player.disabled ? (
-              <button className="dash-player-enable" onClick={() => adminEnablePlayer(player.id)}>
-                Re-enable Player
-              </button>
-            ) : (
-              <button
-                className="dash-player-disable"
-                onClick={() => {
-                  if (confirm(`Restrict ${player.displayName}? They will be unable to log in.`))
-                    adminDisablePlayer(player.id);
-                }}
-              >
-                Disable Player
-              </button>
-            )}
+            {/* Three states, one control. Restricted sits between Active and
+                Disabled: still playing, but claims come back only when the world
+                resolves — see playerStatus / releasesClaimsEarly. */}
+            <div className="dash-player-status" role="group" aria-label={`Status for ${player.displayName}`}>
+              {(['active', 'restricted', 'disabled'] as const).map(s => (
+                <button
+                  key={s}
+                  className={`dash-status-btn dash-status-btn--${s}${status === s ? ' on' : ''}`}
+                  disabled={statusBusy || status === s}
+                  aria-pressed={status === s}
+                  title={s === 'restricted'
+                    ? 'Plays as normal, but does not get a claim back until the world is finished.'
+                    : s === 'disabled' ? 'Blocked from signing in.' : 'No restrictions.'}
+                  onClick={() => applyStatus(s)}
+                >
+                  {STATUS_COPY[s].label}
+                </button>
+              ))}
+            </div>
             {/* Ban is the harder version of Disable: it also writes the pre-emptive
                 ban entry, so deleting their season record (or a new season starting)
                 can't quietly let them back in. Lifting it is the Players page's

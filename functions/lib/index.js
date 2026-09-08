@@ -2952,6 +2952,12 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
     for (const { seasonId } of seasons) {
         const playersSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'players')).get();
         const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {});
+        // A RESTRICTED player is exempt from BOTH early-release blocks below: their
+        // adventurer / mission claim is held until the world itself resolves (the tile
+        // or mission completing frees it), rather than the moment their own slots go
+        // terminal. Inlined here the same way `deriveStatus` is — the client mirror is
+        // `releasesClaimsEarly` in src/lib/gameLogic.ts.
+        const releasesEarly = (pid) => rawPlayers[pid]?.restricted !== true;
         // ── Tiles ──────────────────────────────────────────────────────────────
         const tilesSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'tiles')).get();
         if (tilesSnap.exists()) {
@@ -3000,7 +3006,8 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                                 const resolved = statusMap.get(names[i]) ?? s.status;
                                 return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                             }) &&
-                            rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord) {
+                            rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord &&
+                            releasesEarly(adv.owner)) {
                             updates[(0, seasonPaths_1.sp)(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busy`)] = false;
                             updates[(0, seasonPaths_1.sp)(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busyTile`)] = null;
                         }
@@ -3059,7 +3066,8 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                             const resolved = statusMap.get(names[i]) ?? s.status;
                             return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                         }) &&
-                        rawPlayers[pid]?.activeMissions?.[missionId]) {
+                        rawPlayers[pid]?.activeMissions?.[missionId] &&
+                        releasesEarly(pid)) {
                         updates[(0, seasonPaths_1.sp)(seasonId, `players/${pid}/activeMissions/${missionId}`)] = null;
                     }
                 }

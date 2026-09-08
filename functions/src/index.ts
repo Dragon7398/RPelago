@@ -3489,7 +3489,13 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
   const seasons = await tickableSeasons(db, true);
   for (const { seasonId } of seasons) {
     const playersSnap = await db.ref(sp(seasonId, 'players')).get();
-    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {}) as Record<string, { adventurers?: Record<string, RawAdv>; activeMissions?: Record<string, true> }>;
+    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {}) as Record<string, { adventurers?: Record<string, RawAdv>; activeMissions?: Record<string, true>; restricted?: boolean }>;
+    // A RESTRICTED player is exempt from BOTH early-release blocks below: their
+    // adventurer / mission claim is held until the world itself resolves (the tile
+    // or mission completing frees it), rather than the moment their own slots go
+    // terminal. Inlined here the same way `deriveStatus` is — the client mirror is
+    // `releasesClaimsEarly` in src/lib/gameLogic.ts.
+    const releasesEarly = (pid: string) => rawPlayers[pid]?.restricted !== true;
 
     // ── Tiles ──────────────────────────────────────────────────────────────
     const tilesSnap = await db.ref(sp(seasonId, 'tiles')).get();
@@ -3536,7 +3542,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
                 const resolved = statusMap.get(names[i]) ?? s.status;
                 return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
               }) &&
-              rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
+              rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord &&
+              releasesEarly(adv.owner)
             ) {
               updates[sp(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busy`)]     = false;
               updates[sp(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busyTile`)] = null;
@@ -3594,7 +3601,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
               const resolved = statusMap.get(names[i]) ?? s.status;
               return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
             }) &&
-            rawPlayers[pid]?.activeMissions?.[missionId]
+            rawPlayers[pid]?.activeMissions?.[missionId] &&
+            releasesEarly(pid)
           ) {
             updates[sp(seasonId, `players/${pid}/activeMissions/${missionId}`)] = null;
           }

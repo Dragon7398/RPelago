@@ -11,7 +11,7 @@ import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionC
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
 import { checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
-import { yamlLimitsForPlayer } from '../../lib/gameLogic';
+import { yamlLimitsForPlayer, releasesClaimsEarly } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -707,9 +707,12 @@ function MissionCard({ mission, pinned, onInteract }: {
               // terminal and they still hold this mission's claim, release it —
               // the mission analogue of freeing a tile adventurer (mirrors the
               // server tick block in tickSlotStatuses).
+              // A RESTRICTED player is exempt from the early release: their claim
+              // is held until the mission itself completes.
               const resolved = slots.map(s => ({ status: statusMap.get(s.name) ?? s.status }));
               if (mission.state === 'inprogress'
                   && slotsAllFree(resolved)
+                  && releasesClaimsEarly(gameState?.players?.[pid])
                   && gameState?.players?.[pid]?.activeMissions?.[mission.id]) {
                 await freeMissionClaim(pid, mission.id);
               }

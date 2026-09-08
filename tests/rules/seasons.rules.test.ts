@@ -268,6 +268,27 @@ describe('active season — player economy is server-owned', () => {
       player().ref(`seasons/${CASINO}/players/${OTHER_UID}/nameColor`).set('crimson'),
     );
   });
+
+  // `restricted` is the middle player status (claims only come back when the world
+  // resolves). A player clearing their own flag would lift their own penalty, so
+  // it must be admin-only — there is deliberately no player-writable `.write` at
+  // or above that leaf, unlike adventurers / nameColor / feats.
+  it('a player cannot lift their own restricted flag', async () => {
+    await assertFails(player().ref(`seasons/${CASINO}/players/${PLAYER_UID}/restricted`).set(null));
+  });
+
+  it('a player cannot restrict anyone, themselves included', async () => {
+    await assertFails(player().ref(`seasons/${CASINO}/players/${PLAYER_UID}/restricted`).set(true));
+    await assertFails(player().ref(`seasons/${CASINO}/players/${OTHER_UID}/restricted`).set(true));
+  });
+
+  it('admin CAN restrict a player, and clears it with null rather than false', async () => {
+    await assertSucceeds(admin().ref(`seasons/${CASINO}/players/${OTHER_UID}/restricted`).set(true));
+    await assertSucceeds(admin().ref(`seasons/${CASINO}/players/${OTHER_UID}/restricted`).set(null));
+    // Shape guard: the flag is a tri-state component, never a string/number.
+    await assertFails(admin().ref(`seasons/${CASINO}/players/${OTHER_UID}/restricted`).set('yes'));
+  });
+
 });
 
 describe('active season — mission claimable slots', () => {

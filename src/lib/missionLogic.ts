@@ -366,6 +366,11 @@ export function computeMissionCard(
   basicTrainingDone: boolean,
   now: number,
   playerGold?: number,
+  // A RESTRICTED player's claim is not released when their own slots finish — it
+  // is held until the world resolves. Only the wording of the no-free-claim
+  // reason changes; the gate itself is the same held-count check, since a
+  // restricted player simply keeps holding.
+  restricted = false,
 ): GMMissionCard {
   const def = MISSION_DEFS[m.type];
   const maxSlots = currentMaxSlots(m, now);
@@ -412,9 +417,15 @@ export function computeMissionCard(
     doneLabel = 'ALREADY COMPLETED';
     disabledReason = 'You have already completed Basic Training — it can be undertaken only once per guildmaster.';
   } else if (!youIn && heldClaimCount >= claimCapacity) {
-    disabledReason = claimCapacity <= 1
-      ? `You are already undertaking a mission. Finish your part of it to free your claim.`
-      : `All your mission claims are in use — finish your part of a table to free one.`;
+    // Telling a restricted player to "finish your part" would be a lie — finishing
+    // their own slots is exactly what no longer frees their claim.
+    disabledReason = restricted
+      ? (claimCapacity <= 1
+          ? `You are already undertaking a mission. Your account is restricted, so that claim is held until the whole mission finishes — not just your part of it.`
+          : `All your mission claims are in use. Your account is restricted, so a claim is only freed when its whole mission finishes — not just your part of it.`)
+      : claimCapacity <= 1
+        ? `You are already undertaking a mission. Finish your part of it to free your claim.`
+        : `All your mission claims are in use — finish your part of a table to free one.`;
   } else if (m.type === 'casino' && filled >= maxSlots && !youIn) {
     disabledReason = 'All seats are taken — waiting for players to lock in at the card table.';
   } else if (m.type === 'casino' && m.casinoGame && playerGold != null && !youIn

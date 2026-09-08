@@ -161,6 +161,14 @@
             "xp":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
             "gold": { ".validate": "newData.isNumber() && newData.val() >= 0" },
 
+            // Middle player status: plays as normal, but claims are only returned
+            // when the world resolves. Admin-only by construction — there is no
+            // `.write` at or above this leaf except the season's admin one (the
+            // player-writable leaves are adventurers / nameColor / feats), so this
+            // is a shape guard, not the permission boundary. Cleared by writing
+            // null, which skips .validate, so the tri-state never leaves a `false`.
+            "restricted": { ".validate": "newData.isBoolean()" },
+
             "inventory": {
               "$itemId": { ".validate": "newData.isNumber() && newData.val() >= 0" }
             }

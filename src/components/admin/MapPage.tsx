@@ -4,6 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { TILE_TYPES, SHOP_ITEMS, ALL_ORBS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { hasUnfinishedTileSlots } from '../../lib/missionLogic';
+import { releasesClaimsEarly } from '../../lib/gameLogic';
 import type { Tile, TileState, TriState, SlotStatus } from '../../types';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, adminUpdateAdvSlotName, adminUpdatePublicSlotName, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
@@ -163,7 +164,10 @@ const handleRegenStats = async () => {
                   const resolved = statusMap.get(s.name) ?? s.status;
                   return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                 }) &&
-                gs.players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === selectedCoord
+                gs.players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === selectedCoord &&
+                // Restricted players don't get an adventurer back early — the
+                // tile's completion frees it instead.
+                releasesClaimsEarly(gs.players[adv.owner])
               ) await freeAdventurer(adv.owner, adv.advId);
             }
             for (let i = 0; i < pubSlots.length; i++) {

@@ -160,7 +160,19 @@ export interface Player {
   xpHistory?: number[];                      // archived XP totals from previous campaigns
   nameColor?: string;                        // color ID from NAME_COLORS palette
   preferredDeckChoice?: CasinoDeckChoice;    // last casino deck picked; pre-fills the picker next cohort
+  // Two independent flags, read together as one tri-state by `playerStatus`:
+  // active (neither set) → restricted → disabled. `disabled` is the kill-switch
+  // (it also disables the Auth account); `restricted` is a play-on penalty that
+  // only changes when the player gets their claims back — see `restricted`.
   disabled?: boolean;
+  // Restricted: plays as normal, but claims are NOT released early. A restricted
+  // player keeps holding a mission claim / tile adventurer until the world itself
+  // resolves (the mission or tile completes), instead of the moment their own
+  // slots all go terminal. This is the pre-pooled-claims behaviour, applied as a
+  // penalty to one player. Every early-release site gates on `releasesClaimsEarly`
+  // (client) or an inline `restricted` check (functions/tickSlotStatuses); the
+  // completion paths clear claims for everyone and are deliberately untouched.
+  restricted?: boolean;
   feats?: PlayerFeats;
   warnings?: Record<string, PlayerWarning>;
   discordHandle?: string;

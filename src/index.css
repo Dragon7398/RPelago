@@ -32,6 +32,22 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --open-bg:     oklch(16% 0.08 320 / 0.36);
   --open-bg-hi:  oklch(24% 0.11 320 / 0.55);
   --open-border: oklch(46% 0.14 320);
+  /* Restricted-player surfaces. The middle player status: still playing, but
+     claims only come back when the world resolves. Amber, like void — a penalty
+     that is emphatically not a ban, and it must not read as the red Disabled
+     state sitting next to it. Every control using these carries its own word
+     ("Restricted"), so hue is reinforcement, never the message. */
+  --restrict-fg:     oklch(74% 0.15 70);
+  --restrict-fg-hi:  oklch(84% 0.16 70);
+  --restrict-bg:     oklch(16% 0.08 70 / 0.42);
+  --restrict-bg-hi:  oklch(23% 0.10 70 / 0.58);
+  --restrict-border: oklch(48% 0.13 70);
+  /* Active — the no-restrictions state. Green, matched to the unban control. */
+  --allow-fg:        oklch(66% 0.14 145);
+  --allow-fg-hi:     oklch(76% 0.16 145);
+  --allow-bg:        oklch(14% 0.08 145 / 0.4);
+  --allow-bg-hi:     oklch(20% 0.10 145 / 0.55);
+  --allow-border:    oklch(40% 0.12 145);
   /* "Go fetch this APworld" surfaces — a heads-up for the host, never an error.
      NEW (never downloaded) is cyan and OLD (downloaded off an older list, so due
      an update check) is violet: both stay clear of the gold-warn and red-reject
@@ -2269,6 +2285,8 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   border-radius: 3px; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
 }
 .dash-player-card.disabled { border-color: oklch(36% 0.12 25 / 0.6); background: oklch(12% 0.04 25 / 0.3); }
+/* Restricted is a live player, so the card stays legible — only the border says so. */
+.dash-player-card.restricted { border-color: var(--restrict-border); }
 .dash-player-header { display: flex; flex-direction: column; gap: 0.15rem; }
 .dash-player-name {
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.1em;
@@ -2312,8 +2330,16 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-void-btn:hover { background: var(--void-bg-hi); color: var(--void-fg-hi); }
 .dash-player-disabled-badge {
   font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;
-  border-radius: 2px; background: oklch(16% 0.10 25 / 0.5);
-  border: 1px solid oklch(40% 0.14 25); color: oklch(62% 0.16 25);
+  border-radius: 2px; background: var(--ban-bg); 
+  border: 1px solid var(--ban-border); color: var(--ban-fg);
+}
+/* Middle status. Amber tokens, so it can never be mistaken for the red DISABLED
+   badge it replaces on the same line — and it carries its own word regardless. */
+.dash-player-restricted-badge {
+  font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;
+  border-radius: 2px; background: var(--restrict-bg);
+  border: 1px solid var(--restrict-border); color: var(--restrict-fg);
+  cursor: help;
 }
 .dash-player-stats  { font-size: 0.78rem; color: oklch(55% 0.06 75); }
 .dash-player-history { color: oklch(48% 0.08 200); }
@@ -2355,26 +2381,45 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .dash-player-sync:hover:not(:disabled) { background: oklch(20% 0.08 215 / 0.5); color: oklch(66% 0.14 215); }
 .dash-player-sync:disabled { opacity: 0.35; cursor: not-allowed; }
-.dash-player-disable {
+/* Player status — one segmented control over the three states (active /
+   restricted / disabled). Each segment keeps its own hue AND its own word, so the
+   control reads the same in the light and high-contrast themes. The current state
+   is the pressed, non-clickable segment; the other two are the actions. */
+.dash-player-status { display: flex; border-radius: 2px; overflow: hidden; }
+.dash-status-btn {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
-  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
-  background: oklch(14% 0.10 25 / 0.4); border: 1px solid oklch(42% 0.16 25);
-  color: oklch(62% 0.18 25); transition: all 0.15s;
+  padding: 0.25rem 0.6rem; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  border-right-width: 0; color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
 }
-.dash-player-disable:hover { background: oklch(20% 0.12 25 / 0.5); color: oklch(72% 0.20 25); }
+.dash-status-btn:last-child  { border-right-width: 1px; }
+.dash-status-btn:first-child { border-radius: 2px 0 0 2px; }
+.dash-status-btn:last-child  { border-radius: 0 2px 2px 0; }
+/* The segment you are NOT on is the action — tint it on hover in its own colour. */
+.dash-status-btn--active:hover:not(:disabled)     { background: var(--allow-bg);     color: var(--allow-fg-hi); }
+.dash-status-btn--restricted:hover:not(:disabled) { background: var(--restrict-bg);  color: var(--restrict-fg-hi); }
+.dash-status-btn--disabled:hover:not(:disabled)   { background: var(--ban-bg);       color: var(--ban-fg-hi); }
+/* The segment you ARE on. `.on` is the current state (disabled as a button, but
+   fully opaque — it is a readout, not an unavailable action); a plain :disabled
+   without `.on` is the in-flight state and does dim. */
+.dash-status-btn.on { cursor: default; font-weight: 600; }
+.dash-status-btn--active.on {
+  background: var(--allow-bg-hi);    border-color: var(--allow-border);    color: var(--allow-fg);
+}
+.dash-status-btn--restricted.on {
+  background: var(--restrict-bg-hi); border-color: var(--restrict-border); color: var(--restrict-fg);
+}
+.dash-status-btn--disabled.on {
+  background: var(--ban-bg-hi);      border-color: var(--ban-border);      color: var(--ban-fg);
+}
+.dash-status-btn:disabled:not(.on) { opacity: 0.4; cursor: not-allowed; }
 .dash-player-admin-badge {
   font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.12em;
   padding: 0.15rem 0.5rem; border-radius: 2px;
   background: oklch(16% 0.08 75 / 0.4); border: 1px solid oklch(40% 0.12 75);
   color: var(--gold-dim); cursor: default;
 }
-.dash-player-enable {
-  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
-  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
-  background: oklch(14% 0.08 145 / 0.4); border: 1px solid oklch(38% 0.12 145);
-  color: oklch(60% 0.14 145); transition: all 0.15s;
-}
-.dash-player-enable:hover { background: oklch(20% 0.10 145 / 0.5); color: oklch(70% 0.16 145); }
 .dash-player-ban {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
   padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
@@ -4121,6 +4166,18 @@ body.theme-lapis {
   --open-bg:     oklch(94% 0.04 320 / 0.5);
   --open-bg-hi:  oklch(88% 0.07 320 / 0.65);
   --open-border: oklch(54% 0.15 320);
+  /* Restricted + active surfaces: same wash problem as every family above — the
+     dark values are a low-lightness tint meant for near-black. Flip the polarity. */
+  --restrict-fg:     oklch(42% 0.15 70);
+  --restrict-fg-hi:  oklch(32% 0.17 70);
+  --restrict-bg:     oklch(93% 0.05 70 / 0.55);
+  --restrict-bg-hi:  oklch(87% 0.08 70 / 0.7);
+  --restrict-border: oklch(54% 0.13 70);
+  --allow-fg:        oklch(36% 0.15 145);
+  --allow-fg-hi:     oklch(28% 0.17 145);
+  --allow-bg:        oklch(90% 0.05 145 / 0.55);
+  --allow-bg-hi:     oklch(84% 0.08 145 / 0.7);
+  --allow-border:    oklch(46% 0.13 145);
   --fetch-new-fg:      oklch(38% 0.13 195);
   --fetch-new-bg:      oklch(93% 0.04 195 / 0.55);
   --fetch-new-border:  oklch(52% 0.12 195);

@@ -41,7 +41,6 @@ function loadView(): View {
   return 'lounge';
 }
 
-const gameFamily = (g: CasinoGame): string => (g === 'blackjack' ? 'Blackjack' : 'Poker');
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
 
 // Compact "1d 4h" / "5h" / "40m" for a forward duration.
@@ -130,8 +129,8 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
 
   return (
     <div className={`rl-tcard${seatedHere ? ' seated-here' : ''}${locked && !seatedHere ? ' locked' : ''}`}>
+      {/* No family tag: the title already names the game. */}
       <div className="rl-tcard-felt">
-        <div className="rl-tcard-tag">{gameFamily(game)}</div>
         <div className="rl-tcard-name">
           {cfg.label}
           <span className="rl-pot">
@@ -140,7 +139,15 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
             <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, tally.max))}g ea</span>
           </span>
         </div>
-        <div className="rl-tcard-room">Cohort {toRoman(m.series)}</div>
+        {/* Status pill sits on the cohort line, matching the live cards. */}
+        <div className="rl-tcard-room rl-room-status">
+          <span>Cohort {toRoman(m.series)}</span>
+          {seatedHere
+            ? <span className="rl-badge seated">Your seat</span>
+            : full
+              ? <span className="rl-badge open">Table full</span>
+              : <span className="rl-badge ready">Taking seats</span>}
+        </div>
       </div>
       <div className="rl-tcard-body">
         <SeatPips m={m} now={now} />
@@ -154,12 +161,7 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
         <div className="rl-entry">
           {(m.entryCosts ?? []).map((c, i) => <span key={i}>{c.label} <b>{c.gold}g</b></span>)}
         </div>
-        <div className="rl-tcard-foot">
-          {seatedHere
-            ? <span className="rl-badge seated">Your seat</span>
-            : full
-              ? <span className="rl-badge open">Table full</span>
-              : <span className="rl-badge ready">Taking seats</span>}
+        <div className="rl-tcard-foot rl-foot-end">
           {seatedHere
             ? <span className="rl-time">You're seated here</span>
             : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
@@ -240,13 +242,20 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
          title="View this table's slots"
          onClick={() => onOpen(m)}
          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m); } }}>
+      {/* No family tag here: the card's title is the game, so "Blackjack" over
+          "Blackjack" is the same word twice. The status pill rides the cohort
+          line instead of the foot — it says exactly what "· live" used to. */}
       <div className="rl-tcard-felt">
-        <div className="rl-tcard-tag">{gameFamily(game)}</div>
         <div className="rl-tcard-name">
           {cfg.label}
           <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>
         </div>
-        <div className="rl-tcard-room">Cohort {toRoman(m.series)} · {pending ? 'awaiting room' : 'live'}</div>
+        <div className="rl-tcard-room rl-room-status">
+          <span>Cohort {toRoman(m.series)}</span>
+          {pending
+            ? <span className="rl-badge pending">Awaiting room</span>
+            : <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>}
+        </div>
       </div>
       <div className="rl-tcard-body">
         {pending ? (
@@ -269,9 +278,6 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
           <div className="rl-mini"><span className="rl-mini-lbl">Elapsed</span><span className="rl-mini-val">{elapsed}</span></div>
         </div>
         <div className="rl-tcard-foot">
-          {pending
-            ? <span className="rl-badge pending">Awaiting room</span>
-            : <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>}
           {open > 0 && (
             <span className="rl-badge open-slots" title="A seat was vacated here — you can take over the slot for free">
               ⚐ {open} open slot{open === 1 ? '' : 's'}
@@ -590,6 +596,12 @@ export default function CasinoShell() {
   // tables have already freed their claim, so they don't count here.
   const locked    = heldClaimCount >= claimCapacity;
   const lockLabel = 'All claims in use';
+  // A RESTRICTED player never gets a claim back early — it is held until the table
+  // itself settles, not the moment their own games are done. Without this the lock
+  // just looks broken: they finished their slots and the seat button stayed shut.
+  const lockNote  = me?.restricted === true && locked
+    ? 'Your account is restricted — a claim comes back when the whole table settles, not when your own games are done.'
+    : null;
 
   const sit = (m: GMMission) => {
     const label = `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`;
@@ -686,6 +698,7 @@ export default function CasinoShell() {
           <span className="rl-sec-title">{tablesTitle}</span>
           <span className="rl-sec-note">{tables.length} table{tables.length === 1 ? '' : 's'} taking seats</span>
         </div>
+        {lockNote && <p className="rl-lock-note">{lockNote}</p>}
         {tables.length === 0
           ? <p className="rl-muted">No tables are open right now — check back soon.</p>
           : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>

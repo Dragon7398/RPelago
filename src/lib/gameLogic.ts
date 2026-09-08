@@ -46,6 +46,42 @@ export function missionClaimCapacity(_player: Player): number {
   return 1;
 }
 
+// ── Player status ─────────────────────────────────────────────────────────────
+// Three states, derived from two independent booleans on the player record so the
+// existing `disabled` wire field (and everything keyed off it — the Auth disable,
+// the ban sweep, every callable's disabled check) is unchanged:
+//
+//   active      — neither flag set. The default.
+//   restricted  — `restricted`. Plays as normal, but does NOT get a claim back
+//                 early: a mission claim / tile adventurer is held until the world
+//                 itself resolves, not the moment that player's own slots go
+//                 terminal. The pre-pooled-claims behaviour, as a penalty.
+//   disabled    — `disabled`. Cannot play at all; outranks restricted for display.
+
+export type PlayerStatus = 'active' | 'restricted' | 'disabled';
+
+type StatusFlags = Pick<Player, 'disabled' | 'restricted'> | null | undefined;
+
+export function playerStatus(player: StatusFlags): PlayerStatus {
+  if (player?.disabled)   return 'disabled';
+  if (player?.restricted) return 'restricted';
+  return 'active';
+}
+
+/**
+ * Whether this player's claim may be released as soon as their OWN slots are all
+ * free. False for a restricted player, whose claim is instead cleared by the
+ * world's completion path (completeMission / awardTileRewards), same as everyone.
+ *
+ * Every early-release site gates on this: the two tile syncs (ChallengesPage,
+ * MapPage), the admin slot edit (GameStateProvider), and the mission sync
+ * (MissionsPage). `tickSlotStatuses` in functions/ inlines the same check, the
+ * way it already inlines `deriveStatus`.
+ */
+export function releasesClaimsEarly(player: StatusFlags): boolean {
+  return player?.restricted !== true;
+}
+
 export function checkAndGrantAdventurers(player: Player, prevLevel: number, newLevel: number): Player {
   if (newLevel <= prevLevel) return player;
 

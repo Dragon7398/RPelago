@@ -152,22 +152,31 @@ body.casino-scope #root { width: 100%; }
   background: radial-gradient(ellipse 80% 100% at 30% 0%, oklch(from var(--felt) calc(l + 0.07) c h), var(--felt) 75%);
   border-bottom: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.4);
 }
-.rl-tcard-tag { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-tcard-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-top: 0.1rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
 .rl-tcard-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.86rem; margin-top: 0.1rem; }
+/* Live cards carry their status pill on the cohort line (it replaced the old
+   "· live" text), so that row is a flex pair. It wraps rather than squeezing the
+   pill on the Floor's narrower cards. */
+.rl-tcard-room.rl-room-status { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.rl-tcard-room.rl-room-status .rl-badge { flex: none; }
 .rl-tcard-body { padding: 0.9rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; flex: 1; }
 .rl-tcard-stats { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
 .rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 0.7rem; margin-top: auto; flex-wrap: wrap; }
 /* Long lock labels ("Seated elsewhere") must break rather than overrun the card
    (which clips via overflow:hidden) at larger font sizes. */
 .rl-tcard-foot .rl-btn { white-space: normal; text-align: center; min-width: 0; }
+/* Foot left holding only the seat control once the status pill moved up. */
+.rl-tcard-foot.rl-foot-end { justify-content: flex-end; }
 
 .rl-mini { display: flex; flex-direction: column; line-height: 1.1; }
 .rl-mini-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-mini-val { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.95rem; color: var(--parchment); }
 .rl-mini-val.gold { color: var(--gold); }
 
-.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; }
+/* Never shrinks or wraps: a long title ("Seven Card Stud") would otherwise
+   squeeze the pot until "g pot" dropped under the number. The title wraps
+   instead — it has the room to. */
+.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; flex: none; white-space: nowrap; }
 .rl-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.15rem; }
 .rl-pot .u { font-size: 0.6rem; color: var(--gold-dim); }
 /* Per-seat pot projection: Lounge only — the Floor's narrower cards can't spare
@@ -196,7 +205,8 @@ body.casino-scope #root { width: 100%; }
 /* The whole live card is a button into its slot overview. */
 .rl-tcard-live { cursor: pointer; }
 .rl-tcard-live:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.4); }
-.rl-tcard-view { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); }
+/* Stays right-aligned now that the foot may hold nothing else. */
+.rl-tcard-view { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); margin-left: auto; }
 .rl-tcard-live:hover .rl-tcard-view { color: var(--gold); }
 
 /* Config-denied notice — the player must resubmit at the table. */
@@ -435,6 +445,14 @@ body.casino-scope #root { width: 100%; }
   border-top: 1px solid var(--line-glow); padding-top: 0.9rem; margin-bottom: 0.4rem; }
 
 .rl-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+/* Why the seat buttons are shut for a restricted player. Uses --caution (the idle
+   badge's lower tier), which every theme already defines light and dark — it is a
+   standing condition of the account, not an error, so it must not read as --neg. */
+.rl-lock-note {
+  font-family: 'Crimson Pro', serif; font-size: 0.82rem; line-height: 1.4;
+  color: var(--caution); margin: 0.15rem 0 0.55rem;
+  border-left: 2px solid var(--caution); padding-left: 0.55rem;
+}
 
 /* ══ Profile modal ══ */
 .rl-prof-namerow { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 1rem; }
