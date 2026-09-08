@@ -1345,6 +1345,58 @@ export const setMissionParticipantStatusNote = onCall(async (request) => {
   return { success: true };
 });
 
+/**
+ * Per-SLOT status note — the player explaining where one game stands.
+ *
+ * Distinct from `setMissionParticipantStatusNote` above, which is one note for a
+ * whole seat: a five-card seat could never say which game it meant. Both exist.
+ *
+ * Saving stamps `lastReported` alongside the text in ONE update, so the landing
+ * page's idle badge and the report's `stalled` check see the same instant.
+ * Clearing deletes the text but deliberately LEAVES `lastReported` — the player
+ * did report; deleting the words does not un-ring that bell.
+ */
+export const setSlotStatusNote = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const { missionId, slotIndex, note, seasonId: reqSeason } = request.data as {
+    missionId?: string; slotIndex?: number; note?: string | null; seasonId?: string;
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+  if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
+    throw new HttpsError('invalid-argument', 'Missing or invalid slotIndex.');
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const now = Date.now();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+
+  const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = missionSnap.val() as GMMission;
+
+  const seat = mission.participants?.[uid];
+  if (!seat) throw new HttpsError('failed-precondition', 'Not a participant.');
+  // Bounds-check against the seat's OWN slots — a note may only ever be attached
+  // to a slot the caller actually holds.
+  if (slotIndex >= (seat.slots ?? []).length)
+    throw new HttpsError('failed-precondition', 'No such slot on your seat.');
+
+  const base = sp(seasonId, `missions/${missionId}/participants/${uid}/slots/${slotIndex}`);
+  const updates: Record<string, unknown> = {};
+
+  if (note == null || note.trim() === '') {
+    updates[`${base}/note`] = null;
+  } else {
+    const text = note.trim().slice(0, 280);
+    updates[`${base}/note`]         = { text, timestamp: now };
+    updates[`${base}/lastReported`] = now;
+  }
+
+  await db.ref().update(updates);
+  return { success: true };
+});
+
 // ── Claim an open spot on an in-progress mission (kicked player replacement) ──
 
 export const claimMissionSlot = onCall(async (request) => {
@@ -2402,6 +2454,106 @@ export const adminGetCasinoYamls = onCall(async (request) => {
   return { yamls };
 });
 
+// ── Admin: peek at what every seat is holding ─────────────────────────────────
+//
+// The host can already see the cards a seat COMMITTED (`lockedCards` is public —
+// it maps 1:1 to the public slots). What this adds is the other half: the cards it
+// did NOT commit. Those are exactly the alternative games a seat could still pick,
+// which is the question the host is actually asking when weighing a config deny —
+// and they live in seasonSecrets/, which no client, admin's included, may read.
+// Hence a callable, going through the Admin SDK.
+//
+// The pool is assembled the same way the table assembles it:
+//   · Hold 'Em — the seat's persisted `hole` plus the table's PUBLIC `community`,
+//     both through holdemPool() so the two decks' uid namespaces can't collide.
+//   · every other game — the dealt `hand`, which lockCasinoResult deliberately
+//     KEEPS as the seat's re-selection pool.
+// Committed cards are matched back into the pool by uid. A CLAIMED card came off
+// another player's deck (a different uid namespace) and is absent from this pool,
+// so it is identified by its index-aligned slot's `claimed` flag — never by uid,
+// which can coincide across the two namespaces.
+//
+// Secrets are purged at settle (onMissionComplete drops the mission's whole secret
+// subtree), so a settled table reports committed cards only. That is expected.
+interface AdminPeekCard {
+  card:      DeckCard;
+  origin:    'hole' | 'community' | 'hand' | 'claimed';
+  committed: boolean;
+}
+
+export const adminGetCasinoHands = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  await requireAdmin(request.auth.uid);
+
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+
+  const [mSnap, hSnap] = await Promise.all([
+    db.ref(sp(seasonId, `missions/${missionId}`)).get(),
+    db.ref(sp(seasonId, `missionsHistory/${missionId}`)).get(),
+  ]);
+  const mission = (mSnap.exists() ? mSnap.val() : hSnap.exists() ? hSnap.val() : null) as GMMission | null;
+  if (!mission) throw new HttpsError('not-found', 'Mission not found.');
+  if (mission.type !== 'casino') throw new HttpsError('failed-precondition', 'Not a casino table.');
+
+  const community = (mission.community ?? []).filter(Boolean);
+  const isHoldem  = mission.casinoGame === 'holdem';
+
+  const seats: {
+    uid: string; playerName: string; played: boolean; poolKnown: boolean; cards: AdminPeekCard[];
+  }[] = [];
+
+  // One read for the whole table rather than two per seat. It carries each seat's
+  // `deck` as well — the draw deck NOBODY may see, its owner included, since it
+  // would let a hand be engineered — so only `hand` and `hole` are ever unpacked.
+  const secretsSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants`)).get();
+  const secrets = (secretsSnap.val() ?? {}) as Record<string, { hand?: DeckCard[]; hole?: DeckCard[] }>;
+
+  for (const [uid, seat] of Object.entries(mission.participants ?? {})) {
+    if (!seat) continue;
+
+    const hand = (secrets[uid]?.hand ?? []).filter(Boolean);
+    const hole = (secrets[uid]?.hole ?? []).filter(Boolean);
+
+    // Hold 'Em's pool spans two decks; every other game is the one dealt hand.
+    // Pre-reveal, a Hold 'Em seat is just its hole cards — community is still empty.
+    const pool: AdminPeekCard[] = isHoldem
+      ? holdemPool(hole, community).map((card, i) => ({
+          card, origin: i < hole.length ? ('hole' as const) : ('community' as const), committed: false,
+        }))
+      : hand.map(card => ({ card, origin: 'hand' as const, committed: false }));
+
+    const { own, claimed } = splitSeatCards(seat);
+    const ownUids = new Set(own.map(p => p.card.uid));
+    for (const entry of pool) if (ownUids.has(entry.card.uid)) entry.committed = true;
+
+    // A committed card the pool can't account for still has to show — it is the
+    // half the host most needs. Happens on a settled table (secrets purged) and on
+    // Hold 'Em hands dealt before the community uid namespacing landed.
+    const cards = [...pool];
+    for (const p of own) {
+      if (!pool.some(e => e.committed && e.card.uid === p.card.uid)) {
+        cards.push({ card: p.card, origin: 'hand', committed: true });
+      }
+    }
+    for (const p of claimed) cards.push({ card: p.card, origin: 'claimed', committed: true });
+
+    seats.push({
+      uid,
+      playerName: seat.playerName ?? uid,
+      played:     seat.played === true,
+      poolKnown:  pool.length > 0,
+      cards,
+    });
+  }
+
+  seats.sort((a, b) => a.playerName.localeCompare(b.playerName));
+  return { seats, game: mission.casinoGame ?? null };
+});
+
 // Admin: deny a seat's config. Invalidates it (deletes the stored file so the host
 // can't accidentally build the room from a rejected YAML) and flags the seat so the
 // player is prompted to resubmit — works whether the table is forming or already in
@@ -3292,8 +3444,14 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
     ]));
   }
 
+  // Should this room still be polled? `Done` is the ONLY final status: a `100%`
+  // slot has every check but has not finished its goal yet (the normal pre-goal
+  // state), and a `Goaled` slot still becomes `Done` when its post-goal release
+  // lands. Treating either as finished froze a room the moment its last
+  // In-Progress slot ticked over — until then the stale slot was only ever
+  // updated as a passenger on some other slot's sync.
   function hasActiveSlots(slots: Array<{ status?: SlotStatus }>): boolean {
-    return slots.some(s => !s.status || s.status === 'Unstarted' || s.status === 'In-Progress');
+    return slots.some(s => s.status !== 'Done');
   }
 
   const updates: Record<string, unknown> = {};
@@ -3331,7 +3489,13 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
   const seasons = await tickableSeasons(db, true);
   for (const { seasonId } of seasons) {
     const playersSnap = await db.ref(sp(seasonId, 'players')).get();
-    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {}) as Record<string, { adventurers?: Record<string, RawAdv>; activeMissions?: Record<string, true> }>;
+    const rawPlayers = (playersSnap.exists() ? playersSnap.val() : {}) as Record<string, { adventurers?: Record<string, RawAdv>; activeMissions?: Record<string, true>; restricted?: boolean }>;
+    // A RESTRICTED player is exempt from BOTH early-release blocks below: their
+    // adventurer / mission claim is held until the world itself resolves (the tile
+    // or mission completing frees it), rather than the moment their own slots go
+    // terminal. Inlined here the same way `deriveStatus` is — the client mirror is
+    // `releasesClaimsEarly` in src/lib/gameLogic.ts.
+    const releasesEarly = (pid: string) => rawPlayers[pid]?.restricted !== true;
 
     // ── Tiles ──────────────────────────────────────────────────────────────
     const tilesSnap = await db.ref(sp(seasonId, 'tiles')).get();
@@ -3378,7 +3542,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
                 const resolved = statusMap.get(names[i]) ?? s.status;
                 return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
               }) &&
-              rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
+              rawPlayers[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord &&
+              releasesEarly(adv.owner)
             ) {
               updates[sp(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busy`)]     = false;
               updates[sp(seasonId, `players/${adv.owner}/adventurers/${adv.advId}/busyTile`)] = null;
@@ -3436,7 +3601,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
               const resolved = statusMap.get(names[i]) ?? s.status;
               return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
             }) &&
-            rawPlayers[pid]?.activeMissions?.[missionId]
+            rawPlayers[pid]?.activeMissions?.[missionId] &&
+            releasesEarly(pid)
           ) {
             updates[sp(seasonId, `players/${pid}/activeMissions/${missionId}`)] = null;
           }

@@ -49,6 +49,13 @@ export const AP_LISTS: readonly ApList[] = [
     // wrongly clear their worlds as already checked against this one.
     from:  Date.parse('2026-08-13T10:00:00-05:00'),
   },
+  {
+    id:    'early-sep',
+    label: 'Early September',
+    // Adopted the morning of Sep 5th. Rooms generated before this instant were
+    // built off the Early August sheet and want a re-check against this one.
+    from:  Date.parse('2026-09-05T08:00:00-05:00'),
+  },
 ];
 
 /** The sheet in force right now — the one new downloads are checked against. */

@@ -30,14 +30,25 @@ export interface AdvSlot {
   room?: 1 | 2;       // bifurcated tiles: which room this slot belongs to
   bonusXP?: number;   // extra XP awarded to the player who completes this slot
   bonusGold?: number; // extra gold awarded to the player who completes this slot
-  // Stamped from Cheesetracker on sync (ms epoch, or null when the tracker has no
-  // value yet). Drive the status report.
+  // Three timestamps of unequal weight (ms epoch, or null). They drive the status
+  // report AND the landing page's idle badges. The first two are stamped from
+  // Cheesetracker on sync; the third is written by the player here.
   //   lastActivity — STRONG: last server-verified activity from the Archipelago
   //                  server (the real "still playing / making progress" signal).
   //   lastChecked  — WEAK: the player's last manual self-report vouching status
   //                  (e.g. "I'm stuck"); may be inaccurate.
+  //   lastReported — WEAK: stamped when the player saves `note` below. The same
+  //                  kind of unverified claim as lastChecked, made in our UI
+  //                  instead of Cheese's, and weighted identically. Deleting the
+  //                  note does NOT clear it — the report was still made.
   lastActivity?: number | null;
   lastChecked?: number | null;
+  lastReported?: number | null;
+  // The player's own explanation of where this slot stands ("stuck behind a Varia
+  // gate", "travelling until Sunday"). Written via the `setSlotStatusNote`
+  // callable, which stamps `lastReported` in the same update. Readable by anyone
+  // at the table; editable only by the slot's owner.
+  note?: AdvStatusNote;
   // Casino only: this slot was CLAIMED from a vacated seat rather than dealt to
   // its holder. Its card pays out flat (no deck boost — the claimant never chose
   // the deck), and it carries its OWN pot weight rather than a slice of the
@@ -155,7 +166,19 @@ export interface Player {
   xpHistory?: number[];                      // archived XP totals from previous campaigns
   nameColor?: string;                        // color ID from NAME_COLORS palette
   preferredDeckChoice?: CasinoDeckChoice;    // last casino deck picked; pre-fills the picker next cohort
+  // Two independent flags, read together as one tri-state by `playerStatus`:
+  // active (neither set) → restricted → disabled. `disabled` is the kill-switch
+  // (it also disables the Auth account); `restricted` is a play-on penalty that
+  // only changes when the player gets their claims back — see `restricted`.
   disabled?: boolean;
+  // Restricted: plays as normal, but claims are NOT released early. A restricted
+  // player keeps holding a mission claim / tile adventurer until the world itself
+  // resolves (the mission or tile completes), instead of the moment their own
+  // slots all go terminal. This is the pre-pooled-claims behaviour, applied as a
+  // penalty to one player. Every early-release site gates on `releasesClaimsEarly`
+  // (client) or an inline `restricted` check (functions/tickSlotStatuses); the
+  // completion paths clear claims for everyone and are deliberately untouched.
+  restricted?: boolean;
   feats?: PlayerFeats;
   warnings?: Record<string, PlayerWarning>;
   discordHandle?: string;
@@ -548,6 +571,32 @@ export interface ClaimableEntry {
   fromPlayerId?:   string;    // provenance: who vacated it
   fromPlayerName?: string;
   createdAt?:    number;
+}
+
+// ── Host peek: an admin-only reveal of what a casino seat is holding ──────────
+// Returned by the `adminGetCasinoHands` callable, which reads the seat's pool out
+// of seasonSecrets/ with the Admin SDK — no client, the admin's included, may read
+// that tree. `origin` is what makes the pool readable:
+//   'hole' / 'hand' — the seat's own private cards
+//   'community'     — Hold 'Em's SHARED five: an option for every seat at the table,
+//                     not this player's private holding
+//   'claimed'       — adopted from a vacated seat, so it was never a card this
+//                     player could have chosen differently
+export interface CasinoPeekCard {
+  card:      DeckCard;
+  origin:    'hole' | 'community' | 'hand' | 'claimed';
+  committed: boolean;
+}
+
+export interface CasinoSeatPeek {
+  uid:        string;
+  playerName: string;
+  played:     boolean;
+  // False once the secret pool is gone — a settled table has its secrets purged by
+  // onMissionComplete, leaving only the committed cards. Not an error, but the
+  // "what else could they have picked" half of the answer is unrecoverable.
+  poolKnown:  boolean;
+  cards:      CasinoPeekCard[];
 }
 
 export interface CompletedChallenge {

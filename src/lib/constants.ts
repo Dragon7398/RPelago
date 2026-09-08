@@ -1,4 +1,7 @@
 import type { AdvClass, OrbDef, ShopItem, Shop } from '../types';
+// Type-only: apYaml.ts is a standalone primitive (its only import is `yaml`), so
+// naming its shape here can't form a cycle.
+import type { YamlLimits } from './apYaml';
 
 // Board geometry (ROWS / COLS / COL_CHARS / CENTER_COORD and the coord helpers)
 // moved to src/lib/board.ts — it is per-season now, not a set of constants.
@@ -147,7 +150,7 @@ export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
 // mission manifest reminder). The sheet gets re-published under a new id from
 // time to time — update it HERE only, so every surface stays in sync.
 export const DRAGOS_LIST_URL =
-  'https://docs.google.com/spreadsheets/d/1udTGPA2yJ1OLaKMzJIQBESGSxGWgr9wIh4Xr2x2N_SQ';
+  'https://docs.google.com/spreadsheets/d/1bqf6bq02u0mKA-owd0pioKGhzYVaaZki-Mj0AoBXkDQ';
 
 // ── Boss orb-reactive traits ───────────────────────────────────────────────────
 // Elemental orb → trait IDs applied to the boss while that orb is ungathered
@@ -242,6 +245,33 @@ export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {
 
 // Non-center shop IDs assigned to the three non-center towns via seeded shuffle
 export const NON_CENTER_SHOP_IDS = ['frostshear', 'flamefell', 'pinereach'] as const;
+
+// ── YAML settings caps ────────────────────────────────────────────────────────
+//
+// The per-game limits the YAML rules state, before any feat raises them. This is
+// the ONE source for both the numbers shown in the rules (help/SectionYaml.tsx,
+// casino/YamlRulesLightbox.tsx) and the numbers a submitted config is screened
+// against (apYaml.checkYamlLimits), so the two can never drift apart.
+//
+// These are SOFT caps: a config over one is warned about, never blocked, because
+// the host grants exceptions per player. Add a feat's bonus via
+// gameLogic.yamlLimitsForFeats, never by editing these base values.
+export const BASE_YAML_LIMITS: YamlLimits = {
+  startInventory:     0,
+  priorityLocations:  2,
+  excludeLocations:   2,
+  startHints:         1,
+  startLocationHints: 1,
+};
+
+// How many items one starting hint may target. Stated in the rules but NOT
+// machine-checkable — an item group's size is only known to the APworld — so
+// nothing screens against it; it exists so the rules text has one home.
+export const START_HINT_ITEM_CAP = 10;
+
+// The progression_balancing band the rules quote. The screening thresholds
+// (warn > 50, reject > 75) live in apYaml.ts with the check itself.
+export const PB_LIMITS = { min: 0, max: 50 } as const;
 
 export interface FeatDef {
   id: string;

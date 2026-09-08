@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseApYaml, checkWorldCount, checkProgressionBalancing, RANDOMIZED_GAME } from '../../src/lib/apYaml';
+import { parseApYaml, checkWorldCount, checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings, RANDOMIZED_GAME, type YamlLimits } from '../../src/lib/apYaml';
 
 describe('parseApYaml — game resolution', () => {
   it('reads a plain string game', () => {
@@ -174,5 +174,137 @@ describe('checkProgressionBalancing', () => {
 
   it('returns nothing for a config with no progression_balancing', () => {
     expect(checkProgressionBalancing('name: P\ngame: Celeste\n')).toEqual([]);
+  });
+});
+
+// ── YAML settings caps ────────────────────────────────────────────────────────
+
+// The base allowance a player with no feats gets (mirrors BASE_YAML_LIMITS).
+const CAPS: YamlLimits = {
+  startInventory: 0, priorityLocations: 2, excludeLocations: 2,
+  startHints: 1, startLocationHints: 1,
+};
+
+// AP nests these under the resolved game's section, same as progression_balancing.
+const capYaml = (body: string) =>
+  `name: P\ngame: Celeste\nCeleste:\n${body.split('\n').map(l => (l ? `  ${l}` : l)).join('\n')}\n`;
+
+describe('checkYamlLimits', () => {
+  it('passes a config sitting exactly on every cap', () => {
+    const text = capYaml(
+      'priority_locations:\n  - A\n  - B\n' +
+      'exclude_locations:\n  - C\n  - D\n' +
+      'start_hints:\n  - Dash\n' +
+      'start_location_hints:\n  - Somewhere\n',
+    );
+    expect(checkYamlLimits(text, CAPS)).toEqual([]);
+  });
+
+  it('passes a config with none of the options at all', () => {
+    expect(checkYamlLimits('name: P\ngame: Celeste\n', CAPS)).toEqual([]);
+  });
+
+  it('flags an over-cap list by count', () => {
+    const f = checkYamlLimits(capYaml('exclude_locations:\n  - A\n  - B\n  - C\n'), CAPS);
+    expect(f).toHaveLength(1);
+    expect(f[0].key).toBe('excludeLocations');
+    expect(f[0].count).toBe(3);
+    expect(f[0].cap).toBe(2);
+    expect(f[0].world).toBe('File');
+  });
+
+  it('counts start_inventory by ITEM COUNT, not by entry', () => {
+    // One entry, three items — the cap is on items.
+    const f = checkYamlLimits(capYaml('start_inventory:\n  Bomb: 3\n'), CAPS);
+    expect(f).toHaveLength(1);
+    expect(f[0].key).toBe('startInventory');
+    expect(f[0].count).toBe(3);
+  });
+
+  it('ignores a start_inventory entry with a count of 0', () => {
+    expect(checkYamlLimits(capYaml('start_inventory:\n  Bomb: 0\n'), CAPS)).toEqual([]);
+  });
+
+  it('adds start_inventory_from_pool to the same cap', () => {
+    const f = checkYamlLimits(
+      capYaml('start_inventory:\n  Bomb: 1\nstart_inventory_from_pool:\n  Key: 1\n'), CAPS);
+    expect(f[0].key).toBe('startInventory');
+    expect(f[0].count).toBe(2);
+  });
+
+  it('honours a raised cap (a feat) instead of the base one', () => {
+    const text = capYaml('exclude_locations:\n  - A\n  - B\n  - C\n  - D\n  - E\n  - F\n');
+    expect(checkYamlLimits(text, CAPS)).toHaveLength(1);            // base 2 — over
+    expect(checkYamlLimits(text, { ...CAPS, excludeLocations: 6 })).toEqual([]); // Picky — fine
+  });
+
+  it('takes the worst SITE, never the sum, so a weighted game is not double-counted', () => {
+    // Two game sections, only one of which can be rolled: 3, not 6.
+    const text =
+      'name: P\ngame:\n  Celeste: 1\n  Hollow Knight: 1\n' +
+      'Celeste:\n  exclude_locations:\n    - A\n    - B\n    - C\n' +
+      'Hollow Knight:\n  exclude_locations:\n    - D\n    - E\n    - F\n';
+    const f = checkYamlLimits(text, CAPS);
+    expect(f).toHaveLength(1);
+    expect(f[0].count).toBe(3);
+  });
+
+  it('reads an option written at the document root', () => {
+    const f = checkYamlLimits('name: P\ngame: Celeste\nstart_hints:\n  - A\n  - B\n', CAPS);
+    expect(f[0].key).toBe('startHints');
+    expect(f[0].count).toBe(2);
+  });
+
+  it('counts a mapping-shaped OptionSet by its members', () => {
+    const f = checkYamlLimits(capYaml('priority_locations:\n  A: 1\n  B: 1\n  C: 1\n'), CAPS);
+    expect(f[0].count).toBe(3);
+  });
+
+  it('labels each world in a multi-document file', () => {
+    const over = capYaml('start_hints:\n  - A\n  - B\n');
+    const fine = capYaml('start_hints:\n  - A\n');
+    const f = checkYamlLimits(`${over}---\n${fine}`, CAPS);
+    expect(f).toHaveLength(1);
+    expect(f[0].world).toBe('World 1');
+  });
+
+  it('never produces a blocking severity — findings are advisory only', () => {
+    const f = checkYamlLimits(capYaml('start_inventory:\n  Bomb: 9\n'), CAPS);
+    expect(f).toHaveLength(1);
+    expect(f[0]).not.toHaveProperty('severity');
+    expect(f[0].message).toMatch(/still submit/i);
+  });
+});
+
+describe('summarizeLimitFindings', () => {
+  it('collapses one setting across several worlds into a single row', () => {
+    const w = (n: number) => capYaml(`exclude_locations:\n${'  - X\n'.repeat(n)}`);
+    const f = checkYamlLimits(`${w(3)}---\n${w(5)}`, CAPS);
+    expect(f).toHaveLength(2);
+
+    const [row] = summarizeLimitFindings(f);
+    expect(row.key).toBe('excludeLocations');
+    expect(row.worlds).toEqual(['World 1', 'World 2']);
+    expect(row.count).toBe(5);                       // the worst overage
+    expect(row.message).toMatch(/World 1 and World 2 ask for up to 5/);
+  });
+
+  it('names a single-document file "This config" rather than "File"', () => {
+    const f = checkYamlLimits(capYaml('exclude_locations:\n  - A\n  - B\n  - C\n'), CAPS);
+    expect(summarizeLimitFindings(f)[0].message).toMatch(/^Excluded locations: This config asks for 3/);
+  });
+
+  it('returns one row per setting, in the order the rules list them', () => {
+    const f = checkYamlLimits(capYaml(
+      'start_hints:\n  - A\n  - B\n' +
+      'start_inventory:\n  Bomb: 1\n' +
+      'exclude_locations:\n  - A\n  - B\n  - C\n',
+    ), CAPS);
+    expect(summarizeLimitFindings(f).map(r => r.key))
+      .toEqual(['startInventory', 'excludeLocations', 'startHints']);
+  });
+
+  it('returns nothing for a clean config', () => {
+    expect(summarizeLimitFindings([])).toEqual([]);
   });
 });

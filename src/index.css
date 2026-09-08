@@ -32,6 +32,22 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --open-bg:     oklch(16% 0.08 320 / 0.36);
   --open-bg-hi:  oklch(24% 0.11 320 / 0.55);
   --open-border: oklch(46% 0.14 320);
+  /* Restricted-player surfaces. The middle player status: still playing, but
+     claims only come back when the world resolves. Amber, like void — a penalty
+     that is emphatically not a ban, and it must not read as the red Disabled
+     state sitting next to it. Every control using these carries its own word
+     ("Restricted"), so hue is reinforcement, never the message. */
+  --restrict-fg:     oklch(74% 0.15 70);
+  --restrict-fg-hi:  oklch(84% 0.16 70);
+  --restrict-bg:     oklch(16% 0.08 70 / 0.42);
+  --restrict-bg-hi:  oklch(23% 0.10 70 / 0.58);
+  --restrict-border: oklch(48% 0.13 70);
+  /* Active — the no-restrictions state. Green, matched to the unban control. */
+  --allow-fg:        oklch(66% 0.14 145);
+  --allow-fg-hi:     oklch(76% 0.16 145);
+  --allow-bg:        oklch(14% 0.08 145 / 0.4);
+  --allow-bg-hi:     oklch(20% 0.10 145 / 0.55);
+  --allow-border:    oklch(40% 0.12 145);
   /* "Go fetch this APworld" surfaces — a heads-up for the host, never an error.
      NEW (never downloaded) is cyan and OLD (downloaded off an older list, so due
      an update check) is violet: both stay clear of the gold-warn and red-reject
@@ -44,6 +60,26 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --fetch-old-fg:      oklch(72% 0.12 300);
   --fetch-old-bg:      oklch(18% 0.06 300 / 0.42);
   --fetch-old-border:  oklch(46% 0.11 300);
+  /* Mission pending-action pill — the admin board's triage flag. Three tiers by
+     WHO is holding things up, because that is what the host does differently:
+       block — waiting on a player (a config that hasn't arrived, or was denied)
+       act   — waiting on the host (deploy it, generate the room)
+       done  — finished, waiting only to be settled
+     Every pill always carries an icon AND words ("2 configs", "needs room",
+     "ready to settle"), so hue is reinforcement and never the message — the
+     red/gold/green split would otherwise be the one triple the Deutan/Protan
+     themes handle worst. `done` is teal rather than green for the same reason:
+     it keeps the finished tier on the blue side of Tidepool's blue-yellow axis
+     instead of collapsing into the gold `act` tier. */
+  --pend-block-fg:     oklch(70% 0.18 25);
+  --pend-block-bg:     oklch(16% 0.09 25 / 0.42);
+  --pend-block-border: oklch(46% 0.15 25);
+  --pend-act-fg:       oklch(78% 0.15 75);
+  --pend-act-bg:       oklch(18% 0.07 75 / 0.42);
+  --pend-act-border:   oklch(48% 0.12 75);
+  --pend-done-fg:      oklch(76% 0.13 175);
+  --pend-done-bg:      oklch(18% 0.06 175 / 0.42);
+  --pend-done-border:  oklch(46% 0.11 175);
   --teal:       oklch(60% 0.14 195);
   --purple:     oklch(55% 0.18 310);
   --green:      oklch(58% 0.16 145);
@@ -1125,9 +1161,21 @@ header p {
 /* Progression-balancing flag shown beside a seat's name on download. Amber for a
    discouraged (warn) value, red for a disallowed (reject) one that slipped past the
    player's submit gate. Theme-aware via the same oklch tokens as the deny button. */
-.casino-yaml-pb {
+.casino-yaml-pb, .casino-yaml-cap {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
   padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
+}
+/* Over one of the per-game settings caps (inventory / locations / hints).
+   Deliberately the SAME gold surface as a PB warn, not a colour of its own: the
+   two say exactly the same thing — a setting outside policy that nothing blocked,
+   worth your eyes — so they should read as one family, with the badge text ("PB
+   60" vs "Excluded 6/2") carrying which setting it is. Never the red `reject`
+   surface: these caps have no hard limit, since you grant exceptions to them.
+   (--caution, the casino landing's orange, is scoped to body.casino-scope and does
+   not resolve in the map-shell admin dashboard — do not reach for it here.) */
+.casino-yaml-cap {
+  color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
+  border: 1px solid oklch(from var(--gold) l c h / 0.45);
 }
 .casino-yaml-pb.warn {
   color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
@@ -1156,6 +1204,62 @@ header p {
 }
 /* Which sheet the flags above were judged against. */
 .casino-yaml-list-note { color: var(--text-muted); letter-spacing: 0.04em; }
+/* Seats with NO stored config — the ones the download list structurally cannot
+   show, since a denied file is deleted from Storage. Sits above the list and is
+   built from mission state, so it needs no fetch and survives a deny emptying the
+   list. Uses the --pend-block/--pend-act pair the board's triage pill already
+   defines, so it inherits the light and color-blind remaps for free; the tag
+   always spells out DENIED / NOT SUBMITTED, so hue is never the message. */
+/* One severity axis, driven from the block: AMBER by default (seats still open,
+   so a missing config costs nothing yet) and RED only with `.blocking`, when the
+   table is full — or already live — and those configs are the last thing between
+   the host and a room. Locally aliased so every child follows the block without
+   re-stating the pair, and so the two states can never half-apply. The DENIED /
+   NOT SUBMITTED wording always distinguishes the rows, so hue is only ever
+   carrying urgency, never which of the two a row is. */
+.casino-yaml-missing {
+  --miss-fg:     var(--pend-act-fg);
+  --miss-bg:     var(--pend-act-bg);
+  --miss-border: var(--pend-act-border);
+  margin-top: 0.4rem; border: 1px solid var(--miss-border);
+  border-radius: 3px; overflow: hidden; background: var(--miss-bg);
+}
+.casino-yaml-missing.blocking {
+  --miss-fg:     var(--pend-block-fg);
+  --miss-bg:     var(--pend-block-bg);
+  --miss-border: var(--pend-block-border);
+}
+.casino-yaml-missing-head {
+  padding: 0.4rem 0.6rem; border-bottom: 1px solid oklch(from var(--miss-border) l c h / 0.5);
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.06em;
+  color: var(--miss-fg); cursor: default;
+}
+.casino-yaml-missing-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.32rem 0.6rem;
+  border-bottom: 1px solid oklch(from var(--miss-border) l c h / 0.25);
+}
+.casino-yaml-missing-row:last-child { border-bottom: none; }
+.casino-yaml-missing-tag {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  padding: 0.1rem 0.36rem; border-radius: 2px; white-space: nowrap;
+  color: var(--miss-fg); border: 1px solid var(--miss-border);
+}
+.casino-yaml-missing-when { font-size: 0.62rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.casino-yaml-missing-why {
+  font-family: 'Crimson Pro', serif; font-size: 0.72rem; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; max-width: 22rem;
+}
+/* Header doubles as the collapse control (the list also folds itself away once the
+   room syncs). Inherits the head's Cinzel/gold-dim so it reads as the label it
+   replaces, matching the SLOTS ledger toggle. */
+.casino-yaml-collapse {
+  display: inline-flex; align-items: center; gap: 0.4rem; text-align: left;
+  font: inherit; letter-spacing: inherit; color: inherit;
+  padding: 0; background: none; border: none; cursor: pointer;
+  transition: color 0.15s;
+}
+.casino-yaml-collapse:hover { color: var(--gold); }
 .casino-yaml-acts { display: inline-flex; align-items: center; gap: 0.5rem; }
 .casino-yaml-deny-confirm { display: inline-flex; align-items: center; gap: 0.3rem; }
 
@@ -1217,7 +1321,20 @@ header p {
 .admin-tri-btn.active-on      { background: oklch(20% 0.08 145 / 0.6); color: oklch(70% 0.14 145); }
 .admin-tri-btn.active-off     { background: oklch(16% 0.05 25 / 0.5);  color: oklch(65% 0.12 25); }
 .admin-tri-btn.active-special { background: oklch(18% 0.08 60 / 0.5);  color: var(--amber); }
-.admin-tri-btn:hover { filter: brightness(1.25); }
+.admin-tri-btn:hover:not(:disabled) { filter: brightness(1.25); }
+/* Locked room settings. The lock is a guard against a stray keystroke, not a
+   permission boundary — the host can always unlock — so these read as inert
+   rather than forbidden: dimmed and not-allowed, no red, no error styling. */
+.admin-tri-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5); }
+.admin-text-input:disabled,
+.admin-count-input:disabled {
+  opacity: 0.5; cursor: not-allowed;
+  background: oklch(from var(--bg-deep) l c h / 0.6);
+}
+.admin-room-locked-note {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--amber); margin-top: 0.5rem; margin-bottom: 0.1rem;
+}
 .admin-hint-wrap { display: flex; align-items: center; gap: 0.4rem; }
 .admin-hint-wrap span { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); }
 .admin-state-btns { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
@@ -1908,6 +2025,25 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   color: oklch(72% 0.18 145); font-size: 0.78rem; flex-shrink: 0;
   cursor: default; line-height: 1;
 }
+/* Mission board triage pill. Replaces the bare ⚠/✓ glyphs above on the missions
+   page (Challenges still uses those): the board now SORTS on this, so the flag
+   has to say what the card is waiting on, not just that something is up. */
+.dash-pending-pill {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.1em;
+  text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
+  padding: 0.12rem 0.4rem; border-radius: 2px; line-height: 1.35;
+  cursor: default; border: 1px solid var(--pend-act-border);
+  color: var(--pend-act-fg); background: var(--pend-act-bg);
+}
+.dash-pending-pill.configs,
+.dash-pending-pill.denied {
+  color: var(--pend-block-fg); background: var(--pend-block-bg);
+  border-color: var(--pend-block-border);
+}
+.dash-pending-pill.complete {
+  color: var(--pend-done-fg); background: var(--pend-done-bg);
+  border-color: var(--pend-done-border);
+}
 
 /* Hamburger (mobile) */
 .dash-header-nav { position: relative; }
@@ -2006,6 +2142,33 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.12em;
   color: var(--gold-dim); border-bottom: 1px solid var(--border);
   padding-bottom: 0.35rem;
+}
+.dash-col-header-right { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* Release control for a held card. Only rendered on the column actually holding
+   one, so it doubles as the signal that the board is not sorting live right now. */
+.dash-col-resort {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  /* Shorter than the 0.75rem header title that sets the row height, so appearing
+     here can never grow the header and push the cards below it down. */
+  line-height: 1.2;
+  padding: 0.12rem 0.4rem; border-radius: 2px; cursor: pointer;
+  color: var(--pend-act-fg); background: var(--pend-act-bg);
+  border: 1px solid var(--pend-act-border); transition: color 0.15s, border-color 0.15s;
+}
+.dash-col-resort:hover { color: var(--gold); border-color: var(--gold-dim); }
+/* Marks the held card itself, so "why is this one not moving" is answered on the
+   card as well as in the header. Same amber as the release chip — this is a state
+   the host put the board in, not a problem with the cohort.
+
+   MUST NOT AFFECT LAYOUT. The pin is set from a capture-phase pointerdown, so it
+   re-renders mid-gesture; anything that reflows the card (this was a pill inside
+   the wrapping flex header, which shifted the Sync button and the room links
+   sideways) moves the control out from under the pointer, and the browser then
+   fires no click at all — the host's first click silently does nothing and only
+   the second one lands. An inset shadow is painted, never laid out, so the marker
+   cannot move a single pixel of anything. */
+.dash-tile-card.pinned {
+  box-shadow: inset 3px 0 0 var(--pend-act-fg);
 }
 .dash-col-count {
   background: oklch(16% 0.06 75 / 0.5); border: 1px solid var(--border);
@@ -2122,6 +2285,8 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   border-radius: 3px; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
 }
 .dash-player-card.disabled { border-color: oklch(36% 0.12 25 / 0.6); background: oklch(12% 0.04 25 / 0.3); }
+/* Restricted is a live player, so the card stays legible — only the border says so. */
+.dash-player-card.restricted { border-color: var(--restrict-border); }
 .dash-player-header { display: flex; flex-direction: column; gap: 0.15rem; }
 .dash-player-name {
   font-family: 'Cinzel', serif; font-size: 0.75rem; letter-spacing: 0.1em;
@@ -2165,8 +2330,16 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-void-btn:hover { background: var(--void-bg-hi); color: var(--void-fg-hi); }
 .dash-player-disabled-badge {
   font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;
-  border-radius: 2px; background: oklch(16% 0.10 25 / 0.5);
-  border: 1px solid oklch(40% 0.14 25); color: oklch(62% 0.16 25);
+  border-radius: 2px; background: var(--ban-bg); 
+  border: 1px solid var(--ban-border); color: var(--ban-fg);
+}
+/* Middle status. Amber tokens, so it can never be mistaken for the red DISABLED
+   badge it replaces on the same line — and it carries its own word regardless. */
+.dash-player-restricted-badge {
+  font-size: 0.5rem; letter-spacing: 0.12em; padding: 0.1rem 0.4rem;
+  border-radius: 2px; background: var(--restrict-bg);
+  border: 1px solid var(--restrict-border); color: var(--restrict-fg);
+  cursor: help;
 }
 .dash-player-stats  { font-size: 0.78rem; color: oklch(55% 0.06 75); }
 .dash-player-history { color: oklch(48% 0.08 200); }
@@ -2208,26 +2381,45 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .dash-player-sync:hover:not(:disabled) { background: oklch(20% 0.08 215 / 0.5); color: oklch(66% 0.14 215); }
 .dash-player-sync:disabled { opacity: 0.35; cursor: not-allowed; }
-.dash-player-disable {
+/* Player status — one segmented control over the three states (active /
+   restricted / disabled). Each segment keeps its own hue AND its own word, so the
+   control reads the same in the light and high-contrast themes. The current state
+   is the pressed, non-clickable segment; the other two are the actions. */
+.dash-player-status { display: flex; border-radius: 2px; overflow: hidden; }
+.dash-status-btn {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
-  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
-  background: oklch(14% 0.10 25 / 0.4); border: 1px solid oklch(42% 0.16 25);
-  color: oklch(62% 0.18 25); transition: all 0.15s;
+  padding: 0.25rem 0.6rem; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  border-right-width: 0; color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
 }
-.dash-player-disable:hover { background: oklch(20% 0.12 25 / 0.5); color: oklch(72% 0.20 25); }
+.dash-status-btn:last-child  { border-right-width: 1px; }
+.dash-status-btn:first-child { border-radius: 2px 0 0 2px; }
+.dash-status-btn:last-child  { border-radius: 0 2px 2px 0; }
+/* The segment you are NOT on is the action — tint it on hover in its own colour. */
+.dash-status-btn--active:hover:not(:disabled)     { background: var(--allow-bg);     color: var(--allow-fg-hi); }
+.dash-status-btn--restricted:hover:not(:disabled) { background: var(--restrict-bg);  color: var(--restrict-fg-hi); }
+.dash-status-btn--disabled:hover:not(:disabled)   { background: var(--ban-bg);       color: var(--ban-fg-hi); }
+/* The segment you ARE on. `.on` is the current state (disabled as a button, but
+   fully opaque — it is a readout, not an unavailable action); a plain :disabled
+   without `.on` is the in-flight state and does dim. */
+.dash-status-btn.on { cursor: default; font-weight: 600; }
+.dash-status-btn--active.on {
+  background: var(--allow-bg-hi);    border-color: var(--allow-border);    color: var(--allow-fg);
+}
+.dash-status-btn--restricted.on {
+  background: var(--restrict-bg-hi); border-color: var(--restrict-border); color: var(--restrict-fg);
+}
+.dash-status-btn--disabled.on {
+  background: var(--ban-bg-hi);      border-color: var(--ban-border);      color: var(--ban-fg);
+}
+.dash-status-btn:disabled:not(.on) { opacity: 0.4; cursor: not-allowed; }
 .dash-player-admin-badge {
   font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.12em;
   padding: 0.15rem 0.5rem; border-radius: 2px;
   background: oklch(16% 0.08 75 / 0.4); border: 1px solid oklch(40% 0.12 75);
   color: var(--gold-dim); cursor: default;
 }
-.dash-player-enable {
-  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
-  padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
-  background: oklch(14% 0.08 145 / 0.4); border: 1px solid oklch(38% 0.12 145);
-  color: oklch(60% 0.14 145); transition: all 0.15s;
-}
-.dash-player-enable:hover { background: oklch(20% 0.10 145 / 0.5); color: oklch(70% 0.16 145); }
 .dash-player-ban {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
   padding: 0.25rem 0.6rem; border-radius: 2px; cursor: pointer;
@@ -2660,6 +2852,35 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   background: oklch(from var(--gold) l c h / 0.14);
   border-color: var(--gold-dim); color: var(--gold);
 }
+
+/* Rank prefix on the paged Top Games rows — the number is the row's place in the
+   whole list, so it is the only thing telling page 3 apart from page 1. Muted and
+   tabular so it reads as an index beside the title rather than competing with it. */
+.dash-stat-rank {
+  display: inline-block; min-width: 1.6rem; margin-right: 0.35rem;
+  font-family: 'Cinzel', serif; font-size: 0.58rem;
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+/* Pager. Disabled ends are dimmed AND non-interactive rather than hidden, so the
+   control keeps its position while you page; state is carried by opacity and the
+   cursor, never by hue alone. */
+.dash-stat-pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.6rem; flex-wrap: wrap;
+}
+.dash-stat-pager-btn {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.06em;
+  padding: 0.25rem 0.7rem; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); transition: all 0.12s;
+}
+.dash-stat-pager-btn:hover:not(:disabled) { border-color: var(--border-glow); color: var(--parchment); }
+.dash-stat-pager-btn:disabled { opacity: 0.35; cursor: default; }
+.dash-stat-pager-info {
+  font-family: 'Crimson Pro', serif; font-size: 0.74rem;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.dash-stat-pager-page { color: var(--text-dim); }
 
 .dash-gold-board { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; }
 .dash-gold-row {
@@ -3945,12 +4166,36 @@ body.theme-lapis {
   --open-bg:     oklch(94% 0.04 320 / 0.5);
   --open-bg-hi:  oklch(88% 0.07 320 / 0.65);
   --open-border: oklch(54% 0.15 320);
+  /* Restricted + active surfaces: same wash problem as every family above — the
+     dark values are a low-lightness tint meant for near-black. Flip the polarity. */
+  --restrict-fg:     oklch(42% 0.15 70);
+  --restrict-fg-hi:  oklch(32% 0.17 70);
+  --restrict-bg:     oklch(93% 0.05 70 / 0.55);
+  --restrict-bg-hi:  oklch(87% 0.08 70 / 0.7);
+  --restrict-border: oklch(54% 0.13 70);
+  --allow-fg:        oklch(36% 0.15 145);
+  --allow-fg-hi:     oklch(28% 0.17 145);
+  --allow-bg:        oklch(90% 0.05 145 / 0.55);
+  --allow-bg-hi:     oklch(84% 0.08 145 / 0.7);
+  --allow-border:    oklch(46% 0.13 145);
   --fetch-new-fg:      oklch(38% 0.13 195);
   --fetch-new-bg:      oklch(93% 0.04 195 / 0.55);
   --fetch-new-border:  oklch(52% 0.12 195);
   --fetch-old-fg:      oklch(38% 0.14 300);
   --fetch-old-bg:      oklch(93% 0.04 300 / 0.55);
   --fetch-old-border:  oklch(52% 0.13 300);
+  /* Pending pills: same wash problem as every family above — the dark values are
+     a low-lightness tint meant for near-black. Flip to a light tint behind dark,
+     saturated text. */
+  --pend-block-fg:     oklch(40% 0.19 25);
+  --pend-block-bg:     oklch(92% 0.045 25 / 0.55);
+  --pend-block-border: oklch(52% 0.16 25);
+  --pend-act-fg:       oklch(40% 0.14 65);
+  --pend-act-bg:       oklch(93% 0.05 70 / 0.55);
+  --pend-act-border:   oklch(52% 0.12 68);
+  --pend-done-fg:      oklch(36% 0.12 180);
+  --pend-done-bg:      oklch(93% 0.04 178 / 0.55);
+  --pend-done-border:  oklch(48% 0.11 178);
 }
 /* Unban stays green, and green-on-cream has the same wash problem. */
 body.theme-parchment .dash-ban-lift,
@@ -4816,6 +5061,16 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-slot-game { color: var(--gold-dim); }
 .sr-slot-reasons { font-size: 0.64rem; color: var(--gold-dim); word-break: break-word; }
 .sr-slot-problem .sr-slot-reasons { color: oklch(from var(--bg-card) calc(1 - l) 0.13 25); }
+/* The player's status note, quoted under the reasons. Deliberately quiet — it is
+   context for the excuse decision, not another finding. */
+.sr-slot-note {
+  display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap;
+  margin-top: 0.15rem; padding: 0.15rem 0.4rem;
+  border-left: 2px solid oklch(from var(--gold) l c h / 0.4); border-radius: 0 2px 2px 0;
+  background: oklch(from var(--bg-card) l c h / 0.5);
+}
+.sr-slot-note-text { font-size: 0.66rem; font-style: italic; color: var(--ink-soft); word-break: break-word; }
+.sr-slot-note-time { font-size: 0.58rem; color: var(--gold-dim); white-space: nowrap; }
 
 .sr-section { margin-top: 1.15rem; }
 .sr-section .casino-log-toggle { margin-bottom: 0.6rem; }

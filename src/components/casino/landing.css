@@ -11,6 +11,9 @@ body.casino-scope #root { width: 100%; }
 .rl-root {
   --line: var(--border);
   --line-glow: var(--border-glow);
+  /* The idle badge's alert tier is the theme's own negative — no new token needed.
+     (--caution IS new and is defined per theme in casino/themes.css.) */
+  --alert: var(--neg);
   position: relative; z-index: 1;
   max-width: 1500px; margin: 0 auto; padding: 0 1rem 5rem; width: 100%;
   display: flex; flex-direction: column; gap: 1.4rem;
@@ -149,22 +152,31 @@ body.casino-scope #root { width: 100%; }
   background: radial-gradient(ellipse 80% 100% at 30% 0%, oklch(from var(--felt) calc(l + 0.07) c h), var(--felt) 75%);
   border-bottom: 1px solid oklch(from var(--felt) calc(l + 0.14) c h / 0.4);
 }
-.rl-tcard-tag { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-tcard-name { font-family:'Cinzel',serif; font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-top: 0.1rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
 .rl-tcard-room { font-family:'Crimson Pro',serif; font-style: italic; color: var(--ink-soft); font-size: 0.86rem; margin-top: 0.1rem; }
+/* Live cards carry their status pill on the cohort line (it replaced the old
+   "· live" text), so that row is a flex pair. It wraps rather than squeezing the
+   pill on the Floor's narrower cards. */
+.rl-tcard-room.rl-room-status { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.rl-tcard-room.rl-room-status .rl-badge { flex: none; }
 .rl-tcard-body { padding: 0.9rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; flex: 1; }
 .rl-tcard-stats { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
 .rl-tcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 0.7rem; margin-top: auto; flex-wrap: wrap; }
 /* Long lock labels ("Seated elsewhere") must break rather than overrun the card
    (which clips via overflow:hidden) at larger font sizes. */
 .rl-tcard-foot .rl-btn { white-space: normal; text-align: center; min-width: 0; }
+/* Foot left holding only the seat control once the status pill moved up. */
+.rl-tcard-foot.rl-foot-end { justify-content: flex-end; }
 
 .rl-mini { display: flex; flex-direction: column; line-height: 1.1; }
 .rl-mini-lbl { font-family:'Cinzel',serif; font-size: 0.48rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-dim); }
 .rl-mini-val { font-family:'Cinzel',serif; font-weight: 700; font-size: 0.95rem; color: var(--parchment); }
 .rl-mini-val.gold { color: var(--gold); }
 
-.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; }
+/* Never shrinks or wraps: a long title ("Seven Card Stud") would otherwise
+   squeeze the pot until "g pot" dropped under the number. The title wraps
+   instead — it has the room to. */
+.rl-pot { display: inline-flex; align-items: baseline; gap: 0.25rem; flex: none; white-space: nowrap; }
 .rl-pot .n { font-family:'Cinzel',serif; font-weight: 800; color: var(--gold); font-size: 1.15rem; }
 .rl-pot .u { font-size: 0.6rem; color: var(--gold-dim); }
 /* Per-seat pot projection: Lounge only — the Floor's narrower cards can't spare
@@ -193,7 +205,8 @@ body.casino-scope #root { width: 100%; }
 /* The whole live card is a button into its slot overview. */
 .rl-tcard-live { cursor: pointer; }
 .rl-tcard-live:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.4); }
-.rl-tcard-view { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); }
+/* Stays right-aligned now that the foot may hold nothing else. */
+.rl-tcard-view { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); margin-left: auto; }
 .rl-tcard-live:hover .rl-tcard-view { color: var(--gold); }
 
 /* Config-denied notice — the player must resubmit at the table. */
@@ -432,6 +445,14 @@ body.casino-scope #root { width: 100%; }
   border-top: 1px solid var(--line-glow); padding-top: 0.9rem; margin-bottom: 0.4rem; }
 
 .rl-muted { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.86rem; }
+/* Why the seat buttons are shut for a restricted player. Uses --caution (the idle
+   badge's lower tier), which every theme already defines light and dark — it is a
+   standing condition of the account, not an error, so it must not read as --neg. */
+.rl-lock-note {
+  font-family: 'Crimson Pro', serif; font-size: 0.82rem; line-height: 1.4;
+  color: var(--caution); margin: 0.15rem 0 0.55rem;
+  border-left: 2px solid var(--caution); padding-left: 0.55rem;
+}
 
 /* ══ Profile modal ══ */
 .rl-prof-namerow { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 1rem; }
@@ -588,12 +609,32 @@ body.casino-scope #root { width: 100%; }
 /* Lounge: fewer, roomier cards. `min(100%, …)` keeps the track from outgrowing a
    narrow phone — the card still shrinks to the column rather than overflowing. */
 .mp-board-wide { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
+/* Divider between the games a table still owes work on and the finished ones.
+   The label sits on the rule with the Done toggle parked at its far end, so the
+   whole split costs one line rather than a second section heading. All four
+   colours are theme tokens — the rule fades from the theme's own gold and the
+   button borrows the card ground, so light and colour-blind themes need no
+   override. */
+.mp-split { display: flex; align-items: center; gap: 0.55rem; margin: 1rem 0 0.55rem; }
+.mp-split-lbl { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold-dim); white-space: nowrap; }
+.mp-split-rule { flex: 1; height: 1px; min-width: 1rem; background: linear-gradient(90deg, oklch(from var(--gold) l c h / 0.4), oklch(from var(--gold) l c h / 0.05)); }
+.mp-split-btn {
+  font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--gold-dim); background: oklch(from var(--bg-card) l c h / 0.7);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0.24rem 0.62rem;
+  cursor: pointer; white-space: nowrap;
+}
+.mp-split-btn:hover { color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.5); }
+.mp-split-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
 .mp-tile { background: oklch(from var(--bg-card) l c h / 0.6); border: 1px solid var(--line); border-top: 2px solid oklch(72% 0.14 var(--th,75) / 0.55); border-radius: 10px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
 .mp-tile.goaled { border-top-color: var(--pos); box-shadow: 0 0 0 1px oklch(from var(--pos) l c h / 0.25); }
 .mp-tile.you { box-shadow: 0 0 0 1px oklch(from var(--gold) l c h / 0.3); }
 /* Status on its own line at the top (left-aligned, sized to content) so the genre
-   label below gets the full width — no cramping when the font scale is bumped up. */
-.mp-tile-status { display: flex; }
+   label below gets the full width — no cramping when the font scale is bumped up.
+   It now carries up to four chips (status pill, ⚐ claimed, idle badge, note
+   button), so it wraps rather than squeezing the pill on a narrow column. */
+.mp-tile-status { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 .mp-tile-game { font-family:'Crimson Pro',serif; font-size: 0.92rem; color: var(--parchment); line-height: 1.2; }
 .mp-tile-slot { font-family:'Cinzel',serif; font-size: 0.6rem; color: var(--gold); overflow-wrap: anywhere; }
 .mp-tile-owner { display: flex; align-items: center; gap: 0.35rem; font-family:'Crimson Pro',serif; font-size: 0.74rem; font-style: italic; color: var(--gold-dim); }
@@ -708,6 +749,82 @@ body.casino-scope #root { width: 100%; }
 .mp-openslot-btn { margin-top: 0.15rem; }
 /* Provenance mark on a board tile whose slot was taken over from someone else. */
 .mp-tile-claimed { color: var(--mission); font-size: 0.72rem; margin-left: 0.3rem; }
+
+/* ── Idle badge ──
+   Two tiers separated three ways — icon SHAPE (outline clock vs triangle),
+   outline vs SOLID chip, and the hour count as TEXT. Colour alone can't carry it:
+   four themes are light and four run a colour-blind-safe lightness ladder, so the
+   number is the channel that never fails. --caution is per-theme (themes.css);
+   --alert is that theme's own --neg. */
+.mp-idle {
+  display: inline-flex; align-items: center; gap: 0.24rem; flex-shrink: 0;
+  font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.06em; font-weight: 600;
+  padding: 0.18rem 0.5rem; border-radius: 999px; border: 1px solid; white-space: nowrap; cursor: default;
+}
+.mp-idle svg { width: 0.68rem; height: 0.68rem; flex-shrink: 0; }
+.mp-idle:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.mp-idle.caution {
+  color: var(--caution); border-color: oklch(from var(--caution) l c h / 0.5);
+  background: oklch(from var(--caution) l c h / 0.1);
+}
+.mp-idle.alert {
+  color: var(--bg-deep); background: var(--alert); border-color: var(--alert); font-weight: 800;
+}
+
+/* ── Slot status notes ── */
+.mp-note-btn {
+  display: inline-flex; align-items: center; gap: 0.24rem; flex-shrink: 0;
+  font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.18rem 0.5rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--gold-dim); transition: all 0.15s;
+}
+.mp-note-btn svg { width: 0.68rem; height: 0.68rem; flex-shrink: 0; }
+.mp-note-btn:hover { color: var(--gold); border-color: var(--line-glow); }
+.mp-note-btn.has {
+  color: var(--gold); border-color: oklch(from var(--gold) l c h / 0.45);
+  background: oklch(from var(--gold) l c h / 0.1);
+}
+.mp-note-btn.focus { color: var(--gold); border-color: var(--line-glow); box-shadow: 0 0 0 2px oklch(from var(--gold) l c h / 0.22); }
+
+.mp-note {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  border-left: 2px solid oklch(from var(--gold) l c h / 0.45); border-radius: 0 3px 3px 0;
+  background: oklch(from var(--bg-deep) l c h / 0.55); padding: 0.32rem 0.45rem;
+}
+.mp-note-text { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; line-height: 1.35; color: var(--ink-soft); text-wrap: pretty; }
+.mp-note-meta { display: flex; align-items: baseline; gap: 0.4rem; font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--gold-dim); }
+.mp-note-edit {
+  background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+  color: var(--gold-dim); text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; transition: opacity 0.12s, color 0.12s;
+}
+.mp-note-edit:hover { color: var(--gold); opacity: 1; }
+
+/* The .lb-adv-note-editor pattern from index.css, re-tokenised (its input fill was
+   a hardcoded oklch) and scaled up — the lightbox original sits in a dense row
+   list, this sits in a card with room. */
+.mp-note-editor { display: flex; flex-direction: column; gap: 0.3rem; }
+.mp-note-input {
+  width: 100%; box-sizing: border-box; padding: 0.36rem 0.45rem; resize: vertical; min-height: 3.2rem;
+  background: oklch(from var(--bg-deep) l c h / 0.8); border: 1px solid var(--line-glow); color: var(--parchment);
+  font-family:'Crimson Pro',serif; font-size: 0.78rem; border-radius: 3px; outline: none; line-height: 1.45;
+  transition: border-color 0.15s;
+}
+.mp-note-input:focus { border-color: var(--gold); }
+.mp-note-actions { display: flex; align-items: center; gap: 0.3rem; }
+.mp-note-chars { font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--gold-dim); margin-right: auto; }
+.mp-note-cancel {
+  background: transparent; border: 1px solid var(--line); border-radius: 3px;
+  font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gold-dim); padding: 0.2rem 0.55rem; cursor: pointer; transition: border-color 0.12s, color 0.12s;
+}
+.mp-note-cancel:hover:not(:disabled) { border-color: var(--line-glow); color: var(--parchment); }
+.mp-note-save {
+  background: oklch(from var(--gold) l c h / 0.18); border: 1px solid var(--gold-dim); border-radius: 3px;
+  font-family:'Cinzel',serif; font-size: 0.52rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gold); padding: 0.2rem 0.6rem; cursor: pointer; transition: background 0.12s;
+}
+.mp-note-save:hover:not(:disabled) { background: oklch(from var(--gold) l c h / 0.28); }
+.mp-note-cancel:disabled, .mp-note-save:disabled { opacity: 0.45; cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
   .rl-tcard, .rl-overlay, .rl-sitflash, .rl-sitflash-card, .rl-sitflash-chip::after,

@@ -1,12 +1,13 @@
 // Seat rail, pot chip, challenge panel, readout, gauge, and reveal row components.
 
 import { useState } from 'react';
-import { DECK_VARIANTS, type DeckCard } from '../lib/casinoData';
-import type { CasinoStats, CasinoDeckChoice } from '../types';
+import { DECK_VARIANTS, CARD_TYPES, type DeckCard } from '../lib/casinoData';
+import type { CasinoStats, CasinoDeckChoice, CasinoPeekCard, CasinoSeatPeek } from '../types';
 import type { GambitDef } from '../lib/casinoGambits';
 import { applyDeckBoost } from '../lib/casinoSlots';
 import { estimatedSeatShare } from '../lib/missionLogic';
 import { discordAvatarUrl } from '../lib/discordAvatar';
+import { cardTypeHue } from './cardMeta';
 
 // The deck-variant GP modifier badge. ⚠️ `gpBoost` is SIGNED, so both the label
 // and the up/down class are read off its sign — this used to be hardcoded to
@@ -82,6 +83,7 @@ interface SeatProps {
   isMe: boolean;
   stake?: number;         // gold they're playing for (once locked)
   startByLabel?: string;  // "XX:XX left" deadline display
+  peek?: CasinoSeatPeek | null;  // host view: this seat's cards, committed ones marked
 }
 
 const STATUS_DOT: Record<SeatStatus, string> = {
@@ -102,7 +104,77 @@ const STATUS_TEXT: Record<SeatStatus, string> = {
   locked:   'Locked in',
 };
 
-export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stake, startByLabel }: SeatProps) {
+// ── Host view: one seat's cards ───────────────────────────────────────────────
+//
+// Admin-only, and the UNCOMMITTED cards are the point of it: they are the games
+// that seat could still choose if its config is denied, which is the question the
+// host is weighing at that moment. So they render alongside the committed ones,
+// dimmed rather than hidden.
+//
+// A Hold 'Em `community` card is shared by the whole table — it is an option for
+// every seat, not this player's private holding — so it is labelled apart from
+// the seat's own cards rather than being read as one of them.
+const ORIGIN_NOTE: Record<CasinoPeekCard['origin'], string> = {
+  hole:      'hole card',
+  community: 'shared community card — on the table for every seat',
+  hand:      'dealt to this seat',
+  claimed:   'claimed from a vacated seat — never this seat’s to choose',
+};
+
+function SeatPeek({ peek }: { peek: CasinoSeatPeek }) {
+  const committed = peek.cards.filter(c => c.committed).length;
+  return (
+    <div className="cz-peek">
+      <div className="cz-peek-head">
+        <span className="cz-peek-tag">Host view</span>
+        {peek.cards.length > 0 && (
+          <span className="cz-peek-count">{committed}/{peek.cards.length} committed</span>
+        )}
+      </div>
+      {peek.cards.length === 0 ? (
+        <div className="cz-peek-note">Nothing dealt yet.</div>
+      ) : (
+        <ul className="cz-peek-list">
+          {peek.cards.map((c, i) => {
+            const t = CARD_TYPES[c.card.type];
+            const cls = ['cz-peek-card'];
+            if (c.committed) cls.push('committed');
+            if (c.origin === 'community') cls.push('shared');
+            const title = [
+              `${c.card.name} · ${t.label} · ${c.card.value}g`,
+              ORIGIN_NOTE[c.origin],
+              c.committed ? 'Committed to a slot' : 'Not committed — still open to them on a re-pick',
+            ].join('\n');
+            return (
+              <li
+                key={`${c.card.uid}-${i}`}
+                className={cls.join(' ')}
+                // Tinted by hue at the theme's own text lightness (--stat-l), NOT by
+                // --acc-*: those accents are tuned to sit on a card's dark stock and
+                // wash out on a light theme's seat panel.
+                style={{ '--hue': cardTypeHue(c.card.type) } as React.CSSProperties}
+                title={title}
+              >
+                <span className="cz-peek-mark">{c.committed ? '✔' : '○'}</span>
+                <span className="cz-peek-suit">{t.suit}</span>
+                <span className="cz-peek-name">{c.card.name}</span>
+                <span className="cz-peek-val">{c.card.value}g</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {/* Secrets are dropped wholesale when a table settles, so an old table can
+          only ever show what it committed — say so rather than implying the seat
+          was dealt exactly those cards and nothing else. */}
+      {!peek.poolKnown && peek.cards.length > 0 && (
+        <div className="cz-peek-note">Dealt pool purged at settle — committed cards only.</div>
+      )}
+    </div>
+  );
+}
+
+export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stake, startByLabel, peek }: SeatProps) {
   const cls = ['cz-seat'];
   if (isMe)           cls.push('you');
   if (status === 'playing') cls.push('active');
@@ -133,6 +205,7 @@ export function Seat({ name, playerId, avatarHash, nameColor, status, isMe, stak
       {startByLabel && status === 'deadline' && (
         <div className="cz-seat-startby">{startByLabel} to start</div>
       )}
+      {peek && <SeatPeek peek={peek} />}
     </div>
   );
 }

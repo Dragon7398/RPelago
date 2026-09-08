@@ -3,22 +3,30 @@
 // challenges have "problem" or "warning" slots, who owns them, and why. Kept free
 // of React/Firebase so it can be unit-tested against the live thresholds.
 //
-// Two timestamps per slot, of unequal weight:
+// Three timestamps per slot, of unequal weight:
 //   lastActivity — STRONG. Server-verified activity from the Archipelago server;
 //                  the real "still making progress" signal. Drives the time-based
 //                  warnings (no recent activity).
 //   lastChecked  — WEAK. A manual self-report by the player (e.g. vouching they're
 //                  stuck); may be inaccurate. Only counts toward the "later of the
-//                  two" progress check on the problem threshold.
+//                  three" progress check on the problem threshold.
+//   lastReported — WEAK. Stamped when the player saves a status note on the slot.
+//                  Weighted exactly like lastChecked, so a note CLEARS the
+//                  `stalled` problem and therefore costs no statusIncident. That
+//                  is deliberate (it is why notes exist), and it is not a new
+//                  loophole — lastChecked already does the same from the tracker
+//                  side. `noActivity144` deliberately ignores both: a note must
+//                  never launder a slot with no server activity.
 //
 // "Done" here means Goaled/Done only — a `100%` slot has every check but no goal,
 // so it still holds its world open and can be flagged as the last player. See
 // OWING_STATUSES; do not conflate it with FREE_COMPLETED_STATUSES.
 
 import type {
-  GMMission, Tile, Player, AdvSlot, SlotStatus,
+  GMMission, Tile, Player, AdvSlot, SlotStatus, AdvStatusNote,
   OfficialReport, OfficialProblemWorld, OfficialProblemPlayer, OfficialWarnWorld, OfficialWarnItem,
 } from '../types';
+import { FREE_COMPLETED_STATUSES } from './constants';
 
 const HOUR = 3_600_000;
 
@@ -33,6 +41,12 @@ export const WARN_ALL_STALE_HOURS     = 72;   // every In-Progress slot here idl
 export const TOO_EARLY_HOURS        = 48;  // not yet elapsed this long → "Too Early"
 export const RECENTLY_REPORTED_HOURS = 24; // reported within this long → "Recently Reported"
 
+// Landing-page idle badge (the player-facing preview of the above). The alert tier
+// deliberately REUSES PROBLEM_STALE_HOURS rather than declaring its own 72, so the
+// red badge always means "you are on the host's next report" and the two can never
+// drift apart. Only the caution tier is new.
+export const SLOT_CAUTION_HOURS = 48;
+
 export type ReportTier   = 'problem' | 'warning';
 export type ReportBucket = 'active' | 'tooEarly' | 'recentlyReported';
 
@@ -44,6 +58,10 @@ export interface ReportSlotFinding {
   codes:    string[];  // machine-readable, for the official report builder
                        // problems: 'unstarted' | 'stalled'
                        // warnings: 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60'
+  /** The player's own explanation, when they left one. Surfaced in the admin
+   *  Report tab so the host reads the reason before deciding whether to excuse —
+   *  it is exactly the evidence the trackers cannot see. */
+  note?:    AdvStatusNote;
 }
 
 export interface ReportPlayerFinding {
@@ -91,6 +109,63 @@ const ungoaled = (s: AdvSlot): boolean => UNGOALED_STATUSES.includes(statusOf(s)
 // slots synced before the timestamp fields existed).
 function stale(ts: number | null | undefined, hours: number, now: number): boolean {
   return ts != null && (now - ts) / HOUR >= hours;
+}
+
+/**
+ * The newest sign of life on a slot — the later of server activity and either
+ * kind of self-report. Only present stamps count; all three missing returns null
+ * ("unknown", per `stale()` above).
+ */
+export function lastSignOfLife(s: AdvSlot): number | null {
+  const stamps = [s.lastActivity, s.lastChecked, s.lastReported].filter((v): v is number => v != null);
+  return stamps.length ? Math.max(...stamps) : null;
+}
+
+export type SlotIdleTier = 'caution' | 'alert';
+
+export interface SlotIdle {
+  tier:  SlotIdleTier;
+  hours: number;    // whole hours since the last sign of life
+  /** True when the clock is running from the room link, not from a timestamp —
+   *  the badge's copy says "since the room went up" rather than "since last
+   *  activity", which would be a lie on a slot that has never had any. */
+  fromRoom: boolean;
+}
+
+/**
+ * The landing page's idle badge for one slot, or null for no badge.
+ *
+ * Two departures from the report's own rules, both deliberate:
+ *
+ *  - Suppressed for every status in FREE_COMPLETED_STATUSES (100% / Goaled /
+ *    Done) — the set that already frees a mission claim. `statusReport` keeps
+ *    `100%` in scope on purpose (see the header note), so a 100% slot can raise
+ *    a `lastPlayer` warning while carrying no badge. That is the intended trade:
+ *    this badge nudges the player, it does not mirror the report.
+ *
+ *  - With no stamps at all the clock falls back to `roomLinkedAt`, so an
+ *    Unstarted slot still badges. `stale()`'s unknown-is-never-stale rule holds
+ *    for the report and is untouched; the fallback is safe here because the room
+ *    link is an event we recorded, not the absence of one. No link, no badge —
+ *    there was nothing to start.
+ */
+export function slotIdleTier(
+  s: AdvSlot,
+  now: number,
+  roomLinkedAt?: number | null,
+): SlotIdle | null {
+  const status = statusOf(s);
+  if (FREE_COMPLETED_STATUSES.has(status)) return null;
+
+  const sign     = lastSignOfLife(s);
+  const fromRoom = sign == null;
+  const origin   = sign ?? roomLinkedAt ?? null;
+  if (origin == null) return null;
+
+  const hours = Math.floor((now - origin) / HOUR);
+  if (hours >= PROBLEM_STALE_HOURS) return { tier: 'alert',   hours, fromRoom };
+  if (hours >= SLOT_CAUTION_HOURS)  return { tier: 'caution', hours, fromRoom };
+  return null;
 }
 
 export function fmtDuration(h: number): string {
@@ -155,11 +230,10 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
   }
 
   if (status === 'In-Progress') {
-    // "Later of activity / self-report": strong server activity OR a (weaker) manual
-    // self-report both count as a sign of life. Only present timestamps count — a
-    // slot with neither recorded is unknown, not stalled.
-    const stamps = [s.lastActivity, s.lastChecked].filter((v): v is number => v != null);
-    const lastSign = stamps.length ? Math.max(...stamps) : null;
+    // "Later of activity / self-report": strong server activity OR either kind of
+    // (weaker) manual self-report counts as a sign of life. Only present timestamps
+    // count — a slot with none recorded is unknown, not stalled.
+    const lastSign = lastSignOfLife(s);
 
     // Problem (b): stalled — no server activity AND no self-report in 60h+.
     if (stale(lastSign, PROBLEM_STALE_HOURS, now)) {
@@ -184,7 +258,8 @@ function classifySlot(s: AdvSlot, ownerId: string, all: ScopedSlot[], now: numbe
   const slotName = s.name?.trim() || '(unnamed slot)';
   const game     = s.game?.trim() || '—';
   const pack = (list: { code: string; reason: string }[], tier: ReportTier): ReportSlotFinding =>
-    ({ slotName, game, tier, reasons: list.map(x => x.reason), codes: list.map(x => x.code) });
+    ({ slotName, game, tier, reasons: list.map(x => x.reason), codes: list.map(x => x.code),
+       ...(s.note ? { note: s.note } : {}) });
   if (problems.length > 0) return pack(problems, 'problem');
   if (warnings.length > 0) return pack(warnings, 'warning');
   return null;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { slotsAllFree, countUnfinishedSets, normalizeClaimEntry, claimableCount } from '../../src/lib/slotHelpers';
 import { awaitingRoom, hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
-import { missionClaimCapacity } from '../../src/lib/gameLogic';
+import { missionClaimCapacity, playerStatus, releasesClaimsEarly } from '../../src/lib/gameLogic';
 import type { AdvSlot, ClaimableEntry, GMMission, GMParticipant, Player } from '../../src/types';
 
 const slot = (status?: AdvSlot['status']): AdvSlot => ({ name: 'n', game: 'g', ...(status ? { status } : {}) });
@@ -138,6 +138,17 @@ describe('computeMissionCard — pooled-claim gating', () => {
     expect(card.disabledReason).toMatch(/free your claim|claims are in use/i);
   });
 
+  it('tells a RESTRICTED player the truth about why their claim is stuck', () => {
+    // The default copy says "finish your part of it to free your claim" — which is
+    // exactly the thing that no longer works for a restricted player.
+    const plain = computeMissionCard(baseMission(), 'me', 1, 1, false, now, undefined, false);
+    expect(plain.disabledReason).toMatch(/finish your part/i);
+    const restricted = computeMissionCard(baseMission(), 'me', 1, 1, false, now, undefined, true);
+    expect(restricted.takeable).toBe(false);
+    expect(restricted.disabledReason).toMatch(/restricted/i);
+    expect(restricted.disabledReason).toMatch(/whole mission finishes/i);
+  });
+
   it('does not block your OWN enlisted card even at capacity', () => {
     const m = baseMission();
     m.participants = { me: { playerId: 'me', playerName: 'Me', joinedAt: 0 } };
@@ -190,5 +201,48 @@ describe('claimableCount', () => {
     } as unknown as GMMission;
     expect(claimableCount(m)).toBe(2);
     expect(claimableCount({} as GMMission)).toBe(0);
+  });
+});
+
+// ── Player status ─────────────────────────────────────────────────────────────
+// Three states over two independent wire flags. The whole point of `restricted`
+// is that it changes exactly one thing — whether a claim comes back early — so
+// these pin both the derivation and the gate the release sites call.
+describe('playerStatus', () => {
+  const p = (over: Partial<Player>): Player => ({ id: 'p', ...over } as Player);
+
+  it('is active when neither flag is set', () => {
+    expect(playerStatus(p({}))).toBe('active');
+    expect(playerStatus(undefined)).toBe('active');
+    expect(playerStatus(null)).toBe('active');
+  });
+
+  it('reads each flag', () => {
+    expect(playerStatus(p({ restricted: true }))).toBe('restricted');
+    expect(playerStatus(p({ disabled: true }))).toBe('disabled');
+  });
+
+  it('lets disabled outrank restricted, so a legacy both-set record still reads as blocked', () => {
+    expect(playerStatus(p({ disabled: true, restricted: true }))).toBe('disabled');
+  });
+});
+
+describe('releasesClaimsEarly — the one thing restricted changes', () => {
+  const p = (over: Partial<Player>): Player => ({ id: 'p', ...over } as Player);
+
+  it('is true for everyone but a restricted player', () => {
+    expect(releasesClaimsEarly(p({}))).toBe(true);
+    expect(releasesClaimsEarly(p({ disabled: true }))).toBe(true);
+    expect(releasesClaimsEarly(undefined)).toBe(true);
+  });
+
+  it('is false for a restricted player — their claim waits for the world to resolve', () => {
+    expect(releasesClaimsEarly(p({ restricted: true }))).toBe(false);
+  });
+
+  // The gate is independent of slot state: a restricted player's slots still go
+  // terminal, they just don't buy the claim back. Nothing about slotsAllFree moves.
+  it('does not change what counts as a finished slot set', () => {
+    expect(slotsAllFree([slot('Done'), slot('Goaled')])).toBe(true);
   });
 });

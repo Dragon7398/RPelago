@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, FEATS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
-import { getPlayerFeatIds } from '../../lib/gameLogic';
+import { getPlayerFeatIds, releasesClaimsEarly } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, adminUpdateAdvSlotName, adminUpdatePublicSlotName, freeAdventurer } from '../../firebase/db';
@@ -190,7 +190,10 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
                   const resolved = statusMap.get(s.name) ?? s.status;
                   return resolved === 'Done' || resolved === '100%' || resolved === 'Goaled';
                 }) &&
-                players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord
+                players[adv.owner]?.adventurers?.[adv.advId]?.busyTile === coord &&
+                // Restricted players don't get an adventurer back early — the
+                // tile's completion frees it instead.
+                releasesClaimsEarly(players[adv.owner])
               ) await freeAdventurer(adv.owner, adv.advId);
             }
             for (let i = 0; i < pubSlots.length; i++) {

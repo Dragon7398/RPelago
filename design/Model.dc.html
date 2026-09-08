@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #141009; --bg-card: #252010; --line: #4a3c22;
+      --gold: oklch(76% 0.14 75); --gold-dim: oklch(62% 0.10 75);
+      --parchment: oklch(92% 0.03 80); --ink-soft: oklch(86% 0.035 82 / 0.82);
+      --pos: oklch(76% 0.15 145); --neg: oklch(66% 0.17 28);
+      --caution: oklch(80% 0.13 78); --alert: var(--neg);
+      --strong: oklch(80% 0.12 235);
+    }
+    body { margin: 0; background: var(--bg-deep); color: var(--parchment); font-size: 16px; }
+    a { color: var(--gold); } a:hover { color: var(--parchment); }
+
+    .cap { font-family:'Cinzel',serif; font-size:0.5rem; letter-spacing:0.16em; text-transform:uppercase; color: oklch(62% 0.10 75 / 0.75); }
+    .h2 { font-family:'Cinzel',serif; font-weight:800; font-size:0.8rem; letter-spacing:0.05em; color:var(--gold); }
+    .body { font-family:'Crimson Pro',serif; font-size:0.86rem; line-height:1.45; color: oklch(from var(--gold-dim) l c h / 0.95); text-wrap:pretty; }
+    .body b { font-weight:600; color:var(--parchment); font-style:normal; }
+    .card { border:1px solid oklch(from var(--gold) l c h / 0.22); border-radius:10px;
+      background: oklch(from var(--bg-card) l c h / 0.45); padding:0.9rem 1rem 1rem;
+      display:flex; flex-direction:column; gap:0.6rem; }
+    .rule { height:1px; background: oklch(from var(--gold) l c h / 0.16); }
+    code { font-family:'Cinzel',serif; font-size:0.66rem; letter-spacing:0.03em; color:var(--parchment);
+      background: oklch(from var(--bg-deep) l c h / 0.7); border:1px solid var(--line); border-radius:3px; padding:0.06rem 0.28rem; }
+
+    .sig { display:flex; align-items:flex-start; gap:0.6rem; }
+    .sig-bar { width:3px; border-radius:2px; align-self:stretch; flex-shrink:0; }
+    .sig-name { font-family:'Cinzel',serif; font-size:0.62rem; letter-spacing:0.05em; color:var(--parchment); }
+    .sig-tag { font-family:'Cinzel',serif; font-size:0.48rem; letter-spacing:0.14em; text-transform:uppercase; padding:0.1rem 0.36rem; border-radius:999px; border:1px solid; }
+    .sig-desc { font-family:'Crimson Pro',serif; font-style:italic; font-size:0.8rem; line-height:1.35; color: oklch(from var(--gold-dim) l c h / 0.9); text-wrap:pretty; }
+
+    .tier { display:grid; grid-template-columns: 62px 1fr; gap:0.7rem; align-items:baseline; }
+    .tier-h { font-family:'Cinzel',serif; font-weight:800; font-size:0.86rem; letter-spacing:0.02em; }
+
+    .flag { display:flex; gap:0.55rem; align-items:flex-start; }
+    .flag-dot { width:0.42rem; height:0.42rem; border-radius:50%; background:var(--caution); margin-top:0.42rem; flex-shrink:0; }
+  </style>
+</helmet>
+
+<div style="padding: 34px 32px 38px; display:flex; flex-direction:column; gap:18px;">
+
+  <div style="display:flex; flex-direction:column; gap:4px;">
+    <div class="cap">What drives the badge</div>
+    <div style="font-family:'Cinzel',serif; font-weight:800; font-size:1.2rem; color:var(--gold); letter-spacing:0.04em;">One clock, three sources</div>
+  </div>
+
+  <div class="card">
+    <div class="h2">The signals</div>
+    <div style="display:flex; flex-direction:column; gap:0.65rem;">
+
+      <div class="sig">
+        <div class="sig-bar" style="background: var(--strong);"></div>
+        <div style="display:flex; flex-direction:column; gap:0.16rem;">
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+            <span class="sig-name">lastActivity</span>
+            <span class="sig-tag" style="color:var(--strong); border-color: oklch(from var(--strong) l c h / 0.5);">Strong</span>
+          </div>
+          <div class="sig-desc">Server-verified, from Cheesetracker. The real "is playing" signal.</div>
+        </div>
+      </div>
+
+      <div class="sig">
+        <div class="sig-bar" style="background: oklch(from var(--gold-dim) l c h / 0.6);"></div>
+        <div style="display:flex; flex-direction:column; gap:0.16rem;">
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+            <span class="sig-name">lastChecked</span>
+            <span class="sig-tag" style="color:var(--gold-dim); border-color: var(--line);">Weak</span>
+          </div>
+          <div class="sig-desc">The player's manual self-report on the tracker. We already sync this field on every status pass.</div>
+        </div>
+      </div>
+
+      <div class="sig">
+        <div class="sig-bar" style="background: var(--gold);"></div>
+        <div style="display:flex; flex-direction:column; gap:0.16rem;">
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+            <span class="sig-name">lastReported</span>
+            <span class="sig-tag" style="color:var(--gold-dim); border-color: var(--line);">Weak</span>
+            <span class="sig-tag" style="color:var(--pos); border-color: oklch(from var(--pos) l c h / 0.5);">New</span>
+          </div>
+          <div class="sig-desc">Stamped when the player saves a note here. Weak by construction — it is the same kind of claim as <span style="font-style:normal;">lastChecked</span>, just made in our UI instead of Cheese's.</div>
+        </div>
+      </div>
+
+    </div>
+    <div class="rule"></div>
+    <div class="body">
+      The clock reads the <b>latest of the three</b> that is actually present.
+    </div>
+    <div class="body">
+      When none of them is, the clock falls back to <b>the room</b> — <code>mission.linkedAt</code>, or <code>tile.linkedAt</code> on the map shell. An <b>Unstarted</b> slot is not <span style="font-style:italic;">unknown</span>: the link going up is the moment everyone could have begun, so it is a real origin and the slot badges from it like any other. No room link yet means no clock and no badge, which is correct — there was nothing to start.
+    </div>
+    <div class="body" style="font-style:italic; font-size:0.8rem;">
+      This is the one deliberate departure from <code>stale()</code>'s unknown-is-never-stale rule, and it is narrow: the fallback is an event we recorded, not the absence of one.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2">The thresholds</div>
+    <div style="display:flex; flex-direction:column; gap:0.55rem;">
+      <div class="tier">
+        <span class="tier-h" style="color:var(--caution);">48h</span>
+        <span class="body" style="margin:0;">Caution. New constant — <b>SLOT_CAUTION_HOURS</b>. Deliberately the same 48h that already buckets a world as "Too Early" on the admin report, so the player's first nudge lands exactly when the host starts looking. For an Unstarted slot the two clocks share an origin as well — the report's elapsed clock runs from <code>linkedAt</code> too — so the caution appears in the same hour the world becomes report-eligible, and the report's <span style="font-style:italic;">unstarted</span> Problem (which has no time gate of its own) fires against the same 48h.</span>
+      </div>
+      <div class="tier">
+        <span class="tier-h" style="color:var(--alert);">72h</span>
+        <span class="body" style="margin:0;">Warning. <span style="font-style:italic;">Not</span> a new constant — reuse <b>PROBLEM_STALE_HOURS</b>, which is already 72. That keeps one number in one file, and makes the badge an honest preview of the report's <span style="font-style:italic;">stalled</span> problem rather than a second opinion.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2">Where the note is written</div>
+    <div class="body">
+      Mission slots are server-write-only, so a casino note takes a new callable alongside <b>setMissionParticipantStatusNote</b> — same auth shape, indexed by slot. It writes <code>note</code> and <code>lastReported</code> in one update, and it must reject a slot the caller does not own.
+    </div>
+    <div class="body">
+      Tile slots (map shell) need no callable: the <b>adventurers/$advId</b> rule already lets an owner write their own subtree. They do need a <code>.validate</code> for the note shape, mirroring the one guarding the existing <b>statusNote</b>.
+    </div>
+    <div class="rule"></div>
+    <div class="body">
+      Notes live on the <b>slot</b>. The existing per-participant <b>statusNote</b> is a seat-wide note and stays as it is — a five-card seat could never say which game it meant, which is the gap this closes.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2">Three things to watch</div>
+    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+      <div class="flag">
+        <span class="flag-dot"></span>
+        <span class="body" style="margin:0;">Adding <b>lastReported</b> to the report's <code>stamps</code> array is a one-line change with real teeth: a note now clears the <span style="font-style:italic;">stalled</span> Problem — which is the point of restoring notes, but it is worth saying out loud before shipping. The <span style="font-style:italic;">noActivity</span> warning is untouched: it reads <b>lastActivity</b> only, and a note must not launder a dead slot.</span>
+      </div>
+      <div class="flag">
+        <span class="flag-dot"></span>
+        <span class="body" style="margin:0;">Both sync paths write leaf fields, so notes survive a status sync. Two writers do <span style="font-style:italic;">not</span>: <b>resubmitCasinoYaml</b>'s card re-pick rebuilds slots through <code>cardsToSlots</code>, and <b>adminSetParticipantSlots</b> replaces the array wholesale. The re-pick only happens while forming or on a deny, so little is lost — but the admin editor should carry notes across.</span>
+      </div>
+      <div class="flag">
+        <span class="flag-dot"></span>
+        <span class="body" style="margin:0;">A note is a <span style="font-style:italic;">self-serve excuse</span> — it clears the incident whether or not the player played. That is not new: <b>lastChecked</b> already does exactly this from the tracker side, and the note is the better door because it says why. But nothing catches a persistent note-writer who never plays except <span style="font-style:italic;">noActivity</span>, which is an admin-facing Warning costing no incident.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

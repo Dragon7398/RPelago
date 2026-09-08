@@ -47,7 +47,9 @@ function buildRows(
 }
 
 // `foot` overrides the computed footer for tables that show only a slice of their
-// data (the Top Games list), where summing the visible rows would understate.
+// data (the Top Games list, which is paged), where summing the visible rows would
+// understate. `rankFrom` numbers those rows from their position in the WHOLE list,
+// so page 2 reads 21-40 rather than restarting at 1.
 // ── Game titles ───────────────────────────────────────────────────────────────
 //
 // On a casino seat `slot.game` is NOT hand-typed: parseApYaml lifts it verbatim
@@ -69,7 +71,10 @@ function buildRows(
 //
 // Rows are DISPLAYED with the spelling their key saw most often, since the folded
 // key itself would render as lowercase mush.
-const GAME_TOP_N = 10;
+//
+// The list is long enough (a season runs well over a hundred distinct APworlds) that
+// a single top-N slice hid most of it, so it is paged rather than truncated.
+const GAME_PAGE_SIZE = 20;
 
 const foldGame = (raw: string) => raw.trim().replace(/\s+/g, ' ');
 
@@ -131,10 +136,11 @@ function Figure({ value, label }: { value: number; label: string }) {
   );
 }
 
-function StatTable({ headLabel, rows, foot }: {
+function StatTable({ headLabel, rows, foot, rankFrom }: {
   headLabel: string;
   rows: Rows;
   foot?: { label: string; tally: Tally };
+  rankFrom?: number;
 }) {
   const total = foot?.tally ?? rows.reduce<Tally>(
     (acc, r) => ({ live: acc.live + r.tally.live, done: acc.done + r.tally.done }),
@@ -151,11 +157,14 @@ function StatTable({ headLabel, rows, foot }: {
         </tr>
       </thead>
       <tbody>
-        {rows.map(r => {
+        {rows.map((r, i) => {
           const sum = r.tally.live + r.tally.done;
           return (
             <tr key={r.key} className={sum === 0 ? 'zero' : undefined}>
-              <th scope="row">{r.label}</th>
+              <th scope="row">
+                {rankFrom !== undefined && <span className="dash-stat-rank">{rankFrom + i}</span>}
+                {r.label}
+              </th>
               <td className="num live">{r.tally.live}</td>
               <td className="num done">{r.tally.done}</td>
               <td className="num total">{sum}</td>
@@ -183,6 +192,10 @@ export default function StatsPage() {
   // folds in basic/patrol. The game-TYPE table above is inherently casino and
   // ignores this.
   const [scope, setScope] = useState<'casino' | 'all'>('casino');
+  // Held un-clamped: the row set shrinks when the scope narrows (or when a mission
+  // settles under the page), so the page in effect is always re-derived below rather
+  // than trusted from state, which would otherwise render an empty page.
+  const [gamePageRaw, setGamePage] = useState(0);
 
   const { live, done } = useMemo(() => {
     const current = Object.values(gameState?.missions ?? {});
@@ -223,6 +236,11 @@ export default function StatsPage() {
     .sort((a, b) => (b.gold ?? 0) - (a.gold ?? 0))
     .slice(0, 10), [gameState?.players]);
 
+  const gamePages = Math.max(1, Math.ceil(games.rows.length / GAME_PAGE_SIZE));
+  const gamePage = Math.min(gamePageRaw, gamePages - 1);
+  const gameFrom = gamePage * GAME_PAGE_SIZE;
+  const gameTo = Math.min(gameFrom + GAME_PAGE_SIZE, games.rows.length);
+
   if (!gameState) return null;
 
   return (
@@ -240,7 +258,7 @@ export default function StatsPage() {
           <button
             key={s}
             className={`dash-stat-scope-btn${scope === s ? ' active' : ''}`}
-            onClick={() => setScope(s)}
+            onClick={() => { setScope(s); setGamePage(0); }}
           >
             {s === 'casino' ? 'Casino only' : 'All missions'}
           </button>
@@ -271,12 +289,31 @@ export default function StatsPage() {
             </div>
             <StatTable
               headLabel="Game"
-              rows={games.rows.slice(0, GAME_TOP_N)}
+              rows={games.rows.slice(gameFrom, gameTo)}
+              rankFrom={gameFrom + 1}
               foot={{
-                label: games.rows.length > GAME_TOP_N ? `All ${games.distinct} games` : 'Total',
+                label: games.rows.length > GAME_PAGE_SIZE ? `All ${games.distinct} games` : 'Total',
                 tally: games.totals,
               }}
             />
+            {gamePages > 1 && (
+              <div className="dash-stat-pager">
+                <button
+                  className="dash-stat-pager-btn"
+                  onClick={() => setGamePage(gamePage - 1)}
+                  disabled={gamePage === 0}
+                >&lsaquo; Prev</button>
+                <span className="dash-stat-pager-info">
+                  {gameFrom + 1}&ndash;{gameTo} of {games.rows.length}
+                  <span className="dash-stat-pager-page"> &middot; page {gamePage + 1} of {gamePages}</span>
+                </span>
+                <button
+                  className="dash-stat-pager-btn"
+                  onClick={() => setGamePage(gamePage + 1)}
+                  disabled={gamePage >= gamePages - 1}
+                >Next &rsaquo;</button>
+              </div>
+            )}
             <div className="dash-stat-note">
               A game on both an in-progress and a completed mission counts once under Unique games, so the
               first three figures overlap rather than add up.

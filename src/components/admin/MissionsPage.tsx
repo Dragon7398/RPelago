@@ -4,12 +4,14 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { currentMaxSlots, fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, type GameToFetch } from '../../lib/missionLogic';
+import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
+import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
-import { checkProgressionBalancing } from '../../lib/apYaml';
+import { checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
+import { yamlLimitsForPlayer, releasesClaimsEarly } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
 
@@ -35,9 +37,12 @@ function MissionParticipantSlots({
   mismatchedNames?: Set<string>;
   onKick: () => void;
 }) {
-  const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus } = useGameState();
+  const { adminSetParticipantSlots, adminUpdateParticipantSlotStatus, gameState } = useGameState();
   const { addToast } = useToast();
   const slots = participant.slots ?? [];
+  // Seats are labelled by Discord handle: everything the host does from this row
+  // (kick, void, deny) ends in a ping, so the name shown must be the pingable one.
+  const who = playerHandle(gameState?.players, playerId, participant.playerName);
   const [draft, setDraft] = useState<{ name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number }>({
     name: '', game: '', details: '', status: 'Unstarted', bonusXP: 0, bonusGold: 0,
   });
@@ -91,8 +96,8 @@ function MissionParticipantSlots({
     try {
       await adminVoidCasinoSeat(missionId, playerId);
       addToast(isLive
-        ? `${participant.playerName}'s seat voided — its whole share returns to the table.`
-        : `${participant.playerName} removed from the table — they forfeit what they anted in.`, 'success');
+        ? `${who}'s seat voided — its whole share returns to the table.`
+        : `${who} removed from the table — they forfeit what they anted in.`, 'success');
       setConfirmSeat(null);
     } catch (err) {
       addToast(`Could not void seat: ${err instanceof Error ? err.message : String(err)}`, 'error');
@@ -104,7 +109,7 @@ function MissionParticipantSlots({
   return (
     <div className="admin-slot-adv">
       <div className="admin-slot-adv-header">
-        <span className="admin-slot-adv-name">{participant.playerName}</span>
+        <span className="admin-slot-adv-name" title={participant.playerName}>{who}</span>
         {isCasino && participant.yamlDenied && (
           <span className="casino-deny-badge" title="Config denied — awaiting the player's resubmit">⛔ resubmit pending</span>
         )}
@@ -113,11 +118,11 @@ function MissionParticipantSlots({
             <span className="admin-remove-explain">
               {!splitRemoval
                 ? isCasino
-                  ? `Remove ${participant.playerName} from this table? Nothing has deployed yet, so there is nothing to hand on — they simply forfeit everything they have anted in. No warning is recorded.`
-                  : `Kick ${participant.playerName}? Their slots reopen for a replacement and they are warned.`
+                  ? `Remove ${who} from this table? Nothing has deployed yet, so there is nothing to hand on — they simply forfeit everything they have anted in. No warning is recorded.`
+                  : `Kick ${who}? Their slots reopen for a replacement and they are warned.`
                 : confirmSeat === 'kick'
-                  ? `Kick ${participant.playerName}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
-                  : `Void ${participant.playerName}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
+                  ? `Kick ${who}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
+                  : `Void ${who}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
             </span>
             <button
               className="dash-action-btn danger"
@@ -305,29 +310,32 @@ function MissionParticipantSlots({
 
 // ── Casino audit log — verifies mission.pot against logged money events ───────
 
-function describeCasinoLogEntry(e: CasinoLogEntry): string {
+// `who` is the entry's player as a Discord handle, resolved by the caller from
+// e.uid — the logged `playerName` is only the display name frozen at write time.
+function describeCasinoLogEntry(e: CasinoLogEntry, who: string): string {
   switch (e.event) {
     case 'deal':
-      return `${e.playerName} dealt ${e.game} — ${e.amount}g ante (${e.potAdd}g → pot)`;
+      return `${who} dealt ${e.game} — ${e.amount}g ante (${e.potAdd}g → pot)`;
     case 'reroll':
-      return `${e.playerName} rerolled — ${e.amount}g (${e.potAdd}g → pot)`;
+      return `${who} rerolled — ${e.amount}g (${e.potAdd}g → pot)`;
     case 'gambit': {
       const def = e.gambitDefId ? GAMBIT_DEFS_BY_ID[e.gambitDefId] : undefined;
       const label = def ? `${def.deltaLabel} ${def.statLabel}` : 'a gambit';
-      return `${e.playerName} played ${label} — ${e.amount ?? 0}g cost, ${e.potAdd ?? 0}g → pot`;
+      return `${who} played ${label} — ${e.amount ?? 0}g cost, ${e.potAdd ?? 0}g → pot`;
     }
     case 'lock':
-      return `${e.playerName} locked in ${e.game ?? ''} — ${e.goldSwing ?? 0}g${e.deckChoice ? ` (${e.deckChoice})` : ''}`;
+      return `${who} locked in ${e.game ?? ''} — ${e.goldSwing ?? 0}g${e.deckChoice ? ` (${e.deckChoice})` : ''}`;
     case 'fold':
-      return `${e.playerName} folded${e.game ? ` (${e.game})` : ''}`;
+      return `${who} folded${e.game ? ` (${e.game})` : ''}`;
     case 'adminvoid':
-      return `Host struck ${e.cardName ? `${e.cardName} from ` : 'a card from '}${e.playerName} — reward now ${e.goldSwing ?? 0}g`;
+      return `Host struck ${e.cardName ? `${e.cardName} from ` : 'a card from '}${who} — reward now ${e.goldSwing ?? 0}g`;
     default:
-      return e.playerName;
+      return who;
   }
 }
 
 function CasinoAuditLog({ mission }: { mission: GMMission }) {
+  const { gameState } = useGameState();
   const [open, setOpen] = useState(false);
   const entries = Object.entries(mission.casinoLog ?? {}).sort((a, b) => a[1].ts - b[1].ts);
   if (entries.length === 0) return null;
@@ -355,7 +363,7 @@ function CasinoAuditLog({ mission }: { mission: GMMission }) {
           </div>
           <div className="casino-log-list">
             {entries.map(([id, e]) => (
-              <div key={id} className="casino-log-row">{describeCasinoLogEntry(e)}</div>
+              <div key={id} className="casino-log-row">{describeCasinoLogEntry(e, playerHandle(gameState?.players, e.uid, e.playerName))}</div>
             ))}
           </div>
         </>
@@ -419,7 +427,8 @@ function FetchBadge({ kind, games }: { kind: 'new' | 'old'; games: GameToFetch[]
 // Deliberately kept as separate files — YAMLs are verified one at a time and later
 // replayed individually by other players — so downloads are per-seat or a .zip of
 // all seats, never a combined single file.
-function CasinoYamlDownload({ missionId, label }: { missionId: string; label: string }) {
+function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label: string; now: number }) {
+  const missionId = mission.id;
   const { addToast } = useToast();
   const { gameState } = useGameState();
   const [yamls, setYamls]     = useState<CasinoYaml[] | null>(null);
@@ -428,6 +437,11 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
   const [denyReason, setDenyReason]   = useState('');
 
   const openDeny = (uid: string) => { setConfirmDeny(uid); setDenyReason(''); };
+
+  // Collapsing DROPS the loaded list rather than hiding it: re-opening refetches,
+  // so a config resubmitted in between is never reviewed from a stale copy. The
+  // card collapses this same way after a room sync, by remounting on a bumped key.
+  const collapse = () => { setYamls(null); setConfirmDeny(null); };
 
   const load = async () => {
     setLoading(true);
@@ -479,8 +493,56 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
     [gameState?.missions, gameState?.missionsHistory, missionId],
   );
 
+  // The seats with NO file behind them. A denied config is deleted from Storage,
+  // so the callable cannot return it and the seat simply vanished from the list
+  // below — the one row the host most needs to see. This roster is derived from
+  // mission state instead, so it shows without fetching anything and stays put
+  // when a deny empties the list entirely.
+  const awaiting = seatsAwaitingConfig(mission);
+  // Severity is the host's, not the players': a config that isn't in yet costs
+  // nothing while seats are still open, because the room could not be generated
+  // today either way. Once nothing else stands in the way, the same rows become
+  // the thing making the room late.
+  const blocking = outstandingConfigsBlockRoom(mission, now);
+
   return (
     <div className="casino-yaml-block">
+      {awaiting.length > 0 && (
+        <div className={`casino-yaml-missing${blocking ? ' blocking' : ''}`}>
+          <div className="casino-yaml-missing-head"
+               title={`Nothing is stored for ${awaiting.length === 1 ? 'this seat' : 'these seats'}, so ${awaiting.length === 1 ? 'it has' : 'they have'} no row in the list below.`}>
+            {blocking
+              ? <>⛔ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} outstanding
+                  <span className="casino-yaml-list-note">
+                    {' '}· all that is holding the room up
+                  </span></>
+              : <>⚠ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} not in yet
+                  <span className="casino-yaml-list-note">
+                    {' '}· nothing to chase until the table fills
+                  </span></>}
+          </div>
+          {awaiting.map(({ playerId, participant, reason }) => (
+            <div key={playerId} className="casino-yaml-missing-row">
+              <span className="casino-yaml-name" title={participant.playerName}>
+                {playerHandle(gameState?.players, playerId, participant.playerName)}
+              </span>
+              <span className={`casino-yaml-missing-tag ${reason}`}>
+                {reason === 'denied' ? 'DENIED · AWAITING RESUBMIT' : 'NOT SUBMITTED'}
+              </span>
+              {reason === 'denied' && participant.yamlDeniedAt != null && (
+                <span className="casino-yaml-missing-when">
+                  {fmtDayClock((now - participant.yamlDeniedAt) / 1000)} ago
+                </span>
+              )}
+              {reason === 'denied' && participant.yamlDeniedReason && (
+                <span className="casino-yaml-missing-why" title="Reason shown to the player">
+                  “{participant.yamlDeniedReason}”
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {yamls === null ? (
         <button className="dash-action-btn" disabled={loading} onClick={load}>
           {loading ? 'Loading…' : '⬇ Player YAMLs'}
@@ -490,12 +552,14 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
       ) : (
         <div className="casino-yaml-list">
           <div className="casino-yaml-head">
-            <span>
+            <button className="casino-yaml-collapse" onClick={collapse} aria-expanded
+                    title="Collapse — reopening fetches the configs again">
+              <span className="admin-slots-caret">▾</span>
               {yamls.length} YAML{yamls.length === 1 ? '' : 's'} uploaded
               {/* Names the sheet the NEW/OLD flags below are judged against, so the
                   badges never have to be taken on trust after a list changes. */}
               <span className="casino-yaml-list-note"> · vs. {currentApList().label} list</span>
-            </span>
+            </button>
             <button className="dash-action-btn" onClick={downloadZip}>⬇ All (.zip)</button>
           </div>
           {yamls.map((y, i) => {
@@ -503,20 +567,34 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
+            // Settings over this player's caps (inventory / locations / hints).
+            // Judged against THEIR limits — a Picky player's six exclusions are
+            // allowed and must not be flagged — and advisory on both sides: the
+            // player was warned at attach and let through, since exceptions are
+            // yours to grant. A badge here is "look at this", not "they cheated".
+            const caps = summarizeLimitFindings(
+              checkYamlLimits(y.text, yamlLimitsForPlayer(gameState?.players?.[y.uid])),
+            );
             // Flags the APworlds this seat still costs the host before the room can
             // be generated: NEW = never downloaded, OLD = downloaded off an earlier
             // sheet and due a look at the current one's "updated" column.
             const { brandNew, outdated } = gameNoveltyInYaml(y.text, sourced);
             return (
             <div key={y.uid} className="casino-yaml-row">
-              <span className="casino-yaml-name">
-                {y.playerName}
+              <span className="casino-yaml-name" title={y.playerName}>
+                {playerHandle(gameState?.players, y.uid, y.playerName)}
                 <FetchBadge kind="new" games={brandNew} />
                 <FetchBadge kind="old" games={outdated} />
                 {pb.map((f, j) => (
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>
                     {f.severity === 'reject' ? '⛔' : '⚠'} PB {f.value}
+                  </span>
+                ))}
+                {caps.map(c => (
+                  <span key={c.key} className="casino-yaml-cap"
+                        title={`${c.worlds.join(', ')} — ${c.label}: ${c.count} (limit ${c.cap} for this player). Over the cap is allowed by exception; nothing blocked it.`}>
+                    ⚠ {c.short} {c.count}/{c.cap}
                   </span>
                 ))}
               </span>
@@ -549,12 +627,19 @@ function CasinoYamlDownload({ missionId, label }: { missionId: string; label: st
 
 // ── Unified mission card ───────────────────────────────────────────────────────
 
-function MissionCard({ mission }: { mission: GMMission }) {
+function MissionCard({ mission, pinned, onInteract }: {
+  mission: GMMission;
+  /** This card is currently held at its board position (see holdPinned). */
+  pinned?: boolean;
+  /** Host touched this card — the board pins it where it is. */
+  onInteract?: () => void;
+}) {
   const {
     adminForceDeploy, adminCompleteMission,
     adminSetMissionLink, adminSetMissionRoomSettings,
     adminKickMissionParticipant, gameState,
   } = useGameState();
+  const seasonId = useSeason().season?.id ?? '';
 
   const [link,    setLink]    = useState(mission.link ?? '');
   const [release, setRelease] = useState<TriState>(mission.release);
@@ -564,6 +649,10 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const [completionWarn, setCompletionWarn] = useState<{ unfinishedSlots: number } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [mismatchedNames, setMismatchedNames] = useState<Set<string>>(new Set());
+  // Bumped when a sync completes, remounting (and so folding away) the YAML list:
+  // a sync that gets this far had a room link and reached the AP server, so the
+  // configs have done their job and the host has no reason to keep reading them.
+  const [yamlCollapse, setYamlCollapse] = useState(0);
 
   const handleSync = async () => {
     const roomLink = mission.link ?? link;
@@ -618,9 +707,12 @@ function MissionCard({ mission }: { mission: GMMission }) {
               // terminal and they still hold this mission's claim, release it —
               // the mission analogue of freeing a tile adventurer (mirrors the
               // server tick block in tickSlotStatuses).
+              // A RESTRICTED player is exempt from the early release: their claim
+              // is held until the mission itself completes.
               const resolved = slots.map(s => ({ status: statusMap.get(s.name) ?? s.status }));
               if (mission.state === 'inprogress'
                   && slotsAllFree(resolved)
+                  && releasesClaimsEarly(gameState?.players?.[pid])
                   && gameState?.players?.[pid]?.activeMissions?.[mission.id]) {
                 await freeMissionClaim(pid, mission.id);
               }
@@ -630,6 +722,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
           // cheese fetch is best-effort
         }
       }
+      setYamlCollapse(n => n + 1);
     } catch (err) {
       console.error('AP sync failed:', err);
     } finally {
@@ -637,6 +730,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
     }
   };
   const slotsLocked = mission.slotsLocked ?? false;
+  // One lock, two scopes. `slotsLocked` is the stored flag (unchanged on the wire);
+  // `settingsLocked` is the same flag read for the room fields, named separately so
+  // the room controls don't read as if slots were the thing protecting them.
+  const settingsLocked = slotsLocked;
+  const lockedHint = 'Locked — unlock at SLOTS below to edit.';
   // The slot ledger is the tallest part of a card, so it collapses. A room that
   // already has a link is one you're monitoring, not filling in — start it shut.
   // Mount-time only, deliberately: setting the link on a live panel must not yank
@@ -654,25 +752,24 @@ function MissionCard({ mission }: { mission: GMMission }) {
   const label        = missionDisplayLabel(mission);
   const participants = Object.entries(mission.participants ?? {});
   const filled       = participants.length;
-  const maxSlots     = currentMaxSlots(mission, now);
-  const tally        = seatTally(mission, now);   // display-only; `maxSlots` still drives the logic below
-  const needsRoom    = mission.state === 'forming'
-    ? (filled > 0 && maxSlots > 0 && filled >= maxSlots)
-    : !mission.link;
-  const readyToComplete = mission.state === 'inprogress' && participants.length > 0 && participants.every(([, p]) => {
-    const slots = p.slots ?? [];
-    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
-  });
+  // Display-only seat count; the cap that actually gates deploy lives inside
+  // missionPendingAction (via currentMaxSlots), which is what the board sorts on.
+  const tally        = seatTally(mission, now);
+  // The single thing this cohort is waiting on the host for — the same call the
+  // board sorts on, so the pill explains why the card sits where it does. It
+  // supersedes the old pair of flags: the forming one fired on any full table,
+  // including a casino one still short a config, which will NOT auto-deploy.
+  const pending = missionPendingAction(mission, now);
 
   // Progress at a glance, for the collapsed SLOTS header.
   const allSlots   = participants.flatMap(([, p]) => p.slots ?? []);
   const totalSlots = allSlots.length;
   const doneSlots  = allSlots.filter(s => s.status === 'Done' || s.status === 'Goaled').length;
 
-  // Elapsed clock origin: the room link going up is when play can actually start,
-  // matching the player-facing PhasePanel. Fall back through deploy → first join →
-  // creation so every card — forming or in progress — always shows something.
-  const clockOrigin = mission.linkedAt ?? mission.deployedAt ?? mission.firstJoinAt ?? mission.createdAt;
+  // Elapsed clock origin (see missionClockOrigin): the room link going up is when
+  // play can actually start, matching the player-facing PhasePanel. Shared with
+  // the board's sort so the cards descend in the order of the number shown here.
+  const clockOrigin = missionClockOrigin(mission);
   const elapsed     = clockOrigin != null ? fmtDayClock((now - clockOrigin) / 1000) : '—';
   // "Since last report" runs from the most recent status report; with none filed
   // yet (feature lands next task) it falls back to the Elapsed origin.
@@ -707,28 +804,42 @@ function MissionCard({ mission }: { mission: GMMission }) {
   };
 
   return (
-    <div className="dash-tile-card">
+    // Capture-phase, so ANY control inside the card counts as "working on this
+    // one" — no per-action wiring to keep in step with. Pointer-down rather than
+    // click, so the pin is in place before the control's own handler (and the
+    // write it fires) can reorder the board out from under the pointer.
+    <div className={`dash-tile-card${pinned ? ' pinned' : ''}`}
+         onPointerDownCapture={onInteract}
+         onFocusCapture={onInteract}>
       {/* Header */}
       <div className="dash-tile-header">
         <span className="dash-tile-name">{label}</span>
         {mission.type === 'casino' && (
           <span className="dash-mission-type-pill">🎲 CASINO</span>
         )}
-        {needsRoom && (
-          <span className="dash-room-warn" title={mission.state === 'forming' ? 'Mission is full — will auto-deploy soon, prepare a room' : 'Mission is In Progress but has no room URL'}>⚠</span>
-        )}
-        {readyToComplete && (
-          <span className="dash-complete-ready" title="All slots are Goaled/Done — ready to mark Complete">✓</span>
+        {pending && (
+          <span className={`dash-pending-pill ${pending.code}`} title={pending.title}>
+            {pending.icon} {pending.label}
+          </span>
         )}
         <span style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', marginLeft: 'auto' }} title={tally.title}>{tally.label}</span>
-        {/* Casino: spectate / test the card table */}
+        {/* Casino: spectate / test the card table. `seasonId` is REQUIRED — the
+            mini-app has no SeasonProvider, so the URL is the only way it learns
+            which season it is in; without it it falls back to config/activeSeasonId
+            and reports "Mission not found or unavailable" for anything being
+            playtested in a draft. */}
         {mission.type === 'casino' && mission.tableUrl && (
           <a
             className="dash-tile-link"
-            href={`${mission.tableUrl}?missionId=${encodeURIComponent(mission.id)}&mission=${encodeURIComponent(mission.label)}&cohort=${encodeURIComponent(toRoman(mission.series))}`}
+            href={`${mission.tableUrl}?${new URLSearchParams({
+              missionId: mission.id,
+              mission:   mission.label,
+              cohort:    toRoman(mission.series),
+              ...(seasonId ? { seasonId } : {}),
+            })}`}
             target="_blank"
             rel="noopener noreferrer"
-            title="Open card table"
+            title="Open card table — reveal seat cards from the Host bar there"
           >🎰</a>
         )}
         {mission.state === 'inprogress' && mission.link && (
@@ -830,17 +941,33 @@ function MissionCard({ mission }: { mission: GMMission }) {
       {mission.type === 'casino' && <CasinoAuditLog mission={mission} />}
 
       {/* Casino: download the seats' uploaded Slot-Fill YAMLs (host verify / room gen) */}
-      {mission.type === 'casino' && <CasinoYamlDownload missionId={mission.id} label={missionDisplayLabel(mission)} />}
+      {mission.type === 'casino' && (
+        <CasinoYamlDownload key={yamlCollapse} mission={mission} now={now}
+                            label={missionDisplayLabel(mission)} />
+      )}
 
-      {/* Room link + settings — inprogress only */}
+      {/* Room link + settings — inprogress only.
+          The lock covers these as well as the slots: once the room is generated the
+          link and the release/collect/hint values describe a room that already
+          EXISTS, and editing them here changes only our record of it — the room
+          itself is untouched, so a stray keystroke silently desynchronises what the
+          players see from what we tell them. Copy Room Text stays live throughout;
+          reading is never the risk. */}
       {mission.state === 'inprogress' && (
         <>
+          {settingsLocked && (
+            <div className="admin-room-locked-note">
+              🔒 Room settings locked — unlock at SLOTS below to edit
+            </div>
+          )}
           <div className="admin-detail-row">
             <div className="admin-detail-label">ARCH. LINK</div>
             <input
               className="admin-text-input"
               placeholder="https://…"
               value={link}
+              disabled={settingsLocked}
+              title={settingsLocked ? lockedHint : undefined}
               onChange={e => setLink(e.target.value)}
               onBlur={() => adminSetMissionLink(mission.id, link)}
             />
@@ -849,10 +976,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
                 className="dash-copy-room-btn"
                 onClick={() => {
                   const pids = Object.keys(mission.participants ?? {});
-                  const handles = pids.map(pid => {
-                    const p = gameState?.players[pid];
-                    return '@' + (p?.discordHandle ?? p?.displayName ?? pid);
-                  }).join(' ');
+                  const handles = pids.map(pid => playerHandle(gameState?.players, pid)).join(' ');
                   let text = `New room generated:  ${label}!\n${link}`;
                   if (mission.tracker) text += `\nhttps://archipelago.gg/tracker/${mission.tracker}`;
                   if (mission.cheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese} (optional)`;
@@ -873,6 +997,8 @@ function MissionCard({ mission }: { mission: GMMission }) {
                     <button
                       key={v}
                       className={`admin-tri-btn${current === v ? ` active-${v}` : ''}`}
+                      disabled={settingsLocked}
+                      title={settingsLocked ? lockedHint : undefined}
                       onClick={() => {
                         if (field === 'release') {
                           setRelease(v); adminSetMissionRoomSettings(mission.id, v, collect, hint);
@@ -893,6 +1019,8 @@ function MissionCard({ mission }: { mission: GMMission }) {
               <input
                 type="number" className="admin-count-input" min={0} max={100}
                 value={hint}
+                disabled={settingsLocked}
+                title={settingsLocked ? lockedHint : undefined}
                 onChange={e => setHint(parseInt(e.target.value) || 0)}
                 onBlur={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}
               />
@@ -914,7 +1042,11 @@ function MissionCard({ mission }: { mission: GMMission }) {
             </span>
           )}
         </button>
-        <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`} onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
+        <button className={`admin-slot-lock-btn${slotsLocked ? ' locked' : ''}`}
+                title={slotsLocked
+                  ? 'Unlock to edit slots, the room link, release/collect and the hint value.'
+                  : 'Lock slots, the room link, release/collect and the hint value against accidental edits.'}
+                onClick={() => setMissionSlotLock(mission.id, !slotsLocked)}>
           {slotsLocked ? '🔒 LOCKED' : '🔓 LOCK'}
         </button>
       </div>
@@ -944,6 +1076,7 @@ function MissionCard({ mission }: { mission: GMMission }) {
 // pot hostage) with no way to see it, let alone withdraw it.
 function MissionClaimableSlots({ mission }: { mission: GMMission }) {
   const { addToast } = useToast();
+  const { gameState } = useGameState();
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
 
@@ -981,7 +1114,13 @@ function MissionClaimableSlots({ mission }: { mission: GMMission }) {
             <span className="admin-claimable-game">{slot?.game?.trim() || '—'}</span>
             <span className="admin-claimable-status">{slot?.status ?? 'Unstarted'}</span>
             {pct > 0 && <span className="admin-claimable-share" title="Share of one seat's pot cut, reserved for the claimant">{pct}% share</span>}
-            {entry.fromPlayerName && <span className="admin-claimable-from">from {entry.fromPlayerName}</span>}
+            {(entry.fromPlayerId || entry.fromPlayerName) && (
+              <span className="admin-claimable-from" title={entry.fromPlayerName}>
+                from {entry.fromPlayerId
+                  ? playerHandle(gameState?.players, entry.fromPlayerId, entry.fromPlayerName)
+                  : entry.fromPlayerName}
+              </span>
+            )}
             {confirm === key ? (
               <span className="admin-remove-confirm">
                 <span className="admin-remove-explain">
@@ -1053,7 +1192,7 @@ function GoldTopUpAudit() {
               : entries.map(([id, e]) => (
                   <div key={id} className="casino-log-row casino-topup-row">
                     <span className="casino-topup-when">{fmtWhen(e.ts)}</span>
-                    <span className="casino-topup-name">{e.playerName}</span>
+                    <span className="casino-topup-name" title={e.playerName}>{playerHandle(gameState?.players, e.uid, e.playerName)}</span>
                     {e.kind === 'manual' && (
                       <span className="casino-topup-tag" title={e.reason || 'Hand-adjusted by the admin on the Players page'}>
                         ADMIN
@@ -1083,10 +1222,24 @@ function GoldTopUpAudit() {
 // details from `mission.type`.
 type MissionFilter = 'casino' | 'noncasino' | 'all';
 
+/** The card the host is working on, held at the board index they last saw it at. */
+type BoardPin = { id: string; column: 'forming' | 'inprog'; index: number };
+
 export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilter }) {
   const { gameState } = useGameState();
   const { addToast }  = useToast();
   const [seeding, setSeeding] = useState(false);
+  // Coarse clock for the sort only (the cards keep their own 1s tick for the
+  // Elapsed readout). Seat decay is the one input that moves on its own, and it
+  // moves on a 24/36h window, so a minute's granularity is plenty and avoids
+  // re-sorting the whole board every second.
+  const [sortNow, setSortNow] = useState(() => Date.now());
+  // The one card held out of the live sort — see holdPinned.
+  const [pin, setPin] = useState<BoardPin | null>(null);
+  useEffect(() => {
+    const id = setInterval(() => setSortNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // New cohorts spawn only while the season is draft or active — a closing or
   // archived season is winding down (mirrors gmSpawnAllowed server-side).
@@ -1103,8 +1256,54 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
   const matchesFilter = (m: GMMission) =>
     filter === 'all' ? true : filter === 'casino' ? m.type === 'casino' : m.type !== 'casino';
   const active   = Object.values(missions).filter(m => m.state !== 'complete' && matchesFilter(m));
-  const forming  = active.filter(m => m.state === 'forming')   .sort((a, b) => (a.createdAt  ?? 0) - (b.createdAt  ?? 0));
-  const inprog   = active.filter(m => m.state === 'inprogress').sort((a, b) => (a.deployedAt ?? 0) - (b.deployedAt ?? 0));
+  // Both columns are triage queues: whatever is stuck waiting on the host rises to
+  // the top, and within each half the longest-waiting cohort leads. Recomputed on
+  // every render off `sortNow` — a decaying table can become full (and so become
+  // actionable) with nothing else changing.
+  const forming  = holdPinned(
+    active.filter(m => m.state === 'forming').sort((a, b) => compareMissionsForAdmin(a, b, sortNow)),
+    pin?.column === 'forming' ? pin : null,
+  );
+  const inprog   = holdPinned(
+    active.filter(m => m.state === 'inprogress').sort((a, b) => compareMissionsForAdmin(a, b, sortNow)),
+    pin?.column === 'inprog' ? pin : null,
+  );
+
+  // Pin whichever card the host just touched, at the position they last SAW it —
+  // read off the rendered order, not re-derived, since the sort key it is about to
+  // change is exactly what we are protecting them from. Touching a different card
+  // moves the pin; the column header's re-sort chip drops it.
+  const handleInteract = (id: string) => {
+    const fi = forming.findIndex(m => m.id === id);
+    const [column, index] = fi >= 0
+      ? ['forming' as const, fi]
+      : ['inprog' as const, inprog.findIndex(m => m.id === id)];
+    if (index < 0) return;
+    // Bail before touching state when nothing would change. This fires on every
+    // pointer-down in the board, so a no-op setPin would re-render the whole page
+    // on every click — and a re-render mid-gesture is exactly what this handler
+    // must not cause (see the .pinned styling note: the marker is deliberately
+    // layout-free, because reflowing a control out from under a pointer between
+    // pointerdown and pointerup makes the browser swallow the click entirely).
+    if (pin && pin.id === id && pin.column === column && pin.index === index) return;
+    setPin({ id, column, index });
+  };
+
+  // One column's header, with the release control when it is the one holding a pin.
+  const colHeader = (title: string, count: number, column: BoardPin['column']) => (
+    <div className="dash-col-header">
+      <span>{title}</span>
+      <span className="dash-col-header-right">
+        {pin?.column === column && (
+          <button className="dash-col-resort" onClick={() => setPin(null)}
+                  title="Release the held card and let the column sort normally">
+            ↕ re-sort
+          </button>
+        )}
+        <span className="dash-col-count">{count}</span>
+      </span>
+    </div>
+  );
 
   const handleSeed = async () => {
     setSeeding(true);
@@ -1133,10 +1332,7 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
 
       <div className="dash-challenges-cols">
         <div className="dash-col">
-          <div className="dash-col-header">
-            <span>Forming</span>
-            <span className="dash-col-count">{forming.length}</span>
-          </div>
+          {colHeader('Forming', forming.length, 'forming')}
           {forming.length === 0 ? (
             <div className="dash-empty" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
               <span>No forming {isCasinoTab ? 'tables' : 'missions'}.</span>
@@ -1151,19 +1347,22 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
               )}
             </div>
           ) : (
-            forming.map(m => <MissionCard key={m.id} mission={m} />)
+            forming.map(m => (
+              <MissionCard key={m.id} mission={m} pinned={pin?.id === m.id}
+                           onInteract={() => handleInteract(m.id)} />
+            ))
           )}
         </div>
 
         <div className="dash-col">
-          <div className="dash-col-header">
-            <span>In Progress</span>
-            <span className="dash-col-count">{inprog.length}</span>
-          </div>
+          {colHeader('In Progress', inprog.length, 'inprog')}
           {inprog.length === 0 ? (
             <div className="dash-empty">No missions in progress.</div>
           ) : (
-            inprog.map(m => <MissionCard key={m.id} mission={m} />)
+            inprog.map(m => (
+              <MissionCard key={m.id} mission={m} pinned={pin?.id === m.id}
+                           onInteract={() => handleInteract(m.id)} />
+            ))
           )}
         </div>
       </div>

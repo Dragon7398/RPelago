@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
+import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
-import { nameColorValue } from '../../lib/constants';
+import { FREE_COMPLETED_STATUSES, nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 
 // The player's chosen name-color, resolved LIVE per playerId so a mid-mission
@@ -29,6 +29,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
 }
 import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
 import { claimEntries } from '../../lib/slotHelpers';
+import { slotIdleTier, type SlotIdle } from '../../lib/statusReport';
 import { useSeason } from '../../contexts/SeasonContext';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -67,8 +68,12 @@ const STATUS_CLS: Record<SlotStatus, string> = {
 // One committed game at the table: the slot's real game (once filled) paired with
 // the card it came from (suit/hue/flavour) via the persisted lockedCards.
 interface SeatGame {
+  // NB: `slot` is the slot's NAME, not the slot object — `raw` is the object.
   slot: string; game: string; cardName: string; type?: CardTypeKey; status: SlotStatus;
   claimed?: boolean; claimedFrom?: string;
+  /** Index into the seat's `slots` array — the address `setSlotStatusNote` writes to. */
+  idx: number;
+  raw: AdvSlot;
 }
 function seatGames(seat: GMParticipant): SeatGame[] {
   const slots = seat.slots ?? [];
@@ -79,6 +84,8 @@ function seatGames(seat: GMParticipant): SeatGame[] {
     cardName: cards[i]?.name ?? '',
     type:     cards[i]?.type,
     status:   s.status ?? 'Unstarted',
+    idx:      i,
+    raw:      s,
     // A slot taken over from someone who left. Worth showing: it explains why a
     // seat holds more cards than it was dealt, and who was originally on the hook.
     ...(s.claimed ? { claimed: true, claimedFrom: s.claimedFrom } : {}),
@@ -544,14 +551,167 @@ function Telemetry({ m, elapsed }: { m: GMMission; elapsed: string }) {
   );
 }
 
+// ── Idle badge + slot notes ───────────────────────────────────────────────────
+
+const NOTE_MAX = 280;
+
+const fmtNoteTime = (ts: number) =>
+  new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+// Outline clock (caution) / filled-chip triangle (alert). Deliberately SVG, not
+// emoji: an emoji ⚠️ paints in its own fixed colours and would ignore --caution
+// and --alert entirely, reading as a foreign object in every light and
+// colour-blind theme.
+const ClockIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+  </svg>
+);
+const AlertIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+    <path d="M12 9v4" /><path d="M12 17h.01" />
+  </svg>
+);
+
+/**
+ * "N hours idle" on a slot. Shown for EVERY slot on a board, not just your own —
+ * a stalled table is the room's problem, and seeing whose slot is holding it up
+ * is most of why you'd open another table's board at all.
+ *
+ * The hour count is rendered as TEXT, not just colour — with ten themes (four
+ * light, four on a colour-blind-safe lightness ladder) the number is the only
+ * channel that never fails. Focusable so the alert copy is reachable without a
+ * mouse.
+ *
+ * The copy is owner-aware: the actionable half ("please play this slot") is an
+ * instruction to the slot's holder, so it appears only on your own. On someone
+ * else's it would be telling the wrong person what to do.
+ */
+function IdleBadge({ idle, mine, ownerName }: { idle: SlotIdle; mine: boolean; ownerName: string }) {
+  const alert = idle.tier === 'alert';
+  // "Since last activity" would be a lie on a slot that never had any — when the
+  // clock is running from the room link, say so instead.
+  const title = mine
+    ? (idle.fromRoom
+        ? `Not started — ${idle.hours}h since the room went up.`
+        : `${idle.hours}h since last activity.`)
+      + (alert ? ' Please play this slot or report on your status.' : '')
+    : (idle.fromRoom
+        ? `${ownerName} hasn't started this — ${idle.hours}h since the room went up.`
+        : `${ownerName} — ${idle.hours}h since last activity.`);
+  return (
+    <span className={`mp-idle ${idle.tier}`} tabIndex={0} title={title}>
+      {alert ? <AlertIcon /> : <ClockIcon />}{idle.hours}h
+    </span>
+  );
+}
+
+const NoteIcon = ({ filled }: { filled: boolean }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    {filled && <><path d="M8 9h8" /><path d="M8 13h5" /></>}
+  </svg>
+);
+
+/**
+ * The note affordance for one slot. Owns its own open/editing state so a board
+ * of ~28 cards doesn't lift 28 booleans into the grid.
+ *
+ * Your own note renders open; someone else's stays collapsed behind the button —
+ * a seven-seat table would otherwise triple in height and bury your own progress.
+ * A slot that is neither yours nor noted shows nothing at all (mirrors
+ * AdvNoteEditor's `if (!isOwner && !note) return null`).
+ */
+function SlotNote({ missionId, slotIdx, note, isOwner }: {
+  missionId: string; slotIdx: number; note?: AdvStatusNote; isOwner: boolean;
+}) {
+  const { setSlotStatusNote } = useGameState();
+  const { addToast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [open,    setOpen]    = useState(false);
+  const [draft,   setDraft]   = useState('');
+  const [saving,  setSaving]  = useState(false);
+
+  if (!isOwner && !note) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await setSlotStatusNote(missionId, slotIdx, draft.trim() || null);
+      setEditing(false);
+    } catch {
+      addToast('Could not save that note. Please try again.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEdit = () => { setDraft(note?.text ?? ''); setEditing(true); };
+  // Your own note is always shown; others' toggle.
+  const showBody = !editing && !!note && (isOwner || open);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`mp-note-btn${note ? ' has' : ''}${editing ? ' focus' : ''}`}
+        title={isOwner
+          ? (note ? 'Your status note — click to edit' : 'Add a status note for this slot')
+          : 'Read this player’s status note'}
+        onClick={() => (isOwner ? (editing ? setEditing(false) : startEdit()) : setOpen(o => !o))}
+      >
+        <NoteIcon filled={!!note} />Note
+      </button>
+
+      {editing && (
+        <div className="mp-note-editor">
+          <textarea
+            className="mp-note-input"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            maxLength={NOTE_MAX}
+            rows={3}
+            placeholder="Where does this slot stand?"
+            autoFocus
+          />
+          <div className="mp-note-actions">
+            <span className="mp-note-chars">{draft.length}/{NOTE_MAX}</span>
+            <button className="mp-note-cancel" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+            <button className="mp-note-save" onClick={() => void save()} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showBody && note && (
+        <div className="mp-note">
+          <div className="mp-note-text">{note.text}</div>
+          <div className="mp-note-meta">
+            <span>{fmtNoteTime(note.timestamp)}</span>
+            {isOwner && <button className="mp-note-edit" onClick={startEdit}>Edit</button>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Spatial card tiles — one per committed game, coloured by its card's suit.
-function TileGrid({ tiles, wide }: { tiles: OwnedGame[]; wide?: boolean }) {
+//
+// `missionId` / `linkedAt` are threaded in for the note write path and the idle
+// clock's room-link fallback. Both callers already hold the mission.
+function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
+  tiles: OwnedGame[]; wide?: boolean; missionId: string; linkedAt?: number | null; now: number;
+}) {
   const colorOf  = useNameColor();
   const handleOf = useHandle();
   return (
     <div className={`mp-board${wide ? ' mp-board-wide' : ''}`}>
       {tiles.map((t, i) => {
         const handle = handleOf(t.ownerId);
+        const idle = slotIdleTier(t.raw, now, linkedAt);
         return (
           <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
                style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
@@ -561,6 +721,8 @@ function TileGrid({ tiles, wide }: { tiles: OwnedGame[]; wide?: boolean }) {
                 <span className="mp-tile-claimed"
                       title={t.claimedFrom ? `Taken over from ${t.claimedFrom}` : 'Taken over from a vacated seat'}>⚐</span>
               )}
+              {idle && <IdleBadge idle={idle} mine={t.you} ownerName={t.ownerName} />}
+              <SlotNote missionId={missionId} slotIdx={t.idx} note={t.raw.note} isOwner={t.you} />
             </div>
             <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
             <div className="mp-tile-game">{t.game}</div>
@@ -575,6 +737,81 @@ function TileGrid({ tiles, wide }: { tiles: OwnedGame[]; wide?: boolean }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Sort tier for the three-band ordering the boards use: still owed work, then
+ * finished-but-still-owning-the-slot, then Done.
+ *
+ * Tier 1 is exactly `FREE_COMPLETED_STATUSES` minus Done, so the band that sits
+ * below the divider stays the same set the rest of the app calls "completed" —
+ * there is no second definition of finished to drift.
+ */
+const finishTier = (s: SlotStatus): 0 | 1 | 2 =>
+  (s === 'Done' ? 2 : FREE_COMPLETED_STATUSES.has(s) ? 1 : 0);
+
+/**
+ * Tier first, then the OWNER's display name, then the slot's name. Owner before
+ * title is what keeps one player's games adjacent inside a band — sorting by game
+ * title first scattered a seat's five cards across the whole grid. Within your own
+ * section there is only one owner, so it collapses to slot name. `idx` is the last
+ * tiebreak so two identically-named slots keep a stable, non-jittery order.
+ */
+const byTierThenName = (a: OwnedGame, b: OwnedGame): number =>
+  finishTier(a.status) - finishTier(b.status)
+  || a.ownerName.localeCompare(b.ownerName, undefined, { sensitivity: 'base' })
+  || a.slot.localeCompare(b.slot, undefined, { sensitivity: 'base' })
+  || a.idx - b.idx;
+
+/**
+ * A board's game tiles, ordered by `byTierThenName` and — for anyone else's games
+ * — split at a divider: only Unstarted / In-Progress above it, everything
+ * finished below. Done games have nothing left to act on at all, so they start
+ * collapsed behind a toggle inside that lower section.
+ *
+ * `mine` renders the flat variant: your own games get the same three-band sort
+ * but are never divided or hidden, because your own seat is the one place you
+ * always want the whole picture. On a mixed board (the peek, where you may hold a
+ * seat) that rule survives per tile — your own Done games ignore the toggle and
+ * the count only ever offers to hide other players'.
+ */
+function GamesBoard({ tiles, wide, missionId, linkedAt, now, mine }: {
+  tiles: OwnedGame[]; wide?: boolean; missionId: string; linkedAt?: number | null; now: number;
+  mine?: boolean;
+}) {
+  const [showDone, setShowDone] = useState(false);
+  const sorted = [...tiles].sort(byTierThenName);
+  const grid = (list: OwnedGame[]) =>
+    <TileGrid tiles={list} wide={wide} missionId={missionId} linkedAt={linkedAt} now={now} />;
+
+  if (mine) return grid(sorted);
+
+  const active   = sorted.filter(t => finishTier(t.status) === 0);
+  const finished = sorted.filter(t => finishTier(t.status) > 0);
+  if (!finished.length) return grid(active);
+
+  // Only someone else's Done tile is ever hidden, so it is also the only kind the
+  // toggle should count — offering to "hide 2 done" and hiding none reads broken.
+  const hidden   = (t: OwnedGame) => t.status === 'Done' && !t.you;
+  const hideable = finished.filter(hidden);
+  const shown    = showDone ? finished : finished.filter(t => !hidden(t));
+
+  return (
+    <>
+      {active.length ? grid(active) : <span className="mp-muted">Nothing left unstarted or in progress.</span>}
+      <div className="mp-split">
+        <span className="mp-split-lbl">Finished · {finished.length}</span>
+        <span className="mp-split-rule" />
+        {hideable.length > 0 && (
+          <button type="button" className="mp-split-btn" onClick={() => setShowDone(v => !v)}
+                  aria-expanded={showDone}>
+            {showDone ? 'Hide' : 'Show'} {hideable.length} done
+          </button>
+        )}
+      </div>
+      {shown.length > 0 && grid(shown)}
+    </>
   );
 }
 
@@ -639,14 +876,14 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
             Your games {!pending && <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span>}
           </div>
           {mine.length
-            ? <TileGrid tiles={mine} wide={wide} />
+            ? <GamesBoard tiles={mine} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} mine />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
         </div>
 
         {others.length > 0 && (
           <div>
             <div className="mp-cell-lbl">The rest of the table</div>
-            <TileGrid tiles={others} wide={wide} />
+            <GamesBoard tiles={others} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} />
           </div>
         )}
 
@@ -664,8 +901,8 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
 // tile grid. The landing's in-progress table cards open this in a modal so the
 // floor's live rooms can be inspected without holding a seat there. `uid` only
 // tints the viewer's own tiles (harmless when they hold no seat at this table).
-export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
-  m: GMMission; uid: string | null;
+export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
+  m: GMMission; uid: string | null; now: number;
   colorOf: (playerId: string) => string;
   handleOf: (playerId: string) => string | null;
 }) {
@@ -683,7 +920,9 @@ export function TableSlotsBoard({ m, uid, colorOf, handleOf }: {
       <ChallengeLinks m={m} />
       <OpenSlots m={m} uid={uid} />
       {tiles.length
-        ? <div style={{ marginTop: '1rem' }}><TileGrid tiles={tiles} wide /></div>
+        ? <div style={{ marginTop: '1rem' }}>
+            <GamesBoard tiles={tiles} wide missionId={m.id} linkedAt={m.linkedAt} now={now} />
+          </div>
         : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}
     </PlayerCtx>
   );

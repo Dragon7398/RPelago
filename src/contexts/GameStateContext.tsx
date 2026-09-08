@@ -37,6 +37,9 @@ export interface GameStateContextValue {
   setNameColor: (playerId: string, colorId: string | null) => Promise<void>;
   adminDisablePlayer: (playerId: string) => Promise<void>;
   adminEnablePlayer: (playerId: string) => Promise<void>;
+  // Restricted is the middle status: plays as normal, but claims are only
+  // returned when the world resolves. See `playerStatus` in gameLogic.ts.
+  adminSetPlayerRestricted: (playerId: string, restricted: boolean) => Promise<void>;
   adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToClaimableSlot: boolean) => Promise<void>;
   claimClaimableSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
   adminSetClaimableSlotBonus: (coord: string, slotKey: string, slotArr: AdvSlot[]) => Promise<void>;
@@ -51,6 +54,7 @@ export interface GameStateContextValue {
   enlistInMission: (missionId: string, missionLabel: string) => Promise<void>;
   standDownFromMission: (missionId: string, missionLabel: string) => Promise<void>;
   setMissionParticipantStatusNote: (missionId: string, note: string | null) => Promise<void>;
+  setSlotStatusNote: (missionId: string, slotIndex: number, note: string | null) => Promise<void>;
   adminSetParticipantSlots: (missionId: string, playerId: string, slots: AdvSlot[]) => Promise<void>;
   adminUpdateParticipantSlotStatus: (missionId: string, playerId: string, slotIndex: number, status: SlotStatus) => Promise<void>;
   adminSetMissionLink: (missionId: string, link: string) => Promise<void>;

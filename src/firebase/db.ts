@@ -751,6 +751,24 @@ export async function setPlayerDisabled(playerId: string, disabled: boolean): Pr
   await httpsCallable(functions!, 'adminSetPlayerDisabled')({ playerId, disabled, seasonId: getCurrentSeason() });
 }
 
+// ── Player restrict / unrestrict ──────────────────────────────────────────────
+// The middle status between active and disabled. A restricted player plays as
+// normal; the only difference is that their claims are NOT released early (see
+// `releasesClaimsEarly` in gameLogic.ts), so a mission claim / tile adventurer is
+// tied up until that world resolves.
+//
+// Unlike disable this stays a CLIENT write, like the other admin player actions
+// (adminGrantGold): it has no Auth or Storage dimension to enforce — nothing a
+// player's own token can do is gated on it — and the `players/$playerId` rule
+// already restricts the write to `config/adminId`. Enforcement lives entirely in
+// the claim-release sites, including the server's `tickSlotStatuses`.
+export async function setPlayerRestricted(playerId: string, restricted: boolean): Promise<void> {
+  assertDb();
+  // Absent, not `false` — the flag reads as a tri-state with `disabled`, and an
+  // explicit false would leave a dead key on every player who was ever restricted.
+  await set(sRef(db!, `players/${playerId}/restricted`), restricted ? true : null);
+}
+
 export async function isPlayerDisabled(playerId: string): Promise<boolean> {
   assertDb();
   const snap = await get(sRef(db!, `players/${playerId}/disabled`));
@@ -1019,6 +1037,14 @@ export async function standDownFromMission(missionId: string): Promise<void> {
 export async function setMissionParticipantStatusNote(missionId: string, note: string | null): Promise<void> {
   assertFunctions();
   await httpsCallable(functions!, 'setMissionParticipantStatusNote')({ missionId, note, seasonId: getCurrentSeason() });
+}
+
+// Per-SLOT note (the seat-wide one above is a different thing). The server stamps
+// `lastReported` in the same update; passing null clears the text but keeps that
+// timestamp.
+export async function setSlotStatusNote(missionId: string, slotIndex: number, note: string | null): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'setSlotStatusNote')({ missionId, slotIndex, note, seasonId: getCurrentSeason() });
 }
 
 // ── Official status reports ──────────────────────────────────────────────────

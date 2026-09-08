@@ -4,7 +4,7 @@ import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath, ownHolePath } from '../firebase/season';
-import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice } from '../types';
+import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
   DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
@@ -12,7 +12,11 @@ import {
 import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
-import { parseApYaml, checkWorldCount, checkProgressionBalancing, type PbFinding } from '../lib/apYaml';
+import {
+  parseApYaml, checkWorldCount, checkProgressionBalancing, checkYamlLimits,
+  summarizeLimitFindings, type PbFinding,
+} from '../lib/apYaml';
+import { getPlayerFeatIds, yamlLimitsForFeats } from '../lib/gameLogic';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, DRAGOS_LIST_URL, nameColorValue } from '../lib/constants';
 import { seatTally, estimatedSeatShare } from '../lib/missionLogic';
@@ -164,6 +168,7 @@ export function CasinoTable() {
   const [yamlInfo, setYamlInfo]   = useState<{ name: string; docs: number; filled: number } | null>(null);
   const [yamlWarn, setYamlWarn]   = useState<string[]>([]);
   const [pbFindings, setPbFindings] = useState<PbFinding[]>([]);
+  const [feats, setFeats] = useState<PlayerFeats | null>(null);
   // Manifest drag-reorder: the row being dragged, and the row it would land on.
   const [dragRow, setDragRow]     = useState<number | null>(null);
   const [dropRow, setDropRow]     = useState<number | null>(null);
@@ -304,6 +309,20 @@ export function CasinoTable() {
     });
   }, [uid, seasonReady]);
 
+  // Player's feats — three of them raise this player's YAML settings caps, so the
+  // rules lightbox and the attach-time screening below both need them. A casino
+  // season has no feats and this simply stays null (base caps), but a casino table
+  // can also run inside a MAP season, where a Picky player's six exclusions are
+  // legitimate — screening them against the base 2 would cry wolf every time.
+  useEffect(() => {
+    if (!db || !uid || !seasonReady) return;
+    return onValue(sRef(db, `players/${uid}/feats`), snap => {
+      setFeats((snap.val() as PlayerFeats | null) ?? null);
+    });
+  }, [uid, seasonReady]);
+
+  const yamlLimits = useMemo(() => yamlLimitsForFeats(getPlayerFeatIds(feats ?? undefined)), [feats]);
+
   const game = mission?.casinoGame ?? null;
   const cfg  = game ? CASINO_GAMES[game] : null;
 
@@ -432,6 +451,72 @@ export function CasinoTable() {
     catch (e) { doFlash((e as { message?: string })?.message ?? fallback); }
     finally { setBusy(false); }
   }
+
+  // ── Host view (admin only) ──────────────────────────────────────────────────
+  //
+  // The host can already see what each seat COMMITTED (`lockedCards` is public and
+  // maps 1:1 to the public slots). What they cannot see is the rest of the pool —
+  // the cards a seat was dealt and left out — because it lives in seasonSecrets/,
+  // which is owner-read only with no admin exception (see database.rules.json: a
+  // read grant there would cascade to every seat's hand). So the reveal goes
+  // through an admin callable, on demand rather than as a live subscription.
+  //
+  // It matters most right before a deny: those uncommitted cards are exactly the
+  // alternative games the seat could re-pick if their config is sent back.
+  const [adminId, setAdminId]     = useState<string | null>(null);
+  const [peekOn, setPeekOn]       = useState(false);
+  const [peekSeats, setPeekSeats] = useState<Record<string, CasinoSeatPeek>>({});
+  const [peekBusy, setPeekBusy]   = useState(false);
+
+  // config/adminId is world-readable (it is a single uid), so this needs no
+  // callable. Held as the id rather than a boolean so signing out can't leave a
+  // stale `true` behind — host-ness is derived from the CURRENT uid below.
+  useEffect(() => {
+    if (!db) return;
+    let cancelled = false;
+    get(ref(db, 'config/adminId'))
+      .then(snap => { if (!cancelled) setAdminId((snap.val() as string | null) ?? null); })
+      .catch(() => { /* not readable → not the host; leave it null */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const isHost = !!uid && adminId === uid;
+
+  const loadPeek = useCallback(async () => {
+    if (!missionId) return;
+    setPeekBusy(true);
+    try {
+      const res = await call<{ missionId: string }, { seats: CasinoSeatPeek[] }>('adminGetCasinoHands')({ missionId });
+      setPeekSeats(Object.fromEntries(res.seats.map(s => [s.uid, s])));
+    } catch (e) {
+      setFlash((e as { message?: string })?.message ?? 'Could not read the seats.');
+      setTimeout(() => setFlash(''), 4000);
+      setPeekOn(false);
+    } finally {
+      setPeekBusy(false);
+    }
+  }, [call, missionId]);
+
+  // What the reveal is a snapshot OF: who is seated, who has locked in, how many
+  // cards each committed, and whether the Hold 'Em community has landed. Any of
+  // those moving makes the shown pool stale, so re-read rather than leave the host
+  // looking at a hand that has since changed.
+  const peekKey = useMemo(
+    () => Object.entries(mission?.participants ?? {})
+      .map(([id, p]) => `${id}:${p?.played ? 1 : 0}:${p?.lockedCards?.length ?? 0}`)
+      .sort()
+      .join('|') + `#${mission?.community?.length ?? 0}`,
+    [mission?.participants, mission?.community],
+  );
+
+  useEffect(() => {
+    if (!peekOn) return;
+    // Reading the seats is a fetch against an external system (the callable), not
+    // derived state — but it flips `peekBusy` before its first await, which is what
+    // the rule sees. Scoped off for this one call.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadPeek();
+  }, [peekOn, peekKey, loadPeek]);
 
   // ── Derived state ────────────────────────────────────────────────────────
 
@@ -824,6 +909,15 @@ export function CasinoTable() {
   // Reject-level findings are a HARD block; warn-level are non-blocking notices.
   const pbBlock = pbFindings.filter(f => f.severity === 'reject');
   const pbWarn  = pbFindings.filter(f => f.severity === 'warn');
+  // Settings-cap overages, one row per setting. DERIVED rather than stamped at
+  // attach: `feats` loads asynchronously, so a file attached before it arrives
+  // would otherwise stay screened against the base caps and accuse a Picky player
+  // of an overage they are allowed. Deliberately absent from canSubmit — there is
+  // no hard cap here, only a flag the host reads on download.
+  const capSummary = useMemo(
+    () => summarizeLimitFindings(yamlText ? checkYamlLimits(yamlText, yamlLimits) : []),
+    [yamlText, yamlLimits],
+  );
   const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr && pbBlock.length === 0;
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
@@ -980,8 +1074,26 @@ export function CasinoTable() {
             : 'This table has settled · the pot has been paid out'}
       </div>
 
+      {/* ── Host view: reveal every seat's cards (admin only) ── */}
+      {isHost && (
+        <div className="cz-hostbar">
+          <span className="cz-hostbar-tag">Host</span>
+          <button className="cz-hostbar-btn" disabled={peekBusy} onClick={() => setPeekOn(v => !v)}>
+            {peekBusy && !peekOn ? 'Reading…' : peekOn ? 'Hide seat cards' : '👁 Reveal seat cards'}
+          </button>
+          {peekOn && (
+            <button className="cz-hostbar-btn" disabled={peekBusy} title="Re-read the seats"
+                    onClick={() => void loadPeek()}>{peekBusy ? '…' : '↻'}</button>
+          )}
+          <span className="cz-hostbar-note">
+            Every seat's cards, committed and not — the uncommitted ones are what they could still
+            pick if you send a config back. Only you can see this.
+          </span>
+        </div>
+      )}
+
       {/* ── Seat rail ── */}
-      <div className="cz-rail">
+      <div className={`cz-rail${peekOn ? ' peeking' : ''}`}>
         {seatEntries.map(([id, p], i) => {
           const isMe   = id === uid;
           const status = seatStatus(p, isMe, now, i < openMax);
@@ -998,6 +1110,7 @@ export function CasinoTable() {
               isMe={isMe}
               stake={stake}
               startByLabel={status === 'deadline' && sbLeft > 0 ? fmtCountdown(sbLeft) : undefined}
+              peek={peekOn && p ? (peekSeats[id] ?? null) : null}
             />
           );
         })}
@@ -1365,7 +1478,7 @@ export function CasinoTable() {
                 </div>
                 <div className="sf-reminder">
                   Remember to <strong>test and generate your YAML</strong> before submitting. It should
-                  generate at or below <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
+                  generate between <strong>50 checks</strong> and <strong>2,000 checks</strong> in total across all {committedCards.length} game{committedCards.length === 1 ? '' : 's'}.
                 </div>
                 <div className="sf-reminder">
                   Please also check that your games are included in{' '}
@@ -1462,6 +1575,24 @@ export function CasinoTable() {
                   {pbWarn.map((f, i) => (
                     <div className="sf-yaml-warn" key={`pbw${i}`}>⚠ {f.world}: {f.message}</div>
                   ))}
+                  {/* Over-cap settings. Grouped in one box so a file over on two
+                      settings across four worlds doesn't bury the rest of the
+                      notices, and worded to make clear the submit still goes
+                      through — these caps are waived by the host, not enforced. */}
+                  {capSummary.length > 0 && (
+                    <div className="sf-yaml-cap">
+                      <div className="sf-yaml-cap-head">
+                        ⚠ Over the YAML settings limits — you can still submit
+                      </div>
+                      {capSummary.map(s => (
+                        <div className="sf-yaml-cap-row" key={s.key}>{s.message}</div>
+                      ))}
+                      <div className="sf-yaml-cap-foot">
+                        If your host has not already approved this, please fix it or say so when you submit —
+                        they see these flags on their side too.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1546,7 +1677,7 @@ export function CasinoTable() {
       </div>
 
       {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
-      {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} />}
+      {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} limits={yamlLimits} />}
     </div>
   );
 }

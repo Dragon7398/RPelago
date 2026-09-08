@@ -656,7 +656,7 @@ export default function GuildmasterMissions() {
 
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
-    .map(m => computeMissionCard(m, uid, heldMissionIds.length, capacity, basicTrainingDone, now, player?.gold))
+    .map(m => computeMissionCard(m, uid, heldMissionIds.length, capacity, basicTrainingDone, now, player?.gold, player?.restricted === true))
     .sort((a, b) => {
       const ga = sortGroup(a), gb = sortGroup(b);
       if (ga !== gb) return ga - gb;

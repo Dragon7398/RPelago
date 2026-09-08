@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #141009; --bg-card: #252010;
+      --border: #4a3c22; --line: #4a3c22; --line-glow: #9a7838;
+      --gold: oklch(76% 0.14 75); --gold-dim: oklch(62% 0.10 75);
+      --parchment: oklch(92% 0.03 80); --ink-soft: oklch(86% 0.035 82 / 0.82);
+      --pos: oklch(76% 0.15 145); --neg: oklch(66% 0.17 28);
+      --caution: oklch(78% 0.19 53); --alert: var(--neg);
+    }
+    body { margin: 0; background: var(--bg-deep); color: var(--parchment); font-size: 16px; }
+    a { color: var(--gold); } a:hover { color: var(--parchment); }
+
+    .mp-idle { display:inline-flex; align-items:center; gap:0.24rem; flex-shrink:0;
+      font-family:'Cinzel',serif; font-size:0.54rem; letter-spacing:0.06em; font-weight:600;
+      padding:0.18rem 0.5rem; border-radius:999px; border:1px solid; white-space:nowrap; cursor:default; }
+    .mp-idle svg { width:0.68rem; height:0.68rem; flex-shrink:0; }
+    .mp-idle.caution { color:var(--caution); border-color: oklch(from var(--caution) l c h / 0.5); background: oklch(from var(--caution) l c h / 0.1); }
+    .mp-idle.alert { color: var(--bg-deep); background: var(--alert); border-color: var(--alert); font-weight:800; }
+    .mp-st { font-family:'Cinzel',serif; font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase;
+      padding:0.18rem 0.55rem; border-radius:999px; border:1px solid; white-space:nowrap;
+      display:inline-flex; align-items:center; gap:0.28rem; }
+    .mp-st .dot { width:0.5rem; height:0.5rem; border-radius:50%; }
+    .mp-st.unstarted { color:var(--gold-dim); border-color:var(--line); }
+    .mp-st.unstarted .dot { background:var(--gold-dim); opacity:0.5; }
+    .mp-st.inprog { color: oklch(80% 0.12 235); border-color: oklch(80% 0.12 235 / 0.5); background: oklch(80% 0.12 235 / 0.1); }
+    .mp-st.inprog .dot { background: oklch(80% 0.12 235); }
+    .mp-st.full { color: oklch(80% 0.13 85); border-color: oklch(80% 0.13 85 / 0.5); background: oklch(80% 0.13 85 / 0.1); }
+    .mp-st.full .dot { background: oklch(80% 0.13 85); }
+    .mp-st.goal { color:var(--pos); border-color: oklch(from var(--pos) l c h / 0.6); background: oklch(from var(--pos) l c h / 0.16); }
+    .mp-st.goal .dot { background:var(--pos); }
+
+    /* Native title tooltip, drawn so the copy can be reviewed. */
+    .tip { font-family:'Crimson Pro',serif; font-size:0.78rem; color: oklch(96% 0.005 90);
+      background: oklch(20% 0.01 260); border:1px solid oklch(38% 0.01 260); border-radius:4px;
+      padding:0.28rem 0.5rem; box-shadow: 0 4px 14px oklch(0% 0 0 / 0.5); max-width:34ch; line-height:1.35; text-wrap:pretty; }
+
+    .card { border:1px solid oklch(from var(--gold) l c h / 0.22); border-radius:10px;
+      background: oklch(from var(--bg-card) l c h / 0.45); padding:0.9rem 1rem 1rem;
+      display:flex; flex-direction:column; gap:0.7rem; }
+    .cap { font-family:'Cinzel',serif; font-size:0.5rem; letter-spacing:0.16em; text-transform:uppercase; color: oklch(62% 0.10 75 / 0.75); }
+    .h2 { font-family:'Cinzel',serif; font-weight:800; font-size:0.82rem; letter-spacing:0.05em; color:var(--gold); }
+    .body { font-family:'Crimson Pro',serif; font-size:0.86rem; line-height:1.45; color: oklch(from var(--gold-dim) l c h / 0.95); text-wrap:pretty; }
+    .body b { font-weight:600; color:var(--parchment); }
+    .mono { font-family:'Cinzel',serif; font-size:0.62rem; letter-spacing:0.04em; color:var(--parchment); }
+    .rule { height:1px; background: oklch(from var(--gold) l c h / 0.16); }
+
+    .swatchrow { display:grid; grid-template-columns: 132px 1fr; gap:0.8rem; align-items:center; }
+    .themebox { display:flex; align-items:center; gap:0.5rem; padding:0.7rem 0.8rem; border-radius:8px; border:1px solid; }
+    .t-gilded  { background:#141009; border-color:#4a3c22; --caution: oklch(78% 0.19 53); --alert: var(--neg); --bg-deep:#141009; }
+    .t-moonlit { background: oklch(12% 0.02 250); border-color: oklch(35% 0.05 245); --caution: oklch(76% 0.19 63); --alert: oklch(64% 0.17 38); --bg-deep: oklch(12% 0.02 250); }
+    .t-parchment { background: oklch(95% 0.025 85); border-color: oklch(64% 0.07 75); --caution: oklch(52% 0.15 82); --alert: oklch(46% 0.18 30); --bg-deep: oklch(95% 0.025 85); }
+    .themename { font-family:'Cinzel',serif; font-size:0.58rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--gold-dim); }
+    .themenote { font-family:'Crimson Pro',serif; font-style:italic; font-size:0.76rem; color: oklch(from var(--gold-dim) l c h / 0.85); }
+  </style>
+</helmet>
+
+<div style="padding: 34px 36px 38px; display:flex; flex-direction:column; gap:22px;">
+
+  <div style="display:flex; flex-direction:column; gap:4px;">
+    <div class="cap">Badge specification</div>
+    <div style="font-family:'Cinzel',serif; font-weight:800; font-size:1.35rem; color:var(--gold); letter-spacing:0.04em;">Two tiers, three channels</div>
+    <div style="font-family:'Crimson Pro',serif; font-style:italic; font-size:0.94rem; color:var(--gold-dim); max-width:70ch; line-height:1.45; text-wrap:pretty;">
+      Colour alone cannot carry this — ten themes ship, four of them on a colour-blind-safe lightness ladder and four of them light. Each tier is separated three ways: a different icon <span style="font-style:normal;">shape</span>, an outline versus a solid <span style="font-style:normal;">chip</span>, and the elapsed hours printed as <span style="font-style:normal;">text</span>.
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:1rem;">
+
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:0.55rem;">
+        <span class="mp-idle caution">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          52h
+        </span>
+        <span class="h2">Caution · 48h+</span>
+      </div>
+      <div class="body">
+        A clock, drawn in outline, in <b>--caution</b>. This is information, not an accusation — the slot has gone quiet, and the player is the first to know.
+      </div>
+      <div class="rule"></div>
+      <div class="cap">On hover</div>
+      <div class="tip">52h since last activity.</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:0.55rem;">
+        <span class="mp-idle alert">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+          78h
+        </span>
+        <span class="h2">Warning · 72h+</span>
+      </div>
+      <div class="body">
+        A triangle, on a solid <b>--alert</b> chip. 72h is the same threshold as <b>PROBLEM_STALE_HOURS</b>, so on an In-Progress slot this badge means <span style="font-style:italic;">you are on the host's next report</span> — and it appears before the report runs, which is the whole point.
+      </div>
+      <div class="rule"></div>
+      <div class="cap">On hover</div>
+      <div class="tip">78h since last activity. Please play this slot or report on your status.</div>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <div class="h2">Copy variants, not more tiers</div>
+    <div class="body">
+      Two things move the wording, and neither adds a badge. <b>"Since last activity" is a lie</b> on a slot that has never had any — when the clock runs from the room link, the sentence names that instead. And the <b>actionable half is an instruction to the holder</b>, so it appears only on your own slots; on someone else's it would be telling the wrong person what to do.
+    </div>
+    <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:0.8rem; margin-top:0.1rem;">
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span class="mp-st unstarted"><span class="dot"></span>Unstarted</span>
+          <span class="mp-idle caution">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+            52h
+          </span>
+        </div>
+        <div class="tip">Not started — 52h since the room went up.</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span class="mp-st unstarted"><span class="dot"></span>Unstarted</span>
+          <span class="mp-idle alert">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+            78h
+          </span>
+        </div>
+        <div class="tip">Not started — 78h since the room went up. Please play this slot or report on your status.</div>
+      </div>
+    </div>
+    <div class="rule"></div>
+    <div class="cap">Whose slot it is</div>
+    <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:0.8rem;">
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        <div class="body" style="font-size:0.8rem;">Yours</div>
+        <div class="tip">78h since last activity. Please play this slot or report on your status.</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        <div class="body" style="font-size:0.8rem;">Someone else's</div>
+        <div class="tip">Tamsin — 78h since last activity.</div>
+      </div>
+    </div>
+    <div class="body" style="font-style:italic; font-size:0.8rem;">
+      Badges appear on <b>every</b> slot a board draws — yours, the rest of your table, and any table opened through the peek. A stalled table is the room's problem, and seeing whose slot is holding it up is most of why you would open someone else's board.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2">Never badged</div>
+    <div class="body">
+      Three statuses are terminal for badging — the set <b>FREE_COMPLETED_STATUSES</b>, which already decides when a mission claim is released. A player who has done their part is never nagged. A slot with no timestamps at all is <span style="font-style:italic;">unknown</span>, not stale, and stays quiet too.
+    </div>
+    <div class="body" style="font-style:italic; font-size:0.8rem;">
+      Note the deliberate divergence: <b>statusReport.ts</b> keeps <b>100%</b> in scope on purpose — a slot with every check but no goal still holds its world open — and its header says in as many words not to unify with this set. So a 100% slot can raise a <span style="font-style:normal;">lastPlayer</span> warning on the host's report while showing no badge here. That is the intended trade: the badge is a nudge aimed at the player, not a mirror of the report.
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.1rem;">
+      <span class="mp-st full"><span class="dot"></span>100%</span>
+      <span class="mp-st goal"><span class="dot"></span>Goaled</span>
+      <span class="mp-st goal"><span class="dot"></span>Done</span>
+      <span style="font-family:'Crimson Pro',serif; font-style:italic; font-size:0.82rem; color: oklch(from var(--gold-dim) l c h / 0.8); margin-left:0.3rem;">— badge suppressed</span>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+      <span class="mp-st unstarted"><span class="dot"></span>Unstarted</span>
+      <span class="mp-st inprog"><span class="dot"></span>In-Progress</span>
+      <span style="font-family:'Crimson Pro',serif; font-style:italic; font-size:0.82rem; color: oklch(from var(--gold-dim) l c h / 0.8); margin-left:0.3rem;">— badge eligible</span>
+    </div>
+    <div class="body" style="font-style:italic; font-size:0.8rem;">
+      <b>Unstarted</b> slots carry no tracker timestamps of their own, so their clock runs from the room link instead — see the Data model board. They badge like anything else, on the same 48h/72h, which is what makes "you never started" visible on the player's own page rather than only on the host's report.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2">Theme check</div>
+    <div class="body">
+      <b>--caution</b> is the one colour this feature adds, and it needs a value per theme like every other token. <b>--alert</b> reuses the existing <b>--neg</b>, which is already tuned in all ten. Caution is <b>orange, not amber</b>, in every theme — amber <span style="font-style:italic;">is</span> gold here, so an amber badge reads as decoration rather than a warning. Full derivation and all ten values are on the <b>Theme values</b> page.
+    </div>
+    <div style="display:flex; flex-direction:column; gap:0.6rem; margin-top:0.2rem;">
+
+      <div class="swatchrow">
+        <div style="display:flex; flex-direction:column; gap:0.1rem;">
+          <span class="themename">Gilded</span>
+          <span class="themenote">default, dark</span>
+        </div>
+        <div class="themebox t-gilded">
+          <span class="mp-idle caution"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>52h</span>
+          <span class="mp-idle alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>78h</span>
+          <span class="mono" style="margin-left:auto; opacity:0.7;">oklch(78% 0.19 53)</span>
+        </div>
+      </div>
+
+      <div class="swatchrow">
+        <div style="display:flex; flex-direction:column; gap:0.1rem;">
+          <span class="themename">Moonlit</span>
+          <span class="themenote">colour-blind ladder</span>
+        </div>
+        <div class="themebox t-moonlit">
+          <span class="mp-idle caution"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>52h</span>
+          <span class="mp-idle alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>78h</span>
+          <span class="mono" style="margin-left:auto; opacity:0.7;">oklch(76% 0.19 63)</span>
+        </div>
+      </div>
+
+      <div class="swatchrow">
+        <div style="display:flex; flex-direction:column; gap:0.1rem;">
+          <span class="themename">Parchment</span>
+          <span class="themenote">light</span>
+        </div>
+        <div class="themebox t-parchment">
+          <span class="mp-idle caution"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>52h</span>
+          <span class="mp-idle alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>78h</span>
+          <span class="mono" style="margin-left:auto; opacity:0.55; color: oklch(22% 0.05 60);">oklch(52% 0.15 82)</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="body" style="font-style:italic; font-size:0.8rem;">
+      The badge icons are inline SVG, not emoji, for one hard reason: an emoji ⚠️ paints in its own fixed colours and ignores every token above — it would read as a foreign object in Parchment and Moonlit alike.
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

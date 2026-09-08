@@ -62,6 +62,18 @@ function PlayerBlock({ player, excuse }: { player: ReportPlayerFinding; excuse?:
                 {f.slotName}<span className="sr-slot-game"> · {f.game}</span>
               </span>
               <span className="sr-slot-reasons">{f.reasons.join(' · ')}</span>
+              {/* The player's own explanation — the evidence the trackers structurally
+                  cannot see, and usually the thing an excuse decision turns on. */}
+              {f.note && (
+                <span className="sr-slot-note">
+                  <span className="sr-slot-note-text">{f.note.text}</span>
+                  <span className="sr-slot-note-time">
+                    {new Date(f.note.timestamp).toLocaleString(undefined, {
+                      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                    })}
+                  </span>
+                </span>
+              )}
             </span>
           </li>
         ))}
