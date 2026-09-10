@@ -515,6 +515,10 @@ export interface GMMission {
   firstJoinAt:     number | null;
   createdAt:       number;
   deployedAt?:     number;
+  // When the mission settled into missionsHistory. Stamped by `archivedMission`,
+  // so rows archived before it existed have none — read it through
+  // `missionSettledAt`, which falls back to the deploy/creation clock.
+  completedAt?:    number;
   participants:    Record<string, GMParticipant>;
   // Vacated slots waiting for a replacement. Two shapes are accepted on read (see
   // `normalizeClaimEntry`): a bare AdvSlot[] is the legacy/non-casino form, while

@@ -1289,9 +1289,12 @@ export async function syncPlayerProfile(
 // The archived copy a mission settles into. For casino tables it stamps each
 // seat's `potShare` and `net`, which the Settled ledger reads back: the pot split
 // awards its remainder to a randomly chosen seat, so nothing downstream can
-// re-derive who got it. Non-casino missions archive unchanged.
-function archivedMission(mission: GMMission, potShares: Map<string, number>): GMMission {
-  const settled: GMMission = { ...mission, state: 'complete' };
+// re-derive who got it. Non-casino missions archive unchanged apart from the
+// settle stamp. `completedAt` is the only record of WHEN a table settled — the
+// deploy clock can be days earlier — and it is what the casino profile's history
+// dates each row by.
+function archivedMission(mission: GMMission, potShares: Map<string, number>, now: number): GMMission {
+  const settled: GMMission = { ...mission, state: 'complete', completedAt: now };
   if (mission.type !== 'casino') return settled;
 
   const participants: Record<string, GMParticipant> = {};
@@ -1439,7 +1442,7 @@ export async function completeMission(
     }
   }
 
-  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares);
+  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares, now);
   updates[sPath(`missions/${mission.id}`)]         = null;
 
   await update(ref(db!), updates);

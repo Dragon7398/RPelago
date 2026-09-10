@@ -1,9 +1,10 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
+import type { AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
 import { FREE_COMPLETED_STATUSES, nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
+import { seatGames, type SeatGame } from './seatGames';
 
 // The player's chosen name-color, resolved LIVE per playerId so a mid-mission
 // change is reflected everywhere. Provided by the shell (from gameState.players).
@@ -67,31 +68,6 @@ const STATUS_CLS: Record<SlotStatus, string> = {
 
 // One committed game at the table: the slot's real game (once filled) paired with
 // the card it came from (suit/hue/flavour) via the persisted lockedCards.
-interface SeatGame {
-  // NB: `slot` is the slot's NAME, not the slot object — `raw` is the object.
-  slot: string; game: string; cardName: string; type?: CardTypeKey; status: SlotStatus;
-  claimed?: boolean; claimedFrom?: string;
-  /** Index into the seat's `slots` array — the address `setSlotStatusNote` writes to. */
-  idx: number;
-  raw: AdvSlot;
-}
-function seatGames(seat: GMParticipant): SeatGame[] {
-  const slots = seat.slots ?? [];
-  const cards = seat.lockedCards ?? [];
-  return slots.map((s, i) => ({
-    slot:     s.name?.trim() || `Seat ${i + 1}`,
-    game:     s.game?.trim() || cards[i]?.name || 'Unfilled',
-    cardName: cards[i]?.name ?? '',
-    type:     cards[i]?.type,
-    status:   s.status ?? 'Unstarted',
-    idx:      i,
-    raw:      s,
-    // A slot taken over from someone who left. Worth showing: it explains why a
-    // seat holds more cards than it was dealt, and who was originally on the hook.
-    ...(s.claimed ? { claimed: true, claimedFrom: s.claimedFrom } : {}),
-  }));
-}
-
 function StatusPill({ status }: { status: SlotStatus }) {
   return <span className={`mp-st ${STATUS_CLS[status]}`}><span className="dot" />{status}</span>;
 }
@@ -102,7 +78,7 @@ function NetBadge({ n, big }: { n: number; big?: boolean }) {
   return <span className={`st-net ${cls}${big ? ' big' : ''}`}>{str}<small>g</small></span>;
 }
 
-function GameChip({ g }: { g: SeatGame }) {
+export function GameChip({ g }: { g: SeatGame }) {
   const goaled = isGoaled(g.status);
   return (
     <span className={`st-chip${goaled ? ' goaled' : ''}`} style={{ '--th': hueOf(g.type) } as React.CSSProperties}

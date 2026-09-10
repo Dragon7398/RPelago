@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { GMMission } from '../../types';
+import { missionSettledAt } from '../../lib/missionLogic';
 
 /**
  * The player's most recently settled casino table — the Ledger phase's subject.
@@ -16,7 +17,6 @@ export function useLastSettled(
     if (!uid) return null;
     const mine = Object.values(history ?? {}).filter(m => m.type === 'casino' && !!m.participants?.[uid]);
     if (mine.length === 0) return null;
-    const at = (m: GMMission) => m.deployedAt ?? m.createdAt;
-    return mine.reduce((a, b) => (at(b) > at(a) ? b : a));
+    return mine.reduce((a, b) => (missionSettledAt(b) > missionSettledAt(a) ? b : a));
   }, [history, uid]);
 }
