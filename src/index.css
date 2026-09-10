@@ -110,6 +110,25 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --boss-bg-1:   oklch(15% 0.08 40);
   --boss-bg-2:   oklch(20% 0.06 40);
 
+  /* S2 Dungeon (Arcane Violet). Per-theme values live in each body.theme-* block;
+     see docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(66% 0.14 270);
+  --dungeon-bg-1: oklch(13% 0.06 270);
+  --dungeon-bg-2: oklch(17% 0.05 270);
+
+  /* S2 Tower and Castle are ALIASES, declared once. Custom properties resolve at
+     USE time, so these follow whatever the active theme sets for boss/town --
+     no per-theme copies, and they cannot drift if a theme is retuned.
+       Tower  = the S1 boss colour: it holds the season goal tile.
+       Castle = the vacated town rung: S2 has no towns, and the rung is already
+                balanced in all ten themes. */
+  --tower-fg:     var(--boss-fg);
+  --tower-bg-1:   var(--boss-bg-1);
+  --tower-bg-2:   var(--boss-bg-2);
+  --castle-fg:    var(--town-fg);
+  --castle-bg-1:  var(--town-bg-1);
+  --castle-bg-2:  var(--town-bg-2);
+
   /* ── Guildmaster mission accent ─────────────────────────────── */
   --gm-accent:   oklch(68% 0.15 285);
   --gm-accent-d: oklch(50% 0.14 285);
@@ -421,6 +440,41 @@ header p {
 .tile.state-inprogress.tile-boss .tile-label,
 .tile.state-complete.tile-boss .tile-label { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
 
+/* ── S2 tile types ─────────────────────────────────────────── */
+.tile.state-available.tile-dungeon,
+.tile.state-inprogress.tile-dungeon,
+.tile.state-complete.tile-dungeon {
+  background: linear-gradient(145deg, var(--dungeon-bg-1) 0%, var(--dungeon-bg-2) 100%);
+}
+.tile.state-available.tile-dungeon:hover,
+.tile.state-inprogress.tile-dungeon:hover,
+.tile.state-complete.tile-dungeon:hover { border-color: var(--dungeon-fg) !important; box-shadow: 0 8px 24px oklch(from var(--dungeon-fg) l c h / 0.3); }
+.tile.state-available.tile-dungeon .tile-label,
+.tile.state-inprogress.tile-dungeon .tile-label,
+.tile.state-complete.tile-dungeon .tile-label { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-tower,
+.tile.state-inprogress.tile-tower,
+.tile.state-complete.tile-tower {
+  background: linear-gradient(145deg, var(--tower-bg-1) 0%, var(--tower-bg-2) 100%);
+}
+.tile.state-available.tile-tower:hover,
+.tile.state-inprogress.tile-tower:hover,
+.tile.state-complete.tile-tower:hover { border-color: var(--tower-fg) !important; box-shadow: 0 8px 24px oklch(from var(--tower-fg) l c h / 0.3); }
+.tile.state-available.tile-tower .tile-label,
+.tile.state-inprogress.tile-tower .tile-label,
+.tile.state-complete.tile-tower .tile-label { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-castle,
+.tile.state-inprogress.tile-castle,
+.tile.state-complete.tile-castle {
+  background: linear-gradient(145deg, var(--castle-bg-1) 0%, var(--castle-bg-2) 100%);
+}
+.tile.state-available.tile-castle:hover,
+.tile.state-inprogress.tile-castle:hover,
+.tile.state-complete.tile-castle:hover { border-color: var(--castle-fg) !important; box-shadow: 0 8px 24px oklch(from var(--castle-fg) l c h / 0.3); }
+.tile.state-available.tile-castle .tile-label,
+.tile.state-inprogress.tile-castle .tile-label,
+.tile.state-complete.tile-castle .tile-label { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
+
 .tile.tile-center.state-complete { border-color: oklch(52% 0.14 75) !important; }
 
 /* Animations */
@@ -469,6 +523,12 @@ header p {
 .tile.state-inprogress.tile-elite  .tile-name { color: oklch(from var(--elite-fg) calc(l + 0.10) c h); }
 .tile.state-available.tile-boss    .tile-name,
 .tile.state-inprogress.tile-boss   .tile-name { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-dungeon  .tile-name,
+.tile.state-inprogress.tile-dungeon .tile-name { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-tower  .tile-name,
+.tile.state-inprogress.tile-tower .tile-name { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-castle  .tile-name,
+.tile.state-inprogress.tile-castle .tile-name { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 
 /* ── Tile name: parchment scroll banner (Hover & Always-on-hover) ── */
 .tile-name-banner {
@@ -653,6 +713,9 @@ header p {
 .lb-title.town_center { color: oklch(from var(--town-fg) calc(l + 0.10) c h); }
 .lb-title.elite  { color: oklch(from var(--elite-fg) calc(l + 0.10) c h); }
 .lb-title.boss   { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
+.lb-title.dungeon { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.lb-title.tower { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.lb-title.castle { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 .lb-divider { width: 60px; height: 1px; background: linear-gradient(to right, transparent, var(--border-glow), transparent); margin: 0.8rem auto; }
 
 .lb-progress-wrap { margin: 0.8rem 0; }
@@ -2280,6 +2343,28 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-adv-note-time { font-size: 0.58rem; color: oklch(46% 0.05 75); white-space: nowrap; flex-shrink: 0; }
 
 /* ── Players page ── */
+/* ── Players roster bands ─────────────────────────────────────────────────────
+   The roster sorts into three claim-activity bands (see comparePlayersForAdmin),
+   so each gets a heading. Cards sit CLOSER together inside a band than the page's
+   own 1.5rem gap between bands, which is what makes the grouping read without
+   needing a heavy rule. Colour comes entirely from existing theme tokens, so the
+   light and high-contrast themes need no override — and the band always carries
+   its own words, so hue is only ever reinforcement. */
+.dash-player-band-group { display: flex; flex-direction: column; gap: 0.9rem; }
+.dash-player-band {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: 'Cinzel', serif; font-size: 0.7rem; letter-spacing: 0.14em;
+  color: var(--gold-dim); border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3rem; cursor: help;
+}
+/* In Play is the band an admin is scanning for, so it is the only one at full
+   gold; the other two step back rather than competing with it. */
+.dash-player-band--active  { color: var(--gold); border-bottom-color: var(--border-glow); }
+.dash-player-band--none    { color: var(--text-muted); }
+.dash-player-band-count {
+  font-size: 0.65rem; letter-spacing: 0.08em; opacity: 0.75;
+}
+
 .dash-player-card {
   background: oklch(14% 0.05 75 / 0.5); border: 1px solid oklch(28% 0.06 75);
   border-radius: 3px; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
@@ -3475,6 +3560,14 @@ body.theme-moonlit {
   --boss-bg-1:   oklch(20% 0.07 95);
   --boss-bg-2:   oklch(24% 0.05 95);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(70% 0.10 290);
+  --dungeon-bg-1: oklch(18% 0.05 290);
+  --dungeon-bg-2: oklch(22% 0.04 290);
+
   --state-avail-fg:     oklch(68% 0.14 170);
   --state-avail-border: oklch(55% 0.12 170);
   --state-prog-border:  oklch(62% 0.16 80);
@@ -3517,6 +3610,14 @@ body.theme-verdant {
   --boss-bg-1:   oklch(19% 0.08 80);
   --boss-bg-2:   oklch(23% 0.06 80);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(66% 0.12 255);
+  --dungeon-bg-1: oklch(17% 0.06 255);
+  --dungeon-bg-2: oklch(21% 0.05 255);
+
   --state-avail-fg:     oklch(72% 0.18 140);
   --state-avail-border: oklch(60% 0.14 140);
   --state-prog-border:  oklch(62% 0.14 65);
@@ -3553,6 +3654,14 @@ body.theme-aether {
   --boss-bg-1:   oklch(18% 0.07 60);
   --boss-bg-2:   oklch(22% 0.05 60);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(65% 0.13 275);
+  --dungeon-bg-1: oklch(16% 0.06 275);
+  --dungeon-bg-2: oklch(20% 0.05 275);
+
   --state-avail-fg:     oklch(72% 0.18 130);
   --state-avail-border: oklch(55% 0.14 130);
   --state-prog-border:  oklch(52% 0.16 60);
@@ -3585,6 +3694,14 @@ body.theme-parchment {
   --boss-fg:     oklch(45% 0.18 50);
   --boss-bg-1:   oklch(82% 0.07 55);
   --boss-bg-2:   oklch(86% 0.05 55);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(36% 0.17 275);
+  --dungeon-bg-1: oklch(82% 0.05 275);
+  --dungeon-bg-2: oklch(86% 0.04 275);
 
   --state-avail-fg:     oklch(40% 0.16 150);
   --state-avail-border: oklch(45% 0.14 150);
@@ -3636,6 +3753,14 @@ body.theme-sakura {
   --boss-bg-1:   oklch(86% 0.06 50);
   --boss-bg-2:   oklch(90% 0.05 50);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(33% 0.16 288);
+  --dungeon-bg-1: oklch(86% 0.05 288);
+  --dungeon-bg-2: oklch(90% 0.04 288);
+
   --state-avail-fg:     oklch(42% 0.14 145);
   --state-avail-border: oklch(48% 0.14 145);
   --state-prog-border:  oklch(48% 0.18 50);
@@ -3684,6 +3809,14 @@ body.theme-mint {
   --boss-fg:     oklch(48% 0.18 50);
   --boss-bg-1:   oklch(84% 0.06 50);
   --boss-bg-2:   oklch(88% 0.05 50);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(30% 0.16 278);
+  --dungeon-bg-1: oklch(84% 0.05 278);
+  --dungeon-bg-2: oklch(88% 0.04 278);
 
   --state-avail-fg:     oklch(40% 0.16 150);
   --state-avail-border: oklch(45% 0.14 150);
@@ -3735,6 +3868,14 @@ body.theme-lapis {
   --boss-bg-1:   oklch(88% 0.09 85);
   --boss-bg-2:   oklch(92% 0.07 85);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(28% 0.14 300);
+  --dungeon-bg-1: oklch(84% 0.06 300);
+  --dungeon-bg-2: oklch(88% 0.05 300);
+
   --state-avail-fg:     oklch(46% 0.13 200);
   --state-avail-border: oklch(48% 0.13 200);
   --state-prog-border:  oklch(50% 0.20 50);
@@ -3785,6 +3926,14 @@ body.theme-obsidian {
   --boss-bg-1:   oklch(22% 0.08 95);
   --boss-bg-2:   oklch(26% 0.06 95);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(86% 0.12 270);
+  --dungeon-bg-1: oklch(20% 0.07 270);
+  --dungeon-bg-2: oklch(24% 0.06 270);
+
   --state-avail-fg:     oklch(82% 0.18 150);
   --state-avail-border: oklch(70% 0.16 150);
   --state-prog-border:  oklch(75% 0.18 70);
@@ -3822,6 +3971,14 @@ body.theme-tidepool {
   --boss-fg:     oklch(90% 0.18 95);
   --boss-bg-1:   oklch(22% 0.07 95);
   --boss-bg-2:   oklch(26% 0.05 95);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(69% 0.11 280);
+  --dungeon-bg-1: oklch(17% 0.06 280);
+  --dungeon-bg-2: oklch(21% 0.05 280);
 
   --state-avail-fg:     oklch(80% 0.13 195);
   --state-avail-border: oklch(68% 0.12 195);
@@ -4765,12 +4922,18 @@ body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }
 .ag-tile-name-town   { color: oklch(from var(--town-fg)   calc(l + 0.08) c h); }
 .ag-tile-name-elite  { color: oklch(from var(--elite-fg)  calc(l + 0.08) c h); }
 .ag-tile-name-boss   { color: oklch(from var(--boss-fg)   calc(l + 0.10) c h); }
+.ag-tile-name-dungeon { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.ag-tile-name-tower { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.ag-tile-name-castle { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 
 .ag-tile-badge-battle { color: var(--battle-fg); border-color: var(--battle-fg); background: var(--battle-bg-1); }
 .ag-tile-badge-puzzle { color: var(--puzzle-fg); border-color: var(--puzzle-fg); background: var(--puzzle-bg-1); }
 .ag-tile-badge-town   { color: var(--town-fg);   border-color: var(--town-fg);   background: var(--town-bg-1);   }
 .ag-tile-badge-elite  { color: var(--elite-fg);  border-color: var(--elite-fg);  background: var(--elite-bg-1);  }
 .ag-tile-badge-boss   { color: var(--boss-fg);   border-color: var(--boss-fg);   background: var(--boss-bg-1);   }
+.ag-tile-badge-dungeon { color: var(--dungeon-fg); border-color: var(--dungeon-fg); background: var(--dungeon-bg-1); }
+.ag-tile-badge-tower { color: var(--tower-fg); border-color: var(--tower-fg); background: var(--tower-bg-1); }
+.ag-tile-badge-castle { color: var(--castle-fg); border-color: var(--castle-fg); background: var(--castle-bg-1); }
 /* Room badge uses a fixed teal — hue kept consistent across all themes */
 .ag-tile-room-badge {
   font-family: 'Cinzel', serif; font-size: 0.5rem;

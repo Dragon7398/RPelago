@@ -1,4 +1,4 @@
-import type { TileTypeKey } from '../types';
+import type { TileTypeKey, BoardId } from '../types';
 
 // ── Per-season board geometry ─────────────────────────────────────────────────
 // S1 is a 5×7 board with a town centre at D3; S2 is 6×7 with the Castle at D6.
@@ -9,7 +9,10 @@ import type { TileTypeKey } from '../types';
 // This module deliberately has NO runtime imports: it is the bottom of the
 // import graph, so anything may depend on it.
 
-export type BoardId = 's1' | 's2';
+// BoardId is declared in types/index.ts so the season types can name it without
+// a types <-> board import cycle. Re-exported here because this is where the
+// specs live and every consumer already imports from this module.
+export type { BoardId };
 
 export interface BoardSpec {
   id:         BoardId;

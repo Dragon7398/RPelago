@@ -264,6 +264,31 @@ slots, a denied config that was never resubmitted).
 let the caller confirm, then re-call. Not a hard block: an admin sometimes needs
 to deploy anyway.
 
+### 0.5.9 The host board needs a submitted-marker on the record
+
+The casino season landed `seatOwesConfig` / `seatsAwaitingConfig`
+([missionLogic.ts:180](../src/lib/missionLogic.ts#L180)), which drive the admin
+board's "who am I waiting on" roster. **Both assume casino**, and universal
+YAML-at-join breaks them in two ways:
+
+1. **`seatsAwaitingConfig` early-returns `[]` for any non-casino mission.** Once
+   Patrol, Basic Training and Field Work all collect configs, that gate is
+   simply wrong and must widen to every type.
+2. **`seatOwesConfig` keys "has submitted" off `played`** — a casino-only flag
+   set when a seat locks its hand. A non-casino participant never sets it, so
+   **every** such seat would read as owing a config forever.
+
+The fix is not to special-case per type. §0.5.2 has the join callable verify the
+Storage object exists — it must **also stamp a marker on the participant /
+adventurer record** in the same write (a `yamlAt` timestamp, say). Otherwise the
+host board would have to hit Storage once per seat just to render, and
+`seatOwesConfig` has nothing type-agnostic to test.
+
+With that marker, `seatOwesConfig` generalises cleanly: **denied → owes; marker
+present → doesn't owe; all-slots-`claimed` → doesn't owe** (the pure-claimant
+case, which §0.5.8 exempts from YAML entirely). `played` stops being load-bearing
+and stays a casino display detail.
+
 ### 0.5.6 Tests
 
 - `joinChallenge` rejects when no Storage object exists; accepts when it does;
@@ -779,6 +804,34 @@ the numbers come from the level, not the form.
 | Check Count % | Raises the global **2,000-check ceiling** *and* the **Agile** cap — level-resolved via `resolveTrait` (§0.6), so it scales against `[250, 220, 180, 140, 100]` rather than a fixed 250. Not Sturdy. Surfaced in `SectionYaml` and the trait display |
 | Battle/Puzzle XP % and GP % | Reward math in `awardTileRewards` (tiles) — elite counts as **battle**. Missions are untyped: no % effect, but pets still earn XP |
 
+> **The five allowance effects plug into an EXISTING seam — `yamlLimitsForFeats`.**
+> The casino season landed a full YAML-limits pipeline that the plan predates:
+> `BASE_YAML_LIMITS` (constants) → `yamlLimitsForFeats(featIds)` /
+> `yamlLimitsForPlayer(player)` (gameLogic) → `checkYamlLimits(text, limits)`
+> (apYaml), already consumed by the casino attach-time warning
+> (`CasinoTable.tsx`), the host download badge (`MissionsPage.tsx`) and the rules
+> text (`SectionYaml.tsx`).
+>
+> The companion allowances map **1:1 onto `YamlLimitKey`**, so companions extend
+> that one function rather than building a parallel path:
+>
+> | Companion effect | `YamlLimits` key | Companion |
+> |---|---|---|
+> | Priority Locations | `priorityLocations` | Rivlet |
+> | Excluded Locations | `excludeLocations` | Corvex |
+> | Hint Locations | `startLocationHints` | Inklet |
+> | Starting Hints | `startHints` | Guppin |
+> | Starting Inventory | `startInventory` | Wyrmkin |
+>
+> Since feats retire (decision 10), `yamlLimitsForFeats` becomes party-aware —
+> something like `yamlLimitsFor(player, party)`. Every existing consumer then
+> picks up companion bonuses for free, including the host's download badge. This
+> makes half of §2.3 a change to one function instead of new plumbing.
+>
+> ⚠️ **Check Count has no `YamlLimits` key** — it bounds *checks*, not a capped
+> setting, and `checkYamlLimits` screens only the five above. It stays a separate
+> concern applied against the global ceiling and the Agile cap.
+
 Reward formula: `Math.round(base * (1 + featBonus + companionPct))` — additive,
 per decision 15. With feats retired, `featBonus` is 0 in S2.
 
@@ -946,6 +999,19 @@ depended upon rather than incidental:
 (`if (!tile.link) return true;`) and the mission branch (`if (!m.link) return true;`)
 switch from `link` to `cheese` — and the tile branch must check `cheese2` as well
 when the tile is bifurcated, since room 2 syncs independently.
+
+**A `restricted` player is exempt from early reclaim — and it is now live code.**
+`playerStatus` / `releasesClaimsEarly`
+([gameLogic.ts:66](../src/lib/gameLogic.ts#L66)) landed with the casino season:
+a restricted player keeps holding their claim until the *world* resolves, rather
+than the moment their own slots go terminal. Every early-release site gates on
+`releasesClaimsEarly`, and `tickSlotStatuses` inlines the same check. The two
+gap fixes above must preserve that — in particular, moving the reclaim check
+above the `hasActiveSlots` bail must not let it bypass the restricted gate.
+
+Note the split of responsibilities for §0.5's join callables: **`disabled` blocks
+joining outright; `restricted` does not.** A restricted player enlists, plays and
+settles normally — the penalty is purely that the claim comes back late.
 
 **Capacity interaction.** With reclaim general, `MISSION_CLAIM_CAPACITY` 1 means
 "one *unfinished* mission at a time, plus any number settling" — a player starts

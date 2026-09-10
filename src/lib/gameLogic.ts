@@ -1,4 +1,4 @@
-import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from '../types';
+import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats, GMMission } from '../types';
 import { getAdjCoords } from './board';
 import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, BASE_YAML_LIMITS, FREE_COMPLETED_STATUSES } from './constants';
 import type { YamlLimits } from './apYaml';
@@ -81,6 +81,67 @@ export function playerStatus(player: StatusFlags): PlayerStatus {
  */
 export function releasesClaimsEarly(player: StatusFlags): boolean {
   return player?.restricted !== true;
+}
+
+// ── Admin roster ordering ─────────────────────────────────────────────────────
+// The Players page is a roster, not a work queue, so it stays alphabetical — but
+// an admin scanning it cares first about who is mid-something. Three bands, then
+// name (the player analogue of missionLogic.compareMissionsForAdmin).
+//
+//   active   — engaged with something LIVE right now.
+//   settled  — nothing live, but something behind them this season.
+//   none     — nothing this season yet.
+//
+// The band tracks the TABLE, not the claim: a settling seat — still a participant
+// on a live mission, claim already released because their own slots went terminal
+// — is `active`, because the admin's question is "who is still at a table", and a
+// freed claim does not take them off it. Same on the tile side: an adventurer
+// released early off an in-progress tile keeps its player in the top band. What
+// distinguishes held from freed is the card's own `· settling` tag, not this.
+
+export type ClaimActivity = 'active' | 'settled' | 'none';
+
+/** The mission/tile records the tier is derived from. All optional — a casino
+ *  season has no tiles, and a fresh season has no history. */
+export interface ClaimActivityCtx {
+  missions?:        Record<string, GMMission> | null;
+  missionsHistory?: Record<string, GMMission> | null;
+  tiles?:           Record<string, Tile> | null;
+}
+
+export function claimActivity(player: Player, ctx: ClaimActivityCtx): ClaimActivity {
+  const onTile = (state: TileState) => Object.values(ctx.tiles ?? {})
+    .some(tile => tile.state === state
+      && Object.values(tile.adventurers ?? {}).some(a => a.owner === player.id));
+
+  // Live: a held claim, a seat at a table that has not settled yet, or an
+  // adventurer on a tile still in play. `heldMission` is kept alongside the seat
+  // scan so a claim on a mission missing from `missions` still counts.
+  const heldMission = Object.keys(player.activeMissions ?? {}).length > 0;
+  const busyAdv     = Object.values(player.adventurers ?? {}).some(a => a.busy && a.busyTile);
+  const liveSeat    = Object.values(ctx.missions ?? {})
+    .some(m => (m.state === 'forming' || m.state === 'inprogress') && !!m.participants?.[player.id]);
+  const liveTile    = onTile('available') || onTile('inprogress');
+  if (heldMission || busyAdv || liveSeat || liveTile) return 'active';
+
+  // Settled: a finished mission, or an adventurer left on a tile they cleared.
+  const inHistory = Object.values(ctx.missionsHistory ?? {})
+    .some(m => !!m.participants?.[player.id]);
+  return inHistory || onTile('complete') ? 'settled' : 'none';
+}
+
+const CLAIM_ACTIVITY_RANK: Record<ClaimActivity, number> = { active: 0, settled: 1, none: 2 };
+
+/**
+ * Roster order for the admin Players page: claim activity first, then Discord
+ * username. Older records may predate `discordHandle`, so the name key falls back
+ * to the display name rather than sinking all of them under an empty key.
+ */
+export function comparePlayersForAdmin(a: Player, b: Player, ctx: ClaimActivityCtx): number {
+  const rank = CLAIM_ACTIVITY_RANK[claimActivity(a, ctx)] - CLAIM_ACTIVITY_RANK[claimActivity(b, ctx)];
+  if (rank !== 0) return rank;
+  const nameKey = (p: Player) => (p.discordHandle || p.displayName || '').toLowerCase();
+  return nameKey(a).localeCompare(nameKey(b));
 }
 
 export function checkAndGrantAdventurers(player: Player, prevLevel: number, newLevel: number): Player {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { slotsAllFree, countUnfinishedSets, normalizeClaimEntry, claimableCount } from '../../src/lib/slotHelpers';
 import { awaitingRoom, hasUnfinishedSlots, hasUnfinishedTileSlots, computeMissionCard, currentMaxSlots, seatTally } from '../../src/lib/missionLogic';
-import { missionClaimCapacity, playerStatus, releasesClaimsEarly } from '../../src/lib/gameLogic';
+import { missionClaimCapacity, playerStatus, releasesClaimsEarly, claimActivity, comparePlayersForAdmin } from '../../src/lib/gameLogic';
+import type { Tile } from '../../src/types';
 import type { AdvSlot, ClaimableEntry, GMMission, GMParticipant, Player } from '../../src/types';
 
 const slot = (status?: AdvSlot['status']): AdvSlot => ({ name: 'n', game: 'g', ...(status ? { status } : {}) });
@@ -244,5 +245,92 @@ describe('releasesClaimsEarly — the one thing restricted changes', () => {
   // terminal, they just don't buy the claim back. Nothing about slotsAllFree moves.
   it('does not change what counts as a finished slot set', () => {
     expect(slotsAllFree([slot('Done'), slot('Goaled')])).toBe(true);
+  });
+});
+
+// ── Admin roster ordering ─────────────────────────────────────────────────────
+describe('claimActivity — the admin Players page tier', () => {
+  const pl = (over: Partial<Player>): Player => ({ id: 'me', displayName: 'Me', ...over } as Player);
+  const seated = (state: GMMission['state']): Record<string, GMMission> => ({
+    m1: {
+      id: 'm1', type: 'patrol', series: 1, label: 'Patrol', state,
+      baseMax: 4, xp: 0, gp: 0, release: 'off', collect: 'off', hint: 0,
+      firstJoinAt: 0, createdAt: 0,
+      participants: { me: { playerId: 'me', playerName: 'Me', joinedAt: 0 } },
+    },
+  });
+
+  it('is "none" for a player who has done nothing this season', () => {
+    expect(claimActivity(pl({}), {})).toBe('none');
+    // A live mission someone ELSE is seated at is not theirs — membership is by id.
+    expect(claimActivity(pl({ id: 'nobody' }), { missions: seated('inprogress') })).toBe('none');
+  });
+
+  it('is "active" while a mission claim is held', () => {
+    expect(claimActivity(pl({ activeMissions: { m1: true } }), { missions: seated('inprogress') }))
+      .toBe('active');
+  });
+
+  it('is "active" while an adventurer is busy on a tile', () => {
+    const p = pl({ adventurers: { a1: { id: 'a1', busy: true, busyTile: 'C2' } } as Player['adventurers'] });
+    expect(claimActivity(p, {})).toBe('active');
+  });
+
+  // The one that matters: a SETTLING seat has already handed its claim back, but
+  // the player is still AT that table, so they stay in the top band. The band
+  // tracks the table, not the claim.
+  it('keeps a settling seat in "active" even with the claim already returned', () => {
+    expect(claimActivity(pl({}), { missions: seated('inprogress') })).toBe('active');
+    expect(claimActivity(pl({}), { missions: seated('forming') })).toBe('active');
+  });
+
+  const tileWith = (state: string) => ({
+    C2: { state, adventurers: { a1: { owner: 'me', advId: 'a1' } } },
+  } as unknown as Record<string, Tile>);
+
+  it('keeps an early-released adventurer on a live tile in "active"', () => {
+    // busy/busyTile are cleared, so only the tile's own state can say they are
+    // still on it.
+    expect(claimActivity(pl({}), { tiles: tileWith('inprogress') })).toBe('active');
+    expect(claimActivity(pl({}), { tiles: tileWith('available') })).toBe('active');
+  });
+
+  it('is "settled" once the table or tile is finished', () => {
+    expect(claimActivity(pl({}), { missionsHistory: seated('complete') })).toBe('settled');
+    expect(claimActivity(pl({}), { tiles: tileWith('complete') })).toBe('settled');
+  });
+});
+
+describe('comparePlayersForAdmin', () => {
+  const pl = (id: string, handle: string, over: Partial<Player> = {}): Player =>
+    ({ id, displayName: handle, discordHandle: handle, ...over } as Player);
+  const history: Record<string, GMMission> = {
+    h1: {
+      id: 'h1', type: 'patrol', series: 1, label: 'Patrol', state: 'complete',
+      baseMax: 4, xp: 0, gp: 0, release: 'off', collect: 'off', hint: 0,
+      firstJoinAt: 0, createdAt: 0,
+      participants: { veteran: { playerId: 'veteran', playerName: 'veteran', joinedAt: 0 } },
+    },
+  };
+
+  it('ranks active over settled over none, then falls back to name', () => {
+    const busy    = pl('busy', 'aaa-busy', { activeMissions: { m1: true } });
+    const veteran = pl('veteran', 'zzz-veteran');
+    const rookie  = pl('rookie', 'bbb-rookie');
+    const order = [rookie, veteran, busy]
+      .sort((a, b) => comparePlayersForAdmin(a, b, { missionsHistory: history }))
+      .map(p => p.id);
+    // Alphabetically this would be aaa-busy, bbb-rookie, zzz-veteran — the tier
+    // is what lifts the veteran above the rookie.
+    expect(order).toEqual(['busy', 'veteran', 'rookie']);
+  });
+
+  it('sorts by Discord username within a tier, falling back to display name', () => {
+    const withHandle = pl('a', 'zeta');
+    const noHandle   = { id: 'b', displayName: 'Alpha' } as Player;
+    const order = [withHandle, noHandle]
+      .sort((a, b) => comparePlayersForAdmin(a, b, {}))
+      .map(p => p.id);
+    expect(order).toEqual(['b', 'a']);
   });
 });

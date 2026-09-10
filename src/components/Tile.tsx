@@ -66,18 +66,33 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
 
   const animDelay = `${(rowIndex * 7 + colIndex) * 18}ms`;
 
+  // Types that are not joinable challenges. S1 towns behaved this way already;
+  // S2 adds the Castle (start tile) and the dungeon/tower DOORWAYS, whose
+  // challenges live inside their own sub-maps rather than on this tile.
+  const isFacility = typeKey === 'town' || typeKey === 'town_center' || typeKey === 'castle';
+  const isDoorway  = typeKey === 'dungeon' || typeKey === 'tower';
+  const nonChallenge = isFacility || isDoorway;
+
+  // NOTHING renders on a hidden tile: a doorway that announced itself as
+  // 'Locked' under fog would leak where the dungeons and Tower are.
   let progressText = '';
-  if (state === 'available') {
-    if (typeKey !== 'town' && typeKey !== 'town_center') {
-      progressText = `${filled}/${required} ⚔`;
-    }
+  if (hidden) {
+    progressText = '';
+  } else if (typeKey === 'castle') {
+    progressText = 'Start';
+  } else if (isDoorway) {
+    // Doorways never show an adventurer count: nobody is sent HERE. Phase 3
+    // replaces these with real progress (orb pips / floor pips).
+    progressText = typeKey === 'dungeon' ? 'Locked' : 'Sealed';
+  } else if (state === 'available') {
+    progressText = `${filled}/${required} ⚔`;
   } else if (state === 'inprogress') {
     progressText = hasClaimable ? 'Slot Open' : 'In Progress';
   }
 
   const icon = hidden
     ? '🌫️'
-    : state === 'complete' && typeKey !== 'town' && typeKey !== 'town_center'
+    : state === 'complete' && !nonChallenge
       ? '✅'
       : info.icon;
 
@@ -88,7 +103,7 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const showBanner =
     !!tile?.name &&
     state !== 'hidden' &&
-    typeKey !== 'town' && typeKey !== 'town_center';
+    !nonChallenge;
 
   const showNameOnFace =
     showBanner && (state === 'available' || state === 'inprogress');

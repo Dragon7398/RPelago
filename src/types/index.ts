@@ -8,6 +8,13 @@ export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done
 export type TileTypeKey =
   | 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss'
   | 'castle' | 'dungeon' | 'tower';
+
+/**
+ * Which board geometry a season uses. The specs themselves live in
+ * src/lib/board.ts; the id is declared here so season types can reference it
+ * without board.ts and types/ importing each other.
+ */
+export type BoardId = 's1' | 's2';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
 export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
@@ -240,6 +247,12 @@ export interface SeasonListEntry {
   label:  string;
   shell:  SeasonShell;
   status: Exclude<SeasonStatus, 'draft'>;
+  /**
+   * Which board geometry this season renders. Absent means `s1` (5x7, town
+   * centre at D3), so every pre-existing config entry keeps working untouched.
+   * S2 sets `s2` (6x7, Castle at D6). See src/lib/board.ts.
+   */
+  board?: BoardId;
   /** Casino tables kept open concurrently. Per-season so S2 can differ from S1.5. */
   casinoOpenTables?: number;
 }
@@ -248,6 +261,8 @@ export interface SeasonListEntry {
 export interface DraftSeasonEntry {
   label: string;
   shell: SeasonShell;
+  /** Board geometry — see SeasonListEntry.board. */
+  board?: BoardId;
   casinoOpenTables?: number;
 }
 
@@ -267,6 +282,8 @@ export interface ResolvedSeason {
   id:     string;
   label:  string;
   shell:  SeasonShell;
+  /** Resolved board geometry. SeasonProvider publishes it via setActiveBoard. */
+  board:  BoardId;
   status: SeasonStatus;
   /** True when viewing an unlaunched season (admin/alpha preview + playtest). */
   isDraft: boolean;

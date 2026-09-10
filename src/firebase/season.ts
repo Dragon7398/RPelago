@@ -117,6 +117,7 @@ export function resolveSeason(
         id:       previewSeasonId,
         label:    draft.label,
         shell:    draft.shell,
+        board:    draft.board ?? 's1',
         status:   'draft',
         isDraft:  true,
         writable: true,   // alphas/admin playtest drafts
@@ -134,6 +135,7 @@ export function resolveSeason(
     id,
     label:    entry.label,
     shell:    entry.shell,
+    board:    entry.board ?? 's1',
     status,
     isDraft:  false,
     // Archived seasons are frozen history.

@@ -12,6 +12,11 @@ export const TILE_TYPES: Record<string, { label: string; icon: string; cls: stri
   battle:      { label: 'Battle', icon: '⚔️',  cls: 'tile-battle' },
   puzzle:      { label: 'Puzzle', icon: '🧩', cls: 'tile-puzzle' },
   elite:       { label: 'Elite',  icon: '💀', cls: 'tile-elite'  },
+  // S2 types. Castle is the auto-complete start tile; dungeon and tower are
+  // DOORWAYS into their own sub-maps, never joinable challenges themselves.
+  castle:      { label: 'Castle', icon: '🏰', cls: 'tile-castle'  },
+  dungeon:     { label: 'Dungeon', icon: '🗝️', cls: 'tile-dungeon' },
+  tower:       { label: 'Tower',  icon: '🏯', cls: 'tile-tower'   },
   boss:        { label: 'Boss',   icon: '🐉', cls: 'tile-boss'   },
 };
 

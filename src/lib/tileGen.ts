@@ -47,7 +47,7 @@ function isInBossCornerRegion(r: number, c: number, bossR: number, bossC: number
 }
 
 // ── Type grid ─────────────────────────────────────────────────────────────────
-function buildTypeGridS1(seed: number): TileTypeKey[][] {
+export function buildTypeGridS1(seed: number): TileTypeKey[][] {
   const [bossR, bossC] = getBossPosition(seed);
 
   const grid: TileTypeKey[][] = Array.from({ length: ROWS }, () =>
