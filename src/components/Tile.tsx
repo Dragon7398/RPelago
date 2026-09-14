@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { TILE_TYPES } from '../lib/constants';
+import { TILE_TYPES, orbsToNextTowerFloor } from '../lib/constants';
 import { getTypeKey } from '../lib/tileGen';
 import { rcFromCoord, activeBoard } from '../lib/board';
 import type { TileState } from '../types';
@@ -81,9 +81,16 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   } else if (typeKey === 'castle') {
     progressText = 'Start';
   } else if (isDoorway) {
-    // Doorways never show an adventurer count: nobody is sent HERE. Phase 3
-    // replaces these with real progress (orb pips / floor pips).
-    progressText = typeKey === 'dungeon' ? 'Locked' : 'Sealed';
+    // Doorways never show an adventurer count: nobody is sent HERE.
+    // The Tower's gate is LIVE data (orb count), so show the real number rather
+    // than a flat 'Sealed'. The dungeon's gate is its interior, which does not
+    // exist until Phase 3 -- nothing to count yet.
+    if (typeKey === 'dungeon') {
+      progressText = 'Locked';
+    } else {
+      const need = orbsToNextTowerFloor(Object.keys(gameState?.orbState ?? {}).length);
+      progressText = need == null ? 'Open' : need + ' orb' + (need === 1 ? '' : 's');
+    }
   } else if (state === 'available') {
     progressText = `${filled}/${required} ⚔`;
   } else if (state === 'inprogress') {

@@ -971,6 +971,96 @@ header p {
 }
 .lb-boss-neg-effect:last-child { border-bottom: none; }
 
+/* ── S2: Castle placeholder + sealed doorways (Dungeon / Tower) ──────────────
+   Theme-aware by construction: every colour derives from the tile-type token of
+   the thing being described, so these follow all ten themes with no per-theme
+   rules. .lb-sealed is tinted by the panel it sits in via --sealed-fg. */
+.lb-placeholder {
+  margin: 0.6rem 0; padding: 0.9rem 1rem; border-radius: 3px;
+  border: 1px dashed var(--border);
+  background: repeating-linear-gradient(45deg,
+    oklch(from var(--bg-card) calc(l + 0.03) c h / 0.5) 0 10px,
+    transparent 10px 20px);
+}
+.lb-placeholder-tag {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.4rem;
+}
+.lb-placeholder-body {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.88rem; line-height: 1.45; color: var(--text-muted);
+}
+
+.lb-sealed {
+  --sealed-fg: var(--dungeon-fg);
+  display: flex; flex-direction: column; gap: 0.55rem;
+  padding: 0.85rem 1rem; border-radius: 3px; margin: 0.6rem 0;
+  border: 1px solid oklch(from var(--sealed-fg) calc(l - 0.2) c h);
+  /* color-mix, NOT a hardcoded lightness: a fixed dark L would render as a
+     near-black slab in the four light themes. Mixing against --bg-card tints
+     toward the type colour while following whatever the theme sets. */
+  background: color-mix(in oklch, var(--sealed-fg) 12%, var(--bg-card));
+}
+.lb-sealed-tower { --sealed-fg: var(--tower-fg); }
+.lb-sealed-title {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.14em;
+  color: oklch(from var(--sealed-fg) calc(l + 0.08) c h); text-align: center;
+}
+.lb-sealed-body {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.85rem; line-height: 1.45; color: var(--text-muted); text-align: center;
+}
+
+/* Dungeon orb pips — both dark until Phase 3 lights them per Elite felled. */
+.lb-orb-pips { display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
+.lb-orb-pip {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 1px solid oklch(from var(--sealed-fg) calc(l - 0.15) c h);
+  background: var(--bg-deep);
+}
+.lb-orb-pip.lit {
+  background: var(--sealed-fg);
+  box-shadow: 0 0 7px oklch(from var(--sealed-fg) l c h / 0.6);
+}
+.lb-orb-pip-label {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  color: var(--gold-dim); margin-left: 0.3rem;
+}
+
+/* Tower floor ladder */
+.lb-tower-floors { display: flex; flex-direction: column; gap: 0.3rem; }
+.lb-tower-floor {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.3rem 0.55rem; border-radius: 2px;
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  opacity: 0.65;
+}
+.lb-tower-floor.open {
+  opacity: 1;
+  border-color: oklch(from var(--tower-fg) calc(l - 0.15) c h);
+  background: color-mix(in oklch, var(--tower-fg) 16%, var(--bg-card));
+}
+.lb-tower-floor-n {
+  font-family: 'Cinzel', serif; font-size: 0.66rem; font-weight: 700;
+  width: 1.1rem; text-align: center; color: var(--gold-dim);
+}
+.lb-tower-floor.open .lb-tower-floor-n { color: oklch(from var(--tower-fg) calc(l + 0.1) c h); }
+.lb-tower-floor-name {
+  flex: 1; font-family: 'Cinzel', serif; font-size: 0.62rem;
+  letter-spacing: 0.1em; color: var(--parchment);
+}
+.lb-tower-floor-req {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--gold-dim);
+}
+.lb-tower-floor.open .lb-tower-floor-req { color: oklch(from var(--tower-fg) calc(l + 0.1) c h); }
+.lb-tower-status {
+  font-family: 'Crimson Pro', serif; font-size: 0.82rem;
+  color: var(--text-muted); text-align: center;
+}
+.lb-tower-status-open { color: var(--state-avail-fg); }
+
 /* Orb reward */
 .lb-orb-reward {
   display: flex; align-items: center; justify-content: center; gap: 0.6rem;

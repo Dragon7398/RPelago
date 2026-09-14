@@ -239,6 +239,27 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
 
 export const ORB_SHOP_COST = 1500;
 
+// ── S2 Tower ──────────────────────────────────────────────────────────────────
+// Orbs needed to unlock each Tower floor. The Sorcerer waits on floor 3, so the
+// season's win condition is gated at 7 of the 9 orbs — a player never needs a
+// full set. Index = floor - 1.
+export const TOWER_FLOOR_ORBS = [3, 5, 7] as const;
+export const TOWER_FLOORS = TOWER_FLOOR_ORBS.length;
+
+/** How many Tower floors `orbCount` orbs have unlocked (0 = still sealed). */
+export function towerFloorsUnlocked(orbCount: number): number {
+  return TOWER_FLOOR_ORBS.filter(n => orbCount >= n).length;
+}
+
+/**
+ * Orbs still needed to unlock the NEXT floor, or null once all are open.
+ * Drives both the tile face and the Tower panel, so the two cannot disagree.
+ */
+export function orbsToNextTowerFloor(orbCount: number): number | null {
+  const next = TOWER_FLOOR_ORBS.find(n => orbCount < n);
+  return next == null ? null : next - orbCount;
+}
+
 // The four named shops. orbId and itemIds can be edited by admin in Firebase;
 // these are the defaults written on first initialization.
 export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {

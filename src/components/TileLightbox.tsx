@@ -9,6 +9,9 @@ import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '.
 import { normalizeSlots } from '../lib/slotHelpers';
 import TownLightbox    from './lightbox/TownLightbox';
 import BossSection     from './lightbox/BossSection';
+import CastlePanel     from './lightbox/CastlePanel';
+import DungeonSection  from './lightbox/DungeonSection';
+import TowerSection    from './lightbox/TowerSection';
 import TileDetails     from './lightbox/TileDetails';
 import PublicSlotsList from './lightbox/PublicSlotsList';
 import ClaimableSlots  from './lightbox/ClaimableSlots';
@@ -109,9 +112,21 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
     return <TownLightbox coord={coord} tile={tile} info={info} open={open} onClose={onClose} onLoginRequest={onLoginRequest} />;
   }
 
+  // The Castle is auto-complete and never a challenge — its own panel, no
+  // adventurer/slot chrome at all.
+  if (typeKey === 'castle') {
+    return <CastlePanel coord={coord} tile={tile} open={open} onClose={onClose} isAdmin={isAdmin} />;
+  }
+
   const orbCount   = Object.keys(orbState).length;
   const minOrbs    = orbConfig?.bossMinOrbs ?? 5;
   const bossLocked = typeKey === 'boss' && orbCount < minOrbs && state !== 'complete';
+
+  // Dungeon / Tower surface tiles are DOORWAYS: their challenges live inside a
+  // sub-map (Phase 3), so they show a sealed panel and never the join/slot
+  // chrome. Suppressing it here is the UI half of the join block; the DB rule
+  // is the half that actually enforces it.
+  const isDoorway = typeKey === 'dungeon' || typeKey === 'tower';
 
   let displayRelease = tile.release;
   let displayCollect = tile.collect;
@@ -166,7 +181,10 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
           <BossSection bossLocked={bossLocked} orbState={orbState} orbConfig={orbConfig} minOrbs={minOrbs} orbCount={orbCount} />
         )}
 
-        {!bossLocked && (
+        {typeKey === 'dungeon' && <DungeonSection />}
+        {typeKey === 'tower'   && <TowerSection orbCount={orbCount} />}
+
+        {!bossLocked && !isDoorway && (
           <>
             <TileDetails
               tile={tile} player={player} user={user} advEntries={advEntries}
