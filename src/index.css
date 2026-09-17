@@ -873,6 +873,27 @@ header p {
 .lb-trait-name {
   font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.07em;
   color: var(--battle-fg);
+
+/* ── S2 leveled traits ──────────────────────────────────────────────────────
+   The level meter proper (segmented bar) is a later pass; this is the compact
+   `3/5` readout the tile panel needs now. Colour comes from theme tokens, so it
+   follows all ten themes. */
+.lb-trait-level {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--gold-dim); opacity: 0.9;
+}
+.lb-trait-targets {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em;
+  color: var(--gold-dim); margin-top: 0.2rem; display: block;
+}
+.help-trait-levels {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  color: var(--gold-dim);
+}
+.help-trait-blurb {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.82rem; color: var(--text-muted); display: block;
+}
 }
 .lb-trait-desc {
   font-family: 'Crimson Pro', serif; font-size: 0.75rem; color: var(--parchment);

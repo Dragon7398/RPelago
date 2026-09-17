@@ -1,7 +1,8 @@
-import { TILE_TRAITS, SHOP_ITEMS } from '../../lib/constants';
+import { SHOP_ITEMS } from '../../lib/constants';
+import { S2_TRAITS, isLeveled } from '../../lib/traits';
 
 export default function SectionTraits() {
-  const featuredTraits = TILE_TRAITS.filter(t =>
+  const featuredTraits = S2_TRAITS.filter(t =>
     ['bifurcated', 'horde', 'agile', 'sturdy', 'stunning', 'cursed', 'aerial'].includes(t.id)
   );
   return (
@@ -16,10 +17,14 @@ export default function SectionTraits() {
       <div className="help-traits">
         {featuredTraits.map(t => (
           <div key={t.id} className="help-trait-row">
-            <span className="help-trait-name">{t.name}</span>
-            <span className="help-trait-desc">
-              {t.description.replace('{value}', String(t.defaultValue))}
+            <span className="help-trait-name">
+              {t.name}
+              {isLeveled(t) && <span className="help-trait-levels"> · {t.max} levels</span>}
             </span>
+            <span className="help-trait-blurb">{t.blurb}</span>
+            {/* Level 1 — the mildest form. The full per-level codex is a later
+                pass (traits plan §7.2); this stays a summary. */}
+            <span className="help-trait-desc">{t.describe(1)}</span>
           </div>
         ))}
       </div>

@@ -205,11 +205,22 @@ export interface Player {
 }
 
 export interface OrbConfig {
-  eliteDrops: number[];   // indices into ALL_ORBS for each elite position
-  shopOrbs: number[];     // indices into ALL_ORBS for each shop town
-  battleOrb: number;      // index into ALL_ORBS for edge battle reward
-  puzzleOrb: number;      // index into ALL_ORBS for edge puzzle reward
-  bossMinOrbs: number;
+  /**
+   * Indices into ALL_ORBS, one per elite position in row-major order.
+   *   S1 — 5 entries (its five surface elites).
+   *   S2 — 9 entries: [0..2] the three surface elites, [3..8] the six dungeon
+   *        elites (two per dungeon), which do not exist until Phase 3 but are
+   *        assignable now so the season's orb layout can be authored up front.
+   */
+  eliteDrops: number[];
+  // ── S1 only ────────────────────────────────────────────────────────────────
+  // S2 has no shop tiles and no edge-tile orbs: all nine come from elites, and
+  // the Tower's gate replaced bossMinOrbs (see TOWER_FLOOR_ORBS). Left optional
+  // rather than removed so archived S1 configs still typecheck.
+  shopOrbs?: number[];     // indices into ALL_ORBS for each shop town
+  battleOrb?: number;      // index into ALL_ORBS for edge battle reward
+  puzzleOrb?: number;      // index into ALL_ORBS for edge puzzle reward
+  bossMinOrbs?: number;
   bossNegEffects: Record<string, string>;  // orbId -> curse text
 }
 

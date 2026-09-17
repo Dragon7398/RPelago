@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
-import { ALL_ORBS } from '../../lib/constants';
-import { rcFromCoord } from '../../lib/board';
+import { ALL_ORBS, TOWER_FLOOR_ORBS, TOWER_FLOORS } from '../../lib/constants';
+import { rcFromCoord, activeBoard } from '../../lib/board';
 import { getTypeKey, orbIdForElite, orbIdForEdgeTile } from '../../lib/tileGen';
 import type { OrbConfig } from '../../types';
 
@@ -28,7 +28,12 @@ export default function OrbsPage() {
     adminUpdateOrbConfig(updates);
   }
 
-  // Build assignment map
+  const isS2 = activeBoard().id === 's2';
+
+  // Build assignment map. On S2 every orb comes from an elite: the three on the
+  // surface, plus six inside the dungeons that do not exist until Phase 3 --
+  // those are listed as reserved rather than unset, so an unassigned SURFACE orb
+  // still reads as a real gap the admin must fill.
   const assignments: Record<string, string[]> = {};
   ALL_ORBS.forEach(o => { assignments[o.id] = []; });
   for (const coord of Object.keys(gameState.tiles)) {
@@ -37,13 +42,23 @@ export default function OrbsPage() {
     if (typeKey === 'elite') {
       const id = orbIdForElite(r, c, orbConfig);
       if (id) assignments[id]?.push(`★ Elite · ${coord}`);
-    } else if (typeKey === 'battle' || typeKey === 'puzzle') {
+    } else if (!isS2 && (typeKey === 'battle' || typeKey === 'puzzle')) {
       const id = orbIdForEdgeTile(r, c, orbConfig);
       if (id) assignments[id]?.push(`${typeKey === 'battle' ? '⚔ Battle' : '🧩 Puzzle'} · ${coord}`);
     }
   }
-  for (const shop of Object.values(gameState.shops ?? {})) {
-    if (shop.orbId) assignments[shop.orbId]?.push(`🛒 ${shop.name}`);
+  if (!isS2) {
+    for (const shop of Object.values(gameState.shops ?? {})) {
+      if (shop.orbId) assignments[shop.orbId]?.push(`🛒 ${shop.name}`);
+    }
+  } else {
+    // Orbs held by a dungeon elite slot (eliteDrops[3..8]) are spoken for, but
+    // have nowhere to live yet.
+    (orbConfig?.eliteDrops ?? []).forEach((orbIdx, i) => {
+      if (i < 3) return;
+      const orb = ALL_ORBS[orbIdx];
+      if (orb) assignments[orb.id]?.push(`🗝️ Dungeon ${Math.floor((i - 3) / 2) + 1} · Elite ${((i - 3) % 2) + 1}`);
+    });
   }
 
   return (
@@ -97,17 +112,26 @@ export default function OrbsPage() {
         </div>
       </section>
 
-      {/* Boss Config */}
+      {/* Boss / Tower gate */}
       <section className="dash-section">
-        <h3 className="dash-section-title">Boss Configuration</h3>
-        <div className="dash-boss-row">
-          <label className="dash-boss-label">Minimum orbs required to face boss</label>
-          <input
-            type="number" className="dash-number-input" min={0} max={9}
-            value={orbConfig?.bossMinOrbs ?? 5}
-            onChange={e => handleOrbConfigUpdate({ bossMinOrbs: parseInt(e.target.value) || 0 })}
-          />
-        </div>
+        <h3 className="dash-section-title">{isS2 ? 'Tower Floors' : 'Boss Configuration'}</h3>
+        {isS2 ? (
+          <div className="dash-boss-row">
+            <label className="dash-boss-label">
+              Floors unseal at {TOWER_FLOOR_ORBS.join(' / ')} orbs — the Sorcerer waits on floor {TOWER_FLOORS}.
+              Fixed in code, not per-season config.
+            </label>
+          </div>
+        ) : (
+          <div className="dash-boss-row">
+            <label className="dash-boss-label">Minimum orbs required to face boss</label>
+            <input
+              type="number" className="dash-number-input" min={0} max={9}
+              value={orbConfig?.bossMinOrbs ?? 5}
+              onChange={e => handleOrbConfigUpdate({ bossMinOrbs: parseInt(e.target.value) || 0 })}
+            />
+          </div>
+        )}
       </section>
 
       {/* Curse Text */}

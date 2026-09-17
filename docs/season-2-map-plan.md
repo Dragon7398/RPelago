@@ -78,6 +78,96 @@ that contradicts them.
 
 ---
 
+## Implementation status
+
+Updated 2026-09-13. Branch `s2/board-foundation`. Everything below is behind the
+`rpelago_s2` **draft** season — invisible to players, and inert for the live
+casino season, which renders no map.
+
+### Done — Phase 1 foundation
+
+| § | Scope | Notes |
+|---|-------|-------|
+| 1.1 | Per-season board geometry + season wiring | `src/lib/board.ts`; `SeasonProvider` publishes the board during render |
+| 1.2 / 1.2a | `TILE_TYPES` entries + theme tokens | Dungeon tuned in all 10 themes; Tower/Castle aliased once |
+| 1.3 | S2 generator wired in | `src/lib/tileGenS2.ts`; `initializeGrid` / `buildDefaultTileData` dispatch on the board |
+| 1.4 | Pass-through cascade | Fixpoint in both `computeRecalcUpdates` and generation |
+| 1.5 | Castle / Dungeon / Tower panels | `CastlePanel`, `DungeonSection`, `TowerSection` (replaces `BossSection` on S2) |
+| 1.6 | Orb sourcing | 9 elite drops; board-aware `defaultOrbConfig` and admin Orbs page |
+
+**To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
+then preview that season.
+
+### Deviations from this plan, and why
+
+Recorded because each one is load-bearing and none is obvious from the code alone.
+
+1. **`activeBoard()` defaults to S1 rather than throwing** (§1.1). `tileGen` builds
+   its type grid at **module scope** in the main bundle, so a throwing accessor
+   broke app load for everyone — casino players included — before any season
+   resolved.
+2. **`BoardId` is declared in `types/index.ts`**, re-exported from `board.ts`.
+   The season types need to name it; declaring it in `board.ts` would have
+   pointed the dependency backwards.
+3. **Geometry helpers take an optional explicit `spec`.** `tileGen` pins itself to
+   `BOARD_SPECS.s1` through it, because the S1 generator must still emit a 5×7
+   grid while an S2 season is active (admin previewing the draft) — otherwise
+   `getAdjRC` returns row 5 and indexes off a 5-row array.
+4. **The S2 generator lives in its own module.** `tileGen` has S1-pinned
+   `ROWS`/`COLS` at module scope; putting S2 logic beside them would reintroduce
+   exactly the shadowing bug (3) removes.
+5. **`seededShuffle` extracted to `src/lib/seededRng.ts`.** `tileGen` imports
+   `tileGenS2` to dispatch, so a shared helper living in `tileGen` made the two
+   circular — across a module that does real work at import.
+6. **Tower and Castle CSS are aliases declared once** (§1.2a), not per-theme
+   copies. Custom properties resolve at *use* time, so they follow whatever the
+   active theme sets for boss/town and cannot drift.
+7. **Sealed-panel backgrounds use `color-mix`, not a fixed lightness.** A
+   hardcoded dark `L` renders as a near-black slab in the four light themes.
+8. **The Tower tile face shows a live orb countdown** ("2 orbs" / "Open") rather
+   than a static "Sealed" — its gate is real data today. The Dungeon stays
+   "Locked": its gate is its interior, which is Phase 3.
+9. **§1.6 was scoped to the data model + admin UI.** Retiring the
+   `purchaseShopOrb` callable moved to §1.8, where the shop actually collapses —
+   deleting a deployed function wants its own deploy, not a ride-along.
+
+> ⚠️ **`npx tsc --noEmit` type-checks NOTHING in this repo.** The root
+> `tsconfig.json` is `{"files": [], "references": [...]}`, so it exits 0
+> unconditionally. This was caught only when `npm run build` failed on a change
+> that `--noEmit` had passed. **The only real gate is `npm run build`** (`tsc -b`)
+> plus `npm run test:unit` and `npm run lint`. `CLAUDE.md` still lists
+> `npx tsc --noEmit` as the type-check command and is misleading on this point.
+
+### Remaining
+
+**Next up — §0.5 + §0.6 together.** They are mutually dependent (the join
+callable validates a Horde floor, which needs the trait resolver) and they gate
+the rest: §0.5 rewrites the join flow the challenge panels render, so building
+those first would be wasted work. This is also the first slice needing a
+**functions deploy**, which wants scheduling against the live casino season.
+
+| Scope | Status |
+|-------|--------|
+| §0.5 Universal YAML-at-join | not started — includes §0.5.7 kick/reset → callables and §0.5.9 submitted-marker |
+| §0.6 / traits Phase A — data model + `resolveTrait` | not started |
+| §1.7 Districts (ward + Town Hall / Shop / Barn panels) | not started |
+| §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | not started |
+| §1.9 Casino district (`CasinoLanding` extraction) | not started |
+| §1.10 Feat retirement + Advisor | not started — entangled with §0.6 and §2.3 |
+| §1.11 Admin + help | not started |
+| Phase 2 — Companions | not started |
+| Phase 3 — Dungeons & Tower | not started |
+| Traits Phase B (generation) / C (UI) | blocked on open questions 1 and 2 |
+
+**Still blocked on design decisions** (traits plan §10): trait difficulty
+modifiers, the Sorcerer's loadout + orb interaction, and equipment↔traits. None
+of them block the near-term path.
+
+**Hold until the casino season winds down**: the `decayHours` plumbing (§2.6),
+the YAML check on `enlistInMission` (§0.5), and the G2 reclaim fix (§2.7a).
+
+---
+
 ## 0.5 Universal YAML-at-join (cross-cutting)
 
 **Every** S2 challenge and mission collects an Archipelago config at join. This
@@ -354,7 +444,7 @@ trait loadout / orb interaction — catalogued in the traits plan §10.
 
 ## Phase 1 — Board, districts, shop, orbs
 
-### 1.1 Per-season board geometry
+### 1.1 Per-season board geometry ✅ DONE
 
 New module **`src/lib/board.ts`** (no dependencies — it is the bottom of the
 import graph):
@@ -432,7 +522,7 @@ Changes:
 > must resolve the board first. Persisting `typeKey` on the tile (§1.3) makes
 > this progressively less load-bearing.
 
-### 1.2 S2 tile types
+### 1.2 S2 tile types ✅ DONE
 
 - **`TileTypeKey`** gains `'dungeon' | 'tower' | 'castle'`. `'town'`,
   `'town_center'`, `'boss'` stay in the union for the S1 archive.
@@ -452,7 +542,7 @@ Changes:
   `.tile-name` accents), plus `.lb-title.dungeon|tower|castle` and the
   `.ag-tile-name-*` / `.ag-tile-badge-*` agenda variants.
 
-### 1.2a Theme tokens — the color plan
+### 1.2a Theme tokens — the color plan ✅ DONE
 
 RPelago ships **ten themes**: `:root`, moonlit, verdant, aether (dark);
 parchment, sakura, mint, lapis (light); obsidian, tidepool (dark). Four are
@@ -528,7 +618,7 @@ themes (parchment, sakura, mint, lapis) for AA contrast on the `.tile-label` and
 and tidepool. The light-theme dungeon values above are deliberately dark
 (28–36% L) and are the most likely to need a nudge.
 
-### 1.3 S2 generator (`src/lib/tileGen.ts`)
+### 1.3 S2 generator ✅ DONE — shipped as `src/lib/tileGenS2.ts`
 
 Split the type-grid builder by board: `buildTypeGridS1` (today's function,
 unchanged) and **`buildTypeGridS2(seed)`**:
@@ -568,7 +658,7 @@ Also in `tileGen.ts`:
 - `getBossPosition` / `isInBossCornerRegion` / `getBossLiveStats` — S1-only.
 - `orbIdForEdgeTile` returns `null` on an S2 board.
 
-### 1.4 Availability cascade — dungeon/tower pass-through
+### 1.4 Availability cascade — dungeon/tower pass-through ✅ DONE
 
 `computeRecalcUpdates` in `src/lib/gameLogic.ts` currently derives `available`
 purely from neighbours of `complete` tiles. S2 adds: **a revealed dungeon or
@@ -593,7 +683,7 @@ layout changes.)
 
 The same rule applies in `buildDefaultTileData`'s initial reveal.
 
-### 1.5 Dungeon / Tower / Castle panels
+### 1.5 Dungeon / Tower / Castle panels ✅ DONE
 
 `src/components/TileLightbox.tsx` currently branches `isTown → TownLightbox`,
 `typeKey === 'boss' → BossSection`. New branches:
@@ -623,7 +713,7 @@ shows `{filled}/{required} ⚔` on ordinary tiles):
   the dungeon is fully `complete`.
 - **Tower** — **three floor pips**, lighting as each floor's terminal clears.
 
-### 1.6 Orbs
+### 1.6 Orbs ✅ DONE (callable retirement deferred to §1.8)
 
 - `OrbConfig` for S2: `eliteDrops: number[]` of length **9** — indices 0–2 are
   the three surface elites, 3–8 are the six dungeon elites (2 per dungeon, in

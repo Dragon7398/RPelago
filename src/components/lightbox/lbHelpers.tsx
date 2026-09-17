@@ -1,4 +1,5 @@
-import { TILE_TRAITS, NAME_COLORS } from '../../lib/constants';
+import { NAME_COLORS } from '../../lib/constants';
+import { S2_TRAITS } from '../../lib/traits';
 
 export function resolveNameColor(colorId: string | undefined): string | undefined {
   if (!colorId || colorId === 'default') return undefined;
@@ -37,7 +38,7 @@ export function traitEffect(traitId: string, value: number, inventory: Record<st
 
 export function renderTraitDesc(description: string, traitIds: readonly string[]): React.ReactNode {
   if (traitIds.length === 0) return description;
-  const refs = TILE_TRAITS.filter(t => traitIds.includes(t.id));
+  const refs = S2_TRAITS.filter(t => traitIds.includes(t.id));
   if (refs.length === 0) return description;
   const pattern = new RegExp(
     `(${refs.map(t => t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
@@ -49,7 +50,10 @@ export function renderTraitDesc(description: string, traitIds: readonly string[]
       {parts.map((part, i) => {
         const trait = refs.find(t => t.name === part);
         if (trait) {
-          const tip = trait.description.replace('{value}', String(trait.defaultValue));
+          // Leveled traits have no single "default value" any more. The tooltip
+          // is explaining what the trait IS, not what a particular tile set it
+          // to, so it shows level 1 — the mildest form.
+          const tip = trait.describe(1);
           return <span key={i} className="trait-ref" data-tooltip={tip}>{part}</span>;
         }
         return part;

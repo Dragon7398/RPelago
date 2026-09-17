@@ -1,4 +1,4 @@
-import { TILE_TRAITS } from '../../lib/constants';
+import { resolveTraits, isLeveled, splitAroundValue } from '../../lib/traits';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, calcSeekerHintReduction, buildSeekerHintTooltip } from '../../lib/gameLogic';
 import { traitEffect } from './lbHelpers';
 import type { Tile, Player, TileAdventurer, AuthUser, OrbAcquisition, OrbDef, TriState } from '../../types';
@@ -103,40 +103,48 @@ export default function TileDetails({
       {tile.traits && Object.keys(tile.traits).length > 0 && (
         <div className="lb-traits">
           <div className="lb-traits-header">TRAITS</div>
-          {TILE_TRAITS
-            .filter(def => tile.traits![def.id] !== undefined)
-            .map(def => {
-              const value    = tile.traits![def.id].value;
-              const effect   = traitEffect(def.id, value, inv);
-              const negated  = effect.kind === 'negated';
-              const modified = effect.kind === 'modified';
-              const parts    = def.description.split('{value}');
-              return (
-                <div key={def.id} className={`lb-trait${negated ? ' lb-trait-negated' : ''}`}>
-                  <div className="lb-trait-top-row">
-                    <span className={`lb-trait-name${negated ? ' lb-trait-struck' : ''}`}>{def.name}</span>
-                    {(negated || modified) && (
-                      <span className="lb-trait-item-badge">
-                        {negated ? '✦ IMMUNE' : '✦ MODIFIED'} · {effect.item}
-                      </span>
-                    )}
-                  </div>
-                  <span className={`lb-trait-desc${negated ? ' lb-trait-struck' : ''}`}>
-                    {modified && parts.length === 2 ? (
-                      <>
-                        {parts[0]}
-                        <span className="lb-trait-val-struck">{value}</span>
-                        {' '}
-                        <span className="lb-trait-val-new">{(effect as { kind: 'modified'; newValue: number; item: string }).newValue}</span>
-                        {parts[1]}
-                      </>
-                    ) : (
-                      def.description.replace('{value}', String(value))
+          {/* Leveled traits (traits plan §4): every read goes through
+              resolveTraits, which tolerates archived S1 `{value}` records and
+              carries the viewing player for the future equipment seam. */}
+          {resolveTraits(tile.traits, player).map(({ def, value, level, count, text }) => {
+            const effect   = traitEffect(def.id, value ?? 0, inv);
+            const negated  = effect.kind === 'negated';
+            const modified = effect.kind === 'modified';
+            const parts    = modified ? splitAroundValue(text, value) : null;
+            return (
+              <div key={def.id} className={`lb-trait${negated ? ' lb-trait-negated' : ''}`}>
+                <div className="lb-trait-top-row">
+                  <span className={`lb-trait-name${negated ? ' lb-trait-struck' : ''}`}>
+                    {def.name}
+                    {isLeveled(def) && (
+                      <span className="lb-trait-level"> {level}/{def.max}</span>
                     )}
                   </span>
+                  {(negated || modified) && (
+                    <span className="lb-trait-item-badge">
+                      {negated ? '✦ IMMUNE' : '✦ MODIFIED'} · {effect.item}
+                    </span>
+                  )}
                 </div>
-              );
-            })}
+                <span className={`lb-trait-desc${negated ? ' lb-trait-struck' : ''}`}>
+                  {parts ? (
+                    <>
+                      {parts[0]}
+                      <span className="lb-trait-val-struck">{value}</span>
+                      {' '}
+                      <span className="lb-trait-val-new">{(effect as { kind: 'modified'; newValue: number; item: string }).newValue}</span>
+                      {parts[1]}
+                    </>
+                  ) : text}
+                </span>
+                {count != null && (
+                  <span className="lb-trait-targets">
+                    {count} player{count !== 1 ? 's' : ''} rolled as {def.multi!.noun} when the tile locks
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

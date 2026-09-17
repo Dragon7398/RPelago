@@ -1,4 +1,5 @@
-import { TILE_TYPES, TILE_TRAITS } from '../../../lib/constants';
+import { TILE_TYPES } from '../../../lib/constants';
+import { S2_TRAITS } from '../../../lib/traits';
 import { activeBoard, allCoords, coordFromRC } from '../../../lib/board';
 import { getTypeKey, typeKeyForCoord } from '../../../lib/tileGen';
 import type { GameState } from '../../../types';
@@ -38,7 +39,7 @@ export default function MapGridPanel({ gameState, selectedCoord, onSelectCoord }
   const { rows: ROWS, cols: COLS, colChars: COL_CHARS } = activeBoard();
   const coords = allCoords();   // column-major: A1–A5, B1–B5, …
 
-  const traitCoverage = TILE_TRAITS.map(def => {
+  const traitCoverage = S2_TRAITS.map(def => {
     let battle = 0, puzzle = 0, elite = 0;
     for (const coord of coords) {
       if (!gameState.tiles[coord]?.traits?.[def.id]) continue;

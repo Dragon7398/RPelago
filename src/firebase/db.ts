@@ -5,6 +5,7 @@ import { sRef, sPath, getCurrentSeason } from './season';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
+import { activeBoard } from '../lib/board';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
@@ -21,6 +22,17 @@ function defaultOrbConfig(): OrbConfig {
   ALL_ORBS.forEach(o => {
     effects[o.id] = `The ${o.label} curse weakens your party while the ${o.label} Orb is absent.`;
   });
+
+  // S2: all nine orbs come from elites — three on the surface, six inside the
+  // dungeons (Phase 3). No shop orbs, no edge-tile orbs, and the Tower's floor
+  // gate replaces bossMinOrbs (see TOWER_FLOOR_ORBS).
+  if (activeBoard().id === 's2') {
+    return {
+      eliteDrops:     ALL_ORBS.map((_, i) => i),   // [0..8]
+      bossNegEffects: effects,
+    };
+  }
+
   return {
     eliteDrops:    [0, 1, 2, 3, 4],
     shopOrbs:      [5, 6],

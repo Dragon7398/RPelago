@@ -210,10 +210,14 @@ export function orbIdForElite(r: number, c: number, orbConfig: OrbConfig): strin
 
 
 export function orbIdForEdgeTile(r: number, c: number, orbConfig: OrbConfig): string | null {
+  // S1 only. An S2 board has no edge orbs at all (buildOrbPositionsS2 leaves
+  // both positions null), so this short-circuits there without a board check.
   const { edgeBattlePos, edgePuzzlePos } = _orbPositions;
-  if (edgeBattlePos && edgeBattlePos[0] === r && edgeBattlePos[1] === c)
+  if (orbConfig.battleOrb != null && edgeBattlePos
+      && edgeBattlePos[0] === r && edgeBattlePos[1] === c)
     return ALL_ORBS[orbConfig.battleOrb]?.id ?? null;
-  if (edgePuzzlePos && edgePuzzlePos[0] === r && edgePuzzlePos[1] === c)
+  if (orbConfig.puzzleOrb != null && edgePuzzlePos
+      && edgePuzzlePos[0] === r && edgePuzzlePos[1] === c)
     return ALL_ORBS[orbConfig.puzzleOrb]?.id ?? null;
   return null;
 }
