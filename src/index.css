@@ -2882,19 +2882,48 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .dash-stat-pager-page { color: var(--text-dim); }
 
+/* The board is paged and carries five count columns, so the header and every row
+   share ONE grid template and scroll together in a single overflow box — a header
+   that scrolls independently of its numbers is worse than no header. The counts are
+   fixed-width so the column edges hold whatever the names do. */
+.dash-gold-wrap { overflow-x: auto; }
+.dash-gold-scroll { display: flex; flex-direction: column; gap: 0.2rem; min-width: 30rem; }
+.dash-gold-grid {
+  display: grid; align-items: center; gap: 0.55rem;
+  grid-template-columns: 1.4rem minmax(6rem, 1fr) repeat(5, 2.6rem) 5.5rem;
+}
+.dash-gold-head {
+  /* Transparent border matching the rows', so the header sits on the same column
+     edges as the bordered rows below it rather than 1px off. */
+  padding: 0 0.5rem; border: 1px solid transparent;
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--gold-dim);
+}
+.dash-gold-head .num { text-align: right; cursor: help; }
 .dash-gold-board { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; }
 .dash-gold-row {
-  display: flex; align-items: center; gap: 0.55rem;
   padding: 0.3rem 0.5rem; border-radius: 2px;
   background: var(--bg-card); border: 1px solid oklch(from var(--border) l c h / 0.55);
 }
 .dash-gold-row.disabled { opacity: 0.55; border-color: var(--ban-border); }
 .dash-gold-rank {
   font-family: 'Cinzel', serif; font-size: 0.7rem; color: var(--text-dim);
-  width: 1.4rem; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums;
+  text-align: right; font-variant-numeric: tabular-nums;
 }
-.dash-gold-row:nth-child(-n+3) .dash-gold-rank { color: var(--gold); }
-.dash-gold-who { display: flex; align-items: baseline; gap: 0.4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
+/* Gilded by RANK, set on the row — a :nth-child rule would re-gild the first three
+   rows of every page, so page 2 would read as the three richest players. */
+.dash-gold-row.top .dash-gold-rank { color: var(--gold); }
+.dash-gold-ct {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; text-align: right;
+  color: var(--parchment); font-variant-numeric: tabular-nums;
+}
+/* Nothing to say, so it says it quietly — the eye should land on the counts that
+   are actually there, not on a wall of zeroes. */
+.dash-gold-ct.zero { color: var(--text-dim); opacity: 0.5; }
+/* Splits Release from Collect without a rule or a colour: the Collect pair simply
+   sits a little further right. */
+.dash-gold-ct.pair { margin-left: 0.3rem; }
+.dash-gold-who { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; flex-wrap: wrap; }
 .dash-gold-name {
   font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.04em;
   color: var(--parchment);
@@ -2902,12 +2931,17 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-gold-handle { font-size: 0.7rem; color: var(--text-dim); }
 .dash-gold-off {
   font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.09em;
-  padding: 0.1rem 0.32rem; border-radius: 2px; flex-shrink: 0;
+  padding: 0.1rem 0.32rem; border-radius: 2px; flex-shrink: 0; cursor: help;
   background: var(--ban-bg); border: 1px solid var(--ban-border); color: var(--ban-fg);
+}
+/* Same amber tokens the Players tab uses for the middle status, so RESTRICTED can
+   never be read as the red DISABLED badge — and each carries its own word anyway. */
+.dash-gold-off.restrict {
+  background: var(--restrict-bg); border-color: var(--restrict-border); color: var(--restrict-fg);
 }
 .dash-gold-amt {
   font-family: 'Cinzel', serif; font-size: 0.8rem; color: var(--gold);
-  font-variant-numeric: tabular-nums; flex-shrink: 0;
+  font-variant-numeric: tabular-nums; text-align: right;
 }
 .dash-gold-unit { font-size: 0.6rem; color: var(--gold-dim); margin-left: 0.1rem; }
 

@@ -21,6 +21,7 @@ import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
   type SeasonShell,
 } from './seasonPaths';
+import { normalizeGameName, gameKey, handleKey } from './profileKeys';
 
 // Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR in
 // src/lib/constants.ts (dual-copy, like ITEM_COSTS and the casino engine).
@@ -502,10 +503,6 @@ interface PlayerRecord {
   gold?:         number;
 }
 
-function normalizeGameName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ');
-}
-
 export const onTileComplete = onValueWritten(
   'seasons/{seasonId}/tiles/{coord}/state',
   async (event) => {
@@ -586,14 +583,14 @@ export const onTileComplete = onValueWritten(
       // Games — keyed record (encodedName → true) so each game write is atomic;
       // no pre-read needed and concurrent tile completions don't stomp each other.
       for (const g of games) {
-        profileUpdates[`${base}/events/${seasonId}/games/${encodeURIComponent(g)}`] = true;
+        profileUpdates[`${base}/events/${seasonId}/games/${gameKey(g)}`] = true;
       }
 
       // Handle index — lets the profile site resolve /p/<handle> to a UID.
-      // Discord handles contain only letters, numbers, underscores, and periods;
-      // replace '.' (invalid Firebase key char) with '_'.
+      // handleKey() swaps the '.' a Discord handle may carry for '_', since '.'
+      // is not a legal Firebase key character.
       if (player.discordHandle) {
-        profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+        profileUpdates[`profiles/handleIndex/${handleKey(player.discordHandle)}`] = playerId;
       }
 
       // Auto profile warning for repeated status-report Problems on this challenge.
@@ -3117,14 +3114,18 @@ export const syncPlayerProfile = onCall(async (request) => {
     }
   }
 
+  // Split exactly the way onMissionComplete does — on the MISSION's type, not on
+  // the season's shell, because a map season can run casino tables too. A casino
+  // table counts towards `handsPlayed`; everything else towards `missions`.
   let missionCount = 0;
+  let handsPlayed  = 0;
   if (historySnap.exists()) {
     const missions = historySnap.val() as Record<string, GMMission>;
     for (const mission of Object.values(missions)) {
       if (mission.state !== 'complete') continue;
       const participant = mission.participants?.[uid];
       if (!participant) continue;
-      missionCount++;
+      if (mission.type === 'casino') handsPlayed++; else missionCount++;
       for (const slot of normalizeArray(participant.slots as GMSlot[] | Record<string, GMSlot> | undefined)) {
         if (slot.game?.trim()) gameNames.add(normalizeGameName(slot.game));
       }
@@ -3138,25 +3139,41 @@ export const syncPlayerProfile = onCall(async (request) => {
     [`${base}/discordHandle`]: player.discordHandle ?? null,
     [`${base}/avatarHash`]:    player.avatarHash    ?? null,
     [`${base}/joinedAt`]:      player.joinedAt      ?? null,
-    [`${base}/events/${seasonId}/xp`]:       player.xp ?? 0,
-    [`${base}/events/${seasonId}/tiles`]:    tileCount,
-    [`${base}/events/${seasonId}/missions`]: missionCount,
   };
 
-  if (tileCount > 0 || missionCount > 0) {
+  // A casino-only season's event record is deliberately gold/handsPlayed/games
+  // (see docs/profile-site-handoff.md §2b) — writing xp/tiles/missions into it
+  // would invent fields the profile site is documented not to expect, and this
+  // audit is the repair path for exactly those casino counters, so it has to
+  // produce the same shape the trigger does.
+  const shell: SeasonShell = seasonInfo(config, seasonId)?.shell ?? 'map';
+  if (shell !== 'casino') {
+    updates[`${base}/events/${seasonId}/xp`]       = player.xp ?? 0;
+    updates[`${base}/events/${seasonId}/tiles`]    = tileCount;
+    updates[`${base}/events/${seasonId}/missions`] = missionCount;
+  }
+  if (handsPlayed > 0 || shell === 'casino') {
+    updates[`${base}/events/${seasonId}/gold`]        = player.gold ?? 0;
+    updates[`${base}/events/${seasonId}/handsPlayed`] = handsPlayed;
+  }
+
+  // Set-once, like both triggers. This used to write unconditionally, which let
+  // an audit run in a later season stomp the event a player first scored in.
+  const firstEvent = (await db.ref(`${base}/firstEvent`).get()).val() as string | null;
+  if (!firstEvent && (tileCount > 0 || missionCount > 0 || handsPlayed > 0)) {
     updates[`${base}/firstEvent`] = seasonId;
   }
 
   for (const g of gameNames) {
-    updates[`${base}/events/${seasonId}/games/${encodeURIComponent(g)}`] = true;
+    updates[`${base}/events/${seasonId}/games/${gameKey(g)}`] = true;
   }
 
   if (player.discordHandle) {
-    updates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = uid;
+    updates[`profiles/handleIndex/${handleKey(player.discordHandle)}`] = uid;
   }
 
   await db.ref().update(updates);
-  return { tileCount, missionCount, gameCount: gameNames.size };
+  return { tileCount, missionCount, handsPlayed, gameCount: gameNames.size };
 });
 
 
@@ -3233,12 +3250,12 @@ export const onMissionComplete = onValueCreated(
       // Games — collect from this participant's slots, same encoding as onTileComplete.
       for (const slot of normalizeArray(participant.slots)) {
         if (slot.game?.trim()) {
-          profileUpdates[`${base}/events/${seasonId}/games/${encodeURIComponent(normalizeGameName(slot.game))}`] = true;
+          profileUpdates[`${base}/events/${seasonId}/games/${gameKey(slot.game)}`] = true;
         }
       }
 
       if (player.discordHandle) {
-        profileUpdates[`profiles/handleIndex/${player.discordHandle.replace(/\./g, '_')}`] = playerId;
+        profileUpdates[`profiles/handleIndex/${handleKey(player.discordHandle)}`] = playerId;
       }
 
       // Auto profile warning for repeated status-report Problems on this mission.

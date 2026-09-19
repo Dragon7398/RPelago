@@ -5,7 +5,7 @@ import { useSeason } from '../../../contexts/SeasonContext';
 import { SHOP_ITEMS } from '../../../lib/constants';
 import { calcLevel, getFeatWarnings, adventurerCountForLevel, playerStatus, type PlayerStatus } from '../../../lib/gameLogic';
 import { missionDisplayLabel } from '../../../lib/missionLogic';
-import { playerReset, syncPlayerProfile, banDiscordId } from '../../../firebase/db';
+import { playerReset, syncPlayerProfile, profileSyncSummary, banDiscordId } from '../../../firebase/db';
 import type { Player, Tile } from '../../../types';
 
 interface Props {
@@ -377,8 +377,8 @@ export default function PlayerCard({ player, tiles, adminId, missions }: Props) 
           onClick={async () => {
             setSyncing(true);
             try {
-              const { tileCount, missionCount, gameCount } = await syncPlayerProfile(player.id);
-              addToast(`${player.displayName}: synced ${tileCount} tile${tileCount !== 1 ? 's' : ''}, ${missionCount} mission${missionCount !== 1 ? 's' : ''}, ${gameCount} game${gameCount !== 1 ? 's' : ''}.`, 'success');
+              const result = await syncPlayerProfile(player.id);
+              addToast(`${player.displayName}: synced ${profileSyncSummary(result)}.`, 'success');
             } catch {
               addToast(`Failed to sync profile for ${player.displayName}.`, 'error');
             } finally {

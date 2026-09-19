@@ -191,6 +191,34 @@ Three states, derived by **`playerStatus(player)`** (`gameLogic.ts`) from **two 
 - **Ban ⊃ disable**: `adminBanDiscordId` also sets `disabled` in every season **the player actually has a record in** (not just the active one) and disables the Auth account, so it works whether or not the person has ever played. ⚠️ It must probe `players/{uid}/id` before writing that flag — RTDB creates missing ancestors, so a blind write to `players/{uid}/disabled` in a season the player was never in **creates a phantom record** holding only that flag, which renders as a nameless RESTRICTED card on the admin Players page. Skipping absent seasons costs nothing: the sign-in gate stops them before `createSeasonPlayer` could ever run. The same call nulls any phantom it finds, and `PlayersPage` drops records with no `id` as a second line of defence. **Unban is deliberately asymmetric** — it clears the ban and re-enables Auth but leaves the per-season `disabled` flags alone, so "may sign in again" stays a separate decision from "season records reinstated".
 - **Limitation**: this blocks a Discord *account*, not a person — a new account gets a new snowflake. An allowlist is the only structural answer.
 
+### The `profiles/` tree (the external profile site)
+
+`onTileComplete` / `onMissionComplete` / `syncPlayerProfile` are the only writers
+of top-level **`profiles/`**, which the separate profile site renders. See
+[docs/profile-site-handoff.md](docs/profile-site-handoff.md) for the wire contract.
+
+> **Every key under `profiles/` goes through `functions/src/profileKeys.ts`** —
+> `gameKey()` for a game name, `handleKey()` for a Discord handle. **Never build
+> one with a bare `encodeURIComponent`**: it escapes every RTDB-illegal key
+> character *except* `.`, which it treats as unreserved. That gap cost real data.
+> These keys are merge paths of ONE multi-path `update()`, so the SDK validates
+> the whole batch up front and **throws before writing anything** — meaning a
+> single seat bringing "Plants vs. Zombies" silently wiped the profile write for
+> *every* player at that table, counters and games alike. It went unnoticed for 7
+> of `casino_s1`'s first 32 tables (40 seat-writes) because the failure is
+> invisible in-app: `missionsHistory` is the source of truth the game itself
+> renders, and only the external site was short. `gameKey` emits `%2E`, which
+> `decodeURIComponent` round-trips, so the site needed no change.
+
+> **`syncPlayerProfile` is the repair path, and it must mirror the triggers'
+> shape exactly.** It re-derives counts from `tiles` + `missionsHistory` rather
+> than incrementing, so it is idempotent and is what backfills a lost write. It
+> splits casino vs non-casino on the **mission's `type`** (a map season can run
+> casino tables) but suppresses `xp`/`tiles`/`missions` under a **casino shell**,
+> per the handoff doc's §2b shape. `firstEvent` is **set-once** here too — it used
+> to write unconditionally, which let an audit run in a later season stomp the
+> event a player first scored in.
+
 > **Admin SDK pitfall**: When using `admin.database().ref(path).transaction()`, passing a child path (e.g. `profiles/{uid}/gold`) instead of the parent node can cause the transaction callback to receive `null` on the first invocation — even when data exists. Always verify the transaction ref resolves to a node that exists, and after fixing a null-transaction bug in one function, audit sibling functions (e.g. `purchaseShopItem` and `purchaseShopOrb`) for the same pattern.
 
 ### Shops and items
@@ -510,6 +538,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/components/admin/playersPage/` | PlayerCard sub-component |
 | `functions/src/index.ts` | Cloud Functions — contains `ITEM_COSTS` table that must mirror `SHOP_ITEMS` in `constants.ts` |
 | `functions/src/casinoEngine.ts` | Server-side casino engine — consolidates all four `src/lib/casino*.ts` files; must stay in sync with them |
+| `functions/src/profileKeys.ts` | RTDB-safe key encoding for the `profiles/` tree — `gameKey`, `handleKey`, `normalizeGameName`. Pure, so `tests/lib/profileKeys.test.ts` can pin it |
 | `database.rules.json` | Firebase security rules |
 | `src/lib/casinoData.ts` | Deck definition, card types, `buildDeck`, `shuffle` |
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |

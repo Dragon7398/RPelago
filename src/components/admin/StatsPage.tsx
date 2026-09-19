@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { CASINO_GAMES, CASINO_GAME_ORDER } from '../../lib/casinoData';
 import { normalizeSlots } from '../../lib/slotHelpers';
+import { playerStatus } from '../../lib/gameLogic';
 import type { AdvSlot, GMMission, TriState } from '../../types';
 
 // ── Mission tallies ───────────────────────────────────────────────────────────
@@ -73,8 +74,8 @@ function buildRows(
 // key itself would render as lowercase mush.
 //
 // The list is long enough (a season runs well over a hundred distinct APworlds) that
-// a single top-N slice hid most of it, so it is paged rather than truncated.
-const GAME_PAGE_SIZE = 20;
+// a single top-N slice hid most of it, so it is paged (PAGE_SIZE) rather than
+// truncated.
 
 const foldGame = (raw: string) => raw.trim().replace(/\s+/g, ' ');
 
@@ -125,6 +126,78 @@ function tallyGames(live: GMMission[], done: GMMission[]) {
   };
 
   return { rows, totals, unique, distinct: acc.size, unassigned };
+}
+
+// ── Paging ────────────────────────────────────────────────────────────────────
+//
+// Both paged lists (games, players) hold their page un-clamped in state and derive
+// the page actually in effect here on every render. The row set shrinks underneath
+// them — narrowing the scope drops games, a ban sweep drops players — and a page
+// index trusted from state then renders an empty list with no way back.
+const PAGE_SIZE = 20;
+
+function pageWindow(total: number, raw: number) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(raw, pages - 1);
+  const from = page * PAGE_SIZE;
+  return { pages, page, from, to: Math.min(from + PAGE_SIZE, total), total };
+}
+
+type PageWindow = ReturnType<typeof pageWindow>;
+
+function Pager({ win, unit, onPage }: {
+  win: PageWindow;
+  unit: string;
+  onPage: (page: number) => void;
+}) {
+  if (win.pages <= 1) return null;
+  return (
+    <div className="dash-stat-pager">
+      <button
+        className="dash-stat-pager-btn"
+        onClick={() => onPage(win.page - 1)}
+        disabled={win.page === 0}
+      >&lsaquo; Prev</button>
+      <span className="dash-stat-pager-info">
+        {win.from + 1}&ndash;{win.to} of {win.total} {unit}
+        <span className="dash-stat-pager-page"> &middot; page {win.page + 1} of {win.pages}</span>
+      </span>
+      <button
+        className="dash-stat-pager-btn"
+        onClick={() => onPage(win.page + 1)}
+        disabled={win.page >= win.pages - 1}
+      >Next &rsaquo;</button>
+    </div>
+  );
+}
+
+// ── Per-player table counts ───────────────────────────────────────────────────
+//
+// One participant record is one seat, so a player is counted ONCE per table however
+// many slots they hold on it (including a claimed slot, which also creates a
+// participant record). Release/Collect are read off the MISSION, not the seat —
+// they are a property of the generated room that every seat on it shares.
+//
+// `tables` is carried alongside the four counts so the shortfall is legible: a
+// TriState may also be `special` (or, on a legacy record, missing), which is neither
+// on nor off, and without the total those tables would silently vanish from both
+// columns.
+interface TableTally { tables: number; relOn: number; relOff: number; colOn: number; colOff: number }
+
+const NO_TABLES: TableTally = { tables: 0, relOn: 0, relOff: 0, colOn: 0, colOff: 0 };
+
+function tallyPlayerTables(live: GMMission[], done: GMMission[]): Record<string, TableTally> {
+  const out: Record<string, TableTally> = {};
+  for (const m of [...live, ...done]) {
+    for (const p of Object.values(m.participants ?? {})) {
+      if (!p?.playerId) continue;
+      const t = (out[p.playerId] ??= { ...NO_TABLES });
+      t.tables++;
+      if (m.release === 'on') t.relOn++; else if (m.release === 'off') t.relOff++;
+      if (m.collect === 'on') t.colOn++; else if (m.collect === 'off') t.colOff++;
+    }
+  }
+  return out;
 }
 
 function Figure({ value, label }: { value: number; label: string }) {
@@ -192,10 +265,9 @@ export default function StatsPage() {
   // folds in basic/patrol. The game-TYPE table above is inherently casino and
   // ignores this.
   const [scope, setScope] = useState<'casino' | 'all'>('casino');
-  // Held un-clamped: the row set shrinks when the scope narrows (or when a mission
-  // settles under the page), so the page in effect is always re-derived below rather
-  // than trusted from state, which would otherwise render an empty page.
+  // Both held un-clamped; `pageWindow` derives the page actually in effect.
   const [gamePageRaw, setGamePage] = useState(0);
+  const [playerPageRaw, setPlayerPage] = useState(0);
 
   const { live, done } = useMemo(() => {
     const current = Object.values(gameState?.missions ?? {});
@@ -229,17 +301,22 @@ export default function StatsPage() {
 
   const games = useMemo(() => tallyGames(scopedLive, scopedDone), [scopedLive, scopedDone]);
 
+  const playerTables = useMemo(() => tallyPlayerTables(scopedLive, scopedDone), [scopedLive, scopedDone]);
+
   // Same phantom-record guard as the Players roster: a record with no `id` was
   // never a player, just an ancestor RTDB created under a stray leaf write.
-  const topGold = useMemo(() => Object.values(gameState?.players ?? {})
+  //
+  // Ties break on name so the order is total: with a page boundary falling inside a
+  // run of equal-gold players, an order that depends on RTDB key order could show
+  // the same player on both pages, or on neither.
+  const goldRows = useMemo(() => Object.values(gameState?.players ?? {})
     .filter(p => !!p?.id)
-    .sort((a, b) => (b.gold ?? 0) - (a.gold ?? 0))
-    .slice(0, 10), [gameState?.players]);
+    .sort((a, b) => (b.gold ?? 0) - (a.gold ?? 0)
+      || (a.displayName || a.discordHandle || a.id).localeCompare(b.displayName || b.discordHandle || b.id)),
+    [gameState?.players]);
 
-  const gamePages = Math.max(1, Math.ceil(games.rows.length / GAME_PAGE_SIZE));
-  const gamePage = Math.min(gamePageRaw, gamePages - 1);
-  const gameFrom = gamePage * GAME_PAGE_SIZE;
-  const gameTo = Math.min(gameFrom + GAME_PAGE_SIZE, games.rows.length);
+  const gameWin = pageWindow(games.rows.length, gamePageRaw);
+  const goldWin = pageWindow(goldRows.length, playerPageRaw);
 
   if (!gameState) return null;
 
@@ -289,31 +366,14 @@ export default function StatsPage() {
             </div>
             <StatTable
               headLabel="Game"
-              rows={games.rows.slice(gameFrom, gameTo)}
-              rankFrom={gameFrom + 1}
+              rows={games.rows.slice(gameWin.from, gameWin.to)}
+              rankFrom={gameWin.from + 1}
               foot={{
-                label: games.rows.length > GAME_PAGE_SIZE ? `All ${games.distinct} games` : 'Total',
+                label: games.rows.length > PAGE_SIZE ? `All ${games.distinct} games` : 'Total',
                 tally: games.totals,
               }}
             />
-            {gamePages > 1 && (
-              <div className="dash-stat-pager">
-                <button
-                  className="dash-stat-pager-btn"
-                  onClick={() => setGamePage(gamePage - 1)}
-                  disabled={gamePage === 0}
-                >&lsaquo; Prev</button>
-                <span className="dash-stat-pager-info">
-                  {gameFrom + 1}&ndash;{gameTo} of {games.rows.length}
-                  <span className="dash-stat-pager-page"> &middot; page {gamePage + 1} of {gamePages}</span>
-                </span>
-                <button
-                  className="dash-stat-pager-btn"
-                  onClick={() => setGamePage(gamePage + 1)}
-                  disabled={gamePage >= gamePages - 1}
-                >Next &rsaquo;</button>
-              </div>
-            )}
+            <Pager win={gameWin} unit="games" onPage={setGamePage} />
             <div className="dash-stat-note">
               A game on both an in-progress and a completed mission counts once under Unique games, so the
               first three figures overlap rather than add up.
@@ -326,25 +386,80 @@ export default function StatsPage() {
       </section>
 
       <section className="dash-section">
-        <h3 className="dash-section-title">Top 10 Players by Gold</h3>
-        {topGold.length === 0 ? (
+        <h3 className="dash-section-title">Players by Gold</h3>
+        {goldRows.length === 0 ? (
           <div className="dash-empty">No players in this season.</div>
         ) : (
-          <ol className="dash-gold-board">
-            {topGold.map((p, i) => (
-              <li key={p.id} className={`dash-gold-row${p.disabled ? ' disabled' : ''}`}>
-                <span className="dash-gold-rank">{i + 1}</span>
-                <span className="dash-gold-who">
-                  <span className="dash-gold-name">{p.displayName || p.discordHandle || p.id}</span>
-                  {p.discordHandle && p.discordHandle !== p.displayName && (
-                    <span className="dash-gold-handle">{p.discordHandle}</span>
-                  )}
-                </span>
-                {p.disabled && <span className="dash-gold-off" title="Disabled">RESTRICTED</span>}
-                <span className="dash-gold-amt">{(p.gold ?? 0).toLocaleString()}<span className="dash-gold-unit">g</span></span>
-              </li>
-            ))}
-          </ol>
+          <>
+            {/* Five columns of numbers need a header saying what they are exactly
+                once, rather than a label repeated on all twenty rows — so the header
+                and the rows share one grid template (`dash-gold-grid`) and sit in one
+                overflow box, since a header that scrolls independently of its own
+                numbers is worse than no header at all. */}
+            <div className="dash-gold-wrap">
+              <div className="dash-gold-scroll">
+                <div className="dash-gold-head dash-gold-grid">
+                  <span />
+                  <span>Player</span>
+                  <span className="num" title="Tables this player held a seat on, within the scope selected above">Tables</span>
+                  <span className="num" title="…of those, tables that generated with Release ON">Rel On</span>
+                  <span className="num" title="…of those, tables that generated with Release OFF">Rel Off</span>
+                  <span className="num" title="…of those, tables that generated with Collect ON">Col On</span>
+                  <span className="num" title="…of those, tables that generated with Collect OFF">Col Off</span>
+                  <span className="num">Gold</span>
+                </div>
+                <ol className="dash-gold-board">
+                  {goldRows.slice(goldWin.from, goldWin.to).map((p, i) => {
+                    const rank = goldWin.from + i + 1;
+                    const t = playerTables[p.id] ?? NO_TABLES;
+                    const status = playerStatus(p);
+                    // Gilding the top three is driven by the RANK, not by row position:
+                    // as a `:nth-child` rule it re-gilded the first three rows of every
+                    // page, so page 2 showed ranks 21-23 as the richest in the season.
+                    const cls = [
+                      'dash-gold-row', 'dash-gold-grid',
+                      status === 'disabled' ? 'disabled' : '',
+                      rank <= 3 ? 'top' : '',
+                    ].filter(Boolean).join(' ');
+                    return (
+                      <li key={p.id} className={cls}>
+                        <span className="dash-gold-rank">{rank}</span>
+                        <span className="dash-gold-who">
+                          <span className="dash-gold-name">{p.displayName || p.discordHandle || p.id}</span>
+                          {p.discordHandle && p.discordHandle !== p.displayName && (
+                            <span className="dash-gold-handle">{p.discordHandle}</span>
+                          )}
+                          {status === 'disabled' && (
+                            <span className="dash-gold-off" title="Disabled — cannot sign in.">DISABLED</span>
+                          )}
+                          {status === 'restricted' && (
+                            <span className="dash-gold-off restrict"
+                                  title="Restricted — plays as normal, but claims are only returned when the world resolves.">
+                              RESTRICTED
+                            </span>
+                          )}
+                        </span>
+                        <span className={`dash-gold-ct${t.tables === 0 ? ' zero' : ''}`}>{t.tables}</span>
+                        <span className={`dash-gold-ct${t.relOn === 0 ? ' zero' : ''}`}>{t.relOn}</span>
+                        <span className={`dash-gold-ct${t.relOff === 0 ? ' zero' : ''}`}>{t.relOff}</span>
+                        <span className={`dash-gold-ct pair${t.colOn === 0 ? ' zero' : ''}`}>{t.colOn}</span>
+                        <span className={`dash-gold-ct${t.colOff === 0 ? ' zero' : ''}`}>{t.colOff}</span>
+                        <span className="dash-gold-amt">{(p.gold ?? 0).toLocaleString()}<span className="dash-gold-unit">g</span></span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            </div>
+            <Pager win={goldWin} unit="players" onPage={setPlayerPage} />
+            <div className="dash-stat-note">
+              Release and Collect belong to the generated room, so a player counts once per table they
+              held a seat on, whatever their slot count there. Only tables in the scope selected above
+              are counted, and only ones that have deployed — both settings are rolled at deploy, so a
+              forming table has nothing to count yet. On + Off can therefore fall short of Tables: a
+              table that rolled <em>Special</em> is neither.
+            </div>
+          </>
         )}
       </section>
     </div>

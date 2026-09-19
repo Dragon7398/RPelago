@@ -59,10 +59,21 @@ Notes on the existing conventions (all of which are **preserved**):
 
 - **`firstEvent`** is set only if not already claimed — it records which event a
   player first scored in, and must never be overwritten by a later event.
-- **`games`** keys are `encodeURIComponent(normalizedGameName)`, where
-  normalization is `trim()` + collapse internal whitespace. Stored as a
-  keyed map (`name → true`) rather than an array so concurrent writes are
-  atomic and can't stomp each other.
+- **`games`** keys are `gameKey(name)`: `encodeURIComponent(normalizedGameName)`
+  **plus a further `.` → `%2E`**, where normalization is `trim()` + collapse
+  internal whitespace. Stored as a keyed map (`name → true`) rather than an
+  array so concurrent writes are atomic and can't stomp each other.
+  **`decodeURIComponent` is still the correct way to read a key back** — `%2E`
+  round-trips to `.` — so the profile site needs no change.
+
+  The extra escape is not cosmetic. `encodeURIComponent` leaves `.` in its
+  unreserved set, but RTDB forbids `.` in a key — and these keys go in as
+  merge paths of a **single** multi-path `update()`, so one game named
+  "Plants vs. Zombies" made the SDK throw before *any* of the batch landed,
+  silently dropping every participant's counters for that whole table. This
+  happened: 7 of `casino_s1`'s first 32 tables — 40 seat-writes — were lost
+  that way and later backfilled. No key written before the fix can contain a
+  `.` (such a write could never have landed), so nothing ends up double-keyed.
 - **`handleIndex`** replaces `.` with `_` because `.` is an invalid Firebase key
   character.
 - Identity fields (`displayName`, `discordHandle`, `avatarHash`, `joinedAt`) are
@@ -178,7 +189,8 @@ The two apps divide cleanly along the **event id**:
 - `profiles/` location, shape of the player stub, and world-readability.
 - `handleIndex` and the `/p/<handle>` resolution flow.
 - The `firstEvent`-set-once rule.
-- The `games` map encoding.
+- The `games` map encoding — still `encodeURIComponent`-based and still read
+  back with `decodeURIComponent`; see the `%2E` note in §1.
 - Identity-refresh-on-every-write behavior.
 - S1's existing `rpelago_s1` records — they are **not migrated or rewritten**.
   Whatever is there stays exactly as-is.

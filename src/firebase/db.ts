@@ -1275,11 +1275,35 @@ export async function adminForceDeploy(missionId: string): Promise<void> {
   await httpsCallable(functions!, 'adminForceDeploy')({ missionId, seasonId: getCurrentSeason() });
 }
 
+// What a profile audit rebuilt. `handsPlayed` is the casino counter — the
+// season's shell decides which of it / `missions` is the meaningful one.
+export interface ProfileSyncResult {
+  tileCount:    number;
+  missionCount: number;
+  handsPlayed:  number;
+  gameCount:    number;
+}
+
+// Toast text for an audit. Lists only the counters that actually have a value,
+// so a casino season reads "3 hands, 9 games" rather than padding the line with
+// the tiles/missions it structurally never has.
+export function profileSyncSummary(r: ProfileSyncResult): string {
+  const parts: string[] = [];
+  const add = (n: number, one: string, many: string) => {
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  };
+  add(r.tileCount,    'tile',    'tiles');
+  add(r.missionCount, 'mission', 'missions');
+  add(r.handsPlayed,  'hand',    'hands');
+  add(r.gameCount,    'game',    'games');
+  return parts.length > 0 ? parts.join(', ') : 'nothing to record';
+}
+
 export async function syncPlayerProfile(
   targetUid?: string,
-): Promise<{ tileCount: number; missionCount: number; gameCount: number }> {
+): Promise<ProfileSyncResult> {
   assertFunctions();
-  const fn = httpsCallable<{ targetUid?: string; seasonId?: string }, { tileCount: number; missionCount: number; gameCount: number }>(
+  const fn = httpsCallable<{ targetUid?: string; seasonId?: string }, ProfileSyncResult>(
     functions!, 'syncPlayerProfile',
   );
   const result = await fn({ targetUid, seasonId: getCurrentSeason() });
