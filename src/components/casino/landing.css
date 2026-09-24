@@ -492,6 +492,37 @@ body.casino-scope #root { width: 100%; }
 .rl-prof-coatpip.on { border-color: oklch(from var(--pos) l c h / 0.6); background: oklch(from var(--pos) l c h / 0.15); color: var(--pos); }
 .rl-full { width: 100%; }
 
+/* ── Profile history: the tables this player has settled ──────────────────────
+   The map shell's profile lists completedChallenges; a casino season writes none
+   (it pays in gold, so the XP block that records them is skipped), so these rows
+   are derived from missionsHistory. Long-lived players accumulate many, hence the
+   scroll cap — the modal itself must not grow past its 88vh. Money colours reuse
+   the ledger's .st-net / .st-chip so a night reads the same in both places. */
+.rl-hist { display: flex; flex-direction: column; gap: 0.45rem; max-height: 21rem; overflow-y: auto; padding-right: 0.2rem; }
+.rl-hist-count {
+  display: inline-block; margin-left: 0.45rem; padding: 0 0.35rem; border-radius: 6px;
+  border: 1px solid var(--line); color: var(--gold-dim); letter-spacing: 0.06em;
+}
+.rl-hist-row {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.55rem 0.65rem; border-radius: 8px;
+  border: 1px solid var(--line); background: oklch(from var(--bg-card) l c h / 0.4);
+}
+.rl-hist-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.rl-hist-title { font-family:'Cinzel',serif; font-size: 0.78rem; letter-spacing: 0.04em; color: var(--parchment); }
+.rl-hist-head .st-net { font-size: 0.86rem; white-space: nowrap; }
+.rl-hist-tag {
+  font-family:'Cinzel',serif; font-size: 0.5rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--gold-dim); border: 1px dashed var(--line-glow); border-radius: 5px; padding: 0.1rem 0.35rem; white-space: nowrap;
+}
+.rl-hist-sub {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;
+  font-family:'Cinzel',serif; font-size: 0.55rem; letter-spacing: 0.08em; color: var(--gold-dim);
+}
+.rl-hist-dot { opacity: 0.5; margin: 0 0.15rem; }
+.rl-hist-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.rl-hist-chips .st-chip { font-size: 0.74rem; padding: 0.12rem 0.4rem; }
+
 /* ══ Activity feed modal ══ */
 .rl-feed { display: flex; flex-direction: column; gap: 0.4rem; }
 .rl-feed-row {

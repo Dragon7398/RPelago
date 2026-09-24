@@ -1287,11 +1287,35 @@ export async function adminForceDeploy(missionId: string): Promise<void> {
   await httpsCallable(functions!, 'adminForceDeploy')({ missionId, seasonId: getCurrentSeason() });
 }
 
+// What a profile audit rebuilt. `handsPlayed` is the casino counter — the
+// season's shell decides which of it / `missions` is the meaningful one.
+export interface ProfileSyncResult {
+  tileCount:    number;
+  missionCount: number;
+  handsPlayed:  number;
+  gameCount:    number;
+}
+
+// Toast text for an audit. Lists only the counters that actually have a value,
+// so a casino season reads "3 hands, 9 games" rather than padding the line with
+// the tiles/missions it structurally never has.
+export function profileSyncSummary(r: ProfileSyncResult): string {
+  const parts: string[] = [];
+  const add = (n: number, one: string, many: string) => {
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  };
+  add(r.tileCount,    'tile',    'tiles');
+  add(r.missionCount, 'mission', 'missions');
+  add(r.handsPlayed,  'hand',    'hands');
+  add(r.gameCount,    'game',    'games');
+  return parts.length > 0 ? parts.join(', ') : 'nothing to record';
+}
+
 export async function syncPlayerProfile(
   targetUid?: string,
-): Promise<{ tileCount: number; missionCount: number; gameCount: number }> {
+): Promise<ProfileSyncResult> {
   assertFunctions();
-  const fn = httpsCallable<{ targetUid?: string; seasonId?: string }, { tileCount: number; missionCount: number; gameCount: number }>(
+  const fn = httpsCallable<{ targetUid?: string; seasonId?: string }, ProfileSyncResult>(
     functions!, 'syncPlayerProfile',
   );
   const result = await fn({ targetUid, seasonId: getCurrentSeason() });
@@ -1301,9 +1325,12 @@ export async function syncPlayerProfile(
 // The archived copy a mission settles into. For casino tables it stamps each
 // seat's `potShare` and `net`, which the Settled ledger reads back: the pot split
 // awards its remainder to a randomly chosen seat, so nothing downstream can
-// re-derive who got it. Non-casino missions archive unchanged.
-function archivedMission(mission: GMMission, potShares: Map<string, number>): GMMission {
-  const settled: GMMission = { ...mission, state: 'complete' };
+// re-derive who got it. Non-casino missions archive unchanged apart from the
+// settle stamp. `completedAt` is the only record of WHEN a table settled — the
+// deploy clock can be days earlier — and it is what the casino profile's history
+// dates each row by.
+function archivedMission(mission: GMMission, potShares: Map<string, number>, now: number): GMMission {
+  const settled: GMMission = { ...mission, state: 'complete', completedAt: now };
   if (mission.type !== 'casino') return settled;
 
   const participants: Record<string, GMParticipant> = {};
@@ -1451,7 +1478,7 @@ export async function completeMission(
     }
   }
 
-  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares);
+  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares, now);
   updates[sPath(`missions/${mission.id}`)]         = null;
 
   await update(ref(db!), updates);

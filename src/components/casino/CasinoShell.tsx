@@ -8,14 +8,15 @@ import HelpModal from '../HelpModal';
 import LoginModal from '../LoginModal';
 import PrivacyModal from '../PrivacyModal';
 import ProfileLink from '../ProfileLink';
-import PhasePanel, { TableSlotsBoard } from './PhasePanel';
+import PhasePanel, { TableSlotsBoard, GameChip } from './PhasePanel';
+import { seatGames, type SeatGame } from './seatGames';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { DeckPreview } from '../../casino/DeckPreview';
 import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
-import { awaitingRoom, currentMaxSlots, msToNextDecay, missionDisplayLabel, fmtDayClock, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { claimableCount } from '../../lib/slotHelpers';
 import { toRoman } from '../../lib/constants';
@@ -356,7 +357,73 @@ function GamesModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-interface ProfileStats { gold: number; net: number; tablesPlayed: number; biggestWin: number; }
+interface ProfileStats { gold: number; net: number; tablesPlayed: number; biggestWin: number; history: HistoryRow[]; }
+
+// One settled table the player sat at — the casino answer to the map profile's
+// per-challenge history. There is no `completedChallenges` record to read here:
+// a casino-only season pays in gold, so `completeMission` skips the whole XP block
+// that writes those entries (see db.ts). The history is therefore derived from
+// `missionsHistory`, which the shell already holds.
+interface HistoryRow {
+  id:      string;
+  label:   string;
+  /**
+   * When the table STARTED — `missionClockOrigin`, the same instant the mission
+   * card's Elapsed clock counts from. Deliberately not the settle date: only
+   * tables archived since `completedAt` was added carry one, so dating by the end
+   * would silently mix real end dates with start-date fallbacks for every older
+   * row. A start date is available on every row that has ever existed.
+   */
+  at:      number;
+  casino:  boolean;
+  /** False for a pure claimant — they took over a live slot without ever playing a hand. */
+  played:  boolean;
+  hand:    number;
+  pot:     number;
+  entries: number;
+  net:     number;
+  games:   SeatGame[];
+}
+
+const fmtDate = (ts: number) =>
+  new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+function HistoryList({ rows }: { rows: HistoryRow[] }) {
+  if (rows.length === 0) {
+    return <p className="rl-muted" style={{ margin: 0 }}>You haven't seen a table through to settlement yet.</p>;
+  }
+  return (
+    <div className="rl-hist">
+      {rows.map(r => (
+        <div key={r.id} className="rl-hist-row">
+          <div className="rl-hist-head">
+            <span className="rl-hist-title">{r.label}</span>
+            {r.casino && r.played && (
+              <span className={`st-net ${r.net > 0 ? 'pos' : r.net < 0 ? 'neg' : 'even'}`}>
+                {r.net > 0 ? `+${r.net}` : r.net < 0 ? `−${Math.abs(r.net)}` : '±0'}<small>g</small>
+              </span>
+            )}
+            {/* A pure claimant took over a live slot without ever anteing, so there
+                is no hand, no pot share and nothing to net out — say why the row
+                has no money on it rather than printing a misleading ±0. */}
+            {r.casino && !r.played && <span className="rl-hist-tag">Claimed slot</span>}
+          </div>
+          <div className="rl-hist-sub">
+            <span>{fmtDate(r.at)}</span>
+            {r.casino && r.played && (
+              <span className="rl-hist-break">
+                Hand {r.hand}g <span className="rl-hist-dot">·</span> Pot +{r.pot}g <span className="rl-hist-dot">·</span> Entries −{r.entries}g
+              </span>
+            )}
+          </div>
+          {r.games.length > 0 && (
+            <div className="rl-hist-chips">{r.games.map((g, i) => <GameChip key={i} g={g} />)}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function ProfStat({ label, value, tone }: { label: string; value: ReactNode; tone?: 'pos' | 'neg' }) {
   return (
@@ -371,7 +438,7 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
   name: string; uid: string; player: Player | undefined; stats: ProfileStats;
   onSetColor: (colorId: string | null) => void; onSignOut: () => void; onClose: () => void;
 }) {
-  const { gold, net, tablesPlayed, biggestWin } = stats;
+  const { gold, net, tablesPlayed, biggestWin, history } = stats;
   const hasCoat  = (player?.inventory?.['coat_of_many_colors'] ?? 0) > 0;
   const done     = player?.casinoGamesCompleted ?? {};
   const doneCount = CASINO_GAME_ORDER.filter(g => done[g]).length;
@@ -419,6 +486,14 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
             </div>
           </div>
         )}
+      </div>
+
+      <div className="rl-prof-sec">
+        <div className="rl-prof-sec-head">
+          Your Nights at the Tables
+          {history.length > 0 && <span className="rl-hist-count">{history.length}</span>}
+        </div>
+        <HistoryList rows={history} />
       </div>
 
       <button className="rl-btn rl-full" style={{ marginTop: '1.1rem' }} onClick={onSignOut}>
@@ -534,15 +609,36 @@ export default function CasinoShell() {
   const profileStats = useMemo<ProfileStats>(() => {
     const uid = user?.id;
     let tablesPlayed = 0, biggestWin = 0;
+    const history: HistoryRow[] = [];
     if (uid) {
       for (const m of Object.values(gameState?.missionsHistory ?? {})) {
-        const seat = m.type === 'casino' ? m.participants?.[uid] : undefined;
-        if (!seat?.played) continue;
+        const seat = m.participants?.[uid];
+        if (!seat) continue;
+        const casino = m.type === 'casino';
+        // A pure claimant is a participant who never played a hand, so they earn a
+        // history row (they saw a slot through) but no money line and no counter —
+        // `tablesPlayed` / `biggestWin` stay keyed on `played`, as before.
+        const played  = casino && seat.played === true;
+        const hand    = seat.goldSwing ?? 0;
+        const pot     = seat.potShare  ?? 0;
+        const entries = casinoSeatPaid(m, uid);
+        history.push({
+          id:     m.id,
+          label:  missionDisplayLabel(m),
+          at:     missionClockOrigin(m) ?? m.createdAt,
+          casino, played, hand, pot, entries,
+          // `net` is stamped at settle; the fallback keeps pre-stamp tables readable
+          // (the same one the Ledger uses).
+          net:    seat.net ?? hand + pot - entries,
+          games:  seatGames(seat),
+        });
+        if (!played) continue;
         tablesPlayed++;
         biggestWin = Math.max(biggestWin, seat.net ?? 0);
       }
+      history.sort((a, b) => b.at - a.at);
     }
-    return { gold, net, tablesPlayed, biggestWin };
+    return { gold, net, tablesPlayed, biggestWin, history };
   }, [gameState?.missionsHistory, user?.id, gold, net]);
 
   const tables = useMemo(() => {

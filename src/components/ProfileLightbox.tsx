@@ -7,7 +7,7 @@ import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFe
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
 import { db as firebaseDb } from '../firebase/config';
 import { sRef } from '../firebase/season';
-import { syncPlayerProfile } from '../firebase/db';
+import { syncPlayerProfile, profileSyncSummary } from '../firebase/db';
 import ProfileLink from './ProfileLink';
 import type { AdvClass, PlayerFeats, CompletedChallenge } from '../types';
 
@@ -69,8 +69,8 @@ export default function ProfileLightbox({ open, onClose }: Props) {
     if (!user) return;
     setSyncing(true);
     try {
-      const { tileCount, missionCount, gameCount } = await syncPlayerProfile();
-      addToast(`Profile synced: ${tileCount} tile${tileCount !== 1 ? 's' : ''}, ${missionCount} mission${missionCount !== 1 ? 's' : ''}, ${gameCount} game${gameCount !== 1 ? 's' : ''}.`, 'success');
+      const result = await syncPlayerProfile();
+      addToast(`Profile synced: ${profileSyncSummary(result)}.`, 'success');
     } catch {
       addToast('Profile sync failed. Please try again.', 'error');
     } finally {

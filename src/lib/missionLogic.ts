@@ -349,6 +349,14 @@ export function holdPinned<T extends { id: string }>(
   return next;
 }
 
+// When an archived mission settled. `completedAt` is stamped by `archivedMission`
+// at settle; rows archived before that field existed fall back to the deploy (then
+// creation) clock, which is the closest thing they carry. Never returns 0, so a
+// caller can sort on it without a null branch.
+export function missionSettledAt(m: GMMission): number {
+  return m.completedAt ?? m.deployedAt ?? m.createdAt;
+}
+
 export function missionDisplayLabel(m: GMMission): string {
   const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
