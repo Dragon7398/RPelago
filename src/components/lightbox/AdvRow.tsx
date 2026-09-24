@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { FEATS } from '../../lib/constants';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import { slotsFromEntry } from '../../lib/slotHelpers';
+import { rolledTargets } from '../../lib/traits';
 import type { TileAdventurer, Player } from '../../types';
 
 export function CopyButton({ text }: { text: string }) {
@@ -25,12 +26,14 @@ export function CopyButton({ text }: { text: string }) {
 
 export function AdvStatusIcons({ advId, tile, inventory }: {
   advId: string;
-  tile: { stunnedAdvId?: string; tauntedAdvId?: string };
+  // Accepts both shapes; rolledTargets handles the S1 singulars.
+  tile: Parameters<typeof rolledTargets>[0];
   inventory: Record<string, number>;
 }) {
-  const isStunned = tile.stunnedAdvId === advId;
-  const isTaunted = tile.tauntedAdvId === advId;
-  if (!isStunned && !isTaunted) return null;
+  const isStunned = rolledTargets(tile, 'stunned').includes(advId);
+  const isTaunted = rolledTargets(tile, 'taunted').includes(advId);
+  const isThief   = rolledTargets(tile, 'thief').includes(advId);
+  if (!isStunned && !isTaunted && !isThief) return null;
   const resisted = isStunned && (inventory['ring_of_resistance'] ?? 0) > 0;
   return (
     <span className="lb-adv-status-icons">
@@ -40,6 +43,7 @@ export function AdvStatusIcons({ advId, tile, inventory }: {
           : <span className="lb-adv-status-icon" title="Stunned!">💫</span>
       )}
       {isTaunted && <span className="lb-adv-status-icon" title="Taunted!">😤</span>}
+      {isThief && <span className="lb-adv-status-icon" title="Thief!">🦝</span>}
     </span>
   );
 }

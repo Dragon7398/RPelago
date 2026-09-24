@@ -102,7 +102,17 @@ export interface Tile {
   traits?: Record<string, { value: number }>;
   publicSlots?: AdvSlot[];
   claimableSlots?: Record<string, AdvSlot[]>;
+  // Lock-time target rolls, written when the tile enters `inprogress` and
+  // cleared on every transition away from it (see setTileState). Arrays because
+  // Stunning/Taunt/Thief target several players at their higher levels.
+  // Read them through rolledTargets() in lib/traits.ts, never directly — it
+  // handles the S1 singulars below.
+  stunnedAdvIds?: string[];
+  tauntedAdvIds?: string[];
+  thiefAdvIds?:   string[];
+  /** @deprecated S1 shape — single target, and no thief field existed. */
   stunnedAdvId?: string;
+  /** @deprecated S1 shape — see stunnedAdvId. */
   tauntedAdvId?: string;
   link: string;
   link2?: string;

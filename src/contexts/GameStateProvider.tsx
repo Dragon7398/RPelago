@@ -41,6 +41,7 @@ import { awardTileRewards, computeRecalcUpdates, releasesClaimsEarly } from '../
 import { FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
 import { getAdjCoords, rcFromCoord } from '../lib/board';
+import { rollTraitTargets } from '../lib/traits';
 import { GameStateContext } from './GameStateContext';
 import type { GameState } from '../types';
 
@@ -175,9 +176,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
     if (state === 'inprogress' && tile) {
       const advIds = Object.keys(tile.adventurers ?? {});
-      const pick = () => advIds.length > 0 ? advIds[Math.floor(Math.random() * advIds.length)] : null;
-      const stunnedAdvId = tile.traits?.['stunning'] !== undefined ? pick() : null;
-      const tauntedAdvId = tile.traits?.['taunt']    !== undefined ? pick() : null;
+      // Stunning / Taunt / Thief roll their targets here, at lock time. Thief is
+      // NEW in S2 and is rolled by the system rather than picked by the admin --
+      // see rollTraitTargets.
+      const roll = rollTraitTargets(tile.traits, advIds);
       let roomAssignments: Record<string, 1 | 2> | undefined;
       let slotRoomUpdates: Record<string, unknown> | undefined;
       if (tile.traits?.['bifurcated'] !== undefined && advIds.length > 0) {
@@ -200,9 +202,9 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
       if (wasComplete && gameState) {
         const recalc = computeRecalcUpdates(gameState.tiles, coord, 'inprogress');
-        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
+        await setTilesAvailability(recalc, coord, roll, roomAssignments, slotRoomUpdates);
       } else {
-        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
+        await setTileInProgress(coord, roll, roomAssignments, slotRoomUpdates);
       }
     } else if (wasComplete && state !== 'complete' && gameState) {
       const recalc = computeRecalcUpdates(gameState.tiles, coord, state);

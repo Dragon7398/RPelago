@@ -6,6 +6,7 @@ import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfi
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { activeBoard } from '../lib/board';
+import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
@@ -167,20 +168,39 @@ export function subscribeToGame(
 }
 
 // ── Tile mutations ────────────────────────────────────────────────────────────
+// Every roll field a tile carries while `inprogress`. THE CLEARING INVARIANT:
+// setTileState nulls all of them on any transition, so a stale roll can never
+// survive a state bounce. Adding a fourth roll field means adding it HERE and
+// nowhere else — the legacy S1 singulars are included so an archived-shaped
+// tile also gets cleaned if it is ever transitioned.
+const TILE_ROLL_FIELDS = [
+  'stunnedAdvIds', 'tauntedAdvIds', 'thiefAdvIds',
+  'stunnedAdvId',  'tauntedAdvId',
+] as const;
+
+function clearedRollFields(): Record<string, null> {
+  return Object.fromEntries(TILE_ROLL_FIELDS.map(f => [f, null]));
+}
+
 export async function setTileState(coord: string, state: TileState): Promise<void> {
-  await update(sRef(db!, `tiles/${coord}`), { state, stunnedAdvId: null, tauntedAdvId: null });
+  await update(sRef(db!, `tiles/${coord}`), { state, ...clearedRollFields() });
 }
 
 export async function setTileInProgress(
   coord: string,
-  stunnedAdvId: string | null,
-  tauntedAdvId: string | null,
+  roll: TraitTargetRoll,
   roomAssignments?: Record<string, 1 | 2>,
   extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
   const updates: Record<string, unknown> = { [sPath(`tiles/${coord}/state`)]: 'inprogress' };
-  updates[sPath(`tiles/${coord}/stunnedAdvId`)] = stunnedAdvId;
-  updates[sPath(`tiles/${coord}/tauntedAdvId`)] = tauntedAdvId;
+  // Clear first, then write only the non-empty rolls, so a previous roll (or a
+  // legacy singular) is wiped even when this trait now targets nobody.
+  for (const [f, v] of Object.entries(clearedRollFields())) {
+    updates[sPath(`tiles/${coord}/${f}`)] = v;
+  }
+  for (const [f, ids] of Object.entries(roll)) {
+    if (ids.length) updates[sPath(`tiles/${coord}/${f}`)] = ids;
+  }
   if (roomAssignments) {
     for (const [advId, room] of Object.entries(roomAssignments)) {
       updates[sPath(`tiles/${coord}/adventurers/${advId}/room`)] = room;
@@ -214,8 +234,7 @@ export async function resetTileStats(coord: string, stats: Partial<Tile>): Promi
 export async function setTilesAvailability(
   stateUpdates: Record<string, TileState>,
   inProgressCoord?: string,
-  stunnedAdvId?: string | null,
-  tauntedAdvId?: string | null,
+  roll?: TraitTargetRoll,
   roomAssignments?: Record<string, 1 | 2>,
   extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
@@ -225,8 +244,12 @@ export async function setTilesAvailability(
     updates[sPath(`tiles/${c}/state`)] = s;
   }
   if (inProgressCoord != null) {
-    updates[sPath(`tiles/${inProgressCoord}/stunnedAdvId`)] = stunnedAdvId ?? null;
-    updates[sPath(`tiles/${inProgressCoord}/tauntedAdvId`)] = tauntedAdvId ?? null;
+    for (const [f, v] of Object.entries(clearedRollFields())) {
+      updates[sPath(`tiles/${inProgressCoord}/${f}`)] = v;
+    }
+    for (const [f, ids] of Object.entries(roll ?? emptyTraitRoll())) {
+      if (ids.length) updates[sPath(`tiles/${inProgressCoord}/${f}`)] = ids;
+    }
     if (roomAssignments) {
       for (const [advId, room] of Object.entries(roomAssignments)) {
         updates[sPath(`tiles/${inProgressCoord}/adventurers/${advId}/room`)] = room;

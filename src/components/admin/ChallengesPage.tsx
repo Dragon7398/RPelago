@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, FEATS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
+import { rolledTargets } from '../../lib/traits';
 import { getPlayerFeatIds, releasesClaimsEarly } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
@@ -12,8 +13,9 @@ interface TileBadgeInfo {
   cursed: boolean;
   stunning: boolean;
   taunt: boolean;
-  stunnedAdvId?: string;
-  tauntedAdvId?: string;
+  stunnedAdvIds: string[];
+  tauntedAdvIds: string[];
+  thiefAdvIds:   string[];
 }
 
 function AdvSlotList({ entry, players, mismatchedNames, tileBadges }: {
@@ -33,12 +35,12 @@ function AdvSlotList({ entry, players, mismatchedNames, tileBadges }: {
         ? { label: 'Resist', cls: 'dtb-resist' }
         : { label: 'Cursed', cls: 'dtb-cursed' });
     }
-    if (tileBadges.stunning && tileBadges.stunnedAdvId === entry.advId) {
+    if (tileBadges.stunning && tileBadges.stunnedAdvIds.includes(entry.advId)) {
       badges.push(hasRing
         ? { label: 'Resist', cls: 'dtb-resist' }
         : { label: 'Stunned', cls: 'dtb-stunned' });
     }
-    if (tileBadges.taunt && tileBadges.tauntedAdvId === entry.advId) {
+    if (tileBadges.taunt && tileBadges.tauntedAdvIds.includes(entry.advId)) {
       badges.push({ label: 'Taunt', cls: 'dtb-taunt' });
     }
   }
@@ -124,8 +126,9 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
     cursed:       tile.traits?.['cursed']   !== undefined,
     stunning:     tile.traits?.['stunning'] !== undefined,
     taunt:        tile.traits?.['taunt']    !== undefined,
-    stunnedAdvId: tile.stunnedAdvId,
-    tauntedAdvId: tile.tauntedAdvId,
+    stunnedAdvIds: rolledTargets(tile, 'stunned'),
+    tauntedAdvIds: rolledTargets(tile, 'taunted'),
+    thiefAdvIds:   rolledTargets(tile, 'thief'),
   } : undefined;
 
   const handleSync = async (room: 1 | 2) => {

@@ -253,6 +253,98 @@ export function resolveTraits(
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
+// ── Lock-time target rolls ────────────────────────────────────────────────────
+
+/**
+ * Who a tile rolled when it locked. Arrays, because Stunning/Taunt/Thief can
+ * target several players at their higher levels (traits plan §5).
+ *
+ * Thief has NO pre-S2 equivalent — it was never tracked at all. It is
+ * system-rolled and never admin-picked, deliberately: the mechanic materially
+ * disadvantages whoever is chosen, so the admin must not be able to introduce
+ * bias, real or perceived.
+ */
+export interface TraitTargetRoll {
+  stunnedAdvIds: string[];
+  tauntedAdvIds: string[];
+  thiefAdvIds:   string[];
+}
+
+/** The three roll kinds, and the tile field each lands in. */
+export const ROLL_KINDS = {
+  stunned: 'stunnedAdvIds',
+  taunted: 'tauntedAdvIds',
+  thief:   'thiefAdvIds',
+} as const;
+export type RollKind = keyof typeof ROLL_KINDS;
+
+const ROLL_TRAIT: Record<RollKind, string> = {
+  stunned: 'stunning',
+  taunted: 'taunt',
+  thief:   'thief',
+};
+
+/** Pick `count` DISTINCT ids, clamped to what is available. */
+function pickDistinct(pool: string[], count: number, rng: () => number): string[] {
+  const rest = [...pool];
+  const out: string[] = [];
+  const n = Math.min(Math.max(count, 0), rest.length);
+  for (let i = 0; i < n; i++) {
+    out.push(rest.splice(Math.floor(rng() * rest.length), 1)[0]);
+  }
+  return out;
+}
+
+/**
+ * Roll every targeting trait on a tile as it goes in-progress.
+ *
+ * Each trait rolls INDEPENDENTLY, so one player may be both stunned and a
+ * thief — the same way S1 could stun and taunt the same adventurer. Only
+ * targets *within* one trait are guaranteed distinct.
+ *
+ * `rng` is injected so the roll is deterministic under test.
+ */
+export function rollTraitTargets(
+  traits: Record<string, TraitEntry> | undefined,
+  advIds: string[],
+  rng: () => number = Math.random,
+): TraitTargetRoll {
+  const roll = (kind: RollKind): string[] => {
+    const traitId = ROLL_TRAIT[kind];
+    const resolved = resolveTrait(traitId, traits?.[traitId]);
+    if (!resolved) return [];
+    // Below the multi threshold the trait still targets exactly one slot.
+    return pickDistinct(advIds, resolved.count ?? 1, rng);
+  };
+  return {
+    stunnedAdvIds: roll('stunned'),
+    tauntedAdvIds: roll('taunted'),
+    thiefAdvIds:   roll('thief'),
+  };
+}
+
+/** An empty roll — what a tile carries outside `inprogress`. */
+export function emptyTraitRoll(): TraitTargetRoll {
+  return { stunnedAdvIds: [], tauntedAdvIds: [], thiefAdvIds: [] };
+}
+
+/**
+ * Who a tile has rolled for one kind, tolerating the S1 singular fields.
+ * Every reader goes through here so the legacy fallback lives in one place.
+ */
+export function rolledTargets(
+  tile: Partial<TraitTargetRoll> & { stunnedAdvId?: string; tauntedAdvId?: string },
+  kind: RollKind,
+): string[] {
+  const arr = tile[ROLL_KINDS[kind]];
+  if (arr?.length) return arr;
+  // Legacy S1 records stored a single id and had no thief field at all.
+  const legacy = kind === 'stunned' ? tile.stunnedAdvId
+               : kind === 'taunted' ? tile.tauntedAdvId
+               : undefined;
+  return legacy ? [legacy] : [];
+}
+
 /**
  * Split a resolved description around its numeric parameter, for renderers that
  * strike the original and show a replacement beside it (the item MODIFIED

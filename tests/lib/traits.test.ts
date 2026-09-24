@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   S2_TRAITS, traitDef, isLeveled, hasMultiTargets, traitLevel,
   resolveTrait, resolveTraits, hordeFloor, effectiveHint, splitAroundValue,
+  rollTraitTargets, rolledTargets, emptyTraitRoll,
   type TraitEntry,
 } from '../../src/lib/traits';
 import { TILE_TRAITS } from '../../src/lib/constants';
@@ -248,5 +249,84 @@ describe('splitAroundValue — the MODIFIED item badge renderer', () => {
         if (parts) expect(parts[0] + t.value + parts[1], `${def.id} L${level}`).toBe(t.text);
       }
     }
+  });
+});
+
+describe('rollTraitTargets — lock-time rolls', () => {
+  const advs = ['a', 'b', 'c', 'd', 'e', 'f'];
+  // Deterministic rng: always takes the first remaining candidate.
+  const firstRng = () => 0;
+
+  it('rolls nothing for a tile with no targeting traits', () => {
+    expect(rollTraitTargets({ sturdy: lv(2) }, advs, firstRng)).toEqual(emptyTraitRoll());
+    expect(rollTraitTargets(undefined, advs, firstRng)).toEqual(emptyTraitRoll());
+  });
+
+  it('rolls exactly ONE target below the multi threshold', () => {
+    const r = rollTraitTargets({ stunning: lv(1), taunt: lv(2) }, advs, firstRng);
+    expect(r.stunnedAdvIds).toHaveLength(1);
+    expect(r.tauntedAdvIds).toHaveLength(1);
+  });
+
+  it('rolls `count` targets at or above the threshold', () => {
+    const r = rollTraitTargets({ stunning: lv(3, 4), taunt: lv(3) }, advs, firstRng);
+    expect(r.stunnedAdvIds).toHaveLength(4);
+    expect(r.tauntedAdvIds).toHaveLength(2);   // multi default
+  });
+
+  it('rolls thief from L2 — and ALWAYS by the system, never hand-picked', () => {
+    // Thief has no admin target picker anywhere by design; this is the only
+    // place a thief is ever chosen.
+    expect(rollTraitTargets({ thief: lv(1) }, advs, firstRng).thiefAdvIds).toHaveLength(1);
+    expect(rollTraitTargets({ thief: lv(2, 3) }, advs, firstRng).thiefAdvIds).toHaveLength(3);
+  });
+
+  it('never repeats a target within one trait', () => {
+    let seed = 0;
+    const rng = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+    for (let i = 0; i < 100; i++) {
+      const ids = rollTraitTargets({ stunning: lv(3, 5) }, advs, rng).stunnedAdvIds;
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+
+  it('clamps to the number of adventurers actually present', () => {
+    const two = ['a', 'b'];
+    const r = rollTraitTargets({ stunning: lv(3, 5) }, two, firstRng);
+    expect(r.stunnedAdvIds).toHaveLength(2);
+    expect(rollTraitTargets({ stunning: lv(3, 5) }, [], firstRng).stunnedAdvIds).toEqual([]);
+  });
+
+  it('rolls each trait independently — one player may be stunned AND a thief', () => {
+    // Matches S1, where stun and taunt could land on the same adventurer.
+    const r = rollTraitTargets({ stunning: lv(1), thief: lv(1) }, ['solo'], firstRng);
+    expect(r.stunnedAdvIds).toEqual(['solo']);
+    expect(r.thiefAdvIds).toEqual(['solo']);
+  });
+});
+
+describe('rolledTargets — reading, with the S1 fallback', () => {
+  it('reads the S2 arrays', () => {
+    const tile = { stunnedAdvIds: ['a', 'b'], tauntedAdvIds: ['c'], thiefAdvIds: ['d'] };
+    expect(rolledTargets(tile, 'stunned')).toEqual(['a', 'b']);
+    expect(rolledTargets(tile, 'taunted')).toEqual(['c']);
+    expect(rolledTargets(tile, 'thief')).toEqual(['d']);
+  });
+
+  it('falls back to the S1 singulars', () => {
+    const legacy = { stunnedAdvId: 'x', tauntedAdvId: 'y' };
+    expect(rolledTargets(legacy, 'stunned')).toEqual(['x']);
+    expect(rolledTargets(legacy, 'taunted')).toEqual(['y']);
+    expect(rolledTargets(legacy, 'thief')).toEqual([]);   // never existed in S1
+  });
+
+  it('prefers the array when both shapes are present', () => {
+    const both = { stunnedAdvIds: ['new'], stunnedAdvId: 'old' };
+    expect(rolledTargets(both, 'stunned')).toEqual(['new']);
+  });
+
+  it('returns an empty array for an unrolled tile', () => {
+    expect(rolledTargets({}, 'stunned')).toEqual([]);
+    expect(rolledTargets({ stunnedAdvIds: [] }, 'stunned')).toEqual([]);
   });
 });
