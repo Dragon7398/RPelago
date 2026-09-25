@@ -5,7 +5,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { missionDisplayLabel } from '../../lib/missionLogic';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown, warnItemText,
-  excuseKey, type ExcuseMap, type ReportCandidate, type ReportPlayerFinding,
+  excuseKey, roomHealthText, worstRoomTier, ROOM_WINDOW_HOURS,
+  type ExcuseMap, type ReportCandidate, type ReportPlayerFinding, type RoomHealth,
 } from '../../lib/statusReport';
 import { runOfficialStatusReport, markStatusWarningHandled, excuseStatusProblem } from '../../firebase/db';
 import type { OfficialReport, OfficialProblemPlayer, OfficialProblemWorld, OfficialWarnWorld } from '../../types';
@@ -82,9 +83,24 @@ function PlayerBlock({ player, excuse }: { player: ReportPlayerFinding; excuse?:
   );
 }
 
+// How fast the whole ROOM is clearing — a world-level reading that owes nothing
+// to any one player, so it sits above the player blocks rather than inside one.
+// The tier word is spelled out beside the glyph: the legend above promises that
+// meaning survives without hue, for the colour-blind themes.
+function RoomRow({ h, showRoom }: { h: RoomHealth; showRoom: boolean }) {
+  if (!h.tier) return null;
+  return (
+    <div className={`sr-room sr-room-${h.tier}`}>
+      <span className="sr-room-tag">{h.tier === 'danger' ? '⛔ DANGER' : '⚠ CAUTION'}</span>
+      <span className="sr-room-text">{roomHealthText(h, showRoom)}</span>
+    </div>
+  );
+}
+
 function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode }) {
   const problems = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'problem').length, 0);
   const warnings = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'warning').length, 0);
+  const roomTier = worstRoomTier(c.rooms);
   return (
     <div className="dash-tile-card sr-card">
       <div className="sr-card-header">
@@ -94,10 +110,17 @@ function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (play
         <span className="dash-tile-name">{c.name}</span>
         <WorldCheeseLink kind={c.kind} id={c.id} />
         <span className="sr-card-counts">
+          {roomTier && (
+            <span
+              className={`sr-count sr-count-${roomTier === 'danger' ? 'problem' : 'warning'}`}
+              title={`Room pace over the last ${ROOM_WINDOW_HOURS}h`}
+            >🏚{c.rooms.filter(r => r.tier).length > 1 ? ` ×${c.rooms.filter(r => r.tier).length}` : ''}</span>
+          )}
           {problems > 0 && <span className="sr-count sr-count-problem">{problems}⛔</span>}
           {warnings > 0 && <span className="sr-count sr-count-warning">{warnings}⚠</span>}
         </span>
       </div>
+      {c.rooms.map(h => <RoomRow key={h.room} h={h} showRoom={c.rooms.length > 1} />)}
       {c.players.map(p => <PlayerBlock key={p.playerId} player={p} excuse={excuseFor?.(p.playerId)} />)}
     </div>
   );
@@ -400,6 +423,7 @@ export default function StatusReportPage() {
         <span className="sr-legend">
           <span><span className="sr-badge sr-badge-problem">⛔</span> Problem</span>
           <span><span className="sr-badge sr-badge-warning">⚠</span> Warning</span>
+          <span><span className="sr-badge">🏚</span> Room pace</span>
         </span>
       </div>
 

@@ -343,6 +343,38 @@ Both sync paths write **leaf fields** (`slots/{i}/status`, `/lastChecked`, `/las
 
 **`{NUMBER}` slot names.** A player may end a slot name with `{NUMBER}` so the room still generates through a name collision — Archipelago expands the token to nothing for the first such slot and to a digit for each one after (`jam_minit`, then `jam_minit2`). The stored name keeps the token, so it matches nothing on the tracker. Every sync path resolves it through **`resolveNumberedSlotName`** (`archipelagoApi.ts`, mirrored server-side in `tickSlotStatuses`) and **adopts the generated name permanently** — the client paths write it via `adminUpdate{Adv,Public,Participant}SlotName`, the tick folds it into its `updates` batch. Resolution is deliberately **only for the unambiguous case**: exactly one room name matching the base (bare or AP-numbered). Two or more real candidates return null, keep the token, and surface in the admin mismatch list — with two genuine `jam_minit` slots nothing in the name says whose is whose, so that mapping stays a manual call.
 
+A Cheese game row also carries `checks_done` / `checks_total` (summed per room for
+**Room pace**, below), and several fields we deliberately do not read:
+`progression_status` (see the BK note), `completion_status`,
+`availability_status`, `notes`, `user_is_away`, `effective_discord_user_id`.
+
+> **BK is handled by the TIMERS, not by a status field — do not start reading
+> `progression_status`.** Setting BK / Soft BK on Cheesetracker, or pressing its
+> **Still BK** button, refreshes `last_checked`; making real progress refreshes
+> `last_activity`. So the two signals we already read draw exactly the line that
+> matters, and the **player contract is a repeated act of attention**: a BK player
+> is expected to look at their slot every 2–3 days, confirm it is still BK, and
+> refresh the timer — either with Cheese's button (→ `last_checked`) or by updating
+> their note here (→ `lastReported`, via `setSlotStatusNote`). That cadence is
+> `PROBLEM_STALE_HOURS` (72h); the two are the same number by design.
+>
+> `progression_status` is a **label**, and the problem is that it is *enduring but
+> not self-correcting*. A player can set it back to `unblocked` and some do — but
+> clearing it is an unrewarded chore, so many simply don't, and even a diligent
+> player may deliberately leave it set while they go make a concerted effort to BK
+> the slot again. The decay is **one-directional**: BK gets set promptly because it
+> is useful to the player, and cleared late or never. That is worse than a field
+> that never changes, because a stale `bk` is indistinguishable from a current one —
+> the label cannot tell us which it is, and neither can we.
+>
+> So honouring it would replace a recurring check-in with a declaration that lasts
+> as long as the player leaves it sitting there, and would silently retire the
+> `stalled` problem for anyone flagged BK — including everyone who has long since
+> been unblocked. The label is not the proof of life; refreshing the timer is.
+>
+> The backstop for a room where everyone is diligently self-reporting BK and
+> nothing is actually moving is **Room pace** (below), which reads neither timer.
+
 **`deriveSlotStatus` gates `In-Progress` on `last_activity` being present — NOT on `checks_done`** (`collect` mechanics inflate a slot's check count without the player ever launching the game) and **not on `last_checked`** (the weak signal). Terminal states (Done/Goaled/100%) still win. **Any change to derivation or the strong/weak roles must be made in both `archipelagoApi.ts` and the server `deriveStatus`.** `parseCheeseTs` (`archipelagoApi.ts`) normalizes ISO → ms.
 
 ### Status reports
@@ -361,6 +393,58 @@ Warning items carry **`slots`** — the names of the slots that actually tripped
 
 - **Before** — the live candidate card's `excuse` toggle builds an `ExcuseMap` (key → optional reason) passed as `buildOfficialReport`'s 4th arg. Excused players are still written into the snapshot (audit trail) carrying `excused` / `excusedReason` / `excusedAt` / `excusedBy`, but `runOfficialStatusReport` skips their increment. **Presence of the key IS the excuse** — an empty reason still counts, so test with `in`/`hasOwnProperty`, never truthiness.
 - **After** — `excuseStatusProblem` on a stored report marks the snapshot row and **refunds** the incident. The refund is read-then-write, **not `increment(-1)`**: a player excused pre-run was never charged, and a blind decrement would go negative and mask a later real incident from the ≥5 auto-warning.
+
+### Room pace (room health)
+
+Every threshold in the status report above judges a **player**. This one judges the
+**room**: ten players can each look clean on the slot checks while the world as a
+whole crawls, and that is the case nothing else can see. It is scored from
+`checks_done` / `checks_total` — two integers Cheesetracker has always returned in
+the payload both sync paths already fetch, and which `deriveSlotStatus` used only
+for its `100%` test and then discarded.
+
+- **`tickSlotStatuses` is the ONLY writer.** It already holds the games for every
+  in-progress room, so it sums them into `roomProgress/{msEpoch}: {done, total}` on
+  the mission (or `roomProgress` / `roomProgress2` on a tile, mirroring
+  `cheese`/`cheese2` — a bifurcated tile is two Archipelago rooms and therefore two
+  readings). Spacing `ROOM_SAMPLE_MIN_HOURS` (6h), retention
+  `ROOM_SAMPLE_RETENTION_HOURS` (14d); the constants live in `statusReport.ts` and
+  are **mirrored in the tick** the way `deriveStatus` is. The admin **Sync** buttons
+  deliberately do NOT sample — one writer on a fixed cadence is the point, and the
+  tick covers live + draft seasons every 15 minutes regardless of who is looking.
+- **Store the raw pair, never a percentage.** `checks_total` MOVES: a slot that has
+  not connected reports 0 locations and adds its whole count on first connect, and a
+  voided card sits in the denominator forever. A stored percentage cannot tell
+  "nobody played" from "the room grew", which would have the report accuse a world
+  that just gained a player. For the same reason `roomHealth` divides the delta by
+  the **current** total, not the baseline's.
+- **The verdict is a RATE, not a raw delta**, because official runs are ad hoc:
+  `ratePct = deltaPct × (ROOM_WINDOW_HOURS / actual span)`. Caution under
+  `ROOM_CAUTION_PCT` (3%) per window, danger under `ROOM_DANGER_PCT` (1.5%) — at
+  which pace a mid-game room needs 2+ months. `ROOM_WINDOW_HOURS` **reuses
+  `PROBLEM_STALE_HOURS`** rather than declaring its own 72, exactly as the idle
+  badge does: that constant already is the check-in cadence and two copies would
+  drift. Normalisation only ever scales a LONGER span down (a sampling gap); a span
+  shorter than the window has no baseline and returns **null — unknown, never 0%**,
+  per `stale()`'s rule. A room with every check found is never flagged.
+- **A world with no player findings still gets a card** when its room is off the
+  pace — `computeStatusReport`'s `if (playersList.length === 0) continue` now also
+  tests the room tier, and dropping that is what would make the whole reading
+  useless.
+- **It never charges a `statusIncident` and never reaches the player-facing
+  Problems block.** The room's pace is nobody's individual fault. It is a
+  world-general **warning** item (`roomCaution` / `roomDanger`, carrying no
+  `playerId` and no `slots`), sorted to the head of its world's item list. Like
+  `allIdle60` these are **persisted wire values — never rename one**, and the
+  rendered text reads the threshold constants so wording cannot drift from what
+  fired. The item carries a pre-rendered **`detail`** because samples are pruned at
+  14 days while reports are kept for 10 runs — recomputing it later is impossible.
+- `detail` leads with the absolute counts on purpose. A room funnelled down to a
+  few checks ping-ponging between two players flags forever and the flag is
+  *correct*, but `+11 of 46 remaining` triages in one glance where a bare `0.9%`
+  would send the host into the room to learn it was fine.
+- `archivedMission` **strips `roomProgress`** — live telemetry, not part of the
+  settled record.
 
 `renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
 
@@ -508,7 +592,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `resolveNumberedSlotName`, `fetchRoomStatus` |
 | `src/lib/apLists.ts` | The APworld-list (Drago's sheet) era registry — `AP_LISTS`, `currentApList`, `apListAt`. **Append one entry to ratchet to a new sheet** |
-| `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
+| `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`), and room-pace scoring (`roomHealth`, `worstRoomTier`, `roomHealthText`, `ROOM_*`) |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
 | `src/firebase/season.ts` | Season path helpers (`sPath`/`sRef`/`secretPath`), `setCurrentSeason`, season resolution |
 | `src/firebase/casinoYaml.ts` | `uploadCasinoYaml` → owner-scoped Storage |

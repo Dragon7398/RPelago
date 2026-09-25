@@ -1319,6 +1319,10 @@ export async function syncPlayerProfile(
 // dates each row by.
 function archivedMission(mission: GMMission, potShares: Map<string, number>, now: number): GMMission {
   const settled: GMMission = { ...mission, state: 'complete', completedAt: now };
+  // Room-pace samples are live telemetry for the status report, not part of the
+  // settled record — a fortnight of them per table would sit in history forever
+  // answering a question nobody asks of a finished room.
+  delete settled.roomProgress;
   if (mission.type !== 'casino') return settled;
 
   const participants: Record<string, GMParticipant> = {};

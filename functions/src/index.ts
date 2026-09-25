@@ -771,6 +771,7 @@ interface GMMission {
   link?:        string;
   tracker?:     string;
   cheese?:      string;
+  roomProgress?: RoomProgress;   // room-pace samples (see the type, below)
   firstJoinAt:  number | null;
   createdAt:    number;
   deployedAt?:  number;
@@ -808,12 +809,18 @@ interface TileAdv {
   slots?: TileSlot[];
 }
 
+// Room-pace samples: `{msEpoch: {done, total}}`, summed over a cheese room's games
+// by `tickSlotStatuses`. Mirrors RoomProgressSample in src/types/index.ts.
+type RoomProgress = Record<string, { done?: number; total?: number }>;
+
 interface Tile {
   state:        string;
   adventurers?: Record<string, TileAdv>;
   traits?:      Record<string, unknown>;
   cheese?:      string;
   cheese2?:     string;
+  roomProgress?:  RoomProgress;   // room 1 (or the only room)
+  roomProgress2?: RoomProgress;   // room 2 of a bifurcated tile
   publicSlots?: TileSlot[];
   name?:        string;
   statusIncidents?: Record<string, number>;   // per-player official-report Problem count
@@ -3473,6 +3480,38 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
 
   const updates: Record<string, unknown> = {};
 
+  // One clock for the whole run, so every sample written by this tick shares a key.
+  const runNow = Date.now();
+
+  // ── Room-pace sampling ──────────────────────────────────────────────────────
+  // The Cheese payload we already hold answers a question the per-slot checks
+  // cannot: is the ROOM going to finish? Sum it and keep a small time series, so
+  // the status report can judge pace over a fixed window no matter when the host
+  // last ran a report. Mirrors ROOM_SAMPLE_* in src/lib/statusReport.ts, which is
+  // the only reader — a change to the spacing or retention must be made in both.
+  const ROOM_SAMPLE_MIN_HOURS       = 6;
+  const ROOM_SAMPLE_RETENTION_HOURS = 336;  // 14d — must exceed the report's window
+
+  function sampleRoomProgress(
+    basePath: string,
+    existing: Record<string, { done?: number; total?: number }> | undefined,
+    games: CheeseGame[],
+  ): void {
+    // Raw counts, never a percentage: `checks_total` moves as slots connect and
+    // as cards are voided, and only the raw pair can tell those apart later.
+    let done = 0, total = 0;
+    for (const g of games) { done += g.checks_done || 0; total += g.checks_total || 0; }
+    if (total <= 0) return;   // nothing tracked yet — a sample here says nothing
+
+    const stamps = Object.keys(existing ?? {}).map(Number).filter(n => Number.isFinite(n));
+    const newest = stamps.length ? Math.max(...stamps) : null;
+    if (newest != null && runNow - newest < ROOM_SAMPLE_MIN_HOURS * 3_600_000) return;
+
+    updates[`${basePath}/${runNow}`] = { done, total };
+    const cutoff = runNow - ROOM_SAMPLE_RETENTION_HOURS * 3_600_000;
+    for (const ts of stamps) if (ts < cutoff) updates[`${basePath}/${ts}`] = null;
+  }
+
   // Stamp a slot's activity timestamps into `updates`, but only the fields that
   // actually changed — avoids rewriting unchanged leaves every 15-minute tick.
   function stampSlotTimes(
@@ -3536,6 +3575,8 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           if (!hasActiveSlots(roomSlots)) continue;
           const games = await getCheeseGames(cheeseId);
           if (!games) continue;
+          const progKey = roomNum === 1 ? 'roomProgress' : 'roomProgress2';
+          sampleRoomProgress(sp(seasonId, `tiles/${coord}/${progKey}`), tile[progKey], games);
           const apNames = games.map(g => extractApSlotName(g.name));
           const statusMap = new Map(games.flatMap(g => {
             const s = deriveStatus(g);
@@ -3591,6 +3632,7 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
         if (!hasActiveSlots(allSlots)) continue;
         const games = await getCheeseGames(mission.cheese);
         if (!games) continue;
+        sampleRoomProgress(sp(seasonId, `missions/${missionId}/roomProgress`), mission.roomProgress, games);
         const apNames = games.map(g => extractApSlotName(g.name));
         const statusMap = new Map(games.flatMap(g => {
           const s = deriveStatus(g);

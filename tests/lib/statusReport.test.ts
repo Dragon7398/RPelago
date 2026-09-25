@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown,
   excuseKey, hasUnexcusedProblem, lastSignOfLife, slotIdleTier,
+  roomHealth, worstRoomTier, roomHealthText,
   PROBLEM_STALE_HOURS, SLOT_CAUTION_HOURS,
-  type ReportCandidate,
+  ROOM_WINDOW_HOURS, ROOM_CAUTION_PCT, ROOM_DANGER_PCT, ROOM_SAMPLE_RETENTION_HOURS,
+  type ReportCandidate, type RoomHealth,
 } from '../../src/lib/statusReport';
 import type { GMMission, Tile, Player, AdvSlot } from '../../src/types';
 
@@ -572,5 +574,187 @@ describe('slotIdleTier', () => {
   it('prefers a real stamp over the room link', () => {
     const s = slot({ status: 'In-Progress', lastActivity: ago(1) });
     expect(slotIdleTier(s, NOW, ago(500))).toBeNull();
+  });
+});
+
+// ── Room pace ────────────────────────────────────────────────────────────────
+
+// A sample tree: `hoursAgo -> [done, total]`, keyed the way the tick writes it.
+const samples = (rows: [number, number, number][]) =>
+  Object.fromEntries(rows.map(([h, done, total]) => [String(ago(h)), { done, total }]));
+
+// A window's worth of history whose latest sample gains `pct`% of `total`.
+const paced = (pct: number, total = 1000, done = 500) =>
+  samples([[ROOM_WINDOW_HOURS + 1, done, total], [0, done + Math.round(total * pct / 100), total]]);
+
+describe('roomHealth', () => {
+  it('returns null when there is nothing to judge', () => {
+    expect(roomHealth(undefined, NOW)).toBeNull();
+    expect(roomHealth({}, NOW)).toBeNull();
+    // Nothing tracked yet: every slot reports 0 locations.
+    expect(roomHealth(samples([[80, 0, 0], [0, 0, 0]]), NOW)).toBeNull();
+  });
+
+  it('returns null with no baseline a full window old — young is not stalled', () => {
+    // Plenty of samples, but all inside the window: unknown, never 0% progress.
+    expect(roomHealth(samples([[40, 500, 1000], [20, 500, 1000], [0, 500, 1000]]), NOW)).toBeNull();
+    // Exactly at the window boundary the baseline exists.
+    expect(roomHealth(samples([[ROOM_WINDOW_HOURS, 500, 1000], [0, 505, 1000]]), NOW)).not.toBeNull();
+  });
+
+  it('returns null when sampling stopped a window ago', () => {
+    // Every sample is older than the cutoff, so the newest IS the baseline and
+    // there is no span to measure (room went all-Done, or its fetches are failing).
+    expect(roomHealth(samples([[200, 400, 1000], [100, 500, 1000]]), NOW)).toBeNull();
+  });
+
+  it('ignores samples stamped in the future', () => {
+    const tree = { ...paced(5), [String(NOW + 10 * H)]: { done: 9999, total: 1000 } };
+    expect(roomHealth(tree, NOW)!.done).toBe(550);
+  });
+
+  it('tiers on the normalised rate', () => {
+    expect(roomHealth(paced(10), NOW)!.tier).toBeNull();
+    expect(roomHealth(paced(ROOM_CAUTION_PCT + 0.5), NOW)!.tier).toBeNull();
+    expect(roomHealth(paced(ROOM_CAUTION_PCT - 0.5), NOW)!.tier).toBe('caution');
+    expect(roomHealth(paced(ROOM_DANGER_PCT - 0.5), NOW)!.tier).toBe('danger');
+    expect(roomHealth(paced(0), NOW)!.tier).toBe('danger');
+  });
+
+  it('refuses to judge a span shorter than the window', () => {
+    // Half a window of history is not a cheap 1.5% verdict — it is not a verdict.
+    // Normalising UP from a short span would let one quiet weekend (or one collect
+    // dump) decide the tier, which is the noise the window exists to average out.
+    expect(roomHealth(samples([[ROOM_WINDOW_HOURS / 2, 500, 1000], [0, 510, 1000]]), NOW)).toBeNull();
+  });
+
+  it('normalises a LONGER span down, so a sampling gap cannot flatter a room', () => {
+    // 2% gained, but over two windows — a 1% pace. The raw delta reads as caution;
+    // the normalised rate is the truth, and it is danger.
+    const gap = samples([[ROOM_WINDOW_HOURS * 2, 500, 1000], [0, 520, 1000]]);
+    const h = roomHealth(gap, NOW)!;
+    expect(h.hours).toBeCloseTo(ROOM_WINDOW_HOURS * 2, 5);
+    expect(h.deltaPct).toBeCloseTo(2, 5);
+    expect(h.ratePct).toBeCloseTo(1, 5);
+    expect(h.tier).toBe('danger');
+  });
+
+  it('measures the delta against the CURRENT total, so a late-connecting slot is not a regress', () => {
+    // 400/800 → a new slot connects (+200 locations) and 40 checks are found.
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 400, 800], [0, 440, 1000]]), NOW)!;
+    expect(h.gained).toBe(40);
+    expect(h.deltaPct).toBeCloseTo(4, 5);   // 40/1000, not 40/800
+    expect(h.totalChanged).toBe(true);
+    expect(h.tier).toBeNull();              // real progress, not a regression
+  });
+
+  it('never flags a room with every check found', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 1000, 1000], [0, 1000, 1000]]), NOW)!;
+    expect(h.remaining).toBe(0);
+    expect(h.ratePct).toBe(0);
+    expect(h.tier).toBeNull();
+  });
+
+  it('reports a shrinking room honestly rather than clamping', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 500, 1000], [0, 480, 1000]]), NOW)!;
+    expect(h.gained).toBe(-20);
+    expect(h.tier).toBe('danger');
+    expect(roomHealthText(h)).toContain('−20 checks');
+  });
+
+  it('carries the absolutes, so an end-game room triages without opening it', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS, 5074, 5120], [0, 5085, 5120]]), NOW)!;
+    expect(h.tier).toBe('danger');
+    const text = roomHealthText(h);
+    expect(text).toContain('+11 checks');
+    expect(text).toContain('35 remain');
+    expect(text).not.toContain('Room 1');       // single-room worlds say nothing
+    expect(roomHealthText(h, true)).toMatch(/^Room 1: /);
+  });
+
+  it('prints the normalised rate only when the span is not the window', () => {
+    // Ordinary read: delta and rate are the same number, so it is said once.
+    const plain = roomHealthText(roomHealth(samples([[ROOM_WINDOW_HOURS, 500, 1000], [0, 520, 1000]]), NOW)!);
+    expect(plain).toContain('+20 checks (2.0%)');
+    expect(plain).not.toContain('per ' + ROOM_WINDOW_HOURS + 'h');
+    // Sampling gap: the normalised rate is the whole story, so it is spelled out.
+    const gap = roomHealthText(roomHealth(samples([[ROOM_WINDOW_HOURS * 2, 500, 1000], [0, 520, 1000]]), NOW)!);
+    expect(gap).toContain('= 1.0% per ' + ROOM_WINDOW_HOURS + 'h');
+  });
+
+  it('prefers the newest baseline at least a window old', () => {
+    const tree = samples([
+      [ROOM_SAMPLE_RETENTION_HOURS - 1, 100, 1000],   // ancient — must not be used
+      [ROOM_WINDOW_HOURS + 2, 500, 1000],             // the baseline
+      [0, 505, 1000],
+    ]);
+    const h = roomHealth(tree, NOW)!;
+    expect(h.gained).toBe(5);
+    expect(h.hours).toBeCloseTo(ROOM_WINDOW_HOURS + 2, 5);
+  });
+});
+
+describe('worstRoomTier', () => {
+  const r = (tier: RoomHealth['tier']) => ({ tier } as RoomHealth);
+  it('takes the worse of a bifurcated tile: two rooms, one verdict', () => {
+    expect(worstRoomTier([])).toBeNull();
+    expect(worstRoomTier([r(null), r(null)])).toBeNull();
+    expect(worstRoomTier([r(null), r('caution')])).toBe('caution');
+    expect(worstRoomTier([r('caution'), r('danger')])).toBe('danger');
+  });
+});
+
+describe('room pace in the report', () => {
+  const healthy = [slot({ name: 'ok', status: 'In-Progress', lastActivity: ago(1) })];
+
+  it('puts a clean world on the report when only its ROOM is off the pace', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(0.5) });
+    const [c] = run({ m1: m });
+    expect(c.players).toHaveLength(0);          // nobody is individually at fault
+    expect(c.rooms.map(r => r.tier)).toEqual(['danger']);
+  });
+
+  it('leaves a clean world with a healthy room off entirely', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(8) });
+    expect(run({ m1: m })).toHaveLength(0);
+  });
+
+  it('reads a bifurcated tile as two rooms', () => {
+    const t = tile({
+      adventurers: { adv1: { advId: 'adv1', owner: 'a', ownerName: 'A', slots: healthy } } as Tile['adventurers'],
+      roomProgress:  paced(9),
+      roomProgress2: paced(0.2),
+    });
+    const [c] = run({}, { D4: t });
+    expect(c.rooms.map(r => [r.room, r.tier])).toEqual([[1, null], [2, 'danger']]);
+  });
+
+  it('writes a world-general warn item with pre-rendered detail, and pings nobody', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(2) });
+    const rep = buildOfficialReport(run({ m1: m }), NOW);
+
+    expect(rep.problems).toHaveLength(0);                  // room pace never pings a player
+    const [item] = rep.warnings[0].items;
+    expect(item.code).toBe('roomCaution');
+    expect(item.playerId).toBeUndefined();
+    expect(item.slots).toBeUndefined();                    // no empty array for RTDB to eat
+    expect(item.detail).toContain('remain');
+
+    const md = renderWarningsMarkdown(rep);
+    expect(md).toContain('Room pace under ' + ROOM_CAUTION_PCT + '% per ' + ROOM_WINDOW_HOURS + 'h');
+    expect(md).toContain(item.detail!);
+    expect(renderProblemsMarkdown(rep)).toBe('');
+  });
+
+  it('leads the item list, ahead of the slot warnings', () => {
+    const stalledSlot = [slot({
+      name: 'zzz', status: 'In-Progress',
+      lastActivity: ago(200),   // trips noActivity144 …
+      lastReported: ago(1),     // … while the self-report clears the `stalled` problem
+    })];
+    const m = mission({ participants: { a: part('a', 'A', stalledSlot) }, roomProgress: paced(1) });
+    const rep = buildOfficialReport(run({ m1: m }), NOW);
+    expect(rep.warnings[0].items[0].code).toBe('roomDanger');
+    expect(rep.warnings[0].items.map(i => i.code)).toContain('noActivity144');
   });
 });

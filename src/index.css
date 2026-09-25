@@ -5067,6 +5067,24 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-count-problem { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
 .sr-count-warning { color: var(--amber); }
 
+/* Room pace — a world-level row, so it sits above the player blocks and carries
+   no left rule (that border marks a player). Both tiers derive from the same
+   theme tokens the counts above use, so they invert with the light themes for
+   free; the DANGER / CAUTION word beside the glyph is what actually carries the
+   severity for the colour-blind themes. */
+.sr-room {
+  display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap;
+  margin: 0 0 0.5rem; padding: 0.35rem 0.5rem; border-radius: 3px;
+  font-size: 0.66rem; line-height: 1.45; font-variant-numeric: tabular-nums;
+  background: oklch(from var(--bg-card) calc(l + 0.04) c h);
+}
+.sr-room-tag { font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.04em; flex-shrink: 0; }
+.sr-room-text { color: var(--gold-dim); }
+.sr-room-danger  { border-left: 2px solid oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-room-danger .sr-room-tag  { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-room-caution { border-left: 2px solid var(--amber); }
+.sr-room-caution .sr-room-tag { color: var(--amber); }
+
 /* Cheesetracker shortcut beside a world name (live card + stored reports). Emoji
    glyph on `color: inherit`, so it needs no per-theme colour of its own. */
 .sr-cheese-link {
