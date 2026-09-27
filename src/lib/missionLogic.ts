@@ -232,12 +232,29 @@ export function outstandingConfigsBlockRoom(m: GMMission, now: number): boolean 
  * players' worlds, so the room isn't done with it.
  */
 export function missionReadyToComplete(m: GMMission): boolean {
+  // Goaled/Done ONLY — deliberately not FREE_COMPLETED_STATUSES / `slotsAllFree`,
+  // which count `100%`. A slot with every check but no goal still holds the world
+  // open; it frees its holder's CLAIM, which is a different question from whether
+  // the table can settle.
+  const goaled = (s: { status?: string }) => s.status === 'Done' || s.status === 'Goaled';
+
   const participants = Object.values(m.participants ?? {});
   if (participants.length === 0) return false;
-  return participants.every(p => {
+  const seatsDone = participants.every(p => {
     const slots = p.slots ?? [];
-    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+    return slots.length > 0 && slots.every(goaled);
   });
+  if (!seatsDone) return false;
+
+  // An unanswered kick leaves a LIVE Archipelago slot that nobody is playing, so
+  // the room is not finished even though every seated player is. Suggesting
+  // settle here would quietly write off the slot (its reserved pot share is never
+  // paid) on a table that might still be waiting for a claimant. The host can
+  // still settle — this only withdraws the hint — and the card's OPEN SLOTS panel
+  // is where they either wait for a claim or ⊘ release it into a void.
+  // An already-goaled entry does not block: that Archipelago slot IS finished,
+  // whatever became of the player who was kicked off it.
+  return claimEntries(m).every(([, e]) => e.slots.length > 0 && e.slots.every(goaled));
 }
 
 /**

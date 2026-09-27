@@ -142,6 +142,55 @@ describe('missionReadyToComplete', () => {
     expect(missionReadyToComplete(mission({ participants: seats(seated('a', { slots: [] })) }))).toBe(false);
     expect(missionReadyToComplete(mission({ participants: {} }))).toBe(false);
   });
+
+  // An unanswered kick leaves a live Archipelago slot nobody is playing, so the
+  // ROOM is unfinished even when every seated player is done.
+  describe('outstanding claimable slots', () => {
+    const doneSeats = seats(seated('a', { slots: [slot('Done'), slot('Goaled')] }));
+    const ready = (claimableSlots: GMMission['claimableSlots']) =>
+      missionReadyToComplete(mission({ participants: doneSeats, claimableSlots }));
+
+    it('blocks on an ungoaled open slot', () => {
+      expect(ready({ k1: { slots: [slot('In-Progress')] } })).toBe(false);
+      expect(ready({ k1: { slots: [slot('Unstarted')] } })).toBe(false);
+      // 100% is not goaled here either — same rule the seats get.
+      expect(ready({ k1: { slots: [slot('100%')] } })).toBe(false);
+      // One bad slot in an otherwise finished entry is enough.
+      expect(ready({ k1: { slots: [slot('Done'), slot('In-Progress')] } })).toBe(false);
+      // …and one bad entry among several.
+      expect(ready({ k1: { slots: [slot('Goaled')] }, k2: { slots: [slot('Unstarted')] } })).toBe(false);
+    });
+
+    it('does not block on an entry whose slot already goaled', () => {
+      // That Archipelago slot IS finished, whatever became of the kicked player.
+      expect(ready({ k1: { slots: [slot('Goaled')] } })).toBe(true);
+      expect(ready({ k1: { slots: [slot('Done')] } })).toBe(true);
+    });
+
+    it('blocks on an entry advertising an opening with no slots', () => {
+      expect(ready({ k1: { slots: [] } })).toBe(false);
+    });
+
+    it('is unaffected when there are no claimable slots', () => {
+      expect(ready(undefined)).toBe(true);
+      expect(ready({})).toBe(true);
+    });
+
+    it('reads the legacy bare-array shape too', () => {
+      expect(ready({ k1: [slot('In-Progress')] })).toBe(false);
+      expect(ready({ k1: [slot('Goaled')] })).toBe(true);
+    });
+
+    it('drops the ready-to-settle hint from the admin board', () => {
+      const m = mission({ state: 'inprogress', participants: doneSeats, link: 'https://archipelago.gg/room/x' });
+      expect(missionPendingAction(m, 0)?.code).toBe('complete');
+      const withOpen = mission({
+        state: 'inprogress', participants: doneSeats, link: 'https://archipelago.gg/room/x',
+        claimableSlots: { k1: { slots: [slot('In-Progress')] } },
+      });
+      expect(missionPendingAction(withOpen, 0)).toBeNull();
+    });
+  });
 });
 
 describe('missionPendingAction — forming', () => {
