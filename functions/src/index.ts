@@ -21,7 +21,7 @@ import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
   type SeasonShell,
 } from './seasonPaths';
-import { normalizeGameName, gameKey, handleKey } from './profileKeys';
+import { normalizeGameName, gameKey, handleKey, apSlotKey } from './profileKeys';
 
 // Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR in
 // src/lib/constants.ts (dual-copy, like ITEM_COSTS and the casino engine).
@@ -3512,6 +3512,38 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
     for (const ts of stamps) if (ts < cutoff) updates[`${basePath}/${ts}`] = null;
   }
 
+  // ── Per-slot sampling ───────────────────────────────────────────────────────
+  // The same payload, kept per slot for the admin Report tab's room peek. This
+  // does NOT live under `seasons/` on purpose: `subscribeToGame` streams that
+  // whole node to every player, and per-slot history is ~7x the room totals to
+  // serve one admin page, read one world at a time. It lives in the top-level
+  // `roomTelemetry/` tree instead, fetched on demand.
+  //
+  // Keys are the TRACKER's slot names (`extractApSlotName`), which is what a
+  // resolved `{NUMBER}` name equals — an unresolved one matches nothing and
+  // correctly shows no history rather than someone else's.
+  function sampleSlotProgress(
+    basePath: string,
+    existing: Record<string, unknown> | undefined,
+    games: CheeseGame[],
+  ): void {
+    const slots: Record<string, { d: number; t: number }> = {};
+    for (const g of games) {
+      const t = g.checks_total || 0;
+      if (t <= 0) continue;   // not connected yet — no row beats a row of zeroes
+      slots[apSlotKey(extractApSlotName(g.name))] = { d: g.checks_done || 0, t };
+    }
+    if (Object.keys(slots).length === 0) return;
+
+    const stamps = Object.keys(existing ?? {}).map(Number).filter(n => Number.isFinite(n));
+    const newest = stamps.length ? Math.max(...stamps) : null;
+    if (newest != null && runNow - newest < ROOM_SAMPLE_MIN_HOURS * 3_600_000) return;
+
+    updates[`${basePath}/${runNow}`] = slots;
+    const cutoff = runNow - ROOM_SAMPLE_RETENTION_HOURS * 3_600_000;
+    for (const ts of stamps) if (ts < cutoff) updates[`${basePath}/${ts}`] = null;
+  }
+
   // Stamp a slot's activity timestamps into `updates`, but only the fields that
   // actually changed — avoids rewriting unchanged leaves every 15-minute tick.
   function stampSlotTimes(
@@ -3553,6 +3585,16 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
     // `releasesClaimsEarly` in src/lib/gameLogic.ts.
     const releasesEarly = (pid: string) => rawPlayers[pid]?.restricted !== true;
 
+    // Existing per-slot samples for this whole season, read ONCE — the tree is
+    // top-level, so unlike `roomProgress` it does not arrive with the tile and
+    // mission snapshots below. Only the timestamp keys are used (for spacing and
+    // pruning), so the shallow shape is all `sampleSlotProgress` needs.
+    const telemetrySnap = await db.ref(`roomTelemetry/${seasonId}`).get();
+    const telemetry = (telemetrySnap.exists() ? telemetrySnap.val() : {}) as {
+      missions?: Record<string, Record<string, unknown>>;
+      tiles?: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
     // ── Tiles ──────────────────────────────────────────────────────────────
     const tilesSnap = await db.ref(sp(seasonId, 'tiles')).get();
     if (tilesSnap.exists()) {
@@ -3577,6 +3619,11 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
           if (!games) continue;
           const progKey = roomNum === 1 ? 'roomProgress' : 'roomProgress2';
           sampleRoomProgress(sp(seasonId, `tiles/${coord}/${progKey}`), tile[progKey], games);
+          sampleSlotProgress(
+            `roomTelemetry/${seasonId}/tiles/${coord}/${roomNum}`,
+            telemetry.tiles?.[coord]?.[roomNum],
+            games,
+          );
           const apNames = games.map(g => extractApSlotName(g.name));
           const statusMap = new Map(games.flatMap(g => {
             const s = deriveStatus(g);
@@ -3633,6 +3680,11 @@ export const tickSlotStatuses = onSchedule('every 15 minutes', async () => {
         const games = await getCheeseGames(mission.cheese);
         if (!games) continue;
         sampleRoomProgress(sp(seasonId, `missions/${missionId}/roomProgress`), mission.roomProgress, games);
+        sampleSlotProgress(
+          `roomTelemetry/${seasonId}/missions/${missionId}`,
+          telemetry.missions?.[missionId],
+          games,
+        );
         const apNames = games.map(g => extractApSlotName(g.name));
         const statusMap = new Map(games.flatMap(g => {
           const s = deriveStatus(g);

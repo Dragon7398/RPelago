@@ -5085,6 +5085,163 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-room-caution { border-left: 2px solid var(--amber); }
 .sr-room-caution .sr-room-tag { color: var(--amber); }
 
+/* ── Room peek ──────────────────────────────────────────────────────────────
+   The expandable detail panel on a report card. Every colour here is an existing
+   theme token or the `oklch(from var(--bg-card) calc(1 - l) …)` inversion that
+   .sr-count-problem already uses — that trick is what makes the four light themes
+   and the CB-safe themes work with no per-theme overrides. Severity always carries
+   a word or a code as well as a hue. */
+
+.sr-peek-toggle {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: none; border: none; padding: 0.15rem 0.1rem; margin: 0;
+  color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.sr-peek-toggle:hover .dash-tile-name { color: var(--gold); }
+.sr-peek-caret { font-size: 0.6rem; color: var(--gold-dim); flex-shrink: 0; }
+
+.sr-peek {
+  margin-top: 0.55rem; padding-top: 0.55rem;
+  border-top: 1px solid oklch(from var(--gold-dim) l c h / 0.3);
+  display: flex; flex-direction: column; gap: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.sr-peek-empty, .sr-peek-nodata, .sr-peek-nonote {
+  font-size: 0.66rem; color: var(--gold-dim); font-style: italic;
+}
+.sr-peek-dim { color: var(--gold-dim); font-style: normal; }
+.sr-peek-room { display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* Health strip */
+.sr-peek-health {
+  display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: flex-start;
+  padding: 0.5rem 0.6rem; border-radius: 3px;
+  background: oklch(from var(--bg-card) calc(l + 0.04) c h);
+  border-left: 2px solid var(--border);
+}
+.sr-peek-health-danger  { border-left-color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-peek-health-caution { border-left-color: var(--amber); }
+.sr-peek-health-none { font-size: 0.66rem; color: var(--gold-dim); }
+.sr-peek-health-figure { display: flex; flex-direction: column; gap: 0.12rem; min-width: 150px; }
+.sr-peek-pct { font-family: 'Cinzel', serif; font-size: 1.4rem; line-height: 1.1; color: var(--parchment); }
+.sr-peek-clear, .sr-peek-counts { font-size: 0.66rem; color: var(--gold-dim); }
+.sr-peek-counts strong { color: var(--parchment); }
+.sr-peek-tier {
+  align-self: flex-start; margin-top: 0.2rem; padding: 0.12rem 0.4rem; border-radius: 2px;
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em; border: 1px solid currentColor;
+}
+.sr-peek-tier-danger  { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-peek-tier-caution { color: var(--amber); }
+.sr-peek-chart { display: flex; flex-direction: column; gap: 0.25rem; flex-grow: 1; min-width: 200px; }
+.sr-peek-chart-head {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: baseline;
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.07em; color: var(--gold-dim);
+}
+.sr-peek-chart-head .sr-peek-dim { font-family: 'Crimson Pro', serif; letter-spacing: 0; font-size: 0.66rem; }
+.sr-peek-health-text { flex-basis: 100%; font-size: 0.66rem; color: var(--gold-dim); line-height: 1.45; }
+
+/* Daily bars. A GAP is a hollow tick on the baseline, never a short bar — a day
+   we could not bracket is unknown, not a day with no progress. */
+.sr-peek-bars {
+  display: flex; align-items: flex-end; gap: 2px; height: 26px; width: 100%; min-width: 0;
+}
+.sr-peek-bar {
+  flex: 1 1 0; min-width: 3px; border-radius: 1px 1px 0 0;
+  background: var(--gold); height: 6px;
+}
+.sr-peek-bar.zero { height: 3px; background: oklch(from var(--bg-card) calc(1 - l) 0.18 25 / 0.55); }
+.sr-peek-bar.gap  { height: 3px; background: none; border-top: 1px dashed var(--gold-dim); border-radius: 0; }
+
+/* Slot rows */
+.sr-peek-slots-head {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: baseline; margin-top: 0.15rem;
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em; color: var(--gold-dim);
+}
+.sr-peek-slots-head .sr-peek-dim { font-family: 'Crimson Pro', serif; letter-spacing: 0; font-size: 0.66rem; }
+/* A GRID, not a flex row: every row must put its five cells at the same x, and
+   flex-grow cannot do that when the identity text varies in width from row to row
+   (it distributes the LEFTOVER, so a short name and a long one land differently).
+   The cells are always rendered, empty ones included — see SlotRow. */
+.sr-peek-row {
+  display: grid;
+  grid-template-columns: minmax(0, 24rem) 9rem 6rem 5rem minmax(0, 1fr);
+  gap: 0.75rem; align-items: center;
+  padding: 0.4rem 0.5rem; border-left: 2px solid var(--border); border-radius: 0 3px 3px 0;
+}
+/* Narrow admin panes: drop to identity + meta and let the numbers wrap under. */
+@media (max-width: 1100px) {
+  .sr-peek-row {
+    grid-template-columns: minmax(0, 1fr) 9rem 6rem 5rem;
+  }
+  .sr-peek-meta { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .sr-peek-row { grid-template-columns: minmax(0, 1fr); }
+  .sr-peek-meta, .sr-peek-progress, .sr-peek-barcell, .sr-peek-delta { grid-column: 1; }
+  .sr-peek-delta { text-align: left; }
+}
+.sr-peek-row-problem { border-left-color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); background: oklch(from var(--bg-card) calc(1 - l) 0.18 25 / 0.07); }
+.sr-peek-row-warning { border-left-color: var(--amber); background: oklch(from var(--amber) l c h / 0.07); }
+/* A finished slot is de-emphasised by its RAIL and its muted handle, never by
+   opacity on the row. Opacity multiplies against every colour inside, and these
+   tokens sit near the 4.5:1 floor already — a whole panel of finished slots
+   (the common case on a settling table) became unreadable. Rank already sorts
+   them last, which is most of the de-emphasis the eye needs. */
+.sr-peek-row-done .sr-peek-handle { color: var(--gold-dim); }
+.sr-peek-row-done .sr-peek-status { opacity: 0.8; }
+
+/* Hairline between rows: at this density the grid needs a horizontal edge to
+   track along, or the eye loses which timers belong to which slot. */
+.sr-peek-row + .sr-peek-row { border-top: 1px solid oklch(from var(--gold-dim) l c h / 0.16); }
+.sr-peek-id { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: baseline; min-width: 0; }
+.sr-peek-handle   { font-size: 0.72rem; color: var(--gold); }
+.sr-peek-slotname { font-family: ui-monospace, Menlo, monospace; font-size: 0.68rem; color: var(--parchment); }
+.sr-peek-game     { font-size: 0.66rem; color: var(--gold-dim); overflow: hidden; text-overflow: ellipsis; }
+.sr-peek-status {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.05em;
+  padding: 0.1rem 0.34rem; border: 1px solid var(--gold-dim); border-radius: 2px; color: var(--gold-dim);
+}
+.sr-peek-incidents {
+  font-size: 0.6rem; padding: 0.1rem 0.38rem; border-radius: 2px;
+  color: oklch(from var(--bg-card) calc(1 - l) 0.18 25);
+  border: 1px solid oklch(from var(--bg-card) calc(1 - l) 0.18 25 / 0.5);
+}
+.sr-peek-progress { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.sr-peek-barcell { display: flex; align-items: flex-end; min-width: 0; }
+.sr-peek-progress-nums { display: flex; justify-content: space-between; font-size: 0.66rem; color: var(--parchment); }
+.sr-peek-track { height: 5px; border-radius: 3px; background: oklch(from var(--bg-card) calc(l - 0.04) c h); overflow: hidden; }
+.sr-peek-fill  { height: 100%; background: var(--gold); }
+.sr-peek-delta { font-size: 0.66rem; color: var(--parchment); text-align: right; }
+.sr-peek-meta  { display: flex; flex-direction: column; gap: 0.12rem; min-width: 0; }
+.sr-peek-timers { display: flex; gap: 0.7rem; flex-wrap: wrap; font-size: 0.66rem; color: var(--parchment); }
+/* The VALUES are the data and read at full contrast; only the field labels are
+   dimmed. lastActivity is the STRONG signal, so it is marked by WEIGHT — colour
+   is already spoken for by the stale state below. */
+.sr-peek-timers .sr-peek-dim { color: var(--gold-dim); }
+.sr-peek-timers .strong { font-weight: 600; }
+.sr-peek-timers .strong.stale { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); }
+.sr-peek-why { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: baseline; }
+.sr-peek-note { font-size: 0.68rem; font-style: italic; color: var(--parchment); }
+.sr-peek-code {
+  font-family: ui-monospace, Menlo, monospace; font-size: 0.6rem;
+  padding: 0.07rem 0.34rem; border-radius: 2px;
+}
+.sr-peek-code-problem { color: oklch(from var(--bg-card) calc(1 - l) 0.18 25); background: oklch(from var(--bg-card) calc(1 - l) 0.18 25 / 0.14); }
+.sr-peek-code-warning { color: var(--amber); background: oklch(from var(--amber) l c h / 0.14); }
+
+/* Open slots — violet, matching the --open-* tokens used everywhere else for a
+   vacated seat, so it never reads as an error. */
+.sr-peek-open {
+  padding: 0.4rem 0.55rem; border: 1px solid var(--open-border); border-radius: 3px;
+  background: var(--open-bg); display: flex; flex-direction: column; gap: 0.2rem;
+}
+.sr-peek-open-head {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: baseline;
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.07em; color: var(--open-fg);
+}
+.sr-peek-open-head .sr-peek-dim { font-family: 'Crimson Pro', serif; letter-spacing: 0; font-size: 0.66rem; }
+.sr-peek-open-row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: baseline; font-size: 0.66rem; }
+
 /* Cheesetracker shortcut beside a world name (live card + stored reports). Emoji
    glyph on `color: inherit`, so it needs no per-theme colour of its own. */
 .sr-cheese-link {

@@ -9,6 +9,7 @@ import {
   type ExcuseMap, type ReportCandidate, type ReportPlayerFinding, type RoomHealth,
 } from '../../lib/statusReport';
 import { runOfficialStatusReport, markStatusWarningHandled, excuseStatusProblem } from '../../firebase/db';
+import RoomPeek from './statusReportPage/RoomPeek';
 import type { OfficialReport, OfficialProblemPlayer, OfficialProblemWorld, OfficialWarnWorld } from '../../types';
 
 const HOUR = 3_600_000;
@@ -97,17 +98,36 @@ function RoomRow({ h, showRoom }: { h: RoomHealth; showRoom: boolean }) {
   );
 }
 
-function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode }) {
+function CandidateCard({ c, excuseFor, now }: {
+  c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode; now: number;
+}) {
   const problems = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'problem').length, 0);
   const warnings = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'warning').length, 0);
   const roomTier = worstRoomTier(c.rooms);
+
+  // Peek state is per card and local: opening one is a look, not a setting, so it
+  // deliberately does not survive a remount or coordinate with the other cards.
+  const [peek, setPeek] = useState(false);
+
   return (
     <div className="dash-tile-card sr-card">
       <div className="sr-card-header">
         <span className="sr-card-kind" title={c.kind === 'mission' ? 'Mission' : 'Challenge'}>
           {c.kind === 'mission' ? '⚜' : '⚔'}
         </span>
-        <span className="dash-tile-name">{c.name}</span>
+        {/* The world name is the disclosure control — a real <button>, so it is
+            keyboard-reachable; WorldCheeseLink already stops propagation, so the
+            links beside it keep working. */}
+        <button
+          type="button"
+          className="sr-peek-toggle"
+          aria-expanded={peek}
+          onClick={() => setPeek(o => !o)}
+          title={peek ? 'Hide room detail' : 'Show room detail — slots, timers, notes, pace'}
+        >
+          <span className="sr-peek-caret">{peek ? '▾' : '▸'}</span>
+          <span className="dash-tile-name">{c.name}</span>
+        </button>
         <WorldCheeseLink kind={c.kind} id={c.id} />
         <span className="sr-card-counts">
           {roomTier && (
@@ -122,12 +142,13 @@ function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (play
       </div>
       {c.rooms.map(h => <RoomRow key={h.room} h={h} showRoom={c.rooms.length > 1} />)}
       {c.players.map(p => <PlayerBlock key={p.playerId} player={p} excuse={excuseFor?.(p.playerId)} />)}
+      {peek && <RoomPeek kind={c.kind} id={c.id} now={now} />}
     </div>
   );
 }
 
-function CollapsibleSection({ title, list, defaultOpen = false }: {
-  title: string; list: ReportCandidate[]; defaultOpen?: boolean;
+function CollapsibleSection({ title, list, now, defaultOpen = false }: {
+  title: string; list: ReportCandidate[]; now: number; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -139,7 +160,7 @@ function CollapsibleSection({ title, list, defaultOpen = false }: {
       {open && (
         list.length === 0
           ? <div className="dash-empty">None.</div>
-          : list.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} />)
+          : list.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} now={now} />)
       )}
     </div>
   );
@@ -449,10 +470,10 @@ export default function StatusReportPage() {
       <h3 className="sr-subhead">Live Candidates</h3>
       {active.length === 0
         ? <div className="dash-empty">No active report candidates — every in-progress mission and challenge is healthy.</div>
-        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} excuseFor={excuseFor(c)} />)}
+        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} excuseFor={excuseFor(c)} now={now} />)}
 
-      <CollapsibleSection title="Too Early" list={tooEarly} />
-      <CollapsibleSection title="Recently Reported" list={recentlyReported} />
+      <CollapsibleSection title="Too Early" list={tooEarly} now={now} />
+      <CollapsibleSection title="Recently Reported" list={recentlyReported} now={now} />
 
       {/* Recent reports archive — the full last-10, newest first (includes the one
           shown above, so reviewing always works even after a single run). */}

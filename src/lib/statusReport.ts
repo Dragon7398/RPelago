@@ -106,10 +106,13 @@ export interface ReportCandidate {
   rooms:   RoomHealth[];
 }
 
-// One slot in a candidate's scope, tagged with its owner (null = unowned public slot).
+// One slot in a candidate's scope, tagged with its owner (null = unowned public
+// slot). `room` is display-only, for the peek's bifurcated grouping — the scope
+// itself deliberately spans both rooms of a tile (see WorldScope).
 interface ScopedSlot {
   ownerId: string | null;
   slot:    AdvSlot;
+  room?:   1 | 2;
 }
 
 const statusOf = (s: AdvSlot): SlotStatus => s.status ?? 'Unstarted';
@@ -315,6 +318,126 @@ export function roomHealthText(h: RoomHealth, showRoom = false): string {
     + ` ${h.remaining.toLocaleString()} remain (${pct1(h.pct)} clear).${grew}`;
 }
 
+// ── Daily series (the peek's bar charts) ─────────────────────────────────────
+// Samples are 6-hourly, so "what happened on Tuesday" is the difference between
+// the last sample of Monday and the last sample of Tuesday. Both ends must exist:
+// a day we cannot bracket is a GAP, never a zero — drawing a missing sample as
+// "no progress" is the same lie `stale()` refuses to tell about a missing stamp.
+
+export interface DayBucket {
+  dayStart: number;        // local midnight
+  label:    string;        // short weekday
+  gained:   number | null; // checks found that day; null = no data to bracket it
+  pct:      number | null; // `gained` as a share of the room/slot's CURRENT total
+}
+
+/** Per-slot samples: `{ts: {slotKey: {d, t}}}` — the `roomTelemetry` tree. */
+export type SlotProgressSamples = Record<string, Record<string, { d?: number; t?: number }>>;
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Local midnight `back` days ago. Uses setDate rather than subtracting 24h so a
+// DST change shifts the boundary instead of smearing it across two days.
+function startOfDay(now: number, back: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - back);
+  return d.getTime();
+}
+
+function bucketize(
+  points: { ts: number; v: number }[],
+  total: number,
+  now: number,
+  days: number,
+): DayBucket[] {
+  const pts = points.filter(p => Number.isFinite(p.ts) && p.ts <= now).sort((a, b) => a.ts - b.ts);
+  // Newest value at or before `t`, or null when nothing was sampled that early.
+  const before = (t: number): number | null => {
+    let found: number | null = null;
+    for (const p of pts) { if (p.ts > t) break; found = p.v; }
+    return found;
+  };
+  // Newest value sampled INSIDE the day. A day needs one: carrying the last known
+  // value across an unsampled day would draw a stopped tick — or a room that went
+  // all-Done and is no longer polled — as a run of confident zeroes, which is the
+  // one thing these bars must never say. Today counts as unsampled until its first
+  // tick lands, so the newest bar can legitimately be a gap.
+  const within = (from: number, to: number): number | null => {
+    let found: number | null = null;
+    for (const p of pts) { if (p.ts > to) break; if (p.ts > from) found = p.v; }
+    return found;
+  };
+
+  const out: DayBucket[] = [];
+  for (let back = days - 1; back >= 0; back--) {
+    const dayStart = startOfDay(now, back);
+    const dayEnd   = Math.min(now, startOfDay(now, back - 1));
+    const a = before(dayStart);
+    const b = within(dayStart, dayEnd);
+    const gained = a == null || b == null ? null : b - a;
+    out.push({
+      dayStart,
+      label: DAY_LABELS[new Date(dayStart).getDay()],
+      gained,
+      pct: gained == null || total <= 0 ? null : (gained / total) * 100,
+    });
+  }
+  return out;
+}
+
+/** Share of the whole room found on each of the last `days` days. */
+export function roomDailySeries(
+  samples: Record<string, RoomProgressSample> | undefined | null,
+  now: number,
+  days = 14,
+): DayBucket[] {
+  const rows = Object.entries(samples ?? {})
+    .map(([ts, v]) => ({ ts: Number(ts), done: v?.done ?? 0, total: v?.total ?? 0 }))
+    .filter(r => Number.isFinite(r.ts) && r.ts <= now)
+    .sort((a, b) => a.ts - b.ts);
+  const total = rows.length ? rows[rows.length - 1].total : 0;
+  return bucketize(rows.map(r => ({ ts: r.ts, v: r.done })), total, now, days);
+}
+
+export interface SlotSeries {
+  days:  DayBucket[];
+  done:  number;
+  total: number;
+  /** Checks found across the whole window — the row's headline delta. */
+  gained: number | null;
+}
+
+/**
+ * One slot's recent movement, or null when the tree holds nothing under this key.
+ * Null is the honest answer for a slot whose `{NUMBER}` never resolved: its stored
+ * name is not the one the room generated, so it matches no series and must show
+ * "no match" rather than somebody else's numbers.
+ */
+export function slotDailySeries(
+  samples: SlotProgressSamples | undefined | null,
+  slotKey: string,
+  now: number,
+  days = 7,
+): SlotSeries | null {
+  const rows = Object.entries(samples ?? {})
+    .map(([ts, bySlot]) => ({ ts: Number(ts), cell: bySlot?.[slotKey] }))
+    .filter(r => Number.isFinite(r.ts) && r.ts <= now && r.cell != null)
+    .map(r => ({ ts: r.ts, d: r.cell!.d ?? 0, t: r.cell!.t ?? 0 }))
+    .sort((a, b) => a.ts - b.ts);
+  if (rows.length === 0) return null;
+
+  const latest  = rows[rows.length - 1];
+  const buckets = bucketize(rows.map(r => ({ ts: r.ts, v: r.d })), latest.t, now, days);
+  const known   = buckets.filter(b => b.gained != null);
+  return {
+    days: buckets,
+    done: latest.d,
+    total: latest.t,
+    gained: known.length ? known.reduce((n, b) => n + b.gained!, 0) : null,
+  };
+}
+
 const handleFor = (playerId: string, fallbackName: string, players: Record<string, Player>): string => {
   const p = players[playerId];
   return '@' + (p?.discordHandle ?? p?.displayName ?? fallbackName ?? playerId);
@@ -434,6 +557,87 @@ function playersFrom(
     .sort((a, b) => a.handle.localeCompare(b.handle, undefined, { sensitivity: 'base' }));
 }
 
+// ── World scope ──────────────────────────────────────────────────────────────
+// The slot set a world is judged over, built ONCE here and shared by the report
+// and the admin peek. Both must see the same slots: `allIdle60` and the two
+// last-player warnings compare a slot against every other slot in this list, so a
+// second construction that differed even slightly would silently change verdicts.
+//
+// Note a bifurcated tile is deliberately ONE scope spanning both rooms, which is
+// the long-standing behaviour — `room` is carried for display only.
+
+interface WorldScope {
+  scope:   ScopedSlot[];
+  nameFor: (ownerId: string) => string;
+}
+
+export function missionScope(m: GMMission): WorldScope {
+  const parts = Object.values(m.participants ?? {});
+  return {
+    scope: parts.flatMap(p => (p.slots ?? []).map(slot => ({ ownerId: p.playerId, slot }))),
+    nameFor: (ownerId) => parts.find(p => p.playerId === ownerId)?.playerName ?? ownerId,
+  };
+}
+
+export function tileScope(t: Tile): WorldScope {
+  const advs = Object.values(t.adventurers ?? {});
+  return {
+    scope: [
+      ...advs.flatMap(a => (a.slots ?? []).map(slot => ({ ownerId: a.owner, slot, room: a.room ?? slot.room ?? 1 }))),
+      ...(t.publicSlots ?? []).map(slot => ({ ownerId: null, slot, room: slot.room ?? 1 })),
+    ],
+    nameFor: (ownerId) => advs.find(a => a.owner === ownerId)?.ownerName ?? ownerId,
+  };
+}
+
+/** Sort rank for the peek: what needs attention first, finished last. */
+export type SlotRank = 0 | 1 | 2 | 3;
+
+export interface WorldSlot {
+  slot:      AdvSlot;
+  ownerId:   string | null;   // null = a public slot, owned by nobody
+  handle:    string | null;   // "@handle"; null for public slots
+  room:      1 | 2;
+  finding:   ReportSlotFinding | null;
+  rank:      SlotRank;        // 0 problem · 1 warning · 2 still going · 3 finished
+}
+
+/**
+ * EVERY slot in a world, each with the finding it would raise (or null).
+ *
+ * This is the peek's view, and it differs from the report's on purpose:
+ * `playersFrom` drops clean slots and public slots because nobody can be pinged
+ * about them, but the host looking into a room needs to see the whole table —
+ * a finished slot is context, and a public slot is still part of the world.
+ *
+ * It also keeps ALL of a slot's findings, where the report keeps one tier: a
+ * problem outranks a warning in `classifySlot`, so `lastChecker` (the others are
+ * at 100% and waiting on this player) never survives into a ping. It is often the
+ * most useful thing on the row, so the peek shows it.
+ */
+export function worldSlotReport(
+  ws: WorldScope,
+  players: Record<string, Player>,
+  now: number,
+): WorldSlot[] {
+  const rows = ws.scope.map(({ ownerId, slot, room }) => {
+    const finding = ownerId == null ? null : classifySlot(slot, ownerId, ws.scope, now);
+    const rank: SlotRank =
+      finding?.tier === 'problem' ? 0
+      : finding?.tier === 'warning' ? 1
+      : ungoaled(slot) ? 2
+      : 3;
+    return {
+      slot, ownerId, room: (room ?? 1) as 1 | 2, finding, rank,
+      handle: ownerId == null ? null : handleFor(ownerId, ws.nameFor(ownerId), players),
+    };
+  });
+
+  return rows.sort((a, b) =>
+    a.rank !== b.rank ? a.rank - b.rank
+    : (a.slot.name || '').localeCompare(b.slot.name || '', undefined, { sensitivity: 'base' }));
+}
+
 // Elapsed clock origin, mirroring the mission card: room link up is when play can
 // start. Missions fall back through deploy → first join → creation; tiles have only
 // linkedAt. Null → elapsed unknown (treated as NOT too-early, so it stays visible).
@@ -458,10 +662,7 @@ export function computeStatusReport(
   // ── Missions ───────────────────────────────────────────────────────────────
   for (const [id, m] of Object.entries(missions ?? {})) {
     if (m.state !== 'inprogress') continue;
-    const scope: ScopedSlot[] = Object.values(m.participants ?? {})
-      .flatMap(p => (p.slots ?? []).map(slot => ({ ownerId: p.playerId, slot })));
-    const nameFor = (ownerId: string) =>
-      Object.values(m.participants ?? {}).find(p => p.playerId === ownerId)?.playerName ?? ownerId;
+    const { scope, nameFor } = missionScope(m);
     const playersList = playersFrom(scope, nameFor, players, now);
     // A world with no player findings still earns a card when its ROOM is off the
     // pace — that combination (everybody individually responsive, the room barely
@@ -482,13 +683,7 @@ export function computeStatusReport(
   // ── Tiles / challenges ───────────────────────────────────────────────────────
   for (const [coord, t] of Object.entries(tiles ?? {})) {
     if (t.state !== 'inprogress') continue;
-    const scope: ScopedSlot[] = [
-      ...Object.values(t.adventurers ?? {}).flatMap(a =>
-        (a.slots ?? []).map(slot => ({ ownerId: a.owner, slot }))),
-      ...(t.publicSlots ?? []).map(slot => ({ ownerId: null, slot })),
-    ];
-    const nameFor = (ownerId: string) =>
-      Object.values(t.adventurers ?? {}).find(a => a.owner === ownerId)?.ownerName ?? ownerId;
+    const { scope, nameFor } = tileScope(t);
     const playersList = playersFrom(scope, nameFor, players, now);
     // Bifurcated tiles are two Archipelago rooms and therefore two readings; a
     // tile that never split simply has no second sample tree.

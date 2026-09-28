@@ -13,7 +13,8 @@
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\admin\\\\source\\\\RPelago\\\\src\" -Recurse | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\admin\\\\source\\\\RPelago\\\\\", \"\"\\) })",
       "PowerShell(npx tsc --noEmit 2>&1)",
       "Bash(npx eslint *)",
-      "PowerShell(npm run build 2>&1)"
+      "PowerShell(npm run build 2>&1)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

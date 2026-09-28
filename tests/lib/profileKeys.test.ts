@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { gameKey, normalizeGameName, handleKey } from '../../functions/src/profileKeys';
+import { gameKey, normalizeGameName, handleKey, apSlotKey } from '../../functions/src/profileKeys';
+import { apSlotKey as clientApSlotKey } from '../../src/lib/slotHelpers';
 
 // RTDB rejects these in a key, and because the profile `games` map is written as
 // merge paths of one multi-path update(), a single bad key throws before ANY of
@@ -53,5 +54,38 @@ describe('handleKey', () => {
   it('strips the dots Discord handles carry', () => {
     expect(handleKey('some.player')).toBe('some_player');
     expect(handleKey('someplayer')).toBe('someplayer');
+  });
+});
+
+// Slot names come straight off the tracker, so they are exactly as arbitrary as
+// game names — and they key the `roomTelemetry` samples, written as merge paths of
+// the tick's one multi-path update(). A single bad key would throw the whole tick.
+describe('apSlotKey', () => {
+  const names = [
+    'Dr. Mario', 'mossTUNIC', "Luigi's Mansion run", 'a/b', 'a#b', 'a$b', 'a[b]',
+    'slot.with.dots', 'Yu-Gi-Oh! 2006', '100% Orange Juice', 'jam_minit2',
+    'spaced  out', 'ünïcodé', `bad${String.fromCharCode(0)}char`,
+  ];
+
+  it('never emits a character RTDB rejects', () => {
+    for (const n of names) {
+      expect({ name: n, bad: illegalIn(apSlotKey(n)) }).toEqual({ name: n, bad: null });
+    }
+  });
+
+  it('is identical on both sides of the wire', () => {
+    // The server writes the key and the client re-derives it to read the series
+    // back. If these two ever drift, every slot silently loses its history.
+    for (const n of names) expect(clientApSlotKey(n)).toBe(apSlotKey(n));
+  });
+
+  it('does NOT normalize whitespace, unlike gameKey', () => {
+    // The client looks a slot up by the name it holds, character for character —
+    // collapsing spaces here would make a doubled-space name unfindable.
+    expect(apSlotKey('a  b')).not.toBe(apSlotKey('a b'));
+  });
+
+  it('keeps distinct names distinct', () => {
+    expect(new Set(names.map(apSlotKey)).size).toBe(names.length);
   });
 });

@@ -4,7 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
-import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch } from '../../lib/missionLogic';
+import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
@@ -627,6 +627,15 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
 
 // ── Unified mission card ───────────────────────────────────────────────────────
 
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+function settleWarnText(b: SettleBlockers): string {
+  const parts: string[] = [];
+  if (b.seats > 0) parts.push(`${plural(b.seats, 'participant has', 'participants have')} unfinished slots`);
+  if (b.open  > 0) parts.push(`${plural(b.open, 'open slot is', 'open slots are')} unclaimed`);
+  return parts.join(' and ') + '.';
+}
+
 function MissionCard({ mission, pinned, onInteract }: {
   mission: GMMission;
   /** This card is currently held at its board position (see holdPinned). */
@@ -646,7 +655,7 @@ function MissionCard({ mission, pinned, onInteract }: {
   const [collect, setCollect] = useState<TriState>(mission.collect);
   const [hint,    setHint]    = useState(mission.hint);
   const [transitioning,  setTransitioning]  = useState(false);
-  const [completionWarn, setCompletionWarn] = useState<{ unfinishedSlots: number } | null>(null);
+  const [completionWarn, setCompletionWarn] = useState<SettleBlockers | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [mismatchedNames, setMismatchedNames] = useState<Set<string>>(new Set());
   // Bumped when a sync completes, remounting (and so folding away) the YAML list:
@@ -791,8 +800,8 @@ function MissionCard({ mission, pinned, onInteract }: {
       setTransitioning(true);
       try {
         const result = await adminCompleteMission(mission.id, false);
-        if (result.warned && result.unfinishedSlots) {
-          setCompletionWarn({ unfinishedSlots: result.unfinishedSlots });
+        if (result.warned && result.blockers) {
+          setCompletionWarn(result.blockers);
         }
       } finally { setTransitioning(false); }
     }
@@ -908,7 +917,7 @@ function MissionCard({ mission, pinned, onInteract }: {
       {completionWarn && (
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.4rem' }}>
           <span className="admin-complete-warn">
-            {completionWarn.unfinishedSlots} participant(s) have unfinished slots. Complete anyway?
+            {settleWarnText(completionWarn)} Complete anyway?
           </span>
           <button className="dash-action-btn danger" onClick={handleConfirmComplete} disabled={transitioning}>
             {transitioning ? '…' : 'Yes, Complete'}

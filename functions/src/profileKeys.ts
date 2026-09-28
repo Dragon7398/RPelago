@@ -32,3 +32,23 @@ export function gameKey(name: string): string {
 export function handleKey(handle: string): string {
   return handle.replace(/\./g, '_');
 }
+
+/**
+ * Key for one Archipelago slot name under `roomTelemetry/…/{ts}/{key}`.
+ *
+ * Same escape as `gameKey` and for the same reason — a slot named "Dr. Mario"
+ * would otherwise throw the tick's whole multi-path `update()`, taking every
+ * other room's sample with it. Slot names are lifted verbatim from the tracker,
+ * so they are exactly as arbitrary as game names.
+ *
+ * Unlike `gameKey` this does NOT normalize whitespace: the name must round-trip
+ * to the same key from the client, which holds `slot.name` as stored. And it is
+ * never decoded — the client re-encodes the name it already has to look a series
+ * up — so only the forward direction has to agree.
+ *
+ * ⚠️ MIRRORED in `apSlotKey` in src/lib/slotHelpers.ts. A change to one is a
+ * change to both, or the client silently stops finding any slot's history.
+ */
+export function apSlotKey(name: string): string {
+  return encodeURIComponent(name).replace(/\./g, '%2E');
+}
