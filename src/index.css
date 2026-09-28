@@ -153,10 +153,31 @@ body::before {
     radial-gradient(ellipse 30% 20% at 80% 10%, oklch(18% 0.06 25 / 0.15) 0%, transparent 60%);
   pointer-events: none; z-index: 0;
 }
+/* Full-viewport film grain. TILED at a fixed 256px rather than stretched to the
+   viewport, because feTurbulence is generated procedurally per painted size: the
+   stretched version made the browser synthesise 4-octave turbulence across the
+   whole viewport on load and again on every resize (~8M pixels on a 4K display),
+   where tiling needs one cached 256x256 square (~65k). stitchTiles was already
+   here and is now load-bearing — it makes the tile seams invisible.
+
+   `baseFrequency` moved 0.9 -> 0.12 to hold the grain SCALE steady, and the two
+   must be changed together. Feature size is (1/f) x (painted px / viewBox units),
+   so stretching the 256-unit box across 1920px at f=0.9 drew ~8.3px grain; the
+   same 8.3px from a 256px tile needs f=0.12. Four octaves still reach ~1px at the
+   finest, so the multi-scale character is unchanged.
+
+   Side effect, and it is a fix rather than a regression: the grain was previously
+   viewport-DEPENDENT (5.9px at 1366, 8.3px at 1920, 16.7px at 3840) because it
+   stretched. It is now a constant 8.3px everywhere, pinned to what a 1920-wide
+   window always showed. Large displays therefore get finer grain than before.
+
+   Unlike the card grain in casino/cards.css, there is no mix-blend-mode here, so
+   `opacity` is already doing plain alpha and needed no retune. */
 body::after {
   content: '';
   position: fixed; inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.12' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 256px 256px; background-repeat: repeat;
   pointer-events: none; z-index: 0; opacity: 0.5;
 }
 

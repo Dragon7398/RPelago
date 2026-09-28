@@ -23,10 +23,41 @@
   --pad: calc(var(--cw) * 0.07);
 }
 .ck * { box-sizing: border-box; }
+/* Card stock grain. Three things here are deliberate, and the first two are about
+   cost, not looks — this overlay is on EVERY card, and a Hold 'Em seat plus a
+   couple of landing panels puts dozens on screen at once.
+
+   1. NO `mix-blend-mode`. Overlay forced the browser to read back the backdrop and
+      blend into a separate buffer per card, which defeats the cheap
+      raster-once-then-composite path and (with .ck's overflow+radius clip) made
+      every card its own blend operation. It was heating players' machines on
+      integrated GPUs and high-DPI displays. Plain alpha instead.
+   2. A FIXED `background-size`, not the element box. The SVG carries only a
+      viewBox, so it used to stretch to each card — and feTurbulence is
+      procedurally rasterized per painted size, so every distinct card width
+      (108/130/92/84/68) paid for its own noise generation. Tiling one 128px
+      square means all cards share a single cached raster (hence stitchTiles, so
+      the seams don't show). Grain is scale-invariant to the eye, so this is free.
+   3. The opacity DROPPED 0.5 -> 0.055, and that is what keeps the look unchanged.
+      Overlay compressed the noise hard toward the backdrop: against light paper
+      (Cb>0.5 => Screen(Cs, 2Cb-1)) a 0..1 noise range collapsed into 0.84..1.0, so
+      the visible grain was only +/-0.16% of the value range. Plain alpha applies
+      the full range, so holding 0.5 would have made the grain ~11x stronger and
+      skewed the paper darker — a change players WOULD notice. 0.055 reproduces the
+      old amplitude within a quarter-stop on both stock families at once: the light
+      ones (.look-plate, .look-court, L 89-96%) want 0.043, the near-black ones
+      (.gambit, .look-sigil, .look-arcana, .look-foil, L 8-17%) want 0.068. That
+      spread is why this needs no per-stock override.
+
+   Upshot: the grain was always near-invisible. It is kept because it now costs one
+   cached tile, and because it is the hook to turn up if we ever want real texture
+   — but turning it up is a DESIGN change, not a perf one. Raising this value
+   re-introduces nothing from (1) or (2), so it is safe to tune on looks alone. */
 .ck-noise::after {
   content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 6;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  opacity: 0.5; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 128px 128px; background-repeat: repeat;
+  opacity: 0.055;
 }
 .ck-coin {
   display: inline-flex; align-items: center; justify-content: center;
@@ -175,14 +206,6 @@
 .ck-back .ck-back-mark { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: calc(var(--cw)*0.03); color: var(--pc-gold); }
 .ck-back .ck-back-star { font-size: calc(var(--cw)*0.28); line-height: 1; text-shadow: 0 0 18px oklch(from var(--pc-gold) l c h / 0.5); }
 .ck-back .ck-back-word { font-size: calc(var(--cw)*0.07); letter-spacing: 0.3em; color: var(--pc-gold-d); }
-
-/* flip card animation */
-.flip-card { perspective: 900px; }
-.flip-inner { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.5s cubic-bezier(0.4,0.2,0.2,1); }
-.flip-inner.is-flipped { transform: rotateY(180deg); }
-.flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.flip-face.flip-back { }
-.flip-face.flip-front { transform: rotateY(180deg); }
 
 /* ── Gambit card ── */
 .gambit {
