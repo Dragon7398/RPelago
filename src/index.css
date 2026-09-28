@@ -1352,9 +1352,39 @@ header p {
   opacity: 0.5; cursor: not-allowed;
   background: oklch(from var(--bg-deep) l c h / 0.6);
 }
-.admin-room-locked-note {
-  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
-  color: var(--amber); margin-top: 0.5rem; margin-bottom: 0.1rem;
+/* Locked room settings, collapsed to one line. The editable panel is four rows
+   tall and, once the room exists, every value in it is a record to READ — so the
+   locked state shows the reading instead, mirroring the player-facing live-table
+   card (.rl-odds / .mp-roll in casino/landing.css). ON/OFF carry their own words,
+   so the green/red pair is reinforcement only and needs no CB-theme remap; both
+   hues come from the --allow-* / --ban-* families the light themes already flip. */
+.admin-room-summary {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  margin-top: 0.5rem; padding: 0.3rem 0.55rem; border-radius: 3px;
+  background: oklch(from var(--bg-deep) l c h / 0.5);
+  border: 1px solid var(--border);
+}
+.admin-room-lock { font-size: 0.7rem; opacity: 0.8; cursor: help; }
+.admin-room-stat { display: flex; align-items: center; gap: 0.35rem; }
+.admin-room-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em;
+  color: var(--gold-dim);
+}
+.admin-room-roll {
+  font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.08em;
+  padding: 0.1rem 0.4rem; border-radius: 999px; border: 1px solid;
+}
+.admin-room-roll.on      { color: var(--allow-fg);    border-color: var(--allow-border);    background: var(--allow-bg); }
+.admin-room-roll.off     { color: var(--ban-fg);      border-color: var(--ban-border);      background: var(--ban-bg); }
+.admin-room-roll.special { color: var(--restrict-fg); border-color: var(--restrict-border); background: var(--restrict-bg); }
+.admin-room-val {
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.8rem; color: var(--parchment);
+  font-variant-numeric: tabular-nums;
+}
+.admin-room-val small { font-size: 0.6em; color: var(--gold-dim); }
+.admin-room-unlock-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic; font-size: 0.66rem;
+  color: var(--text-muted); margin-left: auto;
 }
 .admin-hint-wrap { display: flex; align-items: center; gap: 0.4rem; }
 .admin-hint-wrap span { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); }

@@ -427,7 +427,13 @@ function FetchBadge({ kind, games }: { kind: 'new' | 'old'; games: GameToFetch[]
 // Deliberately kept as separate files — YAMLs are verified one at a time and later
 // replayed individually by other players — so downloads are per-seat or a .zip of
 // all seats, never a combined single file.
-function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label: string; now: number }) {
+function CasinoYamlDownload({ mission, label, now, locked }: {
+  mission: GMMission; label: string; now: number;
+  /** Room settings are locked — the configs are already locked in, so the
+   *  download is hidden with them. The outstanding-config roster stays:
+   *  a denied seat still owes a resubmit on a live table. */
+  locked?: boolean;
+}) {
   const missionId = mission.id;
   const { addToast } = useToast();
   const { gameState } = useGameState();
@@ -505,6 +511,10 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
   // the thing making the room late.
   const blocking = outstandingConfigsBlockRoom(mission, now);
 
+  // With the download hidden and no seat owing a config there is nothing left to
+  // draw — and an empty block would still spend its margin on the card.
+  if (locked && awaiting.length === 0) return null;
+
   return (
     <div className="casino-yaml-block">
       {awaiting.length > 0 && (
@@ -543,7 +553,11 @@ function CasinoYamlDownload({ mission, label, now }: { mission: GMMission; label
           ))}
         </div>
       )}
-      {yamls === null ? (
+      {/* Once the host locks the room the configs behind it are locked in too —
+          they have been read, verified and generated from — so the download is
+          hidden with the rest of the room panel rather than sitting there as one
+          more thing to click. Unlock at SLOTS to fetch them again. */}
+      {locked ? null : yamls === null ? (
         <button className="dash-action-btn" disabled={loading} onClick={load}>
           {loading ? 'Loading…' : '⬇ Player YAMLs'}
         </button>
@@ -743,7 +757,19 @@ function MissionCard({ mission, pinned, onInteract }: {
   // `settingsLocked` is the same flag read for the room fields, named separately so
   // the room controls don't read as if slots were the thing protecting them.
   const settingsLocked = slotsLocked;
-  const lockedHint = 'Locked — unlock at SLOTS below to edit.';
+  const lockedHint = 'Locked — unlock slots below to edit.';
+  // The room announcement, verbatim. Shared by the editable room panel and its
+  // locked one-line summary: the lock guards against a stray EDIT, and copying
+  // the room text only ever reads, so it stays live in both.
+  const copyRoomText = (roomLink: string) => {
+    const pids = Object.keys(mission.participants ?? {});
+    const handles = pids.map(pid => playerHandle(gameState?.players, pid)).join(' ');
+    let text = `New room generated:  ${missionDisplayLabel(mission)}!\n${roomLink}`;
+    if (mission.tracker) text += `\nhttps://archipelago.gg/tracker/${mission.tracker}`;
+    if (mission.cheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese} (optional)`;
+    text += `\n${handles}`;
+    navigator.clipboard.writeText(text);
+  };
   // The slot ledger is the tallest part of a card, so it collapses. A room that
   // already has a link is one you're monitoring, not filling in — start it shut.
   // Mount-time only, deliberately: setting the link on a live panel must not yank
@@ -952,6 +978,7 @@ function MissionCard({ mission, pinned, onInteract }: {
       {/* Casino: download the seats' uploaded Slot-Fill YAMLs (host verify / room gen) */}
       {mission.type === 'casino' && (
         <CasinoYamlDownload key={yamlCollapse} mission={mission} now={now}
+                            locked={settingsLocked}
                             label={missionDisplayLabel(mission)} />
       )}
 
@@ -962,37 +989,43 @@ function MissionCard({ mission, pinned, onInteract }: {
           itself is untouched, so a stray keystroke silently desynchronises what the
           players see from what we tell them. Copy Room Text stays live throughout;
           reading is never the risk. */}
-      {mission.state === 'inprogress' && (
-        <>
-          {settingsLocked && (
-            <div className="admin-room-locked-note">
-              🔒 Room settings locked — unlock at SLOTS below to edit
-            </div>
+      {mission.state === 'inprogress' && (settingsLocked ? (
+        /* Locked: the four rows collapse to ONE read-only line, styled after the
+           player-facing in-progress table card (CasinoShell's RollFlags) — once
+           the room exists these are a record to read, not fields to fill in, so
+           the editor is just height between the host and the slot ledger.
+           Copy Room Text survives the collapse (reading was never the risk) and
+           the link itself stays one click away via the 🔗 in the card header. */
+        <div className="admin-room-summary">
+          <span className="admin-room-lock" title={lockedHint}>🔒</span>
+          {(['release', 'collect'] as const).map(field => (
+            <span className="admin-room-stat" key={field}>
+              <span className="admin-room-lbl">{field.toUpperCase()}</span>
+              <span className={`admin-room-roll ${mission[field]}`}>{mission[field].toUpperCase()}</span>
+            </span>
+          ))}
+          <span className="admin-room-stat">
+            <span className="admin-room-lbl">HINT</span>
+            <span className="admin-room-val">{mission.hint}<small>%</small></span>
+          </span>
+          {mission.link && (
+            <button className="dash-copy-room-btn" onClick={() => copyRoomText(mission.link!)}>Copy Room Text</button>
           )}
+          <span className="admin-room-unlock-hint">unlock slots to edit</span>
+        </div>
+      ) : (
+        <>
           <div className="admin-detail-row">
             <div className="admin-detail-label">ARCH. LINK</div>
             <input
               className="admin-text-input"
               placeholder="https://…"
               value={link}
-              disabled={settingsLocked}
-              title={settingsLocked ? lockedHint : undefined}
               onChange={e => setLink(e.target.value)}
               onBlur={() => adminSetMissionLink(mission.id, link)}
             />
             {link && (
-              <button
-                className="dash-copy-room-btn"
-                onClick={() => {
-                  const pids = Object.keys(mission.participants ?? {});
-                  const handles = pids.map(pid => playerHandle(gameState?.players, pid)).join(' ');
-                  let text = `New room generated:  ${label}!\n${link}`;
-                  if (mission.tracker) text += `\nhttps://archipelago.gg/tracker/${mission.tracker}`;
-                  if (mission.cheese) text += `\nhttps://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese} (optional)`;
-                  text += `\n${handles}`;
-                  navigator.clipboard.writeText(text);
-                }}
-              >Copy Room Text</button>
+              <button className="dash-copy-room-btn" onClick={() => copyRoomText(link)}>Copy Room Text</button>
             )}
           </div>
 
@@ -1006,8 +1039,6 @@ function MissionCard({ mission, pinned, onInteract }: {
                     <button
                       key={v}
                       className={`admin-tri-btn${current === v ? ` active-${v}` : ''}`}
-                      disabled={settingsLocked}
-                      title={settingsLocked ? lockedHint : undefined}
                       onClick={() => {
                         if (field === 'release') {
                           setRelease(v); adminSetMissionRoomSettings(mission.id, v, collect, hint);
@@ -1028,8 +1059,6 @@ function MissionCard({ mission, pinned, onInteract }: {
               <input
                 type="number" className="admin-count-input" min={0} max={100}
                 value={hint}
-                disabled={settingsLocked}
-                title={settingsLocked ? lockedHint : undefined}
                 onChange={e => setHint(parseInt(e.target.value) || 0)}
                 onBlur={() => adminSetMissionRoomSettings(mission.id, release, collect, hint)}
               />
@@ -1037,7 +1066,7 @@ function MissionCard({ mission, pinned, onInteract }: {
             </div>
           </div>
         </>
-      )}
+      ))}
 
       {/* Slots — collapsible; the header carries a summary while collapsed */}
       <div className="admin-detail-row" style={{ marginTop: '0.75rem', marginBottom: '0.4rem', alignItems: 'center' }}>
