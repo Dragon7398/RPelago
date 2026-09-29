@@ -36,6 +36,27 @@ export function slotsFromEntry(entry: TileAdventurer): AdvSlot[] {
   return normalizeSlots(entry.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
 }
 
+/**
+ * Key for one Archipelago slot name under `roomTelemetry/…/{ts}/{key}`.
+ *
+ * RTDB forbids `.` `#` `$` `[` `]` `/` in a key and `encodeURIComponent` escapes
+ * every one of those EXCEPT the dot — the gap that cost a season's worth of
+ * profile writes (see `gameKey` in functions/src/profileKeys.ts). Slot names come
+ * straight off the tracker, so "Dr. Mario" is a real possibility.
+ *
+ * Encode-only, never decoded: to read a slot's history the caller re-encodes the
+ * `slot.name` it already holds, so only the forward direction has to agree with
+ * the server. A name whose key matches nothing simply has no history — which is
+ * the correct answer for an unresolved `{NUMBER}` slot, whose stored name is not
+ * the one the room generated.
+ *
+ * ⚠️ MIRRORED in `apSlotKey` in functions/src/profileKeys.ts (the only writer).
+ * A change to one is a change to both.
+ */
+export function apSlotKey(name: string): string {
+  return encodeURIComponent(name).replace(/\./g, '%2E');
+}
+
 // ── Slot-completion core (shared by Challenges and Missions) ────────────────────
 // A slot is "free" once its status is terminal (100%/Goaled/Done). Both the tile
 // adventurer-release and the mission claim-reclaim key off this single predicate.

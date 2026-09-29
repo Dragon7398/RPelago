@@ -25,6 +25,7 @@
 import type {
   GMMission, Tile, Player, AdvSlot, SlotStatus, AdvStatusNote,
   OfficialReport, OfficialProblemWorld, OfficialProblemPlayer, OfficialWarnWorld, OfficialWarnItem,
+  RoomProgressSample,
 } from '../types';
 import { FREE_COMPLETED_STATUSES } from './constants';
 
@@ -46,6 +47,28 @@ export const RECENTLY_REPORTED_HOURS = 24; // reported within this long → "Rec
 // red badge always means "you are on the host's next report" and the two can never
 // drift apart. Only the caution tier is new.
 export const SLOT_CAUTION_HOURS = 48;
+
+// ── Room-pace thresholds ─────────────────────────────────────────────────────
+// Room health asks a different question from every threshold above it: not "is
+// this PLAYER responding" but "is this ROOM going to finish". They are not the
+// same world — ten players can each look clean on the slot checks while the room
+// as a whole crawls, which is exactly the case nothing else here catches.
+//
+// The window REUSES PROBLEM_STALE_HOURS rather than declaring its own 72, for
+// the same reason the idle badge does: that constant already is the check-in
+// cadence, and two copies would drift. The pace is normalised to it, so a report
+// run twice in one day and one run three weeks late are judged on the same bar —
+// official runs are ad hoc, so a raw "since the last report" delta would mean a
+// different thing every time it was read.
+export const ROOM_WINDOW_HOURS = PROBLEM_STALE_HOURS;  // 72 — the pace window
+export const ROOM_CAUTION_PCT  = 3;    // < this %/window → caution: worth a look
+export const ROOM_DANGER_PCT   = 1.5;  // < this %/window → danger: investigate
+
+// Sampling policy, mirrored in `tickSlotStatuses` (which is the only writer).
+// Retention must comfortably exceed the window, or a room could hold samples yet
+// have no baseline old enough to judge against.
+export const ROOM_SAMPLE_MIN_HOURS       = 6;    // minimum spacing between samples
+export const ROOM_SAMPLE_RETENTION_HOURS = 336;  // 14d of history kept
 
 export type ReportTier   = 'problem' | 'warning';
 export type ReportBucket = 'active' | 'tooEarly' | 'recentlyReported';
@@ -76,12 +99,20 @@ export interface ReportCandidate {
   name:    string;
   bucket:  ReportBucket;
   players: ReportPlayerFinding[]; // alphabetical by handle; only those with findings
+  /** Pace reading per cheese room — one entry, or two for a bifurcated tile.
+   *  Rooms with too little history to judge are omitted, so this can be empty.
+   *  ⚠️ A candidate may have NO players and still be here on room pace alone —
+   *  that is the whole point of the reading (see computeStatusReport). */
+  rooms:   RoomHealth[];
 }
 
-// One slot in a candidate's scope, tagged with its owner (null = unowned public slot).
+// One slot in a candidate's scope, tagged with its owner (null = unowned public
+// slot). `room` is display-only, for the peek's bifurcated grouping — the scope
+// itself deliberately spans both rooms of a tile (see WorldScope).
 interface ScopedSlot {
   ownerId: string | null;
   slot:    AdvSlot;
+  room?:   1 | 2;
 }
 
 const statusOf = (s: AdvSlot): SlotStatus => s.status ?? 'Unstarted';
@@ -174,6 +205,237 @@ export function fmtDuration(h: number): string {
   const d = Math.floor(totalH / 24);
   const rem = totalH % 24;
   return d > 0 ? `${d}d ${rem}h` : `${totalH}h`;
+}
+
+export type RoomHealthTier = 'caution' | 'danger';
+
+export interface RoomHealth {
+  /** null = the room is keeping pace (or has nothing left to find). */
+  tier:         RoomHealthTier | null;
+  room:         1 | 2;     // which cheese room of the world this reading is for
+  done:         number;    // checks found across the whole room, now
+  total:        number;    // checks the room holds, now
+  pct:          number;    // done/total as a percentage
+  remaining:    number;    // total − done
+  gained:       number;    // checks found since the baseline sample (may be < 0)
+  deltaPct:     number;    // `gained` as a % of the CURRENT total
+  ratePct:      number;    // deltaPct normalised to ROOM_WINDOW_HOURS — the judged number
+  hours:        number;    // real hours between baseline and latest sample
+  totalChanged: boolean;   // the room's size moved inside the window
+}
+
+/**
+ * How fast one room is actually clearing, from its `roomProgress` samples.
+ *
+ * Returns null for "unknown" — no samples, no baseline a full window old, or a
+ * room with nothing tracked yet. That follows `stale()`'s rule: an absence of
+ * data is never evidence of a problem, and a young room must not read as 0%
+ * progress simply because it has no history to compare against.
+ *
+ * Two deliberate choices in the arithmetic:
+ *
+ *  - The delta is measured against the CURRENT total, not the baseline's. The
+ *    denominator moves — a slot connecting for the first time adds its whole
+ *    location count — and dividing by the old total would report a window in
+ *    which real progress was made as the room going backwards.
+ *
+ *  - A finished room (every check found) is never flagged. It has no progress
+ *    left to make, so the pace question does not apply to it; without this the
+ *    last window of every successful room would read as danger.
+ */
+export function roomHealth(
+  samples: Record<string, RoomProgressSample> | undefined | null,
+  now: number,
+  room: 1 | 2 = 1,
+): RoomHealth | null {
+  const rows = Object.entries(samples ?? {})
+    .map(([ts, v]) => ({ ts: Number(ts), done: v?.done ?? 0, total: v?.total ?? 0 }))
+    .filter(r => Number.isFinite(r.ts) && r.ts <= now)
+    .sort((a, b) => a.ts - b.ts);
+
+  const latest = rows[rows.length - 1];
+  if (!latest || !(latest.total > 0)) return null;
+
+  // Baseline: the NEWEST sample at least a full window old, so the measured span
+  // is the window plus at most one sampling interval. `base === latest` means
+  // sampling stopped a window ago (the room went all-Done, or its fetches are
+  // failing) — unknown, not stalled.
+  const cutoff = now - ROOM_WINDOW_HOURS * HOUR;
+  let base: typeof latest | undefined;
+  for (const r of rows) { if (r.ts > cutoff) break; base = r; }
+  if (!base || base.ts >= latest.ts) return null;
+
+  const hours     = (latest.ts - base.ts) / HOUR;
+  const gained    = latest.done - base.done;
+  const deltaPct  = (gained / latest.total) * 100;
+  const ratePct   = deltaPct * (ROOM_WINDOW_HOURS / hours);
+  const remaining = latest.total - latest.done;
+
+  const tier: RoomHealthTier | null =
+    remaining <= 0            ? null
+    : ratePct < ROOM_DANGER_PCT  ? 'danger'
+    : ratePct < ROOM_CAUTION_PCT ? 'caution'
+    : null;
+
+  return {
+    tier, room,
+    done: latest.done, total: latest.total,
+    pct: (latest.done / latest.total) * 100,
+    remaining, gained, deltaPct, ratePct, hours,
+    totalChanged: latest.total !== base.total,
+  };
+}
+
+/** The worse of a world's rooms — a bifurcated tile has two, and one sick room
+ *  is enough to make the world worth opening. */
+export const worstRoomTier = (rooms: RoomHealth[]): RoomHealthTier | null =>
+  rooms.some(r => r.tier === 'danger')  ? 'danger'
+  : rooms.some(r => r.tier === 'caution') ? 'caution'
+  : null;
+
+const pct1   = (n: number) => `${n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}%`;
+const signed = (n: number) => `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString()}`;
+
+/**
+ * One room's pace in words. Used for the admin card AND stored as the warn
+ * item's `detail`, so a report stays readable after its samples are pruned.
+ *
+ * It leads with the absolute counts on purpose. A room funnelled down to a
+ * handful of checks ping-ponging between two players will flag forever and the
+ * flag is correct — but `+11 of 46 remaining` triages in one glance, where a
+ * bare `0.9%` would send the host into the room to find out it was fine.
+ */
+export function roomHealthText(h: RoomHealth, showRoom = false): string {
+  const head = showRoom ? `Room ${h.room}: ` : '';
+  const grew = h.totalChanged ? ' Room size changed this window.' : '';
+  // The normalised rate is only worth printing when the span is NOT the window —
+  // on an ordinary read the two numbers are the same and repeating it reads as a
+  // mistake. When a sampling gap stretched the span, it is the whole story.
+  const rate = Math.abs(h.hours - ROOM_WINDOW_HOURS) >= 1
+    ? ` = ${pct1(h.ratePct)} per ${ROOM_WINDOW_HOURS}h.` : '.';
+  return `${head}${signed(h.gained)} checks (${pct1(h.deltaPct)}) in ${fmtDuration(h.hours)}${rate}`
+    + ` ${h.done.toLocaleString()} of ${h.total.toLocaleString()} found;`
+    + ` ${h.remaining.toLocaleString()} remain (${pct1(h.pct)} clear).${grew}`;
+}
+
+// ── Daily series (the peek's bar charts) ─────────────────────────────────────
+// Samples are 6-hourly, so "what happened on Tuesday" is the difference between
+// the last sample of Monday and the last sample of Tuesday. Both ends must exist:
+// a day we cannot bracket is a GAP, never a zero — drawing a missing sample as
+// "no progress" is the same lie `stale()` refuses to tell about a missing stamp.
+
+export interface DayBucket {
+  dayStart: number;        // local midnight
+  label:    string;        // short weekday
+  gained:   number | null; // checks found that day; null = no data to bracket it
+  pct:      number | null; // `gained` as a share of the room/slot's CURRENT total
+}
+
+/** Per-slot samples: `{ts: {slotKey: {d, t}}}` — the `roomTelemetry` tree. */
+export type SlotProgressSamples = Record<string, Record<string, { d?: number; t?: number }>>;
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Local midnight `back` days ago. Uses setDate rather than subtracting 24h so a
+// DST change shifts the boundary instead of smearing it across two days.
+function startOfDay(now: number, back: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - back);
+  return d.getTime();
+}
+
+function bucketize(
+  points: { ts: number; v: number }[],
+  total: number,
+  now: number,
+  days: number,
+): DayBucket[] {
+  const pts = points.filter(p => Number.isFinite(p.ts) && p.ts <= now).sort((a, b) => a.ts - b.ts);
+  // Newest value at or before `t`, or null when nothing was sampled that early.
+  const before = (t: number): number | null => {
+    let found: number | null = null;
+    for (const p of pts) { if (p.ts > t) break; found = p.v; }
+    return found;
+  };
+  // Newest value sampled INSIDE the day. A day needs one: carrying the last known
+  // value across an unsampled day would draw a stopped tick — or a room that went
+  // all-Done and is no longer polled — as a run of confident zeroes, which is the
+  // one thing these bars must never say. Today counts as unsampled until its first
+  // tick lands, so the newest bar can legitimately be a gap.
+  const within = (from: number, to: number): number | null => {
+    let found: number | null = null;
+    for (const p of pts) { if (p.ts > to) break; if (p.ts > from) found = p.v; }
+    return found;
+  };
+
+  const out: DayBucket[] = [];
+  for (let back = days - 1; back >= 0; back--) {
+    const dayStart = startOfDay(now, back);
+    const dayEnd   = Math.min(now, startOfDay(now, back - 1));
+    const a = before(dayStart);
+    const b = within(dayStart, dayEnd);
+    const gained = a == null || b == null ? null : b - a;
+    out.push({
+      dayStart,
+      label: DAY_LABELS[new Date(dayStart).getDay()],
+      gained,
+      pct: gained == null || total <= 0 ? null : (gained / total) * 100,
+    });
+  }
+  return out;
+}
+
+/** Share of the whole room found on each of the last `days` days. */
+export function roomDailySeries(
+  samples: Record<string, RoomProgressSample> | undefined | null,
+  now: number,
+  days = 14,
+): DayBucket[] {
+  const rows = Object.entries(samples ?? {})
+    .map(([ts, v]) => ({ ts: Number(ts), done: v?.done ?? 0, total: v?.total ?? 0 }))
+    .filter(r => Number.isFinite(r.ts) && r.ts <= now)
+    .sort((a, b) => a.ts - b.ts);
+  const total = rows.length ? rows[rows.length - 1].total : 0;
+  return bucketize(rows.map(r => ({ ts: r.ts, v: r.done })), total, now, days);
+}
+
+export interface SlotSeries {
+  days:  DayBucket[];
+  done:  number;
+  total: number;
+  /** Checks found across the whole window — the row's headline delta. */
+  gained: number | null;
+}
+
+/**
+ * One slot's recent movement, or null when the tree holds nothing under this key.
+ * Null is the honest answer for a slot whose `{NUMBER}` never resolved: its stored
+ * name is not the one the room generated, so it matches no series and must show
+ * "no match" rather than somebody else's numbers.
+ */
+export function slotDailySeries(
+  samples: SlotProgressSamples | undefined | null,
+  slotKey: string,
+  now: number,
+  days = 7,
+): SlotSeries | null {
+  const rows = Object.entries(samples ?? {})
+    .map(([ts, bySlot]) => ({ ts: Number(ts), cell: bySlot?.[slotKey] }))
+    .filter(r => Number.isFinite(r.ts) && r.ts <= now && r.cell != null)
+    .map(r => ({ ts: r.ts, d: r.cell!.d ?? 0, t: r.cell!.t ?? 0 }))
+    .sort((a, b) => a.ts - b.ts);
+  if (rows.length === 0) return null;
+
+  const latest  = rows[rows.length - 1];
+  const buckets = bucketize(rows.map(r => ({ ts: r.ts, v: r.d })), latest.t, now, days);
+  const known   = buckets.filter(b => b.gained != null);
+  return {
+    days: buckets,
+    done: latest.d,
+    total: latest.t,
+    gained: known.length ? known.reduce((n, b) => n + b.gained!, 0) : null,
+  };
 }
 
 const handleFor = (playerId: string, fallbackName: string, players: Record<string, Player>): string => {
@@ -295,6 +557,87 @@ function playersFrom(
     .sort((a, b) => a.handle.localeCompare(b.handle, undefined, { sensitivity: 'base' }));
 }
 
+// ── World scope ──────────────────────────────────────────────────────────────
+// The slot set a world is judged over, built ONCE here and shared by the report
+// and the admin peek. Both must see the same slots: `allIdle60` and the two
+// last-player warnings compare a slot against every other slot in this list, so a
+// second construction that differed even slightly would silently change verdicts.
+//
+// Note a bifurcated tile is deliberately ONE scope spanning both rooms, which is
+// the long-standing behaviour — `room` is carried for display only.
+
+interface WorldScope {
+  scope:   ScopedSlot[];
+  nameFor: (ownerId: string) => string;
+}
+
+export function missionScope(m: GMMission): WorldScope {
+  const parts = Object.values(m.participants ?? {});
+  return {
+    scope: parts.flatMap(p => (p.slots ?? []).map(slot => ({ ownerId: p.playerId, slot }))),
+    nameFor: (ownerId) => parts.find(p => p.playerId === ownerId)?.playerName ?? ownerId,
+  };
+}
+
+export function tileScope(t: Tile): WorldScope {
+  const advs = Object.values(t.adventurers ?? {});
+  return {
+    scope: [
+      ...advs.flatMap(a => (a.slots ?? []).map(slot => ({ ownerId: a.owner, slot, room: a.room ?? slot.room ?? 1 }))),
+      ...(t.publicSlots ?? []).map(slot => ({ ownerId: null, slot, room: slot.room ?? 1 })),
+    ],
+    nameFor: (ownerId) => advs.find(a => a.owner === ownerId)?.ownerName ?? ownerId,
+  };
+}
+
+/** Sort rank for the peek: what needs attention first, finished last. */
+export type SlotRank = 0 | 1 | 2 | 3;
+
+export interface WorldSlot {
+  slot:      AdvSlot;
+  ownerId:   string | null;   // null = a public slot, owned by nobody
+  handle:    string | null;   // "@handle"; null for public slots
+  room:      1 | 2;
+  finding:   ReportSlotFinding | null;
+  rank:      SlotRank;        // 0 problem · 1 warning · 2 still going · 3 finished
+}
+
+/**
+ * EVERY slot in a world, each with the finding it would raise (or null).
+ *
+ * This is the peek's view, and it differs from the report's on purpose:
+ * `playersFrom` drops clean slots and public slots because nobody can be pinged
+ * about them, but the host looking into a room needs to see the whole table —
+ * a finished slot is context, and a public slot is still part of the world.
+ *
+ * It also keeps ALL of a slot's findings, where the report keeps one tier: a
+ * problem outranks a warning in `classifySlot`, so `lastChecker` (the others are
+ * at 100% and waiting on this player) never survives into a ping. It is often the
+ * most useful thing on the row, so the peek shows it.
+ */
+export function worldSlotReport(
+  ws: WorldScope,
+  players: Record<string, Player>,
+  now: number,
+): WorldSlot[] {
+  const rows = ws.scope.map(({ ownerId, slot, room }) => {
+    const finding = ownerId == null ? null : classifySlot(slot, ownerId, ws.scope, now);
+    const rank: SlotRank =
+      finding?.tier === 'problem' ? 0
+      : finding?.tier === 'warning' ? 1
+      : ungoaled(slot) ? 2
+      : 3;
+    return {
+      slot, ownerId, room: (room ?? 1) as 1 | 2, finding, rank,
+      handle: ownerId == null ? null : handleFor(ownerId, ws.nameFor(ownerId), players),
+    };
+  });
+
+  return rows.sort((a, b) =>
+    a.rank !== b.rank ? a.rank - b.rank
+    : (a.slot.name || '').localeCompare(b.slot.name || '', undefined, { sensitivity: 'base' }));
+}
+
 // Elapsed clock origin, mirroring the mission card: room link up is when play can
 // start. Missions fall back through deploy → first join → creation; tiles have only
 // linkedAt. Null → elapsed unknown (treated as NOT too-early, so it stays visible).
@@ -303,6 +646,9 @@ function bucketFor(elapsedOrigin: number | null, lastReportAt: number | null, no
   if (lastReportAt != null && (now - lastReportAt) / HOUR < RECENTLY_REPORTED_HOURS) return 'recentlyReported';
   return 'active';
 }
+
+const roomsOf = (list: (RoomHealth | null)[]): RoomHealth[] =>
+  list.filter((r): r is RoomHealth => r != null);
 
 export function computeStatusReport(
   missions: Record<string, GMMission>,
@@ -316,38 +662,42 @@ export function computeStatusReport(
   // ── Missions ───────────────────────────────────────────────────────────────
   for (const [id, m] of Object.entries(missions ?? {})) {
     if (m.state !== 'inprogress') continue;
-    const scope: ScopedSlot[] = Object.values(m.participants ?? {})
-      .flatMap(p => (p.slots ?? []).map(slot => ({ ownerId: p.playerId, slot })));
-    const nameFor = (ownerId: string) =>
-      Object.values(m.participants ?? {}).find(p => p.playerId === ownerId)?.playerName ?? ownerId;
+    const { scope, nameFor } = missionScope(m);
     const playersList = playersFrom(scope, nameFor, players, now);
-    if (playersList.length === 0) continue;
+    // A world with no player findings still earns a card when its ROOM is off the
+    // pace — that combination (everybody individually responsive, the room barely
+    // moving) is precisely what the slot checks cannot see, and dropping it here
+    // is what would make the reading useless.
+    const rooms = roomsOf([roomHealth(m.roomProgress, now, 1)]);
+    if (playersList.length === 0 && !worstRoomTier(rooms)) continue;
 
     const origin = m.linkedAt ?? m.deployedAt ?? m.firstJoinAt ?? m.createdAt ?? null;
     out.push({
       kind: 'mission', id, name: missionLabel(m),
       bucket: bucketFor(origin, m.lastReportAt ?? null, now),
       players: playersList,
+      rooms,
     });
   }
 
   // ── Tiles / challenges ───────────────────────────────────────────────────────
   for (const [coord, t] of Object.entries(tiles ?? {})) {
     if (t.state !== 'inprogress') continue;
-    const scope: ScopedSlot[] = [
-      ...Object.values(t.adventurers ?? {}).flatMap(a =>
-        (a.slots ?? []).map(slot => ({ ownerId: a.owner, slot }))),
-      ...(t.publicSlots ?? []).map(slot => ({ ownerId: null, slot })),
-    ];
-    const nameFor = (ownerId: string) =>
-      Object.values(t.adventurers ?? {}).find(a => a.owner === ownerId)?.ownerName ?? ownerId;
+    const { scope, nameFor } = tileScope(t);
     const playersList = playersFrom(scope, nameFor, players, now);
-    if (playersList.length === 0) continue;
+    // Bifurcated tiles are two Archipelago rooms and therefore two readings; a
+    // tile that never split simply has no second sample tree.
+    const rooms = roomsOf([
+      roomHealth(t.roomProgress,  now, 1),
+      roomHealth(t.roomProgress2, now, 2),
+    ]);
+    if (playersList.length === 0 && !worstRoomTier(rooms)) continue;
 
     out.push({
       kind: 'tile', id: coord, name: t.name || coord,
       bucket: bucketFor(t.linkedAt ?? null, t.lastReportAt ?? null, now),
       players: playersList,
+      rooms,
     });
   }
 
@@ -410,6 +760,20 @@ export function buildOfficialReport(
     // single item, whose slots span every player idle here).
     const items = new Map<string, OfficialWarnItem>();
     const allIdleSlots: string[] = [];
+
+    // Room pace leads the list: it is the only world-level judgement here, and a
+    // world can be on the report for this and nothing else. It carries no slots
+    // and no playerId — the room's pace is nobody's individual fault, which is
+    // also why these codes never reach the player-facing Problems block and
+    // never charge a statusIncident. `detail` is rendered NOW because the
+    // samples behind it are pruned at 14 days while reports are kept for 10.
+    for (const h of c.rooms) {
+      if (!h.tier) continue;
+      items.set(`room${h.room}`, {
+        code:   h.tier === 'danger' ? 'roomDanger' : 'roomCaution',
+        detail: roomHealthText(h, c.rooms.length > 1),
+      });
+    }
     const add = (code: OfficialWarnItem['code'], slot: string, p?: ReportCandidate['players'][number]) => {
       const key = `${code}|${p?.playerId ?? ''}`;
       const cur = items.get(key);
@@ -430,7 +794,12 @@ export function buildOfficialReport(
 
     const list = [...items.values()];
     // Two players can own same-named slots; dedupe so the line reads once each.
-    for (const it of list) it.slots = [...new Set(it.slots)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    // Skip the slotless items (room pace) — `new Set(undefined)` would stamp them
+    // with an empty array that RTDB then stores as null.
+    for (const it of list) {
+      if (!it.slots) continue;
+      it.slots = [...new Set(it.slots)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    }
     if (list.length) warnings.push({ kind: c.kind, id: c.id, name: c.name, handled: false, items: list });
   }
 
@@ -477,6 +846,10 @@ export function warnItemText(it: OfficialWarnItem, wrap: (s: string) => string =
     case 'lastChecker':   return `${it.handle} is the last still finding checks — others here are at 100% and may be waiting on an item from them.${tail}`;
     case 'noActivity144': return `${it.handle} — no activity in over ${WARN_NO_ACTIVITY_HOURS} hours.${tail}`;
     case 'allIdle60':     return `No activity by players in last ${WARN_ALL_STALE_HOURS} hours.${tail}`;
+    // Room pace. The thresholds are read from the constants (as `allIdle60`'s
+    // text is) so the wording can never drift from what actually fired.
+    case 'roomCaution':   return `Room pace under ${ROOM_CAUTION_PCT}% per ${ROOM_WINDOW_HOURS}h — worth a look. ${it.detail ?? ''}`.trim();
+    case 'roomDanger':    return `Room pace under ${ROOM_DANGER_PCT}% per ${ROOM_WINDOW_HOURS}h — needs investigation. ${it.detail ?? ''}`.trim();
   }
 }
 

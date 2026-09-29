@@ -5,9 +5,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { missionDisplayLabel } from '../../lib/missionLogic';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown, warnItemText,
-  excuseKey, type ExcuseMap, type ReportCandidate, type ReportPlayerFinding,
+  excuseKey, roomHealthText, worstRoomTier, ROOM_WINDOW_HOURS,
+  type ExcuseMap, type ReportCandidate, type ReportPlayerFinding, type RoomHealth,
 } from '../../lib/statusReport';
 import { runOfficialStatusReport, markStatusWarningHandled, excuseStatusProblem } from '../../firebase/db';
+import RoomPeek from './statusReportPage/RoomPeek';
 import type { OfficialReport, OfficialProblemPlayer, OfficialProblemWorld, OfficialWarnWorld } from '../../types';
 
 const HOUR = 3_600_000;
@@ -82,29 +84,71 @@ function PlayerBlock({ player, excuse }: { player: ReportPlayerFinding; excuse?:
   );
 }
 
-function CandidateCard({ c, excuseFor }: { c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode }) {
+// How fast the whole ROOM is clearing — a world-level reading that owes nothing
+// to any one player, so it sits above the player blocks rather than inside one.
+// The tier word is spelled out beside the glyph: the legend above promises that
+// meaning survives without hue, for the colour-blind themes.
+function RoomRow({ h, showRoom }: { h: RoomHealth; showRoom: boolean }) {
+  if (!h.tier) return null;
+  return (
+    <div className={`sr-room sr-room-${h.tier}`}>
+      <span className="sr-room-tag">{h.tier === 'danger' ? '⛔ DANGER' : '⚠ CAUTION'}</span>
+      <span className="sr-room-text">{roomHealthText(h, showRoom)}</span>
+    </div>
+  );
+}
+
+function CandidateCard({ c, excuseFor, now }: {
+  c: ReportCandidate; excuseFor?: (playerId: string) => ReactNode; now: number;
+}) {
   const problems = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'problem').length, 0);
   const warnings = c.players.reduce((n, p) => n + p.findings.filter(f => f.tier === 'warning').length, 0);
+  const roomTier = worstRoomTier(c.rooms);
+
+  // Peek state is per card and local: opening one is a look, not a setting, so it
+  // deliberately does not survive a remount or coordinate with the other cards.
+  const [peek, setPeek] = useState(false);
+
   return (
     <div className="dash-tile-card sr-card">
       <div className="sr-card-header">
         <span className="sr-card-kind" title={c.kind === 'mission' ? 'Mission' : 'Challenge'}>
           {c.kind === 'mission' ? '⚜' : '⚔'}
         </span>
-        <span className="dash-tile-name">{c.name}</span>
+        {/* The world name is the disclosure control — a real <button>, so it is
+            keyboard-reachable; WorldCheeseLink already stops propagation, so the
+            links beside it keep working. */}
+        <button
+          type="button"
+          className="sr-peek-toggle"
+          aria-expanded={peek}
+          onClick={() => setPeek(o => !o)}
+          title={peek ? 'Hide room detail' : 'Show room detail — slots, timers, notes, pace'}
+        >
+          <span className="sr-peek-caret">{peek ? '▾' : '▸'}</span>
+          <span className="dash-tile-name">{c.name}</span>
+        </button>
         <WorldCheeseLink kind={c.kind} id={c.id} />
         <span className="sr-card-counts">
+          {roomTier && (
+            <span
+              className={`sr-count sr-count-${roomTier === 'danger' ? 'problem' : 'warning'}`}
+              title={`Room pace over the last ${ROOM_WINDOW_HOURS}h`}
+            >🏚{c.rooms.filter(r => r.tier).length > 1 ? ` ×${c.rooms.filter(r => r.tier).length}` : ''}</span>
+          )}
           {problems > 0 && <span className="sr-count sr-count-problem">{problems}⛔</span>}
           {warnings > 0 && <span className="sr-count sr-count-warning">{warnings}⚠</span>}
         </span>
       </div>
+      {c.rooms.map(h => <RoomRow key={h.room} h={h} showRoom={c.rooms.length > 1} />)}
       {c.players.map(p => <PlayerBlock key={p.playerId} player={p} excuse={excuseFor?.(p.playerId)} />)}
+      {peek && <RoomPeek kind={c.kind} id={c.id} now={now} />}
     </div>
   );
 }
 
-function CollapsibleSection({ title, list, defaultOpen = false }: {
-  title: string; list: ReportCandidate[]; defaultOpen?: boolean;
+function CollapsibleSection({ title, list, now, defaultOpen = false }: {
+  title: string; list: ReportCandidate[]; now: number; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -116,7 +160,7 @@ function CollapsibleSection({ title, list, defaultOpen = false }: {
       {open && (
         list.length === 0
           ? <div className="dash-empty">None.</div>
-          : list.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} />)
+          : list.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} now={now} />)
       )}
     </div>
   );
@@ -400,6 +444,7 @@ export default function StatusReportPage() {
         <span className="sr-legend">
           <span><span className="sr-badge sr-badge-problem">⛔</span> Problem</span>
           <span><span className="sr-badge sr-badge-warning">⚠</span> Warning</span>
+          <span><span className="sr-badge">🏚</span> Room pace</span>
         </span>
       </div>
 
@@ -425,10 +470,10 @@ export default function StatusReportPage() {
       <h3 className="sr-subhead">Live Candidates</h3>
       {active.length === 0
         ? <div className="dash-empty">No active report candidates — every in-progress mission and challenge is healthy.</div>
-        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} excuseFor={excuseFor(c)} />)}
+        : active.map(c => <CandidateCard key={`${c.kind}-${c.id}`} c={c} excuseFor={excuseFor(c)} now={now} />)}
 
-      <CollapsibleSection title="Too Early" list={tooEarly} />
-      <CollapsibleSection title="Recently Reported" list={recentlyReported} />
+      <CollapsibleSection title="Too Early" list={tooEarly} now={now} />
+      <CollapsibleSection title="Recently Reported" list={recentlyReported} now={now} />
 
       {/* Recent reports archive — the full last-10, newest first (includes the one
           shown above, so reviewing always works even after a single run). */}

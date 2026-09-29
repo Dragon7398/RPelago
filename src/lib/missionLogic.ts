@@ -1,4 +1,4 @@
-import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame } from '../types';
+import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame, Tile } from '../types';
 import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
 import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
 import { rollTableSetup } from './casinoEngine';
@@ -231,13 +231,99 @@ export function outstandingConfigsBlockRoom(m: GMMission, now: number): boolean 
  * slot at 100% has found everything of its own but may still owe items to other
  * players' worlds, so the room isn't done with it.
  */
+// Goaled/Done ONLY — deliberately not FREE_COMPLETED_STATUSES / `slotsAllFree`,
+// which count `100%`. A slot with every check but no goal still holds the world
+// open; it frees its holder's CLAIM, which is a different question from whether
+// the world can settle. Shared by both readiness checks so they cannot drift.
+const goaled = (s: { status?: string }) => s.status === 'Done' || s.status === 'Goaled';
+
 export function missionReadyToComplete(m: GMMission): boolean {
   const participants = Object.values(m.participants ?? {});
   if (participants.length === 0) return false;
-  return participants.every(p => {
+  const seatsDone = participants.every(p => {
     const slots = p.slots ?? [];
-    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
+    return slots.length > 0 && slots.every(goaled);
   });
+  if (!seatsDone) return false;
+
+  // An unanswered kick leaves a LIVE Archipelago slot that nobody is playing, so
+  // the room is not finished even though every seated player is. Suggesting
+  // settle here would quietly write off the slot (its reserved pot share is never
+  // paid) on a table that might still be waiting for a claimant. The host can
+  // still settle — this only withdraws the hint — and the card's OPEN SLOTS panel
+  // is where they either wait for a claim or ⊘ release it into a void.
+  // An already-goaled entry does not block: that Archipelago slot IS finished,
+  // whatever became of the player who was kicked off it.
+  return claimEntries(m).every(([, e]) => e.slots.length > 0 && e.slots.every(goaled));
+}
+
+/** What is still standing between a mission and settlement, itemised. */
+export interface SettleBlockers {
+  seats: number;   // participants whose slots are not all Goaled/Done
+  open:  number;   // unclaimed claimable entries that are not all Goaled/Done
+  total: number;
+}
+
+/**
+ * The count behind the Complete confirmation dialog — the same rule as
+ * `missionReadyToComplete`, itemised so the dialog can say WHAT is unfinished.
+ *
+ * It deliberately does NOT reuse `hasUnfinishedSlots`, which counts a `100%` seat
+ * as finished because it reads `FREE_COMPLETED_STATUSES` — the set that releases a
+ * player's CLAIM. That is the right question for claim capacity and the wrong one
+ * here: a 100% seat has found everything of its own and may still owe items to
+ * other worlds, so the room is not done with it. The two must stay separate.
+ *
+ * One divergence from `missionReadyToComplete`: an EMPTY cohort is "not ready"
+ * (there is nothing to settle) but has no blockers, so completing it warns about
+ * nothing — which is the long-standing behaviour and the sensible one.
+ */
+export function missionSettleBlockers(m: GMMission): SettleBlockers {
+  const seats = Object.values(m.participants ?? {}).filter(p => {
+    const slots = p.slots ?? [];
+    return slots.length === 0 || !slots.every(goaled);
+  }).length;
+
+  const open = claimEntries(m)
+    .filter(([, e]) => e.slots.length === 0 || !e.slots.every(goaled))
+    .length;
+
+  return { seats, open, total: seats + open };
+}
+
+/**
+ * The tile twin of `missionReadyToComplete`, and the source of the ✓ badge on the
+ * admin Challenges card.
+ *
+ * A tile has two slot kinds a mission does not, and BOTH were missing from the
+ * inline predicate this replaced:
+ *
+ *  - `publicSlots` — open to anyone, never consumed, and just as much a part of
+ *    the Archipelago room as an adventurer's. An ungoaled one means the room is
+ *    not finished, whoever was or wasn't playing it.
+ *  - `claimableSlots` — a vacated slot nobody took over. Same reasoning as the
+ *    mission side: a live slot with no player, which settling would write off.
+ *    (Tiles store these as bare `AdvSlot[]`, not the casino `ClaimableEntry`.)
+ *
+ * Advisory only, like the mission badge: the host can always press Complete.
+ */
+export function tileReadyToComplete(t: Tile): boolean {
+  const advs = Object.values(t.adventurers ?? {});
+  if (advs.length === 0) return false;
+
+  const advsDone = advs.every(a => {
+    const slots = normalizeSlots(a.slots as AdvSlot[] | undefined);
+    return slots.length > 0 && slots.every(goaled);
+  });
+  if (!advsDone) return false;
+
+  if (!normalizeSlots(t.publicSlots).every(goaled)) return false;
+
+  return Object.values(t.claimableSlots ?? {})
+    .every(raw => {
+      const slots = normalizeSlots(raw);
+      return slots.length > 0 && slots.every(goaled);
+    });
 }
 
 /**

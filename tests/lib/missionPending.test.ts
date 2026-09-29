@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  missionPendingAction, missionReadyToComplete, seatsMissingConfig, seatsAwaitingConfig,
+  missionPendingAction, missionReadyToComplete, tileReadyToComplete, missionSettleBlockers,
+  seatsMissingConfig, seatsAwaitingConfig,
   seatOwesConfig, outstandingConfigsBlockRoom, missionClockOrigin, compareMissionsForAdmin,
-  holdPinned,
+  holdPinned, hasUnfinishedSlots,
 } from '../../src/lib/missionLogic';
-import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant } from '../../src/types';
+import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant, Tile } from '../../src/types';
 
 const HOUR = 3600_000;
 const slot = (status?: AdvSlot['status']): AdvSlot => ({ name: 'n', game: 'g', ...(status ? { status } : {}) });
@@ -142,6 +143,55 @@ describe('missionReadyToComplete', () => {
     expect(missionReadyToComplete(mission({ participants: seats(seated('a', { slots: [] })) }))).toBe(false);
     expect(missionReadyToComplete(mission({ participants: {} }))).toBe(false);
   });
+
+  // An unanswered kick leaves a live Archipelago slot nobody is playing, so the
+  // ROOM is unfinished even when every seated player is done.
+  describe('outstanding claimable slots', () => {
+    const doneSeats = seats(seated('a', { slots: [slot('Done'), slot('Goaled')] }));
+    const ready = (claimableSlots: GMMission['claimableSlots']) =>
+      missionReadyToComplete(mission({ participants: doneSeats, claimableSlots }));
+
+    it('blocks on an ungoaled open slot', () => {
+      expect(ready({ k1: { slots: [slot('In-Progress')] } })).toBe(false);
+      expect(ready({ k1: { slots: [slot('Unstarted')] } })).toBe(false);
+      // 100% is not goaled here either — same rule the seats get.
+      expect(ready({ k1: { slots: [slot('100%')] } })).toBe(false);
+      // One bad slot in an otherwise finished entry is enough.
+      expect(ready({ k1: { slots: [slot('Done'), slot('In-Progress')] } })).toBe(false);
+      // …and one bad entry among several.
+      expect(ready({ k1: { slots: [slot('Goaled')] }, k2: { slots: [slot('Unstarted')] } })).toBe(false);
+    });
+
+    it('does not block on an entry whose slot already goaled', () => {
+      // That Archipelago slot IS finished, whatever became of the kicked player.
+      expect(ready({ k1: { slots: [slot('Goaled')] } })).toBe(true);
+      expect(ready({ k1: { slots: [slot('Done')] } })).toBe(true);
+    });
+
+    it('blocks on an entry advertising an opening with no slots', () => {
+      expect(ready({ k1: { slots: [] } })).toBe(false);
+    });
+
+    it('is unaffected when there are no claimable slots', () => {
+      expect(ready(undefined)).toBe(true);
+      expect(ready({})).toBe(true);
+    });
+
+    it('reads the legacy bare-array shape too', () => {
+      expect(ready({ k1: [slot('In-Progress')] })).toBe(false);
+      expect(ready({ k1: [slot('Goaled')] })).toBe(true);
+    });
+
+    it('drops the ready-to-settle hint from the admin board', () => {
+      const m = mission({ state: 'inprogress', participants: doneSeats, link: 'https://archipelago.gg/room/x' });
+      expect(missionPendingAction(m, 0)?.code).toBe('complete');
+      const withOpen = mission({
+        state: 'inprogress', participants: doneSeats, link: 'https://archipelago.gg/room/x',
+        claimableSlots: { k1: { slots: [slot('In-Progress')] } },
+      });
+      expect(missionPendingAction(withOpen, 0)).toBeNull();
+    });
+  });
 });
 
 describe('missionPendingAction — forming', () => {
@@ -271,5 +321,129 @@ describe('holdPinned — the card the host is working on', () => {
     const l = [row('b'), row('a')];
     holdPinned(l, { id: 'a', index: 0 });
     expect(ids(l)).toEqual(['b', 'a']);
+  });
+});
+
+// ── tileReadyToComplete ──────────────────────────────────────────────────────
+// The tile twin of the mission check, and the source of the ✓ badge on the admin
+// Challenges card. Tiles carry two slot kinds a mission does not, and the inline
+// predicate this replaced saw neither.
+
+describe('tileReadyToComplete', () => {
+  const adv = (owner: string, slots: AdvSlot[]) =>
+    ({ advId: owner, owner, ownerName: owner.toUpperCase(), name: 'A', cls: 'warrior', slots });
+  const t = (over: Partial<Tile> = {}): Tile => ({
+    state: 'inprogress', required: 1, adventurers: {}, name: 'Tile',
+    release: 'on', collect: 'off', hint: 0, details: '', gold: 0, xp: 0, bonusXP: 0,
+    diffBonus: 0, baseRelease: 'on', baseCollect: 'off', baseHint: 0, adminOverride: false,
+    link: 'x',
+    ...over,
+  } as Tile);
+
+  const done = { a: adv('a', [slot('Done'), slot('Goaled')]) } as unknown as Tile['adventurers'];
+
+  it('needs at least one adventurer, each with terminal slots', () => {
+    expect(tileReadyToComplete(t({ adventurers: done }))).toBe(true);
+    expect(tileReadyToComplete(t({ adventurers: {} }))).toBe(false);
+    expect(tileReadyToComplete(t({
+      adventurers: { a: adv('a', [slot('In-Progress')]) } as unknown as Tile['adventurers'],
+    }))).toBe(false);
+    expect(tileReadyToComplete(t({
+      adventurers: { a: adv('a', []) } as unknown as Tile['adventurers'],
+    }))).toBe(false);
+  });
+
+  it('does NOT count 100% as terminal, matching the mission rule', () => {
+    expect(tileReadyToComplete(t({
+      adventurers: { a: adv('a', [slot('100%')]) } as unknown as Tile['adventurers'],
+    }))).toBe(false);
+  });
+
+  it('blocks on an ungoaled PUBLIC slot — the old inline check could not see these', () => {
+    expect(tileReadyToComplete(t({ adventurers: done, publicSlots: [slot('In-Progress')] }))).toBe(false);
+    expect(tileReadyToComplete(t({ adventurers: done, publicSlots: [slot('Unstarted')] }))).toBe(false);
+    expect(tileReadyToComplete(t({ adventurers: done, publicSlots: [slot('Goaled')] }))).toBe(true);
+    expect(tileReadyToComplete(t({ adventurers: done, publicSlots: [] }))).toBe(true);
+  });
+
+  it('blocks on an unclaimed vacated slot, like the mission board', () => {
+    expect(tileReadyToComplete(t({ adventurers: done, claimableSlots: { k: [slot('In-Progress')] } }))).toBe(false);
+    expect(tileReadyToComplete(t({ adventurers: done, claimableSlots: { k: [] } }))).toBe(false);
+    // Already goaled: that Archipelago slot IS finished, whoever left it behind.
+    expect(tileReadyToComplete(t({ adventurers: done, claimableSlots: { k: [slot('Goaled')] } }))).toBe(true);
+    expect(tileReadyToComplete(t({ adventurers: done, claimableSlots: {} }))).toBe(true);
+  });
+
+  it('agrees with the mission rule on the shared cases', () => {
+    // Both sides read the same `goaled` predicate, so a status that settles one
+    // settles the other.
+    for (const st of ['Done', 'Goaled'] as const) {
+      expect(tileReadyToComplete(t({ adventurers: { a: adv('a', [slot(st)]) } as unknown as Tile['adventurers'] }))).toBe(true);
+      expect(missionReadyToComplete(mission({ participants: seats(seated('a', { slots: [slot(st)] })) }))).toBe(true);
+    }
+    for (const st of ['100%', 'In-Progress', 'Unstarted'] as const) {
+      expect(tileReadyToComplete(t({ adventurers: { a: adv('a', [slot(st)]) } as unknown as Tile['adventurers'] }))).toBe(false);
+      expect(missionReadyToComplete(mission({ participants: seats(seated('a', { slots: [slot(st)] })) }))).toBe(false);
+    }
+  });
+});
+
+// ── missionSettleBlockers ────────────────────────────────────────────────────
+// The Complete dialog's gate. It must agree with the board's ✓ hint, and it must
+// name WHAT is unfinished — an unclaimed open slot is not a participant.
+
+describe('missionSettleBlockers', () => {
+  const doneSeat = seats(seated('a', { slots: [slot('Done'), slot('Goaled')] }));
+
+  it('is empty when the cohort and every open slot are terminal', () => {
+    expect(missionSettleBlockers(mission({ participants: doneSeat }))).toEqual({ seats: 0, open: 0, total: 0 });
+    expect(missionSettleBlockers(mission({
+      participants: doneSeat, claimableSlots: { k: { slots: [slot('Goaled')] } },
+    }))).toEqual({ seats: 0, open: 0, total: 0 });
+  });
+
+  it('counts a seat that is not all Goaled/Done, slotless included', () => {
+    expect(missionSettleBlockers(mission({ participants: seats(
+      seated('a', { slots: [slot('Done')] }),
+      seated('b', { slots: [slot('In-Progress')] }),
+      seated('c', { slots: [] }),
+    ) }))).toEqual({ seats: 2, open: 0, total: 2 });
+  });
+
+  it('counts a 100% seat — unlike hasUnfinishedSlots, which frees its CLAIM', () => {
+    // FREE_COMPLETED_STATUSES calls 100% finished because the player may take
+    // another world. Settlement asks a different question: that seat can still
+    // owe items to the rest of the room.
+    expect(missionSettleBlockers(mission({
+      participants: seats(seated('a', { slots: [slot('100%')] })),
+    }))).toEqual({ seats: 1, open: 0, total: 1 });
+    expect(hasUnfinishedSlots(seats(seated('a', { slots: [slot('100%')] })))).toBe(0);
+  });
+
+  it('counts unclaimed open slots separately from seats', () => {
+    const b = missionSettleBlockers(mission({
+      participants: seats(seated('a', { slots: [slot('In-Progress')] })),
+      claimableSlots: { k1: { slots: [slot('In-Progress')] }, k2: [slot('Unstarted')], k3: { slots: [slot('Done')] } },
+    }));
+    expect(b).toEqual({ seats: 1, open: 2, total: 3 });
+  });
+
+  it('agrees with the board hint on every non-empty cohort', () => {
+    const cases: GMMission[] = [
+      mission({ participants: doneSeat }),
+      mission({ participants: doneSeat, claimableSlots: { k: { slots: [slot('In-Progress')] } } }),
+      mission({ participants: seats(seated('a', { slots: [slot('100%')] })) }),
+      mission({ participants: seats(seated('a', { slots: [] })) }),
+    ];
+    for (const m of cases) {
+      expect(missionSettleBlockers(m).total === 0).toBe(missionReadyToComplete(m));
+    }
+  });
+
+  it('warns about nothing on an empty cohort, which is NOT "ready" either', () => {
+    // The one deliberate divergence: nothing to settle, but nothing to warn about.
+    const empty = mission({ participants: {} });
+    expect(missionSettleBlockers(empty).total).toBe(0);
+    expect(missionReadyToComplete(empty)).toBe(false);
   });
 });

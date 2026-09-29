@@ -207,6 +207,20 @@
       }
     },
 
+    // Per-slot check-count history, sampled by tickSlotStatuses and read only by
+    // the admin Report tab's room peek. Deliberately NOT under seasons/: that node
+    // is streamed in full to every player by subscribeToGame, and this tree is
+    // several times the size of the room totals that live there, to serve one
+    // admin page reading one world at a time.
+    //
+    // Admin-only read (operational data; the Report tab is admin-only anyway) and
+    // NOBODY may write — the scheduled tick uses the Admin SDK, which bypasses
+    // rules, so there is no client write path to allow.
+    "roomTelemetry": {
+      ".read":  "auth != null && root.child('config/adminId').val() === auth.uid",
+      ".write": false
+    },
+
     "kmkEvents": {
       // Public read — the player trial board is viewable by anyone.
       ".read": true,

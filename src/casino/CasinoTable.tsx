@@ -100,6 +100,22 @@ function closeTable() {
   setTimeout(() => { if (!window.closed) window.location.href = '/'; }, 150);
 }
 
+// ── Clock ─────────────────────────────────────────────────────────────────────
+
+// A seat's countdown is only shown inside its last 15 minutes. Both the seat
+// status below and the tick-rate gate read this, so the window and the clock
+// that renders it cannot drift apart.
+const DEADLINE_WARN_MS = 900_000;
+
+// Outside that window nothing on screen moves faster than the decay cap (hours),
+// so a 1 Hz re-render of the whole table was pure waste — and not free: every
+// re-render gives the compositor another chance to re-blend the cards' noise
+// overlay, which is what was warming players' machines. Tick fast only in the
+// window, entering it one slow tick early so the countdown appears at a clean
+// 15:00 rather than however far into the window the slow tick happened to land.
+const TICK_FAST_MS = 1_000;
+const TICK_SLOW_MS = 30_000;
+
 // ── Seat status helper ────────────────────────────────────────────────────────
 
 // `seatOpen` is false for a seat decay has closed — an unfillable slot, which is
@@ -109,7 +125,7 @@ function seatStatus(p: GMParticipant | null | undefined, isMe: boolean, now: num
   if (p.played) return 'locked' as const;
   if (isMe) return 'playing' as const;
   if (p.holeLocked) return 'playing' as const;   // Hold 'Em: in, waiting on the reveal
-  if (p.startBy && now > p.startBy - 900_000) return 'deadline' as const; // warn in last 15 min
+  if (p.startBy && now > p.startBy - DEADLINE_WARN_MS) return 'deadline' as const; // warn in last 15 min
   return 'waiting' as const;
 }
 
@@ -193,11 +209,32 @@ export function CasinoTable() {
   const prevPot = useRef<number | null>(null);
   const yamlInputRef = useRef<HTMLInputElement>(null);
 
-  // 1-second tick for countdown timers
+  // Tick for countdown timers. Two-speed: see TICK_FAST_MS. The deadline set is
+  // reduced to a string first so an unrelated mission update (a pot cut, another
+  // seat locking in) doesn't restart the clock.
+  const deadlineKey = Object.values(mission?.participants ?? {})
+    .map(p => p.startBy ?? 0)
+    .sort((a, b) => a - b)
+    .join(',');
+  const deadlines = useMemo(
+    () => deadlineKey.split(',').map(Number).filter(t => t > 0),
+    [deadlineKey],
+  );
+
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+    let timer: number | undefined;
+    const tick = () => {
+      const t = Date.now();
+      setNow(t);
+      // One slow tick of lead-in, so we are already at 1 Hz when the window opens.
+      const fast = deadlines.some(
+        d => t >= d - DEADLINE_WARN_MS - TICK_SLOW_MS && t <= d,
+      );
+      timer = window.setTimeout(tick, fast ? TICK_FAST_MS : TICK_SLOW_MS);
+    };
+    tick();
+    return () => window.clearTimeout(timer);
+  }, [deadlines]);
 
   // Auth subscription
   useEffect(() => {

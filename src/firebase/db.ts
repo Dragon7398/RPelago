@@ -9,9 +9,9 @@ import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, hasUnfinishedSlots } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
-import { hasUnexcusedProblem } from '../lib/statusReport';
+import { hasUnexcusedProblem, type SlotProgressSamples } from '../lib/statusReport';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -1087,6 +1087,28 @@ export async function setSlotStatusNote(missionId: string, slotIndex: number, no
 const worldBase = (kind: 'mission' | 'tile', id: string) =>
   kind === 'mission' ? `missions/${id}` : `tiles/${id}`;
 
+/**
+ * Per-slot check history for ONE world, for the Report tab's room peek.
+ *
+ * A one-shot read, not a subscription, and the path is TOP-LEVEL rather than
+ * under `seasons/` — `subscribeToGame` streams that whole node to every player,
+ * and this tree exists to serve a single admin page looking at one world at a
+ * time. Admin-only by rule; a non-admin read rejects rather than returning {}.
+ *
+ * Returns `{}` when nothing has been sampled yet (a room younger than the first
+ * tick, or one whose slots are all Done and no longer polled).
+ */
+export async function fetchRoomTelemetry(
+  kind: 'mission' | 'tile', id: string, room: 1 | 2 = 1,
+): Promise<SlotProgressSamples> {
+  assertDb();
+  const base = kind === 'mission'
+    ? `roomTelemetry/${getCurrentSeason()}/missions/${id}`
+    : `roomTelemetry/${getCurrentSeason()}/tiles/${id}/${room}`;
+  const snap = await get(ref(db!, base));
+  return snap.exists() ? (snap.val() as SlotProgressSamples) : {};
+}
+
 // Persist an official report and apply its side effects in one atomic update:
 //   • +1 statusIncident for every UNEXCUSED player in a Problem world
 //   • reset lastReportAt (= report.ts) on every Problem world that pinged someone
@@ -1354,6 +1376,10 @@ export async function syncPlayerProfile(
 // dates each row by.
 function archivedMission(mission: GMMission, potShares: Map<string, number>, now: number): GMMission {
   const settled: GMMission = { ...mission, state: 'complete', completedAt: now };
+  // Room-pace samples are live telemetry for the status report, not part of the
+  // settled record — a fortnight of them per table would sit in history forever
+  // answering a question nobody asks of a finished room.
+  delete settled.roomProgress;
   if (mission.type !== 'casino') return settled;
 
   const participants: Record<string, GMParticipant> = {};
@@ -1370,8 +1396,10 @@ function archivedMission(mission: GMMission, potShares: Map<string, number>, now
 
 // Completes a mission: awards XP/GP (with feat bonuses), writes CompletedChallenge
 // records, archives to missionsHistory, and clears participants' held claims.
-// Returns { warned, unfinishedSlots } without acting when gating applies and
-// confirmed is not true — caller shows the confirmation dialog then re-calls.
+// Returns { warned, blockers } without acting when gating applies and confirmed
+// is not true — caller shows the confirmation dialog then re-calls. The gate is
+// `missionSettleBlockers`, the same Goaled/Done rule as the board's "ready to
+// settle" hint, so the dialog and the badge can never disagree.
 export async function completeMission(
   mission: GMMission,
   players: Record<string, Player>,
@@ -1382,12 +1410,12 @@ export async function completeMission(
   // records later carry a uniform `xp: 0`, per the season-architecture plan.
   shell: 'map' | 'casino',
   confirmed?: boolean,
-): Promise<{ warned?: boolean; unfinishedSlots?: number }> {
+): Promise<{ warned?: boolean; blockers?: SettleBlockers }> {
   assertDb();
 
-  const unfinished = hasUnfinishedSlots(mission.participants ?? {});
-  if (unfinished > 0 && !confirmed) {
-    return { warned: true, unfinishedSlots: unfinished };
+  const blockers = missionSettleBlockers(mission);
+  if (blockers.total > 0 && !confirmed) {
+    return { warned: true, blockers };
   }
 
   const ownerIds = Object.keys(mission.participants ?? {});

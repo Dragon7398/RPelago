@@ -321,7 +321,7 @@ Mission state machine: `forming → inprogress → complete`.
 
 > **Display seats with `seatTally`, never `currentMaxSlots`.** Decay lowers the cap but never evicts a seated player, and a casino cohort keeps decaying while it waits for every seat to lock in (`shouldDeploy` also demands `allSeatsPlayed`) — so the cap legitimately slides *below* the fill count and a raw `{filled}/{currentMaxSlots}` renders the nonsense **"7/6"**. `seatTally(m, now)` floors the shown max at the fill count and returns `{ filled, max, over, label, title }`, rendering **"7/7\*"** with an explanatory tooltip. Anything indexed by max seats (seat rails, pips, `SeatGrid`) must use it too, or an occupied seat gets drawn as closed — or dropped entirely. `GMMissionCard.seats` carries the tally for card consumers. Gameplay math (deploy, `takeable`, pot split at settle) keeps using `currentMaxSlots`.
 
-> **The admin mission board is a work queue, sorted by `compareMissionsForAdmin`.** Both columns put whatever is **waiting on the host** first, then longest-waiting first. `missionPendingAction(m, now)` is the single source of that judgement and returns at most one action: forming → `configs` (full but a seat has no usable YAML) / `deploy`; in progress → `denied` / `generate` (no room link) / `complete` (every slot Goaled/Done). It supersedes MissionCard's old ad-hoc `needsRoom` flag, which fired on **any** full forming table — including a casino one still short a config, which will *not* auto-deploy (`shouldDeploy` demands `allSeatsPlayed`). A seat owes a config (`seatOwesConfig`) when `yamlDenied === true` **or** `played !== true` — a deny deletes the stored file but deliberately leaves `played` true, so a denied seat looks locked-in and is exactly as unusable. **The exception is a pure claimant**: `claimMissionSlot` creates its participant record with `played` left unset and it stays unset forever, so testing `played` alone accuses every claimant of never submitting. They are told apart by their slots being entirely `claimed`. Because a denied file is *deleted* from Storage, `adminGetCasinoYamls` structurally cannot return it and the seat vanishes from the download list — so `CasinoYamlDownload` renders `seatsAwaitingConfig(mission)` as its own roster above that list, derived from mission state, needing no fetch and surviving a deny that empties the list entirely. **Its severity is the host's, not the players'**: `outstandingConfigsBlockRoom` keeps the roster an amber *warning* while seats are still open (the room could not be generated today regardless, so a late config costs nothing) and turns it red only once the table is full — or is already live — and those configs are the last thing between the host and a room. The DENIED / NOT SUBMITTED wording distinguishes the rows in both states, so hue only ever carries urgency. **One card is exempt: `holdPinned`.** The board sorts on data the host is mid-way through changing, and pasting a room link is the worst case — it clears `generate` *and* zeroes the Elapsed clock, so the card being worked on drops the length of the column in one frame, with the tracker id, Cheese id and Sync still to do on it. `MissionsPage` therefore pins whichever card the host last touched (capture-phase `onPointerDownCapture`/`onFocusCapture` on the card root, so no per-action wiring can fall out of step) at the index they last **saw** it at — deliberately not a re-derived key, since the key that just moved is the thing being protected against. Everything else keeps sorting around it. **The pin marker must never affect layout** — it is set from a capture-phase pointerdown, so it re-renders mid-gesture, and a marker that reflows the card (it was a pill in the card's *wrapping* flex header, which shifted the Sync button and the room links sideways) moves the control out from under the pointer between pointerdown and pointerup; the browser then fires no `click` at all, so the host's first click silently does nothing and only the second lands. It is therefore an inset box-shadow on the card — painted, never laid out — and `handleInteract` returns early when the pin would be unchanged, so an ordinary click re-renders nothing. Touching another card moves the pin; the column header's **↕ re-sort** chip drops it; a card that leaves the list drops it (a pin holds a position, it never resurrects a row). The secondary sort key is `missionClockOrigin` — the same `linkedAt ?? deployedAt ?? firstJoinAt ?? createdAt` the card's **Elapsed** readout counts from — so the list descends in the order of the number printed on each card.
+> **The admin mission board is a work queue, sorted by `compareMissionsForAdmin`.** Both columns put whatever is **waiting on the host** first, then longest-waiting first. `missionPendingAction(m, now)` is the single source of that judgement and returns at most one action: forming → `configs` (full but a seat has no usable YAML) / `deploy`; in progress → `denied` / `generate` (no room link) / `complete` (`missionReadyToComplete` — every slot Goaled/Done, **including every unclaimed `claimableSlots` entry**: an unanswered kick leaves a live Archipelago slot nobody is playing, so the room is unfinished even when every seated player is done, and settling would silently write off its reserved pot share. An entry whose slot already goaled does not block. The hint is advisory only — the host can still settle, and the card's OPEN SLOTS panel is where they wait for a claim or ⊘ release it). **`tileReadyToComplete` is the tile twin**, behind the ✓ on the admin Challenges card: the same hoisted `goaled` predicate, plus the two slot kinds a mission has no equivalent of — an ungoaled **`publicSlots`** entry blocks (it is as much a part of the Archipelago room as an adventurer's slot) and so does an unclaimed **`claimableSlots`** one (tiles store those as bare `AdvSlot[]`, not the casino `ClaimableEntry`). It replaced an inline copy over `adventurers` alone that could see neither, and which therefore kept showing ✓ after the mission rule changed. **`missionSettleBlockers` is the third reader of that same rule** — the gate behind `completeMission`'s Complete-anyway dialog, itemised (`seats` / `open`) so the copy can name what is unfinished rather than calling an unclaimed slot a participant. It deliberately does **not** reuse `hasUnfinishedSlots`, which counts a `100%` seat as finished because it reads `FREE_COMPLETED_STATUSES` — the right question for claim capacity, the wrong one for settlement. Its one divergence from the hint: an **empty cohort** is not "ready" (nothing to settle) but has no blockers, so completing it warns about nothing. It supersedes MissionCard's old ad-hoc `needsRoom` flag, which fired on **any** full forming table — including a casino one still short a config, which will *not* auto-deploy (`shouldDeploy` demands `allSeatsPlayed`). A seat owes a config (`seatOwesConfig`) when `yamlDenied === true` **or** `played !== true` — a deny deletes the stored file but deliberately leaves `played` true, so a denied seat looks locked-in and is exactly as unusable. **The exception is a pure claimant**: `claimMissionSlot` creates its participant record with `played` left unset and it stays unset forever, so testing `played` alone accuses every claimant of never submitting. They are told apart by their slots being entirely `claimed`. Because a denied file is *deleted* from Storage, `adminGetCasinoYamls` structurally cannot return it and the seat vanishes from the download list — so `CasinoYamlDownload` renders `seatsAwaitingConfig(mission)` as its own roster above that list, derived from mission state, needing no fetch and surviving a deny that empties the list entirely. **Its severity is the host's, not the players'**: `outstandingConfigsBlockRoom` keeps the roster an amber *warning* while seats are still open (the room could not be generated today regardless, so a late config costs nothing) and turns it red only once the table is full — or is already live — and those configs are the last thing between the host and a room. The DENIED / NOT SUBMITTED wording distinguishes the rows in both states, so hue only ever carries urgency. **One card is exempt: `holdPinned`.** The board sorts on data the host is mid-way through changing, and pasting a room link is the worst case — it clears `generate` *and* zeroes the Elapsed clock, so the card being worked on drops the length of the column in one frame, with the tracker id, Cheese id and Sync still to do on it. `MissionsPage` therefore pins whichever card the host last touched (capture-phase `onPointerDownCapture`/`onFocusCapture` on the card root, so no per-action wiring can fall out of step) at the index they last **saw** it at — deliberately not a re-derived key, since the key that just moved is the thing being protected against. Everything else keeps sorting around it. **The pin marker must never affect layout** — it is set from a capture-phase pointerdown, so it re-renders mid-gesture, and a marker that reflows the card (it was a pill in the card's *wrapping* flex header, which shifted the Sync button and the room links sideways) moves the control out from under the pointer between pointerdown and pointerup; the browser then fires no `click` at all, so the host's first click silently does nothing and only the second lands. It is therefore an inset box-shadow on the card — painted, never laid out — and `handleInteract` returns early when the pin would be unchanged, so an ordinary click re-renders nothing. Touching another card moves the pin; the column header's **↕ re-sort** chip drops it; a card that leaves the list drops it (a pin holds a position, it never resurrects a row). The secondary sort key is `missionClockOrigin` — the same `linkedAt ?? deployedAt ?? firstJoinAt ?? createdAt` the card's **Elapsed** readout counts from — so the list descends in the order of the number printed on each card.
 
 `claimableSlots` on missions mirrors the tile claimable slot mechanic — created when a participant is kicked. **`slotsLocked` freezes a mission's whole in-progress record, not just its slots**: the admin 🔒 LOCK on MissionsPage also disables the room link, release, collect and the hint value. Once the room is generated those four describe a room that already EXISTS, and editing them changes only our record of it — the AP room is untouched — so a stray keystroke silently desynchronises what the players see from what we tell them. It is a guard against accident, never a permission boundary (the host can always unlock), so the controls render inert-and-dimmed rather than forbidden, and **Copy Room Text stays live** — reading was never the risk. The flag on the wire is unchanged; `MissionsPage` just reads it under a second name (`settingsLocked`) for the room fields. **The scope test is "could the host fumble it?"** — the lock covers hand-TYPED values only. Anything derived stays live: the tracker and Cheese ids are written solely by `handleSync` from the room link (there are no fields for them), and **Sync itself is never gated by the lock** — it is how the host gets an early read on slot statuses, and it corrects the record from the AP room rather than risking it. Entries have **two shapes**: non-casino missions write a bare `AdvSlot[]` (one entry holding all the kicked player's slots, claiming costs a mission claim), while casino tables write a richer `ClaimableEntry` — see **Casino: void vs kick** below. Every reader goes through `normalizeClaimEntry` / `claimEntries` (`slotHelpers.ts`), so legacy bare arrays keep working.
 
@@ -345,6 +345,38 @@ Both sync paths write **leaf fields** (`slots/{i}/status`, `/lastChecked`, `/las
 
 **`{NUMBER}` slot names.** A player may end a slot name with `{NUMBER}` so the room still generates through a name collision — Archipelago expands the token to nothing for the first such slot and to a digit for each one after (`jam_minit`, then `jam_minit2`). The stored name keeps the token, so it matches nothing on the tracker. Every sync path resolves it through **`resolveNumberedSlotName`** (`archipelagoApi.ts`, mirrored server-side in `tickSlotStatuses`) and **adopts the generated name permanently** — the client paths write it via `adminUpdate{Adv,Public,Participant}SlotName`, the tick folds it into its `updates` batch. Resolution is deliberately **only for the unambiguous case**: exactly one room name matching the base (bare or AP-numbered). Two or more real candidates return null, keep the token, and surface in the admin mismatch list — with two genuine `jam_minit` slots nothing in the name says whose is whose, so that mapping stays a manual call.
 
+A Cheese game row also carries `checks_done` / `checks_total` (summed per room for
+**Room pace**, below), and several fields we deliberately do not read:
+`progression_status` (see the BK note), `completion_status`,
+`availability_status`, `notes`, `user_is_away`, `effective_discord_user_id`.
+
+> **BK is handled by the TIMERS, not by a status field — do not start reading
+> `progression_status`.** Setting BK / Soft BK on Cheesetracker, or pressing its
+> **Still BK** button, refreshes `last_checked`; making real progress refreshes
+> `last_activity`. So the two signals we already read draw exactly the line that
+> matters, and the **player contract is a repeated act of attention**: a BK player
+> is expected to look at their slot every 2–3 days, confirm it is still BK, and
+> refresh the timer — either with Cheese's button (→ `last_checked`) or by updating
+> their note here (→ `lastReported`, via `setSlotStatusNote`). That cadence is
+> `PROBLEM_STALE_HOURS` (72h); the two are the same number by design.
+>
+> `progression_status` is a **label**, and the problem is that it is *enduring but
+> not self-correcting*. A player can set it back to `unblocked` and some do — but
+> clearing it is an unrewarded chore, so many simply don't, and even a diligent
+> player may deliberately leave it set while they go make a concerted effort to BK
+> the slot again. The decay is **one-directional**: BK gets set promptly because it
+> is useful to the player, and cleared late or never. That is worse than a field
+> that never changes, because a stale `bk` is indistinguishable from a current one —
+> the label cannot tell us which it is, and neither can we.
+>
+> So honouring it would replace a recurring check-in with a declaration that lasts
+> as long as the player leaves it sitting there, and would silently retire the
+> `stalled` problem for anyone flagged BK — including everyone who has long since
+> been unblocked. The label is not the proof of life; refreshing the timer is.
+>
+> The backstop for a room where everyone is diligently self-reporting BK and
+> nothing is actually moving is **Room pace** (below), which reads neither timer.
+
 **`deriveSlotStatus` gates `In-Progress` on `last_activity` being present — NOT on `checks_done`** (`collect` mechanics inflate a slot's check count without the player ever launching the game) and **not on `last_checked`** (the weak signal). Terminal states (Done/Goaled/100%) still win. **Any change to derivation or the strong/weak roles must be made in both `archipelagoApi.ts` and the server `deriveStatus`.** `parseCheeseTs` (`archipelagoApi.ts`) normalizes ISO → ms.
 
 ### Status reports
@@ -365,6 +397,105 @@ Warning items carry **`slots`** — the names of the slots that actually tripped
 
 - **Before** — the live candidate card's `excuse` toggle builds an `ExcuseMap` (key → optional reason) passed as `buildOfficialReport`'s 4th arg. Excused players are still written into the snapshot (audit trail) carrying `excused` / `excusedReason` / `excusedAt` / `excusedBy`, but `runOfficialStatusReport` skips their increment. **Presence of the key IS the excuse** — an empty reason still counts, so test with `in`/`hasOwnProperty`, never truthiness.
 - **After** — `excuseStatusProblem` on a stored report marks the snapshot row and **refunds** the incident. The refund is read-then-write, **not `increment(-1)`**: a player excused pre-run was never charged, and a blind decrement would go negative and mask a later real incident from the ≥5 auto-warning.
+
+### Room pace (room health)
+
+Every threshold in the status report above judges a **player**. This one judges the
+**room**: ten players can each look clean on the slot checks while the world as a
+whole crawls, and that is the case nothing else can see. It is scored from
+`checks_done` / `checks_total` — two integers Cheesetracker has always returned in
+the payload both sync paths already fetch, and which `deriveSlotStatus` used only
+for its `100%` test and then discarded.
+
+- **`tickSlotStatuses` is the ONLY writer.** It already holds the games for every
+  in-progress room, so it sums them into `roomProgress/{msEpoch}: {done, total}` on
+  the mission (or `roomProgress` / `roomProgress2` on a tile, mirroring
+  `cheese`/`cheese2` — a bifurcated tile is two Archipelago rooms and therefore two
+  readings). Spacing `ROOM_SAMPLE_MIN_HOURS` (6h), retention
+  `ROOM_SAMPLE_RETENTION_HOURS` (14d); the constants live in `statusReport.ts` and
+  are **mirrored in the tick** the way `deriveStatus` is. The admin **Sync** buttons
+  deliberately do NOT sample — one writer on a fixed cadence is the point, and the
+  tick covers live + draft seasons every 15 minutes regardless of who is looking.
+- **Store the raw pair, never a percentage.** `checks_total` MOVES: a slot that has
+  not connected reports 0 locations and adds its whole count on first connect, and a
+  voided card sits in the denominator forever. A stored percentage cannot tell
+  "nobody played" from "the room grew", which would have the report accuse a world
+  that just gained a player. For the same reason `roomHealth` divides the delta by
+  the **current** total, not the baseline's.
+- **The verdict is a RATE, not a raw delta**, because official runs are ad hoc:
+  `ratePct = deltaPct × (ROOM_WINDOW_HOURS / actual span)`. Caution under
+  `ROOM_CAUTION_PCT` (3%) per window, danger under `ROOM_DANGER_PCT` (1.5%) — at
+  which pace a mid-game room needs 2+ months. `ROOM_WINDOW_HOURS` **reuses
+  `PROBLEM_STALE_HOURS`** rather than declaring its own 72, exactly as the idle
+  badge does: that constant already is the check-in cadence and two copies would
+  drift. Normalisation only ever scales a LONGER span down (a sampling gap); a span
+  shorter than the window has no baseline and returns **null — unknown, never 0%**,
+  per `stale()`'s rule. A room with every check found is never flagged.
+- **A world with no player findings still gets a card** when its room is off the
+  pace — `computeStatusReport`'s `if (playersList.length === 0) continue` now also
+  tests the room tier, and dropping that is what would make the whole reading
+  useless.
+- **It never charges a `statusIncident` and never reaches the player-facing
+  Problems block.** The room's pace is nobody's individual fault. It is a
+  world-general **warning** item (`roomCaution` / `roomDanger`, carrying no
+  `playerId` and no `slots`), sorted to the head of its world's item list. Like
+  `allIdle60` these are **persisted wire values — never rename one**, and the
+  rendered text reads the threshold constants so wording cannot drift from what
+  fired. The item carries a pre-rendered **`detail`** because samples are pruned at
+  14 days while reports are kept for 10 runs — recomputing it later is impossible.
+- `detail` leads with the absolute counts on purpose. A room funnelled down to a
+  few checks ping-ponging between two players flags forever and the flag is
+  *correct*, but `+11 of 46 remaining` triages in one glance where a bare `0.9%`
+  would send the host into the room to learn it was fine.
+- `archivedMission` **strips `roomProgress`** — live telemetry, not part of the
+  settled record.
+
+### The room peek (admin Report tab)
+
+Clicking a world's name on a report card expands `RoomPeek`
+([src/components/admin/statusReportPage/RoomPeek.tsx](src/components/admin/statusReportPage/RoomPeek.tsx)):
+the room's pace chart plus one row per slot — handle, slot name, game, status,
+progress, daily movement, all three timers, the player's note, every finding that
+fired, and the world's open slots. It exists so judging a flagged world stops
+requiring a round trip to Cheesetracker.
+
+- **Per-slot history lives in top-level `roomTelemetry/`, NOT under `seasons/`.**
+  `subscribeToGame` does `onValue` on the whole season node, so anything added
+  there is streamed to **every player**. Room totals (~35 KB) stay inline because
+  every card's badge needs them; per-slot detail is ~7× that to serve one admin
+  page reading one world at a time, so it is fetched on demand by
+  `fetchRoomTelemetry`. Shape:
+  `roomTelemetry/{seasonId}/missions/{missionId}/{ts}/{apSlotKey}: {d, t}` and
+  `…/tiles/{coord}/{roomNum}/{ts}/{apSlotKey}`. Rules: **admin read, nobody
+  writes** (the tick is Admin SDK), pinned in `tests/rules/seasons.rules.test.ts`.
+- **Keys go through `apSlotKey`, never a bare `encodeURIComponent`** — the same
+  dot trap that cost `profiles/` a season of writes, and slot names are as
+  arbitrary as game names ("Dr. Mario"). It is **mirrored** in
+  `src/lib/slotHelpers.ts` and `functions/src/profileKeys.ts`, and unlike
+  `gameKey` it does **not** normalize whitespace: the client re-encodes the
+  `slot.name` it holds to find the series, so the two must agree byte for byte.
+  Encode-only — nothing ever decodes it. `tests/lib/profileKeys.test.ts` pins that
+  the two copies are identical.
+- **A day with no sample inside it is a GAP, not a zero.** `roomDailySeries` /
+  `slotDailySeries` require a sample *within* the day as well as one before it;
+  carrying the last known value forward would draw a stopped tick — or a room that
+  went all-Done and is no longer polled — as a confident run of zeroes. Today is a
+  gap until its first tick lands. Same instinct as `stale()`.
+- **The peek shows every code that fired; the report still collapses to one.**
+  `worldSlotReport` keeps the whole finding, where `classifySlot` lets a problem
+  outrank a warning — so `lastChecker` ("the others are at 100% and may be waiting
+  on this player") never reaches a ping even when it is the most useful line on
+  the row. It also keeps **clean and public slots**, which `playersFrom` drops
+  because nobody can be pinged about them.
+- **One scope, not two.** `missionScope` / `tileScope` build the slot set that both
+  `computeStatusReport` and `worldSlotReport` judge over. `allIdle60` and the two
+  last-player warnings compare a slot against every *other* slot in that list, so a
+  second construction that differed even slightly would silently change verdicts. A
+  bifurcated tile is deliberately ONE scope spanning both rooms; `ScopedSlot.room`
+  is display-only, for the peek's grouping.
+- A slot whose `{NUMBER}` never resolved matches no series and renders **"no
+  tracker match"** — its stored name is not the one the room generated, and showing
+  someone else's numbers would be worse than showing none.
 
 `renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
 
@@ -508,11 +639,12 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/constants.ts` | Grid dims, tile types, orbs, traits, items, feats, shops, level thresholds, `BASE_YAML_LIMITS` |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity`, `playerStatus`/`releasesClaimsEarly` (the active/restricted/disabled tri-state and the early-claim-release gate), `yamlLimitsForFeats`/`yamlLimitsForPlayer` |
-| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `resolveNumberedSlotName`, `fetchRoomStatus` |
 | `src/lib/apLists.ts` | The APworld-list (Drago's sheet) era registry — `AP_LISTS`, `currentApList`, `apListAt`. **Append one entry to ratchet to a new sheet** |
-| `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`) |
+| `src/lib/statusReport.ts` | Status-report classification + official-report builder/markdown (`computeStatusReport`, `buildOfficialReport`), room-pace scoring (`roomHealth`, `worstRoomTier`, `roomHealthText`, `ROOM_*`), and the peek's data (`missionScope`/`tileScope`, `worldSlotReport`, `roomDailySeries`, `slotDailySeries`) |
+| `src/components/admin/statusReportPage/` | RoomPeek — the expandable room detail panel on a report card |
 | `src/firebase/config.ts` | Firebase init, exports `db`, `auth`, `functions`, `storage` |
 | `src/firebase/season.ts` | Season path helpers (`sPath`/`sRef`/`secretPath`), `setCurrentSeason`, season resolution |
 | `src/firebase/casinoYaml.ts` | `uploadCasinoYaml` → owner-scoped Storage |

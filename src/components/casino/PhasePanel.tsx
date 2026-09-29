@@ -2,7 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
-import { FREE_COMPLETED_STATUSES, nameColorValue } from '../../lib/constants';
+import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { seatGames, type SeatGame } from './seatGames';
 
@@ -720,12 +720,17 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
  * Sort tier for the three-band ordering the boards use: still owed work, then
  * finished-but-still-owning-the-slot, then Done.
  *
- * Tier 1 is exactly `FREE_COMPLETED_STATUSES` minus Done, so the band that sits
- * below the divider stays the same set the rest of the app calls "completed" —
- * there is no second definition of finished to drift.
+ * **A `100%` slot is tier 0 — still working.** It is deliberately NOT
+ * `FREE_COMPLETED_STATUSES` minus Done, the way it reads at first glance: that set
+ * answers "may this player take another claim?", where all its locations being
+ * found is enough. This divider answers "is there anything left to do in the
+ * room?", and a 100% slot still has to GOAL. Filing it under Finished emptied the
+ * top of the board while the table was visibly still waiting to settle, which read
+ * as a bug to players. Tier 1 is therefore exactly `Goaled` — the same line
+ * `isGoaled` draws everywhere else on this panel.
  */
 const finishTier = (s: SlotStatus): 0 | 1 | 2 =>
-  (s === 'Done' ? 2 : FREE_COMPLETED_STATUSES.has(s) ? 1 : 0);
+  (s === 'Done' ? 2 : isGoaled(s) ? 1 : 0);
 
 /**
  * Tier first, then the OWNER's display name, then the slot's name. Owner before
@@ -742,8 +747,8 @@ const byTierThenName = (a: OwnedGame, b: OwnedGame): number =>
 
 /**
  * A board's game tiles, ordered by `byTierThenName` and — for anyone else's games
- * — split at a divider: only Unstarted / In-Progress above it, everything
- * finished below. Done games have nothing left to act on at all, so they start
+ * — split at a divider: only Unstarted / In-Progress / 100% above it (a 100% slot
+ * still has to goal), everything goaled below. Done games have nothing left to act on at all, so they start
  * collapsed behind a toggle inside that lower section.
  *
  * `mine` renders the flat variant: your own games get the same three-band sort
@@ -775,7 +780,7 @@ function GamesBoard({ tiles, wide, missionId, linkedAt, now, mine }: {
 
   return (
     <>
-      {active.length ? grid(active) : <span className="mp-muted">Nothing left unstarted or in progress.</span>}
+      {active.length ? grid(active) : <span className="mp-muted">Every slot here has goaled.</span>}
       <div className="mp-split">
         <span className="mp-split-lbl">Finished · {finished.length}</span>
         <span className="mp-split-rule" />

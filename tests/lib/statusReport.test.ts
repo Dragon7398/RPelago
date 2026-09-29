@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   computeStatusReport, buildOfficialReport, renderProblemsMarkdown, renderWarningsMarkdown,
   excuseKey, hasUnexcusedProblem, lastSignOfLife, slotIdleTier,
+  roomHealth, worstRoomTier, roomHealthText,
+  roomDailySeries, slotDailySeries, worldSlotReport, missionScope, tileScope,
   PROBLEM_STALE_HOURS, SLOT_CAUTION_HOURS,
-  type ReportCandidate,
+  ROOM_WINDOW_HOURS, ROOM_CAUTION_PCT, ROOM_DANGER_PCT, ROOM_SAMPLE_RETENTION_HOURS,
+  type ReportCandidate, type RoomHealth,
 } from '../../src/lib/statusReport';
 import type { GMMission, Tile, Player, AdvSlot } from '../../src/types';
 
@@ -572,5 +575,374 @@ describe('slotIdleTier', () => {
   it('prefers a real stamp over the room link', () => {
     const s = slot({ status: 'In-Progress', lastActivity: ago(1) });
     expect(slotIdleTier(s, NOW, ago(500))).toBeNull();
+  });
+});
+
+// ── Room pace ────────────────────────────────────────────────────────────────
+
+// A sample tree: `hoursAgo -> [done, total]`, keyed the way the tick writes it.
+const samples = (rows: [number, number, number][]) =>
+  Object.fromEntries(rows.map(([h, done, total]) => [String(ago(h)), { done, total }]));
+
+// A window's worth of history whose latest sample gains `pct`% of `total`.
+const paced = (pct: number, total = 1000, done = 500) =>
+  samples([[ROOM_WINDOW_HOURS + 1, done, total], [0, done + Math.round(total * pct / 100), total]]);
+
+describe('roomHealth', () => {
+  it('returns null when there is nothing to judge', () => {
+    expect(roomHealth(undefined, NOW)).toBeNull();
+    expect(roomHealth({}, NOW)).toBeNull();
+    // Nothing tracked yet: every slot reports 0 locations.
+    expect(roomHealth(samples([[80, 0, 0], [0, 0, 0]]), NOW)).toBeNull();
+  });
+
+  it('returns null with no baseline a full window old — young is not stalled', () => {
+    // Plenty of samples, but all inside the window: unknown, never 0% progress.
+    expect(roomHealth(samples([[40, 500, 1000], [20, 500, 1000], [0, 500, 1000]]), NOW)).toBeNull();
+    // Exactly at the window boundary the baseline exists.
+    expect(roomHealth(samples([[ROOM_WINDOW_HOURS, 500, 1000], [0, 505, 1000]]), NOW)).not.toBeNull();
+  });
+
+  it('returns null when sampling stopped a window ago', () => {
+    // Every sample is older than the cutoff, so the newest IS the baseline and
+    // there is no span to measure (room went all-Done, or its fetches are failing).
+    expect(roomHealth(samples([[200, 400, 1000], [100, 500, 1000]]), NOW)).toBeNull();
+  });
+
+  it('ignores samples stamped in the future', () => {
+    const tree = { ...paced(5), [String(NOW + 10 * H)]: { done: 9999, total: 1000 } };
+    expect(roomHealth(tree, NOW)!.done).toBe(550);
+  });
+
+  it('tiers on the normalised rate', () => {
+    expect(roomHealth(paced(10), NOW)!.tier).toBeNull();
+    expect(roomHealth(paced(ROOM_CAUTION_PCT + 0.5), NOW)!.tier).toBeNull();
+    expect(roomHealth(paced(ROOM_CAUTION_PCT - 0.5), NOW)!.tier).toBe('caution');
+    expect(roomHealth(paced(ROOM_DANGER_PCT - 0.5), NOW)!.tier).toBe('danger');
+    expect(roomHealth(paced(0), NOW)!.tier).toBe('danger');
+  });
+
+  it('refuses to judge a span shorter than the window', () => {
+    // Half a window of history is not a cheap 1.5% verdict — it is not a verdict.
+    // Normalising UP from a short span would let one quiet weekend (or one collect
+    // dump) decide the tier, which is the noise the window exists to average out.
+    expect(roomHealth(samples([[ROOM_WINDOW_HOURS / 2, 500, 1000], [0, 510, 1000]]), NOW)).toBeNull();
+  });
+
+  it('normalises a LONGER span down, so a sampling gap cannot flatter a room', () => {
+    // 2% gained, but over two windows — a 1% pace. The raw delta reads as caution;
+    // the normalised rate is the truth, and it is danger.
+    const gap = samples([[ROOM_WINDOW_HOURS * 2, 500, 1000], [0, 520, 1000]]);
+    const h = roomHealth(gap, NOW)!;
+    expect(h.hours).toBeCloseTo(ROOM_WINDOW_HOURS * 2, 5);
+    expect(h.deltaPct).toBeCloseTo(2, 5);
+    expect(h.ratePct).toBeCloseTo(1, 5);
+    expect(h.tier).toBe('danger');
+  });
+
+  it('measures the delta against the CURRENT total, so a late-connecting slot is not a regress', () => {
+    // 400/800 → a new slot connects (+200 locations) and 40 checks are found.
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 400, 800], [0, 440, 1000]]), NOW)!;
+    expect(h.gained).toBe(40);
+    expect(h.deltaPct).toBeCloseTo(4, 5);   // 40/1000, not 40/800
+    expect(h.totalChanged).toBe(true);
+    expect(h.tier).toBeNull();              // real progress, not a regression
+  });
+
+  it('never flags a room with every check found', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 1000, 1000], [0, 1000, 1000]]), NOW)!;
+    expect(h.remaining).toBe(0);
+    expect(h.ratePct).toBe(0);
+    expect(h.tier).toBeNull();
+  });
+
+  it('reports a shrinking room honestly rather than clamping', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS + 1, 500, 1000], [0, 480, 1000]]), NOW)!;
+    expect(h.gained).toBe(-20);
+    expect(h.tier).toBe('danger');
+    expect(roomHealthText(h)).toContain('−20 checks');
+  });
+
+  it('carries the absolutes, so an end-game room triages without opening it', () => {
+    const h = roomHealth(samples([[ROOM_WINDOW_HOURS, 5074, 5120], [0, 5085, 5120]]), NOW)!;
+    expect(h.tier).toBe('danger');
+    const text = roomHealthText(h);
+    expect(text).toContain('+11 checks');
+    expect(text).toContain('35 remain');
+    expect(text).not.toContain('Room 1');       // single-room worlds say nothing
+    expect(roomHealthText(h, true)).toMatch(/^Room 1: /);
+  });
+
+  it('prints the normalised rate only when the span is not the window', () => {
+    // Ordinary read: delta and rate are the same number, so it is said once.
+    const plain = roomHealthText(roomHealth(samples([[ROOM_WINDOW_HOURS, 500, 1000], [0, 520, 1000]]), NOW)!);
+    expect(plain).toContain('+20 checks (2.0%)');
+    expect(plain).not.toContain('per ' + ROOM_WINDOW_HOURS + 'h');
+    // Sampling gap: the normalised rate is the whole story, so it is spelled out.
+    const gap = roomHealthText(roomHealth(samples([[ROOM_WINDOW_HOURS * 2, 500, 1000], [0, 520, 1000]]), NOW)!);
+    expect(gap).toContain('= 1.0% per ' + ROOM_WINDOW_HOURS + 'h');
+  });
+
+  it('prefers the newest baseline at least a window old', () => {
+    const tree = samples([
+      [ROOM_SAMPLE_RETENTION_HOURS - 1, 100, 1000],   // ancient — must not be used
+      [ROOM_WINDOW_HOURS + 2, 500, 1000],             // the baseline
+      [0, 505, 1000],
+    ]);
+    const h = roomHealth(tree, NOW)!;
+    expect(h.gained).toBe(5);
+    expect(h.hours).toBeCloseTo(ROOM_WINDOW_HOURS + 2, 5);
+  });
+});
+
+describe('worstRoomTier', () => {
+  const r = (tier: RoomHealth['tier']) => ({ tier } as RoomHealth);
+  it('takes the worse of a bifurcated tile: two rooms, one verdict', () => {
+    expect(worstRoomTier([])).toBeNull();
+    expect(worstRoomTier([r(null), r(null)])).toBeNull();
+    expect(worstRoomTier([r(null), r('caution')])).toBe('caution');
+    expect(worstRoomTier([r('caution'), r('danger')])).toBe('danger');
+  });
+});
+
+describe('room pace in the report', () => {
+  const healthy = [slot({ name: 'ok', status: 'In-Progress', lastActivity: ago(1) })];
+
+  it('puts a clean world on the report when only its ROOM is off the pace', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(0.5) });
+    const [c] = run({ m1: m });
+    expect(c.players).toHaveLength(0);          // nobody is individually at fault
+    expect(c.rooms.map(r => r.tier)).toEqual(['danger']);
+  });
+
+  it('leaves a clean world with a healthy room off entirely', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(8) });
+    expect(run({ m1: m })).toHaveLength(0);
+  });
+
+  it('reads a bifurcated tile as two rooms', () => {
+    const t = tile({
+      adventurers: { adv1: { advId: 'adv1', owner: 'a', ownerName: 'A', slots: healthy } } as Tile['adventurers'],
+      roomProgress:  paced(9),
+      roomProgress2: paced(0.2),
+    });
+    const [c] = run({}, { D4: t });
+    expect(c.rooms.map(r => [r.room, r.tier])).toEqual([[1, null], [2, 'danger']]);
+  });
+
+  it('writes a world-general warn item with pre-rendered detail, and pings nobody', () => {
+    const m = mission({ participants: { a: part('a', 'A', healthy) }, roomProgress: paced(2) });
+    const rep = buildOfficialReport(run({ m1: m }), NOW);
+
+    expect(rep.problems).toHaveLength(0);                  // room pace never pings a player
+    const [item] = rep.warnings[0].items;
+    expect(item.code).toBe('roomCaution');
+    expect(item.playerId).toBeUndefined();
+    expect(item.slots).toBeUndefined();                    // no empty array for RTDB to eat
+    expect(item.detail).toContain('remain');
+
+    const md = renderWarningsMarkdown(rep);
+    expect(md).toContain('Room pace under ' + ROOM_CAUTION_PCT + '% per ' + ROOM_WINDOW_HOURS + 'h');
+    expect(md).toContain(item.detail!);
+    expect(renderProblemsMarkdown(rep)).toBe('');
+  });
+
+  it('leads the item list, ahead of the slot warnings', () => {
+    const stalledSlot = [slot({
+      name: 'zzz', status: 'In-Progress',
+      lastActivity: ago(200),   // trips noActivity144 …
+      lastReported: ago(1),     // … while the self-report clears the `stalled` problem
+    })];
+    const m = mission({ participants: { a: part('a', 'A', stalledSlot) }, roomProgress: paced(1) });
+    const rep = buildOfficialReport(run({ m1: m }), NOW);
+    expect(rep.warnings[0].items[0].code).toBe('roomDanger');
+    expect(rep.warnings[0].items.map(i => i.code)).toContain('noActivity144');
+  });
+});
+
+// ── Daily series ─────────────────────────────────────────────────────────────
+
+// Local midnight `back` days ago — the same boundary the implementation uses, so
+// these tests pin behaviour rather than a timezone.
+function midnight(back: number): number {
+  const d = new Date(NOW);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - back);
+  return d.getTime();
+}
+// A sample `hoursAfter` local midnight `back` days ago.
+const at = (back: number, hoursAfter: number) => midnight(back) + hoursAfter * H;
+
+describe('roomDailySeries', () => {
+  it('returns one bucket per day, oldest first, labelled by weekday', () => {
+    const out = roomDailySeries({}, NOW, 5);
+    expect(out).toHaveLength(5);
+    expect(out[0].dayStart).toBe(midnight(4));
+    expect(out[4].dayStart).toBe(midnight(0));
+    expect(out[4].label).toBe(['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(NOW).getDay()]);
+  });
+
+  it('a day it cannot bracket is a GAP, never a zero', () => {
+    // Only one sample: no day has both a start and an end value.
+    const out = roomDailySeries({ [String(at(1, 12))]: { done: 100, total: 1000 } }, NOW, 3);
+    expect(out.map(b => b.gained)).toEqual([null, null, null]);
+    expect(out.every(b => b.pct === null)).toBe(true);
+  });
+
+  it('measures a day as the difference between its bracketing samples', () => {
+    const samples = {
+      [String(at(3, 23))]: { done: 100, total: 1000 },  // end of day −3
+      [String(at(2, 23))]: { done: 140, total: 1000 },  // end of day −2  → +40
+      [String(at(1, 23))]: { done: 150, total: 1000 },  // end of day −1  → +10
+      [String(at(0, 1))]:  { done: 150, total: 1000 },  // today          → +0
+    };
+    const out = roomDailySeries(samples, NOW, 3);
+    expect(out.map(b => b.gained)).toEqual([40, 10, 0]);
+    expect(out.map(b => b.pct)).toEqual([4, 1, 0]);
+  });
+
+  it('carries a mid-day sample forward rather than losing it to the next bucket', () => {
+    const samples = {
+      [String(at(2, 20))]: { done: 100, total: 1000 },
+      [String(at(1, 6))]:  { done: 130, total: 1000 },  // early on day −1
+    };
+    // Day −1 ends with 130 and began at 100, so it gained 30 even though nothing
+    // was sampled later that day.
+    expect(roomDailySeries(samples, NOW, 2)[0].gained).toBe(30);
+  });
+
+  it('uses the CURRENT total as the denominator, so a growing room is not a regress', () => {
+    const samples = {
+      [String(at(2, 20))]: { done: 400, total: 800 },
+      [String(at(1, 20))]: { done: 440, total: 1000 },   // a slot connected
+    };
+    expect(roomDailySeries(samples, NOW, 2)[0].pct).toBeCloseTo(4, 5);  // 40/1000
+  });
+
+  it('ignores samples stamped in the future', () => {
+    const samples = {
+      [String(at(2, 20))]: { done: 100, total: 1000 },
+      [String(at(1, 20))]: { done: 120, total: 1000 },
+      [String(NOW + 10 * H)]: { done: 9999, total: 1000 },
+    };
+    expect(roomDailySeries(samples, NOW, 2)[0].gained).toBe(20);
+  });
+});
+
+describe('slotDailySeries', () => {
+  const tree = {
+    [String(at(3, 20))]: { mossTUNIC: { d: 480, t: 515 }, corvidHK: { d: 1204, t: 1204 } },
+    [String(at(2, 20))]: { mossTUNIC: { d: 491, t: 515 }, corvidHK: { d: 1204, t: 1204 } },
+    [String(at(1, 20))]: { mossTUNIC: { d: 503, t: 515 }, corvidHK: { d: 1204, t: 1204 } },
+  };
+
+  it('returns null for a key the tree has never held', () => {
+    // An unresolved {NUMBER} slot lands here: its stored name is not the one the
+    // room generated, so it must show "no match", never someone else's numbers.
+    expect(slotDailySeries(tree, 'wrenMinit%7BNUMBER%7D', NOW, 4)).toBeNull();
+    expect(slotDailySeries(undefined, 'mossTUNIC', NOW, 4)).toBeNull();
+    expect(slotDailySeries({}, 'mossTUNIC', NOW, 4)).toBeNull();
+  });
+
+  it('reports the newest counts and the per-day movement', () => {
+    const out = slotDailySeries(tree, 'mossTUNIC', NOW, 3)!;
+    expect(out.done).toBe(503);
+    expect(out.total).toBe(515);
+    // Today is a gap: the newest sample is yesterday's, and carrying it forward
+    // would claim we had observed today and seen nothing.
+    expect(out.days.map(b => b.gained)).toEqual([11, 12, null]);
+    expect(out.gained).toBe(23);
+  });
+
+  it('sums only the days it could bracket', () => {
+    const out = slotDailySeries(tree, 'mossTUNIC', NOW, 7)!;
+    // The four oldest days have no earlier sample to measure against.
+    expect(out.days.slice(0, 3).every(b => b.gained === null)).toBe(true);
+    expect(out.gained).toBe(23);
+  });
+
+  it('a flat slot reports zeroes, which is not the same as no data', () => {
+    const out = slotDailySeries(tree, 'corvidHK', NOW, 3)!;
+    expect(out.gained).toBe(0);
+    expect(out.days.slice(0, 2).map(b => b.gained)).toEqual([0, 0]);
+  });
+});
+
+// ── worldSlotReport ──────────────────────────────────────────────────────────
+
+describe('worldSlotReport', () => {
+  const s = (name: string, over: Partial<AdvSlot> = {}): AdvSlot => ({ name, game: 'G', ...over });
+
+  it('lists EVERY slot, including the clean ones the report drops', () => {
+    const m = mission({ participants: {
+      a: part('a', 'A', [s('aa', { status: 'In-Progress', lastActivity: ago(1) })]),
+      b: part('b', 'B', [s('bb', { status: 'In-Progress', lastActivity: ago(1) })]),
+    } });
+    const out = worldSlotReport(missionScope(m), players, NOW);
+    expect(out.map(r => r.slot.name).sort()).toEqual(['aa', 'bb']);
+    expect(out.every(r => r.finding === null)).toBe(true);
+    // computeStatusReport sees nothing to report on the same world.
+    expect(run({ m1: m })).toHaveLength(0);
+  });
+
+  it('agrees with computeStatusReport on the findings it does raise', () => {
+    const m = mission({ participants: {
+      a: part('a', 'A', [s('stalled1', { status: 'In-Progress', lastActivity: ago(200) })]),
+      b: part('b', 'B', [s('fine', { status: 'In-Progress', lastActivity: ago(1) })]),
+    } });
+    const peek = worldSlotReport(missionScope(m), players, NOW);
+    const bad = peek.find(r => r.slot.name === 'stalled1')!;
+    expect(bad.finding?.tier).toBe('problem');
+    expect(bad.finding?.codes).toContain('stalled');
+
+    const card = run({ m1: m })[0];
+    const reported = card.players.flatMap(p => p.findings).find(f => f.slotName === 'stalled1')!;
+    expect(reported.codes).toEqual(bad.finding!.codes);
+    expect(reported.reasons).toEqual(bad.finding!.reasons);
+  });
+
+  it('ranks problems, then warnings, then unfinished, then done', () => {
+    const m = mission({ participants: {
+      a: part('a', 'A', [
+        s('zz-done', { status: 'Goaled' }),
+        s('aa-problem', { status: 'In-Progress', lastActivity: ago(200) }),
+        s('mm-going', { status: 'In-Progress', lastActivity: ago(1) }),
+      ]),
+      b: part('b', 'B', [s('warn', { status: 'In-Progress', lastActivity: ago(200), lastReported: ago(1) })]),
+    } });
+    const out = worldSlotReport(missionScope(m), players, NOW);
+    expect(out.map(r => r.rank)).toEqual([0, 1, 2, 3]);
+    expect(out.map(r => r.slot.name)).toEqual(['aa-problem', 'warn', 'mm-going', 'zz-done']);
+  });
+
+  it('keeps a public slot, with no handle and no finding to pin on anyone', () => {
+    const t = tile({
+      adventurers: { adv1: { advId: 'adv1', owner: 'a', ownerName: 'A', slots: [s('mine', { status: 'In-Progress', lastActivity: ago(1) })] } } as Tile['adventurers'],
+      publicSlots: [s('open-to-all', { status: 'In-Progress', lastActivity: ago(200) })],
+    });
+    const out = worldSlotReport(tileScope(t), players, NOW);
+    const pub = out.find(r => r.slot.name === 'open-to-all')!;
+    expect(pub.ownerId).toBeNull();
+    expect(pub.handle).toBeNull();
+    expect(pub.finding).toBeNull();   // nobody to report it against
+  });
+
+  it('resolves the handle, falling back to the world-local name', () => {
+    const m = mission({ participants: { a: part('a', 'A', [s('x', { status: 'Goaled' })]) } });
+    expect(worldSlotReport(missionScope(m), players, NOW)[0].handle).toBe('@Zed');
+    const m2 = mission({ participants: { zz: part('zz', 'Nameless', [s('x', { status: 'Goaled' })]) } });
+    expect(worldSlotReport(missionScope(m2), players, NOW)[0].handle).toBe('@Nameless');
+  });
+
+  it('tags each tile slot with its room for the bifurcated split', () => {
+    const t = tile({
+      adventurers: {
+        r1: { advId: 'r1', owner: 'a', ownerName: 'A', room: 1, slots: [s('in-one', { status: 'Goaled' })] },
+        r2: { advId: 'r2', owner: 'b', ownerName: 'B', room: 2, slots: [s('in-two', { status: 'Goaled' })] },
+      } as Tile['adventurers'],
+    });
+    const out = worldSlotReport(tileScope(t), players, NOW);
+    expect(out.find(r => r.slot.name === 'in-one')!.room).toBe(1);
+    expect(out.find(r => r.slot.name === 'in-two')!.room).toBe(2);
   });
 });

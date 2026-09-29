@@ -6,6 +6,7 @@ import { rolledTargets } from '../../lib/traits';
 import { getPlayerFeatIds, releasesClaimsEarly } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
+import { tileReadyToComplete } from '../../lib/missionLogic';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, adminUpdateAdvSlotName, adminUpdatePublicSlotName, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 
@@ -113,10 +114,10 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
   const needsRoom    = variant === 'available'
     ? (tile.required > 0 && advs.length >= tile.required)
     : !tile.link;
-  const readyToComplete = variant === 'inprogress' && advs.length > 0 && advs.every(adv => {
-    const slots = adv.slots ?? [];
-    return slots.length > 0 && slots.every(s => s.status === 'Done' || s.status === 'Goaled');
-  });
+  // Shared with the mission board's "ready to settle" — this used to be an inline
+  // copy over `adventurers` alone, which showed ✓ on a tile still holding an
+  // ungoaled public slot or an unclaimed vacated one.
+  const readyToComplete = variant === 'inprogress' && tileReadyToComplete(tile);
   const [syncing1, setSyncing1] = useState(false);
   const [syncing2, setSyncing2] = useState(false);
   const [mismatched1, setMismatched1] = useState<Set<string>>(new Set());

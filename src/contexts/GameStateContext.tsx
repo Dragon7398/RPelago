@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
+import type { SettleBlockers } from '../lib/missionLogic';
 
 // The Provider component lives in ./GameStateProvider so this file exports only
 // the hook and context object (react-refresh can't hot-swap a module that mixes
@@ -61,7 +62,7 @@ export interface GameStateContextValue {
   adminSetMissionRoomSettings: (missionId: string, release: TriState, collect: TriState, hint: number) => Promise<void>;
   adminKickMissionParticipant: (missionId: string, playerId: string) => Promise<void>;
   adminForceDeploy: (missionId: string) => Promise<void>;
-  adminCompleteMission: (missionId: string, confirmed?: boolean) => Promise<{ warned?: boolean; unfinishedSlots?: number }>;
+  adminCompleteMission: (missionId: string, confirmed?: boolean) => Promise<{ warned?: boolean; blockers?: SettleBlockers }>;
   adminBackfillChallengeHistory: (coord: string) => Promise<number>;
   claimMissionSlot: (missionId: string, slotKey: string) => Promise<void>;
   adminGrantMissingAdventurers: (playerId: string) => Promise<number>;

@@ -96,6 +96,44 @@ describe('config/bannedDiscordIds — admin-read, server-write-only', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// roomTelemetry — per-slot check history for the admin Report tab's room peek.
+//
+// It sits at the TOP LEVEL, not under seasons/, because `subscribeToGame` streams
+// the whole season node to every player and this tree is several times the size of
+// the room totals that live there — to serve one admin page reading one world at a
+// time. Read is admin-only (operational data, and the Report tab is admin-only);
+// write is nobody, because the only writer is the scheduled tick on the Admin SDK,
+// which bypasses rules entirely. There is therefore no client write path to allow.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('roomTelemetry — admin-read, server-write-only', () => {
+  const world = `roomTelemetry/${CASINO}/missions/${MISSION_ID}`;
+
+  it('is unreadable by anyone but the admin — including alpha users', async () => {
+    await assertFails(anon().ref('roomTelemetry').get());
+    await assertFails(player().ref('roomTelemetry').get());
+    await assertFails(alpha().ref('roomTelemetry').get());
+    await assertSucceeds(admin().ref('roomTelemetry').get());
+  });
+
+  it('does not leak one world to a non-admin either', async () => {
+    await assertFails(player().ref(world).get());
+    await assertSucceeds(admin().ref(world).get());
+  });
+
+  it('cannot be written from a client — not even by the admin', async () => {
+    for (const ctx of [anon, player, alpha, admin]) {
+      await assertFails(ctx().ref(`${world}/1700000000000`).set({ someSlot: { d: 1, t: 2 } }));
+    }
+  });
+
+  it('cannot be deleted from a client either', async () => {
+    for (const ctx of [anon, player, alpha, admin]) {
+      await assertFails(ctx().ref(world).remove());
+    }
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // 🔒 THE FIX — casino secrets live OUTSIDE the world-readable season tree.
 //
 // The legacy `game/` tree leaked the draw deck and every hand to anyone,

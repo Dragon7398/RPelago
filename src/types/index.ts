@@ -129,6 +129,10 @@ export interface Tile {
   tracker2?: string;
   cheese?: string;
   cheese2?: string;
+  // Room-pace samples, one tree per cheese room — `roomProgress2` is the second
+  // room of a bifurcated tile, mirroring `cheese`/`cheese2`. Keyed by ms epoch.
+  roomProgress?: Record<string, RoomProgressSample>;
+  roomProgress2?: Record<string, RoomProgressSample>;
   gold: number;
   xp: number;
   bonusXP: number;
@@ -383,7 +387,30 @@ export interface GameState {
 // ⚠️ `allIdle60` is a persisted WIRE VALUE, not a live threshold. It predates the
 // 60h→72h move and stored reports still carry it, so the string stays put while
 // WARN_ALL_STALE_HOURS supplies the number the text renders. Do not rename it.
-export type StatusWarnCode = 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60';
+// ── Room progress ────────────────────────────────────────────────────────────
+// One periodic sample of a whole ROOM's check progress, summed across every game
+// in its Cheesetracker payload. Written by `tickSlotStatuses`, which already
+// fetches that payload for every in-progress room — the sample costs no extra
+// call. Stored as `roomProgress/{msEpoch}: RoomProgressSample`, so appending is a
+// single leaf write and pruning is a null, rather than rewriting an array.
+//
+// ⚠️ `total` is stored RAW, never as a precomputed percentage, because it MOVES:
+// a slot that has not connected yet reports `checks_total: 0` and adds its whole
+// location count on first connect, and a voided card sits in the denominator
+// forever. A stored percentage cannot tell "nobody played" from "the room grew",
+// which would have the report accuse a world that just gained a player.
+export interface RoomProgressSample {
+  done:  number;   // `checks_done`  summed over every game in the room
+  total: number;   // `checks_total` summed the same way
+}
+
+// `roomCaution` / `roomDanger` are WORLD-general (no playerId) and carry no slot
+// names — the finding is about the room's pace, not about anyone's slot. Like
+// `allIdle60` these are persisted wire values: never rename one, and let the
+// rendered text read the threshold constants so the two cannot drift.
+export type StatusWarnCode =
+  | 'lastPlayer' | 'lastChecker' | 'noActivity144' | 'allIdle60'
+  | 'roomCaution' | 'roomDanger';
 
 export interface OfficialProblemPlayer {
   playerId:  string;
@@ -419,6 +446,11 @@ export interface OfficialWarnItem {
   // are every idle slot in the world, across players. Optional because reports
   // stored before this field existed have none.
   slots?:    string[];
+  // Pre-rendered specifics for codes whose numbers cannot be recomputed later —
+  // the room-pace items, whose samples are pruned at 14 days while reports are
+  // kept for 10 runs. Rendering it at build time is what keeps an old report
+  // readable after its samples are gone.
+  detail?:   string;
 }
 
 export interface OfficialWarnWorld {
@@ -556,6 +588,9 @@ export interface GMMission {
   statusIncidents?: Record<string, number>;
   tracker?:        string;
   cheese?:         string;
+  // Room-pace samples keyed by ms epoch (see RoomProgressSample). Stripped by
+  // `archivedMission` — it is live telemetry, not part of the settled record.
+  roomProgress?:   Record<string, RoomProgressSample>;
   firstJoinAt:     number | null;
   createdAt:       number;
   deployedAt?:     number;
