@@ -10,7 +10,7 @@ import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
-import { checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
+import { checkProgressionBalancing, checkBlanketTargets, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
 import { yamlLimitsForPlayer, releasesClaimsEarly } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
@@ -581,6 +581,11 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
+            // A hint or priority aimed at Everything / Everywhere. The player's
+            // submit gate blocks it too, so a badge here means the file changed
+            // under us or the block was bypassed — either way it is a deny, not a
+            // judgement call: there is no version of this you grant by exception.
+            const blanket = checkBlanketTargets(y.text);
             // Settings over this player's caps (inventory / locations / hints).
             // Judged against THEIR limits — a Picky player's six exclusions are
             // allowed and must not be flagged — and advisory on both sides: the
@@ -603,6 +608,12 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>
                     {f.severity === 'reject' ? '⛔' : '⚠'} PB {f.value}
+                  </span>
+                ))}
+                {blanket.map((f, j) => (
+                  <span key={`bt${j}`} className="casino-yaml-blanket"
+                        title={`${f.world}: ${f.message}`}>
+                    ⛔ {f.short} {f.value}
                   </span>
                 ))}
                 {caps.map(c => (

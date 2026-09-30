@@ -9,10 +9,12 @@
 //
 // It does NOT judge validity (genre fit, check counts, etc.) — that stays a
 // manual step. The machine checks are "looks outright broken" (parse errors /
-// missing game), "wrong number of worlds" (checkWorldCount), and the two
-// settings screens below: progression_balancing (checkProgressionBalancing,
-// which alone can hard-block a submit) and the per-game caps on inventory /
-// locations / hints (checkYamlLimits, advisory only).
+// missing game), "wrong number of worlds" (checkWorldCount), and the three
+// settings screens below. Two of those can hard-block a submit —
+// progression_balancing (checkProgressionBalancing) and an option aimed at the
+// universal Everything / Everywhere groups (checkBlanketTargets) — while the
+// per-game caps on inventory / locations / hints (checkYamlLimits) are advisory
+// only, because the host waives those by exception and never these.
 
 import { parseAllDocuments } from 'yaml';
 
@@ -262,6 +264,135 @@ export function checkProgressionBalancing(text: string): PbFinding[] {
         ? `Progression Balancing (${value}) is too high — values above 75 and "extreme" are not allowed. Set it to 75 or lower.`
         : `Progression Balancing (${value}) is above 50 — this is discouraged and will be flagged for your host.`,
     });
+  });
+
+  return findings;
+}
+
+// ── Blanket target screening ────────────────────────────────────────────────
+//
+// The second check that can HARD-BLOCK a submit, and the only limit here that
+// isn't a number. Archipelago ships two universal groups — the item group
+// `Everything` and the location group `Everywhere` — so ONE entry naming one of
+// them takes the whole world: `start_hints: [Everything]` hints every item,
+// `priority_locations: [Everywhere]` prioritises every location, and
+// `start_inventory: {Everything: 1}` simply hands over the game. Each costs a
+// single entry against the caps below while reaching every member those caps
+// exist to count — a loophole rather than an overage, and there is nothing in a
+// loophole for a host to grant an exception to, so unlike checkYamlLimits this
+// check has no advisory level.
+//
+// ALL FIVE capped settings are screened, exclude_locations included. Its blanket
+// form is self-inflicted — TILE_TRAITS hands out all-excluded as the `stunning`
+// penalty, exactly as it hands out all-prioritised as `taunt` — but that is
+// beside the point the caps make: "at most 2 excluded locations" is a NUMBER,
+// and a config naming the group walked around the number. The exception a host
+// grants is against the count, not against the intent, so whether the entry
+// helps or hurts its author does not enter into it.
+//
+// Both group names are screened under every option. A player who files the
+// location group under start_hints is asking for the same thing, just in the
+// wrong place, and it is not our job to guess which half of the pair they meant.
+//
+// Matching is on the member NAME, case- and whitespace-insensitive. A group's
+// membership is known only to the APworld, so the name is all we can ever read
+// (the same reason START_HINT_ITEM_CAP stays unenforceable) — and an item
+// genuinely called "Everything" is precisely what this forbids naming, so a
+// loose match costs nothing. Like the PB block this is screening, not
+// enforcement: it runs in the player's browser at attach and again in the
+// host's on download, and no server mirror exists.
+
+export interface BlanketFinding {
+  world:   string;      // "World 2" (multi-doc) or "File" (single)
+  option:  string;      // the AP option it sits under — "start_hints"
+  label:   string;      // "Starting hints" — prose
+  short:   string;      // "Start hints" — badge text
+  value:   string;      // the offending member(s), as written, comma-joined
+  message: string;      // human-readable explanation
+}
+
+// What each blanket group covers, for the message. Keyed by the normalized name.
+const BLANKET_TARGETS: Readonly<Record<string, string>> = {
+  everything: 'every item',
+  everywhere: 'every location',
+};
+
+// `verb` is what the option DOES with what it names — the whole point of the
+// finding, and the one word that stops the exclusion and priority messages both
+// reading as hints. Ordered as the rules list the caps, so a config over on
+// several reads in the same order in both places. Labels and shorts mirror
+// LIMIT_OPTIONS on purpose: a seat badged `⛔ Excluded Everywhere` and one badged
+// `⚠ Excluded 6/2` are the same setting, and should name it the same way.
+//
+// `yamlKeys` is a LIST for the same reason it is in LIMIT_OPTIONS: start_inventory
+// and start_inventory_from_pool are two ways to write one capped thing (the second
+// just takes the item out of the pool), so they are one option here too. Two
+// entries would emit two findings labelled identically, reading as a duplicate
+// rather than as the two spellings of a single ask.
+const BLANKET_OPTIONS: readonly { yamlKeys: string[]; label: string; short: string; verb: string }[] = [
+  { yamlKeys: ['start_inventory', 'start_inventory_from_pool'],
+                                       label: 'Starting inventory items',  short: 'Start items', verb: 'grants'      },
+  { yamlKeys: ['priority_locations'],   label: 'Priority locations',       short: 'Priority',    verb: 'prioritizes' },
+  { yamlKeys: ['exclude_locations'],    label: 'Excluded locations',       short: 'Excluded',    verb: 'excludes'    },
+  { yamlKeys: ['start_hints'],          label: 'Starting hints',           short: 'Start hints', verb: 'hints'       },
+  { yamlKeys: ['start_location_hints'], label: 'Starting hint locations',  short: 'Hint locs',   verb: 'hints'       },
+];
+
+const blanketKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+
+// The members named by one option's value. AP wants a list for an OptionSet,
+// tolerates a mapping, and players write both — plus the odd bare scalar. A
+// mapping member at 0 is deliberately switched off, read the same way resolveGame
+// reads a weighted `game:` — and for start_inventory, whose mapping is item→count
+// rather than member→weight, 0 means "grant none", which is the same answer and
+// the same one countOptionValue gives it.
+function optionMembers(val: unknown): string[] {
+  if (val == null) return [];
+  if (Array.isArray(val)) return val.filter(v => v != null).map(v => String(v));
+  if (typeof val === 'object') {
+    return Object.entries(val as Record<string, unknown>)
+      .filter(([, w]) => typeof w !== 'number' || w > 0)
+      .map(([m]) => m);
+  }
+  return [String(val)];
+}
+
+// Screen every world for an option aimed at one of the universal groups. One
+// finding per offending option per world; a clean world produces none.
+export function checkBlanketTargets(text: string): BlanketFinding[] {
+  const findings: BlanketFinding[] = [];
+
+  forEachWorld(text, (rec, world) => {
+    const sites = optionSites(rec);
+
+    for (const opt of BLANKET_OPTIONS) {
+      // Unlike the caps, sites are NOT alternatives here: a root default and a
+      // game section are both a blanket target the config is asking for, and
+      // whichever one survives the roll is one too many. Same for an option's
+      // several spellings — either spelling of a blanket grant is one.
+      const hits: string[] = [];
+      const keys: string[] = [];
+      for (const site of sites) {
+        for (const yk of opt.yamlKeys) {
+          if (!(yk in site)) continue;
+          for (const m of optionMembers(site[yk])) {
+            if (!(blanketKey(m) in BLANKET_TARGETS)) continue;
+            hits.push(m.trim());
+            keys.push(yk);
+          }
+        }
+      }
+      if (hits.length === 0) continue;
+
+      const value  = [...new Set(hits)].join(', ');
+      const covers = [...new Set(hits.map(h => BLANKET_TARGETS[blanketKey(h)]))].join(' and ');
+      findings.push({
+        world, option: [...new Set(keys)].join(', '), label: opt.label, short: opt.short, value,
+        message:
+          `${opt.label}: "${value}" ${opt.verb} ${covers} in the world at once, which is not ` +
+          `allowed and cannot be waived. Remove it and name the specific items or locations you want.`,
+      });
+    }
   });
 
   return findings;

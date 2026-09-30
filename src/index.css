@@ -1179,10 +1179,10 @@ header p {
   font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment);
   display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
 }
-/* Progression-balancing flag shown beside a seat's name on download. Amber for a
-   discouraged (warn) value, red for a disallowed (reject) one that slipped past the
-   player's submit gate. Theme-aware via the same oklch tokens as the deny button. */
-.casino-yaml-pb, .casino-yaml-cap {
+/* Config flags shown beside a seat's name on download. Amber for a discouraged
+   (warn) value, red for a disallowed one that slipped past the player's submit
+   gate. Theme-aware via the same oklch tokens as the deny button. */
+.casino-yaml-pb, .casino-yaml-cap, .casino-yaml-blanket {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
   padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
 }
@@ -1202,7 +1202,11 @@ header p {
   color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
   border: 1px solid oklch(from var(--gold) l c h / 0.45);
 }
-.casino-yaml-pb.reject {
+/* The two blocking findings share one red surface: a PB value over 75 and an
+   option aimed at Everything / Everywhere are both "the client refused this, so
+   seeing it here means look now". Kept as one rule rather than two copies of the
+   red, since a drift would imply a severity difference that does not exist. */
+.casino-yaml-pb.reject, .casino-yaml-blanket {
   color: oklch(72% 0.19 25); background: oklch(55% 0.16 25 / 0.14);
   border: 1px solid oklch(55% 0.16 25 / 0.55);
 }
