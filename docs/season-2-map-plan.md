@@ -58,6 +58,10 @@ that contradicts them.
 | 31 | **Win condition**: the Sorcerer falls on Floor 3 → the surface Tower tile flips to *Conquered*. **No automatic season state change** — the admin winds down manually so in-flight challenges can finish. |
 | 32 | **Every challenge and mission collects a YAML at join** (§0.5). Joining becomes one step — *declare slots, attach config* — enforced server-side. Tile joins move from client RTDB writes to **callables**. |
 | 33 | **Traits become leveled** (§0.6, full spec in [season-2-traits-plan.md](season-2-traits-plan.md)). The data model lands with §0.5; generation and UI are later passes, two of them blocked on open design questions. |
+| 34 | **Interior challenges are full citizens**: Cheesetracker sync, room telemetry, room health, status reports — all of it. This is what forced §3.3's reversal onto the main `tiles` map. |
+| 35 | **Interior completions write to `profiles/`** like any other challenge. The external profile site's tile counts will include them. |
+| 36 | **A dungeon is a CONTAINER, not a world.** Each interior challenge settles on its own — *every slot Goaled/Done*, the same rule as a mission. The dungeon groups them for progress display only. |
+| 37 | **`goldTopUpLog` does not carry into S2.** Gold top-ups are a casino invention: S2 challenges and several missions cost nothing to join, so there is no artificial inflation to correct. Chest payouts therefore need no money-in audit entry. |
 
 ### Decisions made while planning (flagging for confirmation)
 
@@ -98,6 +102,32 @@ casino season, which renders no map.
 **To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
 then preview that season.
 
+
+### Done — §0.6 / traits Phase A model
+
+| Scope | Notes |
+|-------|-------|
+| Leveled trait model | `src/lib/traits.ts` — 16 defs, `resolveTrait` with the ignored `_player` equipment seam, legacy `{value}` reader |
+| Reader migration | `TileDetails`, `lbHelpers`, `SectionTraits`, `MapGridPanel`, `agendaHelpers` all resolve through the model |
+| Multi-target rolls | `stunnedAdvIds` / `tauntedAdvIds` / `thiefAdvIds`; thief is system-rolled; clearing invariant single-sourced as `TILE_ROLL_FIELDS` |
+
+**Not yet authorable.** `TraitEditor` still writes `{ value }` (Phase C), which
+`traitLevel` tolerates as level 1 — the read path is ready, the write path is not.
+
+**S2 is inspectable, not playable.** `GuildmasterMissions` renders only inside
+`TownLightbox`, and S2 has no town tiles — so **missions and the shop are both
+unreachable** in an S2 season today. §1.7 districts is what fixes that, and it
+is the gate on end-to-end playtesting.
+
+### Revised after the casino-season audit (2026-09-29)
+
+**§3.3 was reversed** — interiors now live in the main `tiles` map, not a
+separate tree. The original rationale ("existing loops would see 108 extra
+tiles") turned out to be wrong on audit: nine of ten loops *want* them, `MapGrid`
+never iterates the map at all, and keeping them separate would have meant a third
+branch in five server systems — two of which (slot sync, adventurer-free) are
+load-bearing enough that interiors could never resolve without them. See §3.3 and
+decisions 34–37.
 ### Deviations from this plan, and why
 
 Recorded because each one is load-bearing and none is obvious from the code alone.
@@ -149,7 +179,7 @@ those first would be wasted work. This is also the first slice needing a
 | Scope | Status |
 |-------|--------|
 | §0.5 Universal YAML-at-join | not started — includes §0.5.7 kick/reset → callables and §0.5.9 submitted-marker |
-| §0.6 / traits Phase A — data model + `resolveTrait` | not started |
+| §0.6 / traits Phase A — data model + `resolveTrait` | ✅ **done** (model + readers + rolls; admin editor is Phase C) |
 | §1.7 Districts (ward + Town Hall / Shop / Barn panels) | not started |
 | §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | not started |
 | §1.9 Casino district (`CasinoLanding` extraction) | not started |
@@ -1239,50 +1269,79 @@ scale, S1 hand-authored 31 (16 battles + 9 puzzles + 5 elites + boss), so this
 is ~1.7× S1's authoring load — heavier per tile, since puzzles and elites carry
 more design thought than battles do.
 
-### 3.3 Data shape
+### 3.3 Data shape — interiors live in the MAIN `tiles` map
+
+> **This section was reversed.** It originally put interiors in a separate
+> `seasons/{id}/dungeons/…` tree, to stop existing loops seeing ~108 extra
+> tiles. That rationale did not survive contact with the server work the casino
+> season has since landed — see the audit below.
 
 ```
-seasons/{id}/dungeons/{surfaceCoord}/
+seasons/{id}/tiles/{coord}            // ALL challenges: surface AND interior
+seasons/{id}/dungeons/{surfaceCoord}  // container metadata only
   meta:   { seed, name, portal: "r_c", frozen: boolean }
-  tiles/{r_c}:   Tile              // identical shape to a surface tile
-  chests/{r_c}:  DungeonChest
-seasons/{id}/tower/{floor}/          // floor = 1 | 2 | 3
+  chests/{r_c}: DungeonChest
+seasons/{id}/tower/{floor}             // floor = 1 | 2 | 3
   meta:   { seed, name, portal: "r_c", stairs: "r_c", frozen: boolean }
-  tiles/{r_c}:   Tile
-  chests/{r_c}:  DungeonChest
+  chests/{r_c}: DungeonChest
 ```
 
-Keyed by `surfaceCoord` (not a dungeon slug) so the surface tile and its interior
-share an identity. Kept **out of** the top-level `tiles` map deliberately: every
-existing `Object.entries(gameState.tiles)` loop — status report, agenda, admin
-warn counts, `computeRecalcUpdates` — would otherwise start seeing 108 extra
-tiles. Consumers opt in explicitly.
+**Coord scheme.** An interior coord carries its world in the key, so one lookup
+tells you where a tile lives and nothing can collide with a surface coord
+(`A1`–`G6`, which never contain `:`):
 
-```ts
-interface DungeonChest {
-  pathId:      't1' | 't2';
-  pathTiles:   number;        // challenge cells on this treasure path (excl. portal & chest)
-  revealedAt:  number | null; // stamped when the preceding challenge completes
-  opensAt:     number | null; // revealedAt + 24h
-  isMimic:     boolean;
-  mimicRevealedAt?: number;   // when the disguise dropped and the Puzzle went live
-  settledAt?:  number;
-  payouts?:    Record<string, { tier: ChestTier; gold: number }>;
-}
-type ChestTier = 'high' | 'medium' | 'low' | 'none';
-```
+| World | Coord | Example |
+|-------|-------|---------|
+| Surface | `{col}{row}` | `D4` |
+| Dungeon interior | `{surfaceCoord}:{r}_{c}` | `G1:2_3` |
+| Tower interior | `T{floor}:{r}_{c}` | `T1:0_2` |
 
-Challenges inside behave **identically** to surface challenges (decision /
-Q4): adventurers from the same pool, slots, YAML, traits, claimable slots,
-Cheesetracker sync, status reports, companion parties (battle/puzzle typing
-applies normally; elite counts as battle).
+`:` and `_` are both legal RTDB key characters. One helper —
+`parseWorldCoord(coord)` → `{ world: 'surface' } | { world: 'dungeon', at, r, c }
+| { world: 'tower', floor, r, c }` — is the only place that scheme is decoded.
 
-Interior joins go through the same `joinChallenge` / `claimChallengeSlot`
-callables as the surface (§0.5.2), with the composite `containerId`
-(`G1__2_3`, `tower1__0_2`) selecting the Storage path. The callables need a
-`dungeonRef` argument so they can resolve the interior tile path; everything
-else — YAML verification, slot validation, capacity checks — is shared.
+**Why this reversed.** Nine of the ten loops over the tiles map *want* interiors;
+one needs scoping; none break. Audited:
 
+| Consumer | With interiors in the map |
+|---|---|
+| `tickSlotStatuses` (`sp(seasonId,'tiles')`) | ✅ **required** — interiors get Cheesetracker sync and adventurer auto-free |
+| `onTileComplete` (`tiles/{coord}/state`) | ✅ **required** — interior completions reach `profiles/` |
+| `roomProgress` sampling · `roomTelemetry/{season}/tiles/{id}` | ✅ works unchanged; the compound coord is just an id |
+| `statusReport` / Report tab | ✅ wanted — interiors are real rooms needing chasing |
+| `ChallengesPage`, `AdminDashboard`, `App` warn counts | ✅ wanted |
+| `OrbsPage` elite scan | ✅ **this is how dungeon-elite orbs get assigned** — no special case needed |
+| `agendaHelpers` | ✅ wanted — an adventurer inside a dungeon belongs on the agenda |
+| `getFeatWarnings` double-assignment scan | ✅ wanted |
+| `renameAdventurer` name propagation | ✅ wanted |
+| `computeRecalcUpdates` | ⚠️ **must be scoped** — see below |
+| `MapGrid` / `MapGridPanel` | ✅ unaffected — they iterate board geometry and look tiles up BY coord, never over the map |
+
+Keeping the separate tree would have meant adding a third branch to five
+independent server systems, each one a place to forget. Two of those — slot sync
+and adventurer-free — are not optional polish: without them an interior
+challenge can never resolve.
+
+**The one real cost: `computeRecalcUpdates` must be scoped to one world.** It
+iterates the whole tiles map and derives `available` from adjacency, and the
+three world kinds have *different* adjacency (surface = orthogonal with
+pass-through; interior = wall-aware). Callers pass only that world's tiles, and
+the matching `Adjacency` (§3.4). Mixing them would let a surface tile reveal
+through a dungeon wall.
+
+Challenges inside behave **identically** to surface challenges: adventurers from
+the same pool, slots, YAML, traits, claimable slots, Cheesetracker sync, status
+reports, companion parties (battle/puzzle typing applies normally; elite counts
+as battle). Interior joins go through the same `joinChallenge` /
+`claimChallengeSlot` callables (§0.5.2) — the compound coord IS the
+`containerId`, so no extra argument is needed and the Storage path falls out for
+free.
+
+**A dungeon is a container, not a world.** Each interior challenge is its own
+world for the admin board, the status report and settle purposes — *"every slot
+Goaled/Done"*, exactly like a mission (`missionSettleBlockers`). The dungeon
+groups them for **progress display only** (the two orb glyphs, the §3.6
+completion rule). Nothing treats a dungeon as a single settleable unit.
 ### 3.4 Wall-aware cascade
 
 `computeRecalcUpdates` (§1.4) takes a pluggable adjacency. Phase 3 adds a second
@@ -1396,6 +1455,39 @@ rock and chest cells reject adventurer writes.
   refused. Regenerating Tower Floor 1 invalidates Floors 2 and 3 (their portals
   derive from it) — the admin action must refuse or cascade explicitly.
 
+
+### 3.9 World-shaped infrastructure interiors plug into
+
+The casino season grew a body of code that assumes exactly **two** kinds of
+world — mission and tile. Interiors are a third, and §3.3 makes them tiles so
+most of it applies for free. What still needs doing, and what must NOT be
+rebuilt in parallel:
+
+**Extend, never duplicate — `WorldScope`.** `missionScope` / `tileScope` /
+`worldSlotReport` ([statusReport.ts](../src/lib/statusReport.ts)) build "the set
+of slots a world is judged over" once, shared by the report and the admin room
+peek. Its own header warns that a second construction differing *even slightly*
+silently changes verdicts — `allIdle60` and both last-player warnings compare a
+slot against every other slot in that list. Interiors are ordinary tiles under
+§3.3, so `tileScope` already covers them; do not add a fourth.
+
+**Room telemetry needs no new path.** `roomTelemetry/{seasonId}/tiles/{id}/{room}`
+takes the compound coord as `{id}` unchanged. `roomProgress` sampling likewise
+writes to `tiles/{coord}/roomProgress`. Both work the moment interiors are
+tiles — which is most of why they are.
+
+**Room health** (`roomHealth`, `worstRoomTier`) applies per interior challenge,
+not per dungeon (decision 36).
+
+**Bifurcated interiors.** `roomProgress2` and the room-2 telemetry branch exist
+for bifurcated tiles. Nothing stops an interior challenge carrying `bifurcated`,
+and it costs nothing to allow — but it doubles that cell's rooms inside a maze
+that is already 20-odd challenges. Worth deciding during authoring rather than
+in code; the machinery does not care either way.
+
+**APworld eras reset.** `sourcedGameLists` scopes to the active season, so every
+game reads `NEW` again on S2's first tables. Documented behaviour, not a bug —
+but it will look like one on launch day if the host is not expecting it.
 ---
 
 ## Testing
