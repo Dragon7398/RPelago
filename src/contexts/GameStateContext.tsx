@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { GameState, Tile, TileState, OrbConfig, TileAdventurer, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
+import type { GameState, Tile, TileState, OrbConfig, DeclaredSlot, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
 import type { SettleBlockers } from '../lib/missionLogic';
 
 // The Provider component lives in ./GameStateProvider so this file exports only
@@ -12,7 +12,9 @@ export interface GameStateContextValue {
   activityLog: ActivityEntry[];
 
   // Player actions
-  sendAdventurer: (coord: string, entry: TileAdventurer) => Promise<void>;
+  // Joins go through callables now (map plan 0.5.2): the player declares slots
+  // and attaches a config, and the server validates both.
+  sendAdventurer: (coord: string, advId: string, slots: DeclaredSlot[]) => Promise<void>;
   recallAdventurer: (coord: string, advId: string, ownerId: string) => Promise<void>;
   purchaseOrb: (coord: string) => Promise<void>;
   purchaseItem: (itemId: string, coord: string) => Promise<void>;
@@ -42,7 +44,8 @@ export interface GameStateContextValue {
   // returned when the world resolves. See `playerStatus` in gameLogic.ts.
   adminSetPlayerRestricted: (playerId: string, restricted: boolean) => Promise<void>;
   adminKickAdventurer: (coord: string, advId: string, ownerId: string, convertToClaimableSlot: boolean) => Promise<void>;
-  claimClaimableSlot: (coord: string, slotKey: string, entry: TileAdventurer) => Promise<void>;
+  // No slots argument: a claimant INHERITS the vacated slot (0.5.8).
+  claimClaimableSlot: (coord: string, slotKey: string, advId: string) => Promise<void>;
   adminSetClaimableSlotBonus: (coord: string, slotKey: string, slotArr: AdvSlot[]) => Promise<void>;
   adminAddWarning: (playerId: string, message: string) => Promise<void>;
   adminDeleteWarning: (playerId: string, warnKey: string) => Promise<void>;

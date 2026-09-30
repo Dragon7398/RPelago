@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setSlotStatusNote = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.claimChallengeSlot = exports.joinChallenge = exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setSlotStatusNote = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -2499,6 +2499,11 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
     // they keep warning on any kick.)
     const noFault = mission.state === 'forming' && mission.type === 'casino';
     if (!noFault) {
+        // A kick is the HARD consequence; status incidents are the soft nag counter.
+        // Leaving them would fire the >=5 auto-warning again at completion, for a
+        // world this player no longer occupies -- double jeopardy for one
+        // abandonment (map plan decision 36). A no-fault removal never wrote one.
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/statusIncidents/${playerId}`)] = null;
         const warnRef = db.ref((0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings`)).push();
         updates[(0, seasonPaths_1.sp)(seasonId, `players/${playerId}/warnings/${warnRef.key}`)] = {
             timestamp: now,
@@ -3264,4 +3269,8 @@ exports.fetchCheeseDetails = (0, https_1.onCall)(async (request) => {
         })),
     };
 });
+// S2 challenge joins — see src/challengeJoin.ts (map plan 0.5.2).
+var challengeJoin_1 = require("./challengeJoin");
+Object.defineProperty(exports, "joinChallenge", { enumerable: true, get: function () { return challengeJoin_1.joinChallenge; } });
+Object.defineProperty(exports, "claimChallengeSlot", { enumerable: true, get: function () { return challengeJoin_1.claimChallengeSlot; } });
 //# sourceMappingURL=index.js.map

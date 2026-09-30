@@ -120,8 +120,17 @@
           "$coord": {
             "adventurers": {
               "$advId": {
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && (newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid)))",
-                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('seasons').child($seasonId).child('tiles').child($coord).child('state').val() !== 'inprogress' || root.child('seasons').child($seasonId).child('tiles').child($coord).child('claimableSlots').exists()))",
+                // JOINING IS SERVER-ONLY from S2 on. A player may only DELETE their own
+                // entry (recall); creating one goes through the joinChallenge /
+                // claimChallengeSlot callables, because the config requirement is
+                // unenforceable here -- a database rule cannot see a Storage object.
+                // The Admin SDK bypasses these rules, which is how the callables write.
+                //
+                // This also retires the Firebase pre-write trick the old validate used
+                // (claimableSlots still existing in `data` during the atomic update
+                // that deleted it) -- the callable consumes the slot directly.
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && !newData.exists() && data.child('owner').val() === auth.uid))",
+                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || newData.child('advId').val() === $advId",
                 "statusNote": {
                   ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
                 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { httpsCallable } from 'firebase/functions';
 import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref, remove } from 'firebase/database';
-import type { Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
+import type { Tile, TileState, OrbConfig, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
 import { firebaseReady, functions, auth as firebaseAuth, db as firebaseDb } from '../firebase/config';
 import { sPath } from '../firebase/season';
 import { useAuth } from './AuthContext';
@@ -43,7 +43,7 @@ import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializ
 import { getAdjCoords, rcFromCoord } from '../lib/board';
 import { rollTraitTargets } from '../lib/traits';
 import { GameStateContext } from './GameStateContext';
-import type { GameState } from '../types';
+import type { GameState, DeclaredSlot } from '../types';
 
 export function GameStateProvider({ children }: { children: ReactNode }) {
   const [gameState, setGameState]   = useState<GameState | null>(null);
@@ -137,8 +137,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, [seasonId]);
 
   // ── Player actions ──────────────────────────────────────────────────────────
-  const sendAdventurer = useCallback(async (coord: string, entry: TileAdventurer) => {
-    await assignAdventurer(coord, entry);
+  const sendAdventurer = useCallback(async (
+    coord: string, advId: string, slots: DeclaredSlot[],
+  ) => {
+    await assignAdventurer(coord, advId, slots);
   }, []);
 
   const recallAdventurer = useCallback(async (coord: string, advId: string, ownerId: string) => {
@@ -393,9 +395,9 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, [gameState]);
 
   const claimClaimableSlot = useCallback(async (
-    coord: string, slotKey: string, entry: TileAdventurer,
+    coord: string, slotKey: string, advId: string,
   ) => {
-    await dbClaimClaimableSlot(coord, slotKey, entry);
+    await dbClaimClaimableSlot(coord, slotKey, advId);
   }, []);
 
   const adminSetClaimableSlotBonus = useCallback(async (

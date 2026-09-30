@@ -260,11 +260,21 @@ export async function setTilesAvailability(
   await update(ref(db!), updates);
 }
 
-export async function assignAdventurer(coord: string, entry: TileAdventurer): Promise<void> {
-  await update(ref(db!), {
-    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
+/**
+ * Join an available challenge. Goes through the `joinChallenge` CALLABLE, not a
+ * direct RTDB write: the config requirement is unenforceable from a database
+ * rule, which cannot see a Storage object (map plan §0.5.2). The server
+ * re-validates everything — tile state, adventurer ownership, capacity, the
+ * Horde floor — and stamps the `yamlAt` submitted-marker.
+ */
+export async function assignAdventurer(
+  coord: string,
+  advId: string,
+  slots: { name: string; game: string; details?: string }[],
+): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'joinChallenge')({
+    coord, advId, slots, seasonId: getCurrentSeason(),
   });
 }
 
@@ -477,6 +487,10 @@ export async function adminKickAdventurer(
 
   const updates: Record<string, unknown> = {
     [sPath(`tiles/${coord}/adventurers/${advId}`)]:            null,
+    // A kick is the HARD consequence; status incidents are the soft nag counter
+    // that would otherwise fire again at completion for the same abandonment
+    // (decision 36). Cleared in the same atomic update as the removal.
+    [sPath(`tiles/${coord}/statusIncidents/${ownerId}`)]:      null,
     [sPath(`players/${ownerId}/adventurers/${advId}/busy`)]:    false,
     [sPath(`players/${ownerId}/adventurers/${advId}/busyTile`)]: null,
   };
@@ -578,19 +592,25 @@ export async function adminGrantGold(
 }
 
 // ── Player: claim a claimable slot ───────────────────────────────────────────
+/**
+ * Claim a vacated slot on an in-progress challenge. A CALLABLE now — it consumes
+ * the entry under the Admin SDK, which retires the Firebase pre-write evaluation
+ * trick the old rule depended on (the slot still existing in `data` during the
+ * atomic update that deleted it).
+ *
+ * Takes NO config: a claimable slot only ever exists on a world whose
+ * Archipelago room is already generated, so the claimant adopts a LIVE slot and
+ * inherits its declaration rather than submitting one (map plan §0.5.8).
+ */
 export async function claimClaimableSlot(
   coord: string,
   slotKey: string,
-  entry: TileAdventurer,
+  advId: string,
 ): Promise<void> {
-  assertDb();
-  const updates: Record<string, unknown> = {
-    [sPath(`tiles/${coord}/claimableSlots/${slotKey}`)]:                 null,
-    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
-  };
-  await update(ref(db!), updates);
+  assertFunctions();
+  await httpsCallable(functions!, 'claimChallengeSlot')({
+    coord, slotKey, advId, seasonId: getCurrentSeason(),
+  });
 }
 
 // ── Tile traits (orb effects — does not set adminOverride) ───────────────────
@@ -935,6 +955,9 @@ export async function playerReset(playerId: string): Promise<void> {
     const tile = tileSnap.val() as Tile;
 
     updates[sPath(`tiles/${coord}/adventurers/${advId}`)] = null;
+    // Same soft-counter rule as a kick (decision 36): the reset is the hard
+    // consequence, so the nag counter must not fire again at completion.
+    updates[sPath(`tiles/${coord}/statusIncidents/${playerId}`)] = null;
 
     if (tile.state === 'inprogress') {
       const rawSlots = normalizeSlots(
@@ -964,6 +987,7 @@ export async function playerReset(playerId: string): Promise<void> {
 
     // Remove from participants
     updates[sPath(`missions/${missionId}/participants/${playerId}`)] = null;
+    updates[sPath(`missions/${missionId}/statusIncidents/${playerId}`)] = null;
 
     if (mission.state === 'forming') {
       // Check if this was the last participant; if so, reset firstJoinAt

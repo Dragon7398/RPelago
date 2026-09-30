@@ -2992,6 +2992,11 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   // they keep warning on any kick.)
   const noFault = mission.state === 'forming' && mission.type === 'casino';
   if (!noFault) {
+    // A kick is the HARD consequence; status incidents are the soft nag counter.
+    // Leaving them would fire the >=5 auto-warning again at completion, for a
+    // world this player no longer occupies -- double jeopardy for one
+    // abandonment (map plan decision 36). A no-fault removal never wrote one.
+    updates[sp(seasonId, `missions/${missionId}/statusIncidents/${playerId}`)] = null;
     const warnRef = db.ref(sp(seasonId, `players/${playerId}/warnings`)).push();
     updates[sp(seasonId, `players/${playerId}/warnings/${warnRef.key}`)] = {
       timestamp: now,
@@ -3832,3 +3837,6 @@ export const fetchCheeseDetails = onCall(async (request) => {
     })),
   };
 });
+
+// S2 challenge joins — see src/challengeJoin.ts (map plan 0.5.2).
+export { joinChallenge, claimChallengeSlot } from "./challengeJoin";

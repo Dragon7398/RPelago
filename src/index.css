@@ -764,6 +764,70 @@ header p {
 .lb-login-prompt a { color: var(--gold-dim); cursor: pointer; text-decoration: underline; }
 .lb-login-prompt a:hover { color: var(--gold); }
 
+
+/* ── S2 join form (map plan §0.5.1) ─────────────────────────────────────────
+   Declare slots + attach a config, in one step. All colours come from theme
+   tokens, so this follows all ten themes with no per-theme rules. */
+.lb-join-form { display: flex; flex-direction: column; gap: 0.5rem; text-align: left; }
+.lb-join-label {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.12em;
+  color: var(--gold-dim); margin-top: 0.4rem;
+  display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
+}
+.lb-join-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic; letter-spacing: 0;
+  font-size: 0.74rem; color: var(--text-muted);
+}
+.lb-join-slot { display: flex; gap: 0.35rem; align-items: center; }
+.lb-join-input {
+  flex: 1; min-width: 0;
+  font-family: 'Crimson Pro', serif; font-size: 0.85rem;
+  padding: 0.3rem 0.5rem; border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-deep); color: var(--parchment);
+}
+.lb-join-input:focus { outline: none; border-color: var(--border-glow); }
+.lb-join-slot-del {
+  flex: 0 0 auto; width: 1.5rem; height: 1.5rem; border-radius: 3px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); cursor: pointer; line-height: 1;
+}
+.lb-join-slot-del:hover { color: var(--red); border-color: var(--red); }
+.lb-join-add {
+  align-self: flex-start;
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  padding: 0.25rem 0.6rem; border-radius: 3px;
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--gold-dim); cursor: pointer;
+}
+.lb-join-add:hover { border-color: var(--border-glow); color: var(--gold); }
+.lb-join-file { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-muted); }
+.lb-join-file-name {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--gold-dim);
+}
+/* Severity carries meaning, so each tier gets a border AND its own wording —
+   never hue alone. `reject` blocks submission; `warn` is advisory. */
+.lb-join-finding {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; line-height: 1.4;
+  padding: 0.35rem 0.55rem; border-radius: 3px; border-left: 3px solid;
+}
+.lb-join-finding.warn {
+  color: var(--text-muted); border-color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 10%, var(--bg-card));
+}
+.lb-join-finding.reject {
+  color: var(--parchment); border-color: var(--red);
+  background: color-mix(in oklch, var(--red) 12%, var(--bg-card));
+}
+.lb-join-submit {
+  margin-top: 0.4rem; padding: 0.45rem 1rem; border-radius: 3px;
+  font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.12em;
+  border: 1px solid var(--state-avail-border); background: var(--bg-deep);
+  color: var(--state-avail-fg); cursor: pointer;
+}
+.lb-join-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+.lb-join-submit:not(:disabled):hover { border-color: var(--gold); color: var(--gold); }
+.lb-adv-pick-btn.selected { border-color: var(--gold); color: var(--gold); }
 .lb-send-section { margin-top: 0.8rem; }
 .lb-send-label { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); letter-spacing: 0.12em; margin-bottom: 0.5rem; }
 .lb-adv-picker { display: flex; flex-direction: column; gap: 0.35rem; }

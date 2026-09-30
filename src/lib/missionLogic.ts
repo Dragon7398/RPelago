@@ -179,6 +179,13 @@ export interface SeatMissingConfig {
  */
 export function seatOwesConfig(p: GMParticipant): boolean {
   if (p.yamlDenied === true) return true;
+  // `yamlAt` is the TYPE-AGNOSTIC submitted-marker, stamped by the join path in
+  // the same write as the join (map plan §0.5.9). It has to exist because the
+  // host board renders from mission state alone — hitting Storage once per seat
+  // to ask "did they attach one?" is not an option — and because `played` below
+  // is casino-only: a Patrol or Field Work seat never sets it, so testing
+  // `played` alone would accuse every non-casino participant forever.
+  if (p.yamlAt != null) return false;
   if (p.played === true) return false;
   const slots = p.slots ?? [];
   return !(slots.length > 0 && slots.every(s => s.claimed === true));
@@ -189,7 +196,10 @@ export function seatOwesConfig(p: GMParticipant): boolean {
  * player has to act on, and the host has already looked at them once.
  */
 export function seatsAwaitingConfig(m: GMMission): SeatMissingConfig[] {
-  if (m.type !== 'casino') return [];
+  // Every mission type collects a config from S2 on (map plan §0.5), so this is
+  // no longer casino-only. A casino table still reaches it through `played`;
+  // everything else through `yamlAt`.
+  if (m.type === 'casino' && !Object.values(m.participants ?? {}).length) return [];
   return Object.entries(m.participants ?? {})
     .filter(([, p]) => seatOwesConfig(p))
     .map(([playerId, p]) => ({

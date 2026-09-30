@@ -67,6 +67,18 @@ export interface AdvSlot {
   claimedFrom?: string;   // the vacating player's name, for provenance
 }
 
+/**
+ * What a player declares when joining a world (map plan §0.5.1): one entry per
+ * game they are bringing, 1–5 of them. It is the subset of `AdvSlot` a player
+ * authors — status, timestamps, room and the casino's card fields are all
+ * stamped later by the system, never by the join form.
+ */
+export interface DeclaredSlot {
+  name:     string;
+  game:     string;
+  details?: string;
+}
+
 export interface AdvStatusNote {
   text: string;
   timestamp: number;
@@ -81,6 +93,17 @@ export interface TileAdventurer {
   slots?: AdvSlot[];
   room?: 1 | 2;
   statusNote?: AdvStatusNote;
+  /**
+   * When this player's config was verified present, ms epoch — the
+   * type-agnostic "has submitted" marker (map plan §0.5.9). Stamped by the join
+   * path in the same write as the join.
+   *
+   * It exists because the host board renders from world state alone (hitting
+   * Storage once per seat is not an option), and because the casino's `played`
+   * flag is casino-only. Absent on a CLAIMANT, who adopts a live slot and never
+   * submits anything. Read it through `seatOwesConfig`, never directly.
+   */
+  yamlAt?: number;
 }
 
 export interface Tile {
@@ -560,6 +583,17 @@ export interface GMParticipant {
   // has a random remainder, so the ledger cannot re-derive it — it must be recorded.
   potShare?:    number;              // gold this seat took from the pot
   net?:         number;              // goldSwing + potShare − entry costs actually paid
+  /**
+   * When this player's config was verified present, ms epoch — the
+   * type-agnostic "has submitted" marker (map plan §0.5.9). Stamped by the join
+   * path in the same write as the join.
+   *
+   * It exists because the host board renders from world state alone (hitting
+   * Storage once per seat is not an option), and because the casino's `played`
+   * flag is casino-only. Absent on a CLAIMANT, who adopts a live slot and never
+   * submits anything. Read it through `seatOwesConfig`, never directly.
+   */
+  yamlAt?: number;
 }
 
 export interface GMMission {

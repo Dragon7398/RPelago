@@ -352,25 +352,29 @@ atomic update** as the removal, in all three paths —
 | `adminKickMissionParticipant` (existing callable) | `missions/{missionId}/statusIncidents/{playerId}` |
 | `playerReset` (new callable, §0.5.7) | the entry on **every** container it removes the player from |
 
-### 0.5.7 Kick and reset must become callables
+### 0.5.7 ~~Kick and reset must become callables~~ — WITHDRAWN
 
-Two admin paths that remove a player currently write RTDB **from the client**:
+**This section is struck. It contradicted §0.5.8 and would have been pure risk.**
 
-| Path | Today | Must become |
-|------|-------|-------------|
-| `adminKickAdventurer` ([db.ts:423](../src/firebase/db.ts#L423)) | client multi-path `update()` | **callable** |
-| `playerReset` ([db.ts:765](../src/firebase/db.ts#L765)) | client multi-path `update()`; also mints claimable slots for in-progress tiles ([db.ts:807](../src/firebase/db.ts#L807)) | **callable** |
+Its whole justification was that `yaml/**` is owner-scoped, so an admin cannot
+delete another player's config and the cleanup must run under the Admin SDK.
+But §0.5.8 — decided later — says kick and player-reset **RETAIN** the departed
+player's config, because it describes a world that is still in play and is the
+host's only record of what runs in that slot.
 
-The reason is the Storage rule, not the RTDB rule: `yaml/**` is owner-scoped
-(`fileName == request.auth.uid + '.yaml'`), so **an admin cannot touch another
-player's config file** — only the Admin SDK can. Any cleanup path where the
-actor is not the file's owner has to run server-side.
-`adminKickMissionParticipant` is already a callable and needs only the added
-YAML handling; these two need converting.
+Retain means there is nothing to delete, which means there is nothing that needs
+the Admin SDK. Everything else these two paths do is already admin-writable from
+the client: removing tile entries, minting claimable slots, writing warnings, and
+(new) clearing `statusIncidents`.
 
-Both must keep their current atomicity: the kick's auto-warning and the reset's
-whole archive/zero/trim/claimable-slot bundle are single multi-path updates
-today, and must stay single updates inside the callable.
+So **`adminKickAdventurer` and `playerReset` stay client writes.** The only
+change either needs is nulling `statusIncidents/{playerId}` on the container, in
+the same atomic `update()` they already make (decision 36's soft-counter rule).
+
+> Converting them would have meant reimplementing `playerReset`'s ~120 lines —
+> including the casino seat teardown with per-card pot fractions — inside a
+> callable, against a live casino season, to enable a deletion the design had
+> already decided not to do.
 
 ### 0.5.5 Deploy gate
 
