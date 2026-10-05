@@ -13,8 +13,8 @@ import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
 import {
-  parseApYaml, checkWorldCount, checkProgressionBalancing, checkYamlLimits,
-  summarizeLimitFindings, type PbFinding,
+  parseApYaml, checkWorldCount, checkProgressionBalancing, checkBlanketTargets,
+  checkYamlLimits, summarizeLimitFindings, type PbFinding,
 } from '../lib/apYaml';
 import { getPlayerFeatIds, yamlLimitsForFeats } from '../lib/gameLogic';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
@@ -946,6 +946,12 @@ export function CasinoTable() {
   // Reject-level findings are a HARD block; warn-level are non-blocking notices.
   const pbBlock = pbFindings.filter(f => f.severity === 'reject');
   const pbWarn  = pbFindings.filter(f => f.severity === 'warn');
+  // A hint or priority aimed at Everything / Everywhere — also a HARD block, and
+  // unlike the caps below there is no exception to grant, so it never reaches the
+  // host as a notice. DERIVED rather than stamped at attach (pbFindings is state,
+  // and its three reset sites are three chances to leave a stale block on screen);
+  // every one of those sites also clears yamlText, so deriving cannot go stale.
+  const blanketBlock = useMemo(() => (yamlText ? checkBlanketTargets(yamlText) : []), [yamlText]);
   // Settings-cap overages, one row per setting. DERIVED rather than stamped at
   // attach: `feats` loads asynchronously, so a file attached before it arrives
   // would otherwise stay screened against the base caps and accuse a Picky player
@@ -955,7 +961,8 @@ export function CasinoTable() {
     () => summarizeLimitFindings(yamlText ? checkYamlLimits(yamlText, yamlLimits) : []),
     [yamlText, yamlLimits],
   );
-  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired) && !countErr && pbBlock.length === 0;
+  const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired)
+    && !countErr && pbBlock.length === 0 && blanketBlock.length === 0;
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
   // (already-locked). The per-card manifest is keyed by card uid, so reordering the
@@ -1608,6 +1615,9 @@ export function CasinoTable() {
                   {pbBlock.map((f, i) => (
                     <div className="sf-yaml-err" key={`pbe${i}`}>⛔ {f.world}: {f.message}</div>
                   ))}
+                  {blanketBlock.map((f, i) => (
+                    <div className="sf-yaml-err" key={`bte${i}`}>⛔ {f.world}: {f.message}</div>
+                  ))}
                   {yamlWarn.map((w, i) => <div className="sf-yaml-warn" key={i}>⚠ {w}</div>)}
                   {pbWarn.map((f, i) => (
                     <div className="sf-yaml-warn" key={`pbw${i}`}>⚠ {f.world}: {f.message}</div>
@@ -1639,6 +1649,7 @@ export function CasinoTable() {
                   {attachRequired && !yamlText && <> · <span className="sf-ready-need">config required</span></>}
                   {countErr && <> · <span className="sf-ready-need">wrong game count</span></>}
                   {pbBlock.length > 0 && <> · <span className="sf-ready-need">progression balancing too high</span></>}
+                  {blanketBlock.length > 0 && <> · <span className="sf-ready-need">Everything / Everywhere not allowed</span></>}
                 </span>
                 <div className="sf-foot-acts">
                   {resubmitting ? (

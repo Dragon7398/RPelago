@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
+import RoomPeek from './statusReportPage/RoomPeek';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
@@ -10,10 +11,11 @@ import { playerHandle } from '../../lib/playerHandle';
 import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
-import { checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
+import { checkProgressionBalancing, checkBlanketTargets, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
 import { yamlLimitsForPlayer, releasesClaimsEarly } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
+import MercControl from '../MercControl';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -214,6 +216,10 @@ function MissionParticipantSlots({
           >
             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
+          {/* Deliberately outside the 🔒 lock: hiring or dropping a merc is a policy
+              call, not a hand-typed room value the lock exists to protect. */}
+          <MercControl ownerId={playerId} slot={s} ownerSlots={slots} casino={!!isCasino} live={!!isLive}
+                       target={{ kind: 'mission', missionId, ownerId: playerId, slotIndex: i }} />
           {!locked && (confirmDel?.i === i ? (
             <span className="admin-remove-confirm">
               <span className="admin-remove-explain">
@@ -581,6 +587,11 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
             // the player's submit gate blocks reject-level PB, so anything flagged
             // here (esp. a ⛔) slipped past the client and is worth a look / deny.
             const pb = checkProgressionBalancing(y.text);
+            // A hint or priority aimed at Everything / Everywhere. The player's
+            // submit gate blocks it too, so a badge here means the file changed
+            // under us or the block was bypassed — either way it is a deny, not a
+            // judgement call: there is no version of this you grant by exception.
+            const blanket = checkBlanketTargets(y.text);
             // Settings over this player's caps (inventory / locations / hints).
             // Judged against THEIR limits — a Picky player's six exclusions are
             // allowed and must not be flagged — and advisory on both sides: the
@@ -603,6 +614,12 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
                   <span key={j} className={`casino-yaml-pb ${f.severity}`}
                         title={`${f.world}: ${f.message}`}>
                     {f.severity === 'reject' ? '⛔' : '⚠'} PB {f.value}
+                  </span>
+                ))}
+                {blanket.map((f, j) => (
+                  <span key={`bt${j}`} className="casino-yaml-blanket"
+                        title={`${f.world}: ${f.message}`}>
+                    ⛔ {f.short} {f.value}
                   </span>
                 ))}
                 {caps.map(c => (
@@ -775,6 +792,9 @@ function MissionCard({ mission, pinned, onInteract }: {
   // Mount-time only, deliberately: setting the link on a live panel must not yank
   // the section closed while the host is still working in it.
   const [slotsOpen, setSlotsOpen] = useState(() => !mission.link);
+  // The room peek — the same panel the Report tab expands, so a host triaging a
+  // live table does not have to go to Report to see slot progress and timers.
+  const [peekOpen, setPeekOpen] = useState(false);
   // Ticks the Elapsed / since-report clocks below. A status-report monitor is only
   // useful if the times advance live, so re-render once a second rather than only
   // on RTDB changes.
@@ -886,12 +906,22 @@ function MissionCard({ mission, pinned, onInteract }: {
         {mission.cheese && (
           <a className="dash-tile-link" href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese}`} target="_blank" rel="noopener noreferrer" title="Open Cheesetracker">🧀</a>
         )}
+        {mission.state === 'inprogress' && (
+          <button
+            className="dash-tile-link dash-peek-btn"
+            aria-expanded={peekOpen}
+            onClick={() => setPeekOpen(o => !o)}
+            title={peekOpen ? 'Hide room detail' : 'Room detail — slot progress, timers, notes, pace'}
+          >🔍</button>
+        )}
         {(mission.link || link) && (
           <button className="dash-copy-room-btn ap-sync-btn" onClick={handleSync} disabled={syncing}>
             {syncing ? '…' : 'Sync'}
           </button>
         )}
       </div>
+
+      {peekOpen && <RoomPeek kind="mission" id={mission.id} now={now} showOpenSlots={false} />}
 
       {/* Elapsed + time-since-last-report clocks — for admin status-report cadence */}
       <div style={{ display: 'flex', gap: '1.2rem', flexWrap: 'wrap', fontSize: '0.62rem', color: 'var(--gold-dim)', marginTop: '0.3rem' }}>

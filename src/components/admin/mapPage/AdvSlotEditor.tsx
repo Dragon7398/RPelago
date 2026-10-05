@@ -4,6 +4,7 @@ import { useGameState } from '../../../contexts/GameStateContext';
 import { setTileSlotLock } from '../../../firebase/db';
 import { normalizeSlots } from '../../../lib/slotHelpers';
 import type { Tile, AdvSlot, SlotStatus } from '../../../types';
+import MercControl from '../../MercControl';
 
 type SlotDraft = { name: string; game: string; details: string; status: SlotStatus; bonusXP: number; bonusGold: number };
 
@@ -119,6 +120,10 @@ export default function AdvSlotEditor({ tile, selectedCoord, unassigned1, unassi
                 >
                   {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
                 </select>
+                <MercControl ownerId={entry.owner} slot={s} live={tile.state === 'inprogress'} casino={false}
+                             ownerSlots={entries.filter(e => e.owner === entry.owner).flatMap(e =>
+                               normalizeSlots(e.slots as AdvSlot[] | Record<string, AdvSlot> | undefined))}
+                             target={{ kind: 'tile', coord: selectedCoord, advId: entry.advId, slotIndex: i }} />
                 {!locked && <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>}
               </div>
             ))}

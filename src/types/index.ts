@@ -56,15 +56,29 @@ export interface AdvSlot {
   // callable, which stamps `lastReported` in the same update. Readable by anyone
   // at the table; editable only by the slot's owner.
   note?: AdvStatusNote;
-  // Casino only: this slot was CLAIMED from a vacated seat rather than dealt to
-  // its holder. Its card pays out flat (no deck boost — the claimant never chose
-  // the deck), and it carries its OWN pot weight rather than a slice of the
-  // holder's hand, because it was carved off a different seat with a different
-  // `lockedCount`. Storing the fraction on the slot keeps that unambiguous: a
+  // This slot was CLAIMED from a vacated seat rather than dealt to its holder.
+  // On every world it bars the claimant from passing the slot on to a merc. The
+  // pay effects are casino only: its card pays out flat (no deck boost — the
+  // claimant never chose the deck), and it carries its OWN pot weight rather than
+  // a slice of the holder's hand, because it was carved off a different seat with
+  // a different `lockedCount`. Storing the fraction on the slot keeps that unambiguous: a
   // seat-level total could not say which slot contributed what.
   claimed?: boolean;
   claimedFraction?: number;
   claimedFrom?: string;   // the vacating player's name, for provenance
+  // A MERCENARY helping on this slot. Lighter than a claim: the slot stays the
+  // owner's (their adventurer / mission claim, their status-report incidents),
+  // the merc holds no seat and spends no claim — they just get 60% of this slot's
+  // value at settle (XP and gold alike; for casino, 60% of its card and of its
+  // pot weight). Written only by the `setSlotMerc` callable. See mercLogic.ts.
+  merc?: SlotMerc;
+}
+
+export interface SlotMerc {
+  playerId:   string;
+  playerName: string;   // display name at the time of hire, for rendering
+  since:      number;   // ms epoch
+  by?:        string;   // uid that set it — the owner, or the admin
 }
 
 /**
@@ -582,7 +596,8 @@ export interface GMParticipant {
   // Stamped onto the ARCHIVED copy at settle (see completeMission). The pot split
   // has a random remainder, so the ledger cannot re-derive it — it must be recorded.
   potShare?:    number;              // gold this seat took from the pot
-  net?:         number;              // goldSwing + potShare − entry costs actually paid
+  net?:         number;              // goldSwing − mercOut + potShare − entry costs actually paid
+  mercOut?:     number;              // card gold this seat handed to mercs at settle (its pot share already excludes theirs)
   /**
    * When this player's config was verified present, ms epoch — the
    * type-agnostic "has submitted" marker (map plan §0.5.9). Stamped by the join
@@ -669,6 +684,17 @@ export interface GMMission {
   // Kicks deliberately do NOT touch this — their weight stays reserved on the
   // claimable slot for whoever takes it, and goes unpaid if nobody does.
   casinoVoidedShare?: number;
+  // Stamped onto the ARCHIVED copy at settle: what each mercenary took home from
+  // this world, keyed by their playerId. Casino gold includes their slice of the
+  // pot, whose random remainder means the ledger could not re-derive it.
+  mercPayouts?: Record<string, MercPayout>;
+}
+
+export interface MercPayout {
+  playerName: string;
+  xp:         number;
+  gold:       number;
+  slots:      number;   // how many slots they were mercing
 }
 
 // A vacated slot offered up for another player to take over. Only created from an

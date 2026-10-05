@@ -60,6 +60,13 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --fetch-old-fg:      oklch(72% 0.12 300);
   --fetch-old-bg:      oklch(18% 0.06 300 / 0.42);
   --fetch-old-border:  oklch(46% 0.11 300);
+  /* Mercenary tag — a slot someone else is helping play. Steel blue: clear of
+     the gold/amber, red, green, violet and magenta families it sits beside, and
+     on the blue-yellow axis the Deutan/Protan themes keep. The tag always reads
+     "⚔ Name", so hue is reinforcement only. */
+  --merc-fg:      oklch(74% 0.11 250);
+  --merc-bg:      oklch(18% 0.06 250 / 0.42);
+  --merc-border:  oklch(48% 0.11 250);
   /* Mission pending-action pill — the admin board's triage flag. Three tiers by
      WHO is holding things up, because that is what the host does differently:
        block — waiting on a player (a config that hasn't arrived, or was denied)
@@ -819,6 +826,17 @@ header p {
   color: var(--parchment); border-color: var(--red);
   background: color-mix(in oklch, var(--red) 12%, var(--bg-card));
 }
+/* The config auto-fill confirmation. Reuses the design system’s "available/go"
+   tokens rather than introducing a colour: they are declared per theme, so this
+   is correct in the colour-blind and light themes by construction. The leading
+   ✓ and the wording carry the meaning — never hue alone. */
+.lb-join-autofill {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; line-height: 1.4;
+  padding: 0.3rem 0.55rem; border-radius: 3px;
+  border-left: 3px solid var(--state-avail-border);
+  color: var(--state-avail-fg);
+  background: color-mix(in oklch, var(--state-avail-fg) 10%, var(--bg-card));
+}
 .lb-join-submit {
   margin-top: 0.4rem; padding: 0.45rem 1rem; border-radius: 3px;
   font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.12em;
@@ -1417,10 +1435,10 @@ header p {
   font-family: 'Crimson Pro', serif; font-size: 0.85rem; color: var(--parchment);
   display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
 }
-/* Progression-balancing flag shown beside a seat's name on download. Amber for a
-   discouraged (warn) value, red for a disallowed (reject) one that slipped past the
-   player's submit gate. Theme-aware via the same oklch tokens as the deny button. */
-.casino-yaml-pb, .casino-yaml-cap {
+/* Config flags shown beside a seat's name on download. Amber for a discouraged
+   (warn) value, red for a disallowed one that slipped past the player's submit
+   gate. Theme-aware via the same oklch tokens as the deny button. */
+.casino-yaml-pb, .casino-yaml-cap, .casino-yaml-blanket {
   font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.04em;
   padding: 0.1rem 0.34rem; border-radius: 3px; white-space: nowrap; cursor: help;
 }
@@ -1440,7 +1458,11 @@ header p {
   color: var(--gold); background: oklch(from var(--gold) l c h / 0.12);
   border: 1px solid oklch(from var(--gold) l c h / 0.45);
 }
-.casino-yaml-pb.reject {
+/* The two blocking findings share one red surface: a PB value over 75 and an
+   option aimed at Everything / Everywhere are both "the client refused this, so
+   seeing it here means look now". Kept as one rule rather than two copies of the
+   red, since a drift would imply a severity difference that does not exist. */
+.casino-yaml-pb.reject, .casino-yaml-blanket {
   color: oklch(72% 0.19 25); background: oklch(55% 0.16 25 / 0.14);
   border: 1px solid oklch(55% 0.16 25 / 0.55);
 }
@@ -1912,6 +1934,28 @@ header p {
 .lb-slot-sep     { color: var(--border); font-size: 0.6rem; }
 .lb-slot-game    { color: var(--text-muted); font-style: italic; font-size: 0.65rem; }
 .lb-slot-details { color: oklch(60% 0.08 75); font-size: 0.62rem; padding-left: 0.3rem; border-left: 1px solid var(--border); }
+/* ── Mercenary control (MercControl, map + admin variant) ── */
+.merc { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.25rem; }
+.merc-tag {
+  font-size: 0.62rem; letter-spacing: 0.03em; white-space: nowrap;
+  padding: 0.05rem 0.4rem; border-radius: 999px;
+  color: var(--merc-fg); background: var(--merc-bg); border: 1px solid var(--merc-border);
+}
+.merc-btn {
+  font-size: 0.6rem; padding: 0.08rem 0.4rem; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--merc-fg); border: 1px dashed var(--merc-border);
+}
+.merc-btn:hover:not(:disabled) { background: var(--merc-bg); border-style: solid; }
+.merc-btn:disabled { opacity: 0.45; cursor: default; }
+.merc-btn.danger { color: var(--ban-fg); border-color: var(--ban-border); }
+.merc-btn.danger:hover:not(:disabled) { background: var(--ban-bg); }
+.merc-form { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+.merc-input {
+  width: 9rem; font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 4px;
+  background: var(--bg-deep); color: var(--parchment); border: 1px solid var(--merc-border);
+}
+.merc-hint { font-size: 0.6rem; color: var(--text-muted); }
+.merc-hint.bad { color: var(--ban-fg); }
 .lb-slot-prompt {
   font-family: 'Crimson Pro', serif; font-style: italic;
   font-size: 0.72rem; color: var(--text-muted);
@@ -2492,6 +2536,15 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   transition: filter 0.15s; color: inherit;
 }
 .dash-tile-link:hover { filter: brightness(1.4); }
+
+/* The room-peek toggle in a card header. Styled as one of the room links beside
+   it, but it is a real <button> — it opens a panel rather than navigating, so it
+   must be reachable and announce its state. */
+.dash-peek-btn {
+  background: none; border: none; padding: 0; cursor: pointer; line-height: 1;
+  font-family: inherit;
+}
+.dash-peek-btn[aria-expanded="true"] { filter: brightness(1.5); }
 
 /* Generic admin-dashboard action button — a gold-leaf ghost that fits the
    parchment theme (Cinzel small-caps, soft gold border/wash, glow on hover). Add
@@ -4601,6 +4654,9 @@ body.theme-lapis {
   --fetch-old-fg:      oklch(38% 0.14 300);
   --fetch-old-bg:      oklch(93% 0.04 300 / 0.55);
   --fetch-old-border:  oklch(52% 0.13 300);
+  --merc-fg:      oklch(38% 0.13 250);
+  --merc-bg:      oklch(93% 0.04 250 / 0.55);
+  --merc-border:  oklch(52% 0.12 250);
   /* Pending pills: same wash problem as every family above — the dark values are
      a low-lightness tint meant for near-black. Flip to a light tint behind dark,
      saturated text. */
@@ -5495,6 +5551,9 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
   display: flex; flex-direction: column; gap: 0.7rem;
   font-variant-numeric: tabular-nums;
 }
+/* On the Challenges / Missions cards the peek is a section in the middle of a
+   card, not its last child, so it closes with a rule of its own. */
+.dash-tile-card > .sr-peek { margin-bottom: 0.7rem; padding-bottom: 0.6rem; border-bottom: 1px solid oklch(from var(--gold-dim) l c h / 0.3); }
 .sr-peek-empty, .sr-peek-nodata, .sr-peek-nonote {
   font-size: 0.66rem; color: var(--gold-dim); font-style: italic;
 }

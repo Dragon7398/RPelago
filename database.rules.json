@@ -120,19 +120,57 @@
           "$coord": {
             "adventurers": {
               "$advId": {
-                // JOINING IS SERVER-ONLY from S2 on. A player may only DELETE their own
-                // entry (recall); creating one goes through the joinChallenge /
-                // claimChallengeSlot callables, because the config requirement is
-                // unenforceable here -- a database rule cannot see a Storage object.
-                // The Admin SDK bypasses these rules, which is how the callables write.
+                // TWO rules merged here; both intents are load-bearing.
                 //
-                // This also retires the Firebase pre-write trick the old validate used
-                // (claimableSlots still existing in `data` during the atomic update
-                // that deleted it) -- the callable consumes the slot directly.
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && !newData.exists() && data.child('owner').val() === auth.uid))",
-                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || newData.child('advId').val() === $advId",
+                // S2: JOINING IS SERVER-ONLY — a player may not CREATE an entry. Joining
+                // goes through the joinChallenge / claimChallengeSlot callables, because
+                // the config requirement is unenforceable in a rule: a database rule
+                // cannot see a Storage object. The Admin SDK bypasses these rules, which
+                // is how the callables write. This also retires the old pre-write trick
+                // (claimableSlots still existing in `data` during the atomic update that
+                // deleted it).
+                //
+                // The no-create test is the `owner` term ALONE, and deliberately so: on a
+                // create there is no `data`, so owner is null and can never equal a uid.
+                // Do NOT add `!newData.exists()` to express this — that forbids every
+                // non-delete write, which silently kills setAdventurerStatusNote and makes
+                // the statusNote .validate below unreachable.
+                //
+                // What this does NOT cover: an owner may still rewrite the slots of an
+                // entry they already joined with, so the declared set can change after the
+                // config was verified. Unavoidable here for the same Storage reason, and
+                // the host reviews configs regardless.
+                //
+                // MERCS: a non-admin write must not drop a slot that has one. Because
+                // .validate never runs on a DELETED node, the slots/0..9 terms here are
+                // what stop an owner RECALLING an adventurer that holds a merced slot —
+                // the per-slot rule below cannot see that case. Rules cannot iterate;
+                // 0–9 is well past any adventurer’s slot count.
+                //
+                // Net effect: a player may delete their own entry, and only if no slot
+                // on it is merced. Everything else is server-only.
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && data.child('owner').val() === auth.uid && ((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists()))))",
+                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists())) && newData.child('advId').val() === $advId)",
                 "statusNote": {
                   ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
+                },
+                // A merc is hired / replaced / removed only through the setSlotMerc
+                // callable (Admin SDK, so rules don't apply to it). The owner can
+                // otherwise rewrite their own adventurer entry, so pin the merc here:
+                // a non-admin write must leave each slot's merc exactly as it was.
+                // Removal is the case that matters — an owner who could drop their
+                // merc could hire help early and boot it before settle.
+                // (The slots/0..9 terms in the .write and .validate above are the other
+                // half of this: .validate never runs on a DELETED node, so dropping the
+                // merced slot, the slots list, or the whole adventurer would slip past
+                // the per-slot rule here. Rules can't iterate; 0–9 is well past any
+                // adventurer's slot count.)
+                "slots": {
+                  "$slotIdx": {
+                    // ...and `claimed` may not be cleared either: it is what bars a
+                    // claimant from passing the slot on to a merc.
+                    ".validate": "root.child('config/adminId').val() === auth.uid || (newData.child('merc/playerId').val() === data.child('merc/playerId').val() && (data.child('claimed').val() !== true || newData.child('claimed').val() === true))"
+                  }
                 }
               }
             },

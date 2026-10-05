@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { TILE_TYPES, FEATS } from '../../lib/constants';
 import { typeKeyForCoord } from '../../lib/tileGen';
@@ -7,6 +7,7 @@ import { getPlayerFeatIds, releasesClaimsEarly } from '../../lib/gameLogic';
 import type { TileAdventurer, SlotStatus } from '../../types';
 import { slotsFromEntry } from '../../lib/slotHelpers';
 import { tileReadyToComplete } from '../../lib/missionLogic';
+import RoomPeek from './statusReportPage/RoomPeek';
 import { setTileTracker, setTileTracker2, setTileCheese, setTileCheese2, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateAdvSlotStatus, adminUpdatePublicSlotStatus, adminUpdateAdvSlotActivity, adminUpdatePublicSlotActivity, adminUpdateAdvSlotName, adminUpdatePublicSlotName, freeAdventurer } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 
@@ -118,6 +119,15 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
   // copy over `adventurers` alone, which showed ✓ on a tile still holding an
   // ungoaled public slot or an unclaimed vacated one.
   const readyToComplete = variant === 'inprogress' && tileReadyToComplete(tile);
+  const [peekOpen, setPeekOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!peekOpen) return;
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [peekOpen]);
+  const togglePeek = () => { setNow(Date.now()); setPeekOpen(o => !o); };
+
   const [syncing1, setSyncing1] = useState(false);
   const [syncing2, setSyncing2] = useState(false);
   const [mismatched1, setMismatched1] = useState<Set<string>>(new Set());
@@ -285,7 +295,16 @@ function TileCard({ coord, tile, players, navigateToMap, variant, onKick }: Tile
             )}
           </>
         )}
+        {variant === 'inprogress' && (
+          <button
+            className="dash-tile-link dash-peek-btn"
+            aria-expanded={peekOpen}
+            onClick={togglePeek}
+            title={peekOpen ? 'Hide room detail' : 'Room detail — slot progress, timers, notes, pace'}
+          >🔍</button>
+        )}
       </div>
+      {peekOpen && <RoomPeek kind="tile" id={coord} now={now} />}
       {advs.length > 0 && (
         <div className="dash-tile-advs">
           {isBifurcated ? (

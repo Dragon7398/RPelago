@@ -441,8 +441,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await dbSetMissionParticipantStatusNote(missionId, note);
   }, []);
 
-  const setSlotStatusNote = useCallback(async (missionId: string, slotIndex: number, note: string | null) => {
-    await dbSetSlotStatusNote(missionId, slotIndex, note);
+  const setSlotStatusNote = useCallback(async (missionId: string, slotIndex: number, note: string | null, ownerId?: string) => {
+    await dbSetSlotStatusNote(missionId, slotIndex, note, ownerId);
   }, []);
 
   const adminSetParticipantSlots = useCallback(async (missionId: string, playerId: string, slots: AdvSlot[]) => {

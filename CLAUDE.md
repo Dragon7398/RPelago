@@ -156,6 +156,7 @@ All in `functions/src/index.ts`:
 | `standDownFromMission` | Callable | Removes player from a forming mission (not allowed once deployed); frees that mission's claim. |
 | `setMissionParticipantStatusNote` | Callable | Updates a participant's **seat-wide** status note. |
 | `setSlotStatusNote` | Callable | Updates one **slot's** note + stamps `lastReported` (see Slot status notes). |
+| `setSlotMerc` | Callable | Hires (by Discord handle) / replaces / removes a **merc** on one tile or mission slot. Owner may hire onto an empty slot; **only admin may replace or remove** (see Mercenaries). |
 | `claimMissionSlot` | Callable | Atomically claims a claimable slot on a mission (parallel to tile claim logic). **Casino claims are free** — no gold, no mission claim consumed; see Casino: void vs kick. |
 | `adminKickMissionParticipant` | Callable | Kicks a participant and creates a claimable slot — **one per card** for a casino seat. |
 | `adminVoidCasinoSeat` | Callable | Removes a whole casino seat with no replacement; releases all its pot weight, writes no warning. |
@@ -281,6 +282,23 @@ The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **d
 Once a tile is **in progress**, players cannot join it as a fresh adventurer — the Archipelago game is locked in at that point. The only entry path is claiming a claimable slot. This is enforced in two places:
 1. **UI**: The "JOIN THE CHALLENGE" picker is absent from the in-progress lightbox section.
 2. **DB rule**: The `adventurers/$advId` validate rule rejects non-admin writes to in-progress tiles unless `claimableSlots` exists on that tile.
+
+### Mercenaries ("mercing" a slot)
+
+A **lighter claim**: the slot's owner (or the admin) hires another player to help play one slot. The slot stays the **owner's** in every respect — their adventurer / mission claim, their early-release clock, their `statusIncidents` — and the merc holds no seat and spends no claim or adventurer. At settle the merc takes **60% of that slot's value**, XP and gold alike; the owner keeps the other 40%. The split is one constant, `MERC_SHARE_NUM / MERC_SHARE_DEN` (3/5) in `mercLogic.ts` — a ratio rather than `0.6` so the integer math floors exactly — and the UI copy reads `MERC_SHARE_PCT`, so the two can't drift.
+
+- **Data**: `AdvSlot.merc?: SlotMerc` (`{ playerId, playerName, since, by }`) on the slot itself, so it works for tile adventurer slots, mission slots and casino seats alike. Both status-sync paths write leaf fields, so it survives syncs.
+- **Hire / remove only via `setSlotMerc`.** The owner types a Discord handle; the server resolves it against the season's `players/*/discordHandle` (`normalizeHandle`: trim, strip `@`, lowercase — mirrored in `mercLogic.ts` for the picker's live preview). **The owner may hire only onto a slot with no merc; only the admin may replace or remove one** — an owner who could shed their merc could hire help early and boot it before settle to keep the full reward. In-progress worlds only. Mission seats are already server-write-only; **tile adventurer entries are owner-writable, so `database.rules.json` pins the merc there**: a per-slot `.validate` keeps `merc/playerId` unchanged for non-admins, and because `.validate` never runs on a *deleted* node, the `$advId` `.write`/`.validate` also refuse dropping a merced slot, the slot list, or the adventurer (indices 0–9 spelled out — rules can't iterate). Pinned in `tests/rules/seasons.rules.test.ts`.
+- **Hiring limits** (`mercHireBlockers`, client in `mercLogic.ts` + server mirror in `index.ts` — change both): **HARD for players, SOFT for the admin** (the callable refuses a player; for the admin it throws with `details.mercWarnings` unless `confirm: true`, and `MercControl` shows the reasons with a **Hire anyway** button). (1) **`claimed`** — a claimed slot can't be merced; tile (`claimClaimableSlot`) and non-casino mission (`claimMissionSlot`) claims now stamp `claimed: true` too (casino always did; non-casino settlement never reads it), and the tile rules forbid a non-admin clearing it. Slots claimed before that stamp carry no flag and aren't caught. (2) **`casinoLimit`** — an owner may have at most ONE merced slot per casino table. (3) **`allSlots`** — an owner may never merc every slot they hold on a world (their seat; every adventurer of theirs on a tile). The target is excluded from the "already merced" count, so replacing a merc never trips a limit.
+- **"The slot's value"** (`src/lib/mercLogic.ts`, pure; settlement is client-side so there is no server mirror):
+  - **Casino** — explicit per card: 60% of the card's gold (deck-boosted for an own card, flat for a claimed one, mirroring `seatGoldSwing`) and 60% of its pot weight (`1/lockedCount`, or `claimedFraction`). `casinoTableSettlement` moves that weight from the owner's entry to the merc's under a separate key, so **total weight is unchanged** (no minting, denominator untouched) and a merc who is also seated gets two separately-floored shares. `casinoTableShares` is the merged view.
+  - **Tiles / non-casino missions** pay per *player*, not per slot, so a slot is worth the owner's **feat-multiplied** base ÷ their slot count, plus that slot's own `bonusXP`/`bonusGold`. The merc gets no feat bonuses of their own. Casino XP uses the same even-share rule.
+  - Every merc cut is **floored**; the remainder stays with the owner.
+- **`completeMission` accumulates awards per player before writing** — player writes are absolute values, and one player can be owed from their own seat *and* a slot they merc. Mercs get gold (+XP and a `(merc)` history entry in a map season) but no claim release, Coat credit or Basic Training. The archive stamps `mission.mercPayouts` and, on casino seats, `mercOut` (card gold handed over; `net` subtracts it — the pot share already excludes the merc's weight). `awardTileRewards` pays mercs after every owner, from the updated records.
+- **Kicks drop the merc** (`makeClaimEntry`, the player-reset casino path; the non-casino paths whitelist fields so never carried it) — the claimant picks their own help. A **void** kills the slot and the merc with it. A host-deny **card re-pick** carries each own card's merc forward by card uid; a card dropped takes its merc along. Admin slot editors spread slots, so edits keep it.
+- **The merc may write the slot's status note** (`setSlotStatusNote` with `ownerId`), which refreshes `lastReported` for the owner exactly as the owner's own note would.
+- **UI**: `MercControl` renders the `⚔ Name` tag plus hire/change/remove on every slot surface (casino landing tiles, map tile lightbox, map mission roster, admin Missions + Map slot editors — outside the 🔒 lock, which guards hand-typed room values, not policy calls). `MercWork` on the casino landing lists the slots a player is mercing, since they hold no seat to see them by. The settle ledger shows `Hand` net of `mercOut` and a row per merc. Theme tokens: `--merc-fg/bg/border` (index.css, flipped for light themes); the casino variant reuses `--mission`.
+- **Not yet**: `profiles/` credit for mercs (the triggers and `syncPlayerProfile` would have to agree), and more than one merc per slot.
 
 ### Player warnings
 
@@ -450,9 +468,10 @@ for its `100%` test and then discarded.
 - `archivedMission` **strips `roomProgress`** — live telemetry, not part of the
   settled record.
 
-### The room peek (admin Report tab)
+### The room peek (admin Report / Missions / Challenges)
 
-Clicking a world's name on a report card expands `RoomPeek`
+Clicking a world's name on a report card — or the **🔍** beside the room links on an
+in-progress card on the admin **Missions** or **Challenges** tab — expands `RoomPeek`
 ([src/components/admin/statusReportPage/RoomPeek.tsx](src/components/admin/statusReportPage/RoomPeek.tsx)):
 the room's pace chart plus one row per slot — handle, slot name, game, status,
 progress, daily movement, all three timers, the player's note, every finding that
@@ -495,7 +514,24 @@ requiring a round trip to Cheesetracker.
   is display-only, for the peek's grouping.
 - A slot whose `{NUMBER}` never resolved matches no series and renders **"no
   tracker match"** — its stored name is not the one the room generated, and showing
-  someone else's numbers would be worse than showing none.
+  someone else's numbers would be worse than showing none. That message is one of
+  **four** (`TelemetryState`): an in-flight fetch, a rejected one, and a tree with
+  no samples for this room each say so in their own words. Only the last of the
+  four blames the slot, and saying it while the tree is merely empty sends the host
+  hunting a bug that isn't there.
+- **The toggle is a real `<button>` with `aria-expanded`** on all three surfaces,
+  not a clickable span. On Missions it passes **`showOpenSlots={false}`**: that card
+  already carries its own OPEN SLOTS panel with the ⊘ release control this
+  read-only one lacks, and two headers on one card is noise. Challenges needs no
+  such flag — the open-slots block is mission-only.
+- **Every row renders all five grid cells, empty ones included.** `.sr-peek-row` is
+  a CSS **grid** with fixed tracks: `flex-grow` distributes only the LEFTOVER
+  space, so a row whose identity text was shorter put its timers somewhere else
+  entirely, and a row that skipped the bars/delta cells knocked the rest out of
+  line. **Never dim a whole row with `opacity`** either — finished slots were at
+  `0.62`, which multiplies against tokens already near the 4.5:1 floor and made a
+  settling table unreadable. De-emphasis is the rail and a muted handle; rank
+  already sorts them last.
 
 `renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
 
@@ -553,8 +589,9 @@ Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSl
 - **Host deny** (`adminDenyCasinoYaml`): ⛔ in the admin Casino tab. Deletes the stored file and sets `participant.yamlDenied` (+ optional reason). The landing surfaces a resubmit notice; a badge marks the seat in admin.
 - **Leave invalidates**: `deleteSeatYaml` runs on stand-down / kick / deny; `clearSeatSecrets` nulls the seat's secret hand/deck/hole on those same paths (an orphaned secret would otherwise block re-sitting with *"Finish or fold your current hand first"*).
 - **Admin download** (`adminGetCasinoYamls`, admin-only callable via Admin SDK): per-seat `.yaml` and a `.zip` of all seats (via `fflate`) — deliberately never a single combined file.
-- **Config screening** (`src/lib/apYaml.ts`) runs in the player's browser at attach and again in the host's browser on download, from the file text alone — nothing is persisted, so a re-screen always reflects the file as it stands. Two checks, and the difference between them is the whole point:
-  - **`checkProgressionBalancing`** is the only one that can BLOCK. `reject` (>75 / `extreme`) clears `canSubmit`; `warn` (51–75) is a notice.
+- **Config screening** (`src/lib/apYaml.ts`) runs in the player's browser at attach and again in the host's browser on download, from the file text alone — nothing is persisted, so a re-screen always reflects the file as it stands. Three checks, and the difference between them is the whole point:
+  - **`checkProgressionBalancing`** can BLOCK. `reject` (>75 / `extreme`) clears `canSubmit`; `warn` (51–75) is a notice.
+  - **`checkBlanketTargets`** BLOCKS unconditionally — it has no `warn` level and no exception path, because there is nothing in a loophole for a host to waive. AP ships two universal groups (the item group `Everything`, the location group `Everywhere`), so one entry naming one of them takes the whole world: `start_hints: [Everything]` hints *every* item, `priority_locations: [Everywhere]` prioritizes *every* location, and `start_inventory: {Everything: 1}` simply hands over the game. Each costs a single entry against the caps while reaching every member those caps exist to count — a loophole, not an overage. **All five capped settings are screened.** Two of them are counter-intuitive and both belong: `exclude_locations`' blanket form is self-inflicted (`TILE_TRAITS` hands out all-excluded as the `stunning` *penalty*, as it hands out all-prioritised as `taunt`) but "at most 2 excluded locations" is a NUMBER and naming the group walked around the number — a host's exception is granted against the count, never against the intent, so whether an entry helps or hurts its author does not enter into it; and `start_inventory` IS caught by `checkYamlLimits` (base cap 0, so any entry is over) yet only as *"asks for 1, allowed 0"* — an advisory overage of the kind hosts waive routinely, and a wild understatement of the ask, which is why the hard block has to be separate. Both group names are screened under every option (a misfiled group asks the same thing), case- and whitespace-insensitively — a group's membership is known only to the APworld, so the **name is all we can ever read** (the same reason `START_HINT_ITEM_CAP` stays unenforceable), and an item genuinely called "Everything" is exactly what this forbids naming. Findings are ordered, labelled and badged as `LIMIT_OPTIONS` are, so `⛔ Excluded Everywhere` and `⚠ Excluded 6/2` name one setting the same way; `yamlKeys` is likewise a **list** so `start_inventory` + `start_inventory_from_pool` stay one option (two entries would emit two identically-labelled findings), and each option carries the **`verb`** it performs on what it names, without which the exclusion, priority and inventory findings all read as hints. Like the PB block it is client-side screening in both browsers, with **no server mirror** — `lockCasinoResult` verifies that a config exists, never what is in it. Its one divergence from `checkYamlLimits`: option **sites are not alternatives** — a root default, a game section, and either spelling of the inventory key are each a blanket target the config asks for, and whichever survives the roll is one too many.
   - **`checkYamlLimits`** screens the five capped settings (starting inventory items, priority locations, excluded locations, starting hints, starting hint locations) and **has no hard cap and no `reject` severity — do not add one.** The host grants exceptions per player routinely, so an over-cap config must stay submittable; the player is warned in the attach box and the seat is badged for the host on download (`summarizeLimitFindings` collapses it to one row per setting). Both sides are advisory and say so in their copy.
   - **Caps are per-player, passed in, never baked in.** `BASE_YAML_LIMITS` (`constants.ts`) is the base; `yamlLimitsForFeats` / `yamlLimitsForPlayer` (`gameLogic.ts`) add the feat bonuses — the one place `FeatDef.yamlEffect` becomes numbers. Screening a Picky player's six exclusions against the base 2 would cry wolf on a legal config, so the casino table subscribes to `players/{uid}/feats` (a casino table can run inside a **map** season) and the admin list reads `gameState.players[uid]`. **The same values render the rules text** in `help/SectionYaml.tsx` and `casino/YamlRulesLightbox.tsx`, so what a player is told and what they are warned about cannot drift.
   - `forEachWorld` / `optionSites` are shared by both checks: an option is read at the document root **and** in each nested game section, and the sites are alternatives, not additions — PB takes the worst severity, the caps take the highest single site (summing would double-count a weighted `game:`'s several sections).
@@ -640,6 +677,8 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity`, `playerStatus`/`releasesClaimsEarly` (the active/restricted/disabled tri-state and the early-claim-release gate), `yamlLimitsForFeats`/`yamlLimitsForPlayer` |
 | `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
+| `src/lib/mercLogic.ts` | Mercenary split math (`flatMercCuts`, `casinoMercCuts`, `mercTotals`) + handle matching (`normalizeHandle`, `playersByHandle`) |
+| `src/components/MercControl.tsx` | The `⚔` merc tag + hire/change/remove control, shared by every slot surface |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
 | `src/lib/archipelagoApi.ts` | Cheesetracker/AP helpers: `deriveSlotStatus`, `parseCheeseTs`, `extractApSlotName`, `resolveNumberedSlotName`, `fetchRoomStatus` |
 | `src/lib/apLists.ts` | The APworld-list (Drago's sheet) era registry — `AP_LISTS`, `currentApList`, `apListAt`. **Append one entry to ratchet to a new sheet** |
@@ -680,7 +719,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
-| `src/lib/apYaml.ts` | Player-config parsing + screening: `parseApYaml`, `checkWorldCount`, `checkProgressionBalancing` (can block), `checkYamlLimits` / `summarizeLimitFindings` (advisory settings caps) |
+| `src/lib/apYaml.ts` | Player-config parsing + screening: `parseApYaml`, `checkWorldCount`, `checkProgressionBalancing` (can block), `checkBlanketTargets` (always blocks — `Everything` / `Everywhere` under any capped setting), `checkYamlLimits` / `summarizeLimitFindings` (advisory settings caps) |
 | `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`). Renders **one `PhasePanel` per table the player is seated at** (`myTables`) — pooled claims let a player hold several at once; **held (active) claims sort above freed (settling) ones**, and every table shows until it completes. Falls back to a single Ledger/empty panel when they hold none. |
 | `src/components/casino/PhasePanel.tsx` | Per-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger). One instance per seat; `mission=null` renders the Ledger (last settled) or empty prompt. |
 | `src/components/casino/OddsTrio.tsx` | Rolled Release/Collect/Hint display, shared by table cards and the phase panel |

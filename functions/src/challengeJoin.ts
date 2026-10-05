@@ -20,6 +20,13 @@ interface DeclaredSlot {
   name:     string;
   game:     string;
   details?: string;
+  /**
+   * Set only on a CLAIMED slot, so the claimant cannot pass it straight on to
+   * a merc (see mercHireBlockers). Tile settlement never reads it. The join
+   * path shares `cleanSlots` and must not stamp it, so it is stamped at the
+   * claim site rather than in the cleaner.
+   */
+  claimed?: true;
 }
 
 interface TileAdvRecord {
@@ -246,7 +253,7 @@ export const claimChallengeSlot = onCall(async (request) => {
   const entry = tile.claimableSlots?.[slotKey];
   if (!entry) throw new HttpsError('not-found', 'That slot has already been claimed.');
 
-  const inherited = cleanSlots(entry);
+  const inherited = cleanSlots(entry).map(s => ({ ...s, claimed: true as const }));
   const room = (Array.isArray(entry) && entry[0] && (entry[0] as { room?: 1 | 2 }).room) || undefined;
 
   const record = await buildRecord(ctx.seasonId, ctx.uid, ctx.advId, {

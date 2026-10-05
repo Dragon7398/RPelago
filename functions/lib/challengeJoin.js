@@ -170,7 +170,7 @@ exports.claimChallengeSlot = (0, https_1.onCall)(async (request) => {
     const entry = tile.claimableSlots?.[slotKey];
     if (!entry)
         throw new https_1.HttpsError('not-found', 'That slot has already been claimed.');
-    const inherited = cleanSlots(entry);
+    const inherited = cleanSlots(entry).map(s => ({ ...s, claimed: true }));
     const room = (Array.isArray(entry) && entry[0] && entry[0].room) || undefined;
     const record = await buildRecord(ctx.seasonId, ctx.uid, ctx.advId, {
         ...(inherited.length ? { slots: inherited } : {}),

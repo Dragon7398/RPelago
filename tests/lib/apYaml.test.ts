@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseApYaml, checkWorldCount, checkProgressionBalancing, checkYamlLimits, summarizeLimitFindings, RANDOMIZED_GAME, type YamlLimits } from '../../src/lib/apYaml';
+import { parseApYaml, checkWorldCount, checkProgressionBalancing, checkBlanketTargets, checkYamlLimits, summarizeLimitFindings, RANDOMIZED_GAME, type YamlLimits } from '../../src/lib/apYaml';
 
 describe('parseApYaml — game resolution', () => {
   it('reads a plain string game', () => {
@@ -174,6 +174,164 @@ describe('checkProgressionBalancing', () => {
 
   it('returns nothing for a config with no progression_balancing', () => {
     expect(checkProgressionBalancing('name: P\ngame: Celeste\n')).toEqual([]);
+  });
+});
+
+// ── Blanket targets ──────────────────────────────────────────────────────────
+
+// Nested under the resolved game's section, as AP writes these options.
+const blanketYaml = (body: string) =>
+  `name: P\ngame: Celeste\nCeleste:\n${body.split('\n').map(l => (l ? `  ${l}` : l)).join('\n')}\n`;
+
+describe('checkBlanketTargets', () => {
+  it('flags Everything under start_inventory, and says GRANTS not hints', () => {
+    const f = checkBlanketTargets(blanketYaml('start_inventory:\n  Everything: 1\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_inventory');
+    expect(f[0].short).toBe('Start items');
+    expect(f[0].message).toMatch(/grants every item/);
+    expect(f[0].message).not.toMatch(/hints/);
+  });
+
+  it('flags start_inventory_from_pool the same way', () => {
+    const f = checkBlanketTargets(blanketYaml('start_inventory_from_pool:\n  - Everything\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_inventory_from_pool');
+  });
+
+  it('treats the two inventory spellings as ONE option, naming both keys', () => {
+    const f = checkBlanketTargets(blanketYaml(
+      'start_inventory:\n  Everything: 1\nstart_inventory_from_pool:\n  - Everything\n',
+    ));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_inventory, start_inventory_from_pool');
+    expect(f[0].value).toBe('Everything');
+  });
+
+  it('ignores an inventory entry granted zero of', () => {
+    expect(checkBlanketTargets(blanketYaml('start_inventory:\n  Everything: 0\n'))).toEqual([]);
+  });
+
+  it('flags the Everything item group under start_hints', () => {
+    const f = checkBlanketTargets(blanketYaml('start_hints:\n  - Everything\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_hints');
+    expect(f[0].value).toBe('Everything');
+    expect(f[0].message).toMatch(/hints every item/);
+  });
+
+  it('flags the Everywhere location group under start_location_hints', () => {
+    const f = checkBlanketTargets(blanketYaml('start_location_hints:\n  - Everywhere\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_location_hints');
+    expect(f[0].message).toMatch(/hints every location/);
+  });
+
+  it('flags Everywhere under priority_locations, and says PRIORITIZES not hints', () => {
+    const f = checkBlanketTargets(blanketYaml('priority_locations:\n  - Everywhere\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('priority_locations');
+    expect(f[0].short).toBe('Priority');
+    expect(f[0].message).toMatch(/prioritizes every location/);
+    expect(f[0].message).not.toMatch(/hints/);
+  });
+
+  it('flags Everywhere under exclude_locations — self-inflicted, but still past the cap', () => {
+    const f = checkBlanketTargets(blanketYaml('exclude_locations:\n  - Everywhere\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('exclude_locations');
+    expect(f[0].short).toBe('Excluded');
+    expect(f[0].message).toMatch(/excludes every location/);
+  });
+
+  it('flags either group under any screened option — a misfiled group asks the same thing', () => {
+    const f = checkBlanketTargets(blanketYaml('start_hints:\n  - Everywhere\n'));
+    expect(f).toHaveLength(1);
+    expect(f[0].option).toBe('start_hints');
+  });
+
+  it('matches case- and whitespace-insensitively', () => {
+    for (const v of ['everything', 'EVERYTHING', ' Everything ']) {
+      expect(checkBlanketTargets(blanketYaml(`start_hints:\n  - "${v}"\n`))).toHaveLength(1);
+    }
+  });
+
+  it('flags it at the document root as well as in a game section', () => {
+    const f = checkBlanketTargets('name: P\ngame: Celeste\npriority_locations:\n  - Everywhere\n');
+    expect(f).toHaveLength(1);
+    expect(f[0].world).toBe('File');
+  });
+
+  it('flags a mapping member, and a bare scalar', () => {
+    expect(checkBlanketTargets(blanketYaml('start_hints:\n  Everything: 1\n'))).toHaveLength(1);
+    expect(checkBlanketTargets(blanketYaml('exclude_locations: Everywhere\n'))).toHaveLength(1);
+  });
+
+  it('ignores a mapping member switched off with weight 0', () => {
+    expect(checkBlanketTargets(blanketYaml('start_hints:\n  Everything: 0\n  Dash: 1\n'))).toEqual([]);
+  });
+
+  it('reports one finding per option, listing every offending name once', () => {
+    const f = checkBlanketTargets(blanketYaml(
+      'start_hints:\n  - Everything\n  - Everywhere\n  - Everything\n' +
+      'priority_locations:\n  - Everywhere\n',
+    ));
+    expect(f).toHaveLength(2);
+    const hints = f.find(x => x.option === 'start_hints')!;
+    expect(hints.value).toBe('Everything, Everywhere');
+    expect(hints.message).toMatch(/every item and every location/);
+  });
+
+  it('orders findings as the rules list the caps, not as the file lists them', () => {
+    const f = checkBlanketTargets(blanketYaml(
+      'start_location_hints:\n  - Everywhere\nstart_hints:\n  - Everything\n' +
+      'exclude_locations:\n  - Everywhere\npriority_locations:\n  - Everywhere\n' +
+      'start_inventory:\n  Everything: 1\n',
+    ));
+    expect(f.map(x => x.option)).toEqual([
+      'start_inventory', 'priority_locations', 'exclude_locations',
+      'start_hints', 'start_location_hints',
+    ]);
+  });
+
+  it('labels each world in a multi-document file', () => {
+    const text = `${blanketYaml('start_hints:\n  - Dash\n')}---\n${blanketYaml('priority_locations:\n  - Everywhere\n')}`;
+    const f = checkBlanketTargets(text);
+    expect(f).toHaveLength(1);
+    expect(f[0].world).toBe('World 2');
+  });
+
+  it('leaves ordinary names alone', () => {
+    expect(checkBlanketTargets(blanketYaml(
+      'start_hints:\n  - Dash\nstart_location_hints:\n  - Everywhere Chest\n' +
+      'priority_locations:\n  - Everything Bagel\nexclude_locations:\n  - Nowhere\n' +
+      'start_inventory:\n  Everything Bagel: 1\n',
+    ))).toEqual([]);
+  });
+
+  it('returns nothing for a config with none of the screened options', () => {
+    expect(checkBlanketTargets('name: P\ngame: Celeste\n')).toEqual([]);
+  });
+
+  it('is not a cap — one blanket entry is flagged even inside the numeric limits', () => {
+    const text = blanketYaml(
+      'start_hints:\n  - Everything\npriority_locations:\n  - Everywhere\n' +
+      'exclude_locations:\n  - Everywhere\n',
+    );
+    // One entry apiece: every cap satisfied, and every one of them walked around.
+    expect(checkYamlLimits(text, CAPS)).toEqual([]);
+    expect(checkBlanketTargets(text)).toHaveLength(3);
+  });
+
+  it('blocks a blanket inventory grant the caps would only whisper about', () => {
+    const text = blanketYaml('start_inventory:\n  Everything: 1\n');
+    // The caps do see this one — base allowance is 0, so any entry is over — but
+    // only as "asks for 1, allowed 0": an advisory overage of the kind hosts waive
+    // routinely, and a wild understatement of what the entry actually asks for.
+    const caps = summarizeLimitFindings(checkYamlLimits(text, CAPS));
+    expect(caps).toHaveLength(1);
+    expect(caps[0].count).toBe(1);
+    expect(checkBlanketTargets(text)).toHaveLength(1);
   });
 });
 

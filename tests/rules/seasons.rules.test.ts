@@ -422,3 +422,117 @@ describe('config is admin-owned', () => {
     );
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Joining a challenge is SERVER-ONLY (S2) — but only CREATION is.
+//
+// The config requirement cannot be expressed in a rule (a database rule cannot
+// see a Storage object), so the entry may only come into existence through the
+// joinChallenge / claimChallengeSlot callables. The rule says that with the
+// `owner` term alone: on a create there is no `data`, so owner is null.
+//
+// Expressing it as `!newData.exists()` instead — delete-only — is the trap these
+// tests exist to catch: it reads as "server-only" and passes every create test,
+// while silently killing setAdventurerStatusNote and making the statusNote
+// .validate unreachable.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('challenge joins — creation is server-only, owner updates are not', () => {
+  const TILE = `seasons/${CASINO}/tiles/B3`;
+  const ADV  = `${TILE}/adventurers/a9`;
+  const ENTRY = {
+    advId: 'a9', owner: PLAYER_UID, ownerName: 'Player One', name: 'A B', cls: 'fighter',
+    slots: [{ name: 's0', game: 'g' }],
+  };
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(TILE).set({ state: 'inprogress', name: 'Battle' });
+    });
+  });
+
+  it('a player cannot create their own adventurer entry (no config check in a rule)', async () => {
+    await assertFails(player().ref(ADV).set(ENTRY));
+  });
+
+  it('a player cannot create one for someone else either', async () => {
+    await assertFails(player().ref(ADV).set({ ...ENTRY, owner: OTHER_UID }));
+  });
+
+  it('the owner CAN update and recall an entry the server created', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(ADV).set(ENTRY);
+    });
+    // The player-facing status note is a direct client write; delete-only kills it.
+    await assertSucceeds(player().ref(`${ADV}/statusNote`).set({ text: 'stuck', timestamp: 1 }));
+    await assertSucceeds(player().ref(ADV).remove());
+  });
+
+  it('a non-owner can neither update nor recall it', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(ADV).set(ENTRY);
+    });
+    await assertFails(other().ref(`${ADV}/statusNote`).set({ text: 'nope', timestamp: 1 }));
+    await assertFails(other().ref(ADV).remove());
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
+// Mercenaries on tile slots — only the setSlotMerc callable (Admin SDK) may hire,
+// replace or remove one. A tile adventurer entry is otherwise client-writable by
+// its owner, so the rules pin each slot's merc against that owner. Removal is the
+// case that matters: an owner who could drop their merc could hire help early and
+// boot it before settle. Mission seats need no rule — they are server-write-only.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('tile slot mercs — owner cannot hire, swap or shed one from the client', () => {
+  const ADV  = `seasons/${CASINO}/tiles/B2/adventurers/a1`;
+  const MERC = { playerId: OTHER_UID, playerName: 'Player Two', since: 1 };
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.database();
+      await db.ref(`seasons/${CASINO}/players/${PLAYER_UID}/adventurers/a1`).set({ firstName: 'A', lastName: 'B' });
+      await db.ref(`seasons/${CASINO}/tiles/B2`).set({
+        state: 'inprogress', name: 'Battle',
+        adventurers: {
+          a1: {
+            advId: 'a1', owner: PLAYER_UID, ownerName: 'Player One', name: 'A B', cls: 'fighter',
+            slots: [{ name: 's0', game: 'g', merc: MERC }, { name: 's1', game: 'g' }],
+          },
+        },
+      });
+    });
+  });
+
+  it('the owner can still edit their slots, the merced one included', async () => {
+    await assertSucceeds(player().ref(`${ADV}/slots/1/status`).set('In-Progress'));
+    await assertSucceeds(player().ref(`${ADV}/slots/0/status`).set('In-Progress'));
+  });
+
+  it('the owner cannot remove or replace the merc', async () => {
+    await assertFails(player().ref(`${ADV}/slots/0/merc`).remove());
+    await assertFails(player().ref(`${ADV}/slots/0/merc/playerId`).set(PLAYER_UID));
+  });
+
+  it('the owner cannot hire one directly either', async () => {
+    await assertFails(player().ref(`${ADV}/slots/1/merc`).set(MERC));
+  });
+
+  it('the owner cannot drop the merced slot, the slot list, or the adventurer', async () => {
+    await assertFails(player().ref(`${ADV}/slots`).set([{ name: 's1', game: 'g' }]));
+    await assertFails(player().ref(`${ADV}/slots/0`).remove());
+    await assertFails(player().ref(`${ADV}/slots`).remove());
+    await assertFails(player().ref(ADV).remove());
+  });
+
+  it('the owner cannot clear a slot’s claimed flag (it bars passing a claimed slot to a merc)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(`${ADV}/slots/1/claimed`).set(true);
+    });
+    await assertFails(player().ref(`${ADV}/slots/1/claimed`).remove());
+    await assertFails(player().ref(`${ADV}/slots/1`).set({ name: 's1', game: 'g' }));
+    await assertSucceeds(player().ref(`${ADV}/slots/1/status`).set('In-Progress'));
+  });
+
+  it('the admin can remove a merc', async () => {
+    await assertSucceeds(admin().ref(`${ADV}/slots/0/merc`).remove());
+  });
+});

@@ -781,6 +781,37 @@ body.casino-scope #root { width: 100%; }
 /* Provenance mark on a board tile whose slot was taken over from someone else. */
 .mp-tile-claimed { color: var(--mission); font-size: 0.72rem; margin-left: 0.3rem; }
 
+/* ── Mercenary control (MercControl, casino variant) ──
+   --mission is the per-theme accent already used for "someone else is on this
+   slot" (the claimed ⚐ above), themed in every casino palette incl. the light
+   and colour-blind ones. The tag always reads "⚔ Name", so hue is reinforcement. */
+.mp-merc { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
+.mp-merc:empty { display: none; }
+.mp-merc-tag {
+  font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.05em; white-space: nowrap;
+  padding: 0.14rem 0.5rem; border-radius: 999px;
+  color: var(--mission); border: 1px solid oklch(from var(--mission) l c h / 0.5);
+  background: oklch(from var(--mission) l c h / 0.1);
+}
+.mp-merc-btn {
+  font-family:'Cinzel',serif; font-size: 0.54rem; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.16rem 0.5rem; border-radius: 999px; cursor: pointer;
+  border: 1px dashed var(--line); background: transparent; color: var(--gold-dim); transition: all 0.15s;
+}
+.mp-merc-btn:hover:not(:disabled) { color: var(--mission); border-color: var(--mission); border-style: solid; }
+.mp-merc-btn:disabled { opacity: 0.45; cursor: default; }
+.mp-merc-btn.danger { color: var(--neg); }
+.mp-merc-btn.danger:hover:not(:disabled) { border-color: var(--neg); color: var(--neg); }
+.mp-merc-form { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; width: 100%; }
+.mp-merc-input {
+  flex: 1 1 7rem; min-width: 0; font-size: 0.72rem; padding: 0.2rem 0.45rem; border-radius: 6px;
+  background: transparent; color: var(--parchment); border: 1px solid var(--line);
+}
+.mp-merc-input:focus { outline: none; border-color: var(--mission); }
+.mp-merc-hint { font-size: 0.62rem; color: var(--gold-dim); flex-basis: 100%; }
+.mp-merc-hint:empty { display: none; }
+.mp-merc-hint.bad { color: var(--neg); }
+
 /* ── Idle badge ──
    Two tiers separated three ways — icon SHAPE (outline clock vs triangle),
    outline vs SOLID chip, and the hour count as TEXT. Colour alone can't carry it:

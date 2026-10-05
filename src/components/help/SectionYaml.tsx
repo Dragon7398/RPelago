@@ -87,6 +87,13 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
             flagged to you and to your host, so clear it with them before you submit.
           </p>
         </li>
+        <li>
+          <strong>No blanket targets:</strong> naming the item group <code>Everything</code> or
+          the location group <code>Everywhere</code> under any capped setting — starting inventory,
+          priority locations, excluded locations, hints or hint locations — is never allowed: one
+          entry, the whole world. Unlike the limits above this is not waivable: a config that does
+          it is rejected outright and cannot be submitted.
+        </li>
       </ul>
     </div>
   );

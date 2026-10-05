@@ -6,6 +6,7 @@ import type { GMMission, AdvSlot, AdvStatusNote, Player } from '../../types';
 import { awaitingRoom, computeMissionCard, fmtClock, missionDisplayLabel, type GMMissionCard } from '../../lib/missionLogic';
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, missionClaimCapacity } from '../../lib/gameLogic';
 import { AdvFeatIcons, CopyButton } from './AdvRow';
+import MercControl from '../MercControl';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
 import { resolveNameColor } from './lbHelpers';
 import { handStakeFromSlots } from '../../lib/casinoSlots';
@@ -381,6 +382,9 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                           <span className="lb-slot-sep">—</span>
                           <span className="lb-slot-game">{slot.game}</span>
                           <span className={`lb-slot-status ${statusCls}`}>{slot.status ?? 'Unstarted'}</span>
+                          <MercControl ownerId={p.playerId} slot={slot} ownerSlots={p.slots as AdvSlot[]}
+                                       casino={mission.type === 'casino'} live={mission.state === 'inprogress'}
+                                       target={{ kind: 'mission', missionId: mission.id, ownerId: p.playerId, slotIndex: i }} />
                         </div>
                         {slot.details && (
                           <div className="lb-slot-details">{slot.details}</div>
