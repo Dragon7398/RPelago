@@ -5,6 +5,7 @@ import { rollTableSetup } from './casinoEngine';
 import { countUnfinishedSets, normalizeSlots, claimEntries } from './slotHelpers';
 import { parseApYaml } from './apYaml';
 import { AP_LISTS, apListIndexAt, isCurrentApList, type ApList } from './apLists';
+import { casinoMercCuts, mercTotals } from './mercLogic';
 import type { TriState } from '../types';
 
 export type GMMissionStatus = 'open' | 'filling' | 'inprogress';
@@ -754,11 +755,47 @@ export function casinoPotShares(
   return shares;
 }
 
-/** The weights → shares pipeline for a whole table, as settlement uses it. */
-export function casinoTableShares(m: GMMission, rng: () => number = Math.random): Map<string, number> {
+// Merc weights ride in the same split under their own keys, so a merc who ALSO
+// holds a seat at the table gets two separately-floored shares and the ledger can
+// tell them apart. A NUL-delimited prefix can never collide with a playerId.
+const MERC_KEY = ' merc ';
+
+/**
+ * The weights → shares pipeline for a whole table, as settlement uses it, split
+ * into what each SEAT takes and what each MERC takes.
+ *
+ * A merced slot moves half its pot weight from its owner to the merc (see
+ * casinoMercCuts). Weight is only moved, never created, so the denominator is
+ * untouched and the pot can't overpay.
+ */
+export function casinoTableSettlement(
+  m: GMMission,
+  rng: () => number = Math.random,
+): { seat: Map<string, number>; merc: Map<string, number> } {
   const weights = new Map<string, number>();
-  for (const p of potRecipients(m)) weights.set(p.playerId, seatPotWeight(p));
-  return casinoPotShares(m.pot ?? 0, weights, casinoShareDenominator(m), rng);
+  for (const p of potRecipients(m)) {
+    const cuts = casinoMercCuts(p, 0);
+    weights.set(p.playerId, Math.max(0, seatPotWeight(p) - mercTotals(cuts).weight));
+    for (const [mid, c] of cuts) {
+      weights.set(MERC_KEY + mid, (weights.get(MERC_KEY + mid) ?? 0) + c.weight);
+    }
+  }
+  const shares = casinoPotShares(m.pot ?? 0, weights, casinoShareDenominator(m), rng);
+  const seat = new Map<string, number>();
+  const merc = new Map<string, number>();
+  for (const [key, g] of shares) {
+    if (key.startsWith(MERC_KEY)) merc.set(key.slice(MERC_KEY.length), g);
+    else seat.set(key, g);
+  }
+  return { seat, merc };
+}
+
+/** Pot gold per player for a whole table — seat share and merc share summed. */
+export function casinoTableShares(m: GMMission, rng: () => number = Math.random): Map<string, number> {
+  const { seat, merc } = casinoTableSettlement(m, rng);
+  const total = new Map(seat);
+  for (const [id, g] of merc) total.set(id, (total.get(id) ?? 0) + g);
+  return total;
 }
 
 /**

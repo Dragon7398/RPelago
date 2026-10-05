@@ -60,6 +60,13 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --fetch-old-fg:      oklch(72% 0.12 300);
   --fetch-old-bg:      oklch(18% 0.06 300 / 0.42);
   --fetch-old-border:  oklch(46% 0.11 300);
+  /* Mercenary tag — a slot someone else is helping play. Steel blue: clear of
+     the gold/amber, red, green, violet and magenta families it sits beside, and
+     on the blue-yellow axis the Deutan/Protan themes keep. The tag always reads
+     "⚔ Name", so hue is reinforcement only. */
+  --merc-fg:      oklch(74% 0.11 250);
+  --merc-bg:      oklch(18% 0.06 250 / 0.42);
+  --merc-border:  oklch(48% 0.11 250);
   /* Mission pending-action pill — the admin board's triage flag. Three tiers by
      WHO is holding things up, because that is what the host does differently:
        block — waiting on a player (a config that hasn't arrived, or was denied)
@@ -1678,6 +1685,28 @@ header p {
 .lb-slot-sep     { color: var(--border); font-size: 0.6rem; }
 .lb-slot-game    { color: var(--text-muted); font-style: italic; font-size: 0.65rem; }
 .lb-slot-details { color: oklch(60% 0.08 75); font-size: 0.62rem; padding-left: 0.3rem; border-left: 1px solid var(--border); }
+/* ── Mercenary control (MercControl, map + admin variant) ── */
+.merc { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.25rem; }
+.merc-tag {
+  font-size: 0.62rem; letter-spacing: 0.03em; white-space: nowrap;
+  padding: 0.05rem 0.4rem; border-radius: 999px;
+  color: var(--merc-fg); background: var(--merc-bg); border: 1px solid var(--merc-border);
+}
+.merc-btn {
+  font-size: 0.6rem; padding: 0.08rem 0.4rem; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--merc-fg); border: 1px dashed var(--merc-border);
+}
+.merc-btn:hover:not(:disabled) { background: var(--merc-bg); border-style: solid; }
+.merc-btn:disabled { opacity: 0.45; cursor: default; }
+.merc-btn.danger { color: var(--ban-fg); border-color: var(--ban-border); }
+.merc-btn.danger:hover:not(:disabled) { background: var(--ban-bg); }
+.merc-form { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+.merc-input {
+  width: 9rem; font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 4px;
+  background: var(--bg-deep); color: var(--parchment); border: 1px solid var(--merc-border);
+}
+.merc-hint { font-size: 0.6rem; color: var(--text-muted); }
+.merc-hint.bad { color: var(--ban-fg); }
 .lb-slot-prompt {
   font-family: 'Crimson Pro', serif; font-style: italic;
   font-size: 0.72rem; color: var(--text-muted);
@@ -4273,6 +4302,9 @@ body.theme-lapis {
   --fetch-old-fg:      oklch(38% 0.14 300);
   --fetch-old-bg:      oklch(93% 0.04 300 / 0.55);
   --fetch-old-border:  oklch(52% 0.13 300);
+  --merc-fg:      oklch(38% 0.13 250);
+  --merc-bg:      oklch(93% 0.04 250 / 0.55);
+  --merc-border:  oklch(52% 0.12 250);
   /* Pending pills: same wash problem as every family above — the dark values are
      a low-lightness tint meant for near-black. Flip to a light tint behind dark,
      saturated text. */

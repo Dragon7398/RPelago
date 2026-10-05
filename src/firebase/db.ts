@@ -2,14 +2,15 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry, MercPayout } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableShares, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 import { hasUnexcusedProblem, type SlotProgressSamples } from '../lib/statusReport';
+import { casinoMercCuts, flatMercCuts, mercTotals, mergeMercCuts, type MercCuts } from '../lib/mercLogic';
 
 function assertDb() {
   if (!db || !firebaseReady) throw new Error('Firebase is not configured. Fill in .env with your Firebase project values.');
@@ -957,6 +958,7 @@ export async function playerReset(playerId: string): Promise<void> {
           delete clean.claimed;
           delete clean.claimedFraction;
           delete clean.claimedFrom;
+          delete clean.merc;   // hired by the player being reset; a claimant picks their own
           const claimRef = push(sRef(db!, `missions/${missionId}/claimableSlots`));
           updates[sPath(`missions/${missionId}/claimableSlots/${claimRef.key}`)] = {
             slots: [clean],
@@ -1042,9 +1044,30 @@ export async function setMissionParticipantStatusNote(missionId: string, note: s
 // Per-SLOT note (the seat-wide one above is a different thing). The server stamps
 // `lastReported` in the same update; passing null clears the text but keeps that
 // timestamp.
-export async function setSlotStatusNote(missionId: string, slotIndex: number, note: string | null): Promise<void> {
+// `ownerId` is only passed by a MERC writing on the owner's slot; the server
+// checks they are that slot's merc.
+export async function setSlotStatusNote(missionId: string, slotIndex: number, note: string | null, ownerId?: string): Promise<void> {
   assertFunctions();
-  await httpsCallable(functions!, 'setSlotStatusNote')({ missionId, slotIndex, note, seasonId: getCurrentSeason() });
+  await httpsCallable(functions!, 'setSlotStatusNote')({
+    missionId, slotIndex, note, seasonId: getCurrentSeason(), ...(ownerId ? { ownerId } : {}),
+  });
+}
+
+// ── Mercenaries ──────────────────────────────────────────────────────────────
+// Which slot a merc is hired onto. Tile slots are addressed through the
+// adventurer (whose owner the server reads off the tile); mission slots through
+// the owner's seat. `slotIndex` is the index into `normalizeSlots(slots)`.
+export type MercTarget =
+  | { kind: 'mission'; missionId: string; ownerId: string; slotIndex: number }
+  | { kind: 'tile';    coord: string;     advId: string;   slotIndex: number };
+
+// Hire by Discord handle (the server resolves it), or pass null to remove. The
+// server enforces the rules: the owner or admin may hire onto an empty slot; only
+// the admin may replace or remove a merc.
+export async function setSlotMerc(target: MercTarget, handle: string | null): Promise<{ mercName?: string }> {
+  assertFunctions();
+  const res = await httpsCallable(functions!, 'setSlotMerc')({ ...target, handle, seasonId: getCurrentSeason() });
+  return (res.data ?? {}) as { mercName?: string };
 }
 
 // ── Official status reports ──────────────────────────────────────────────────
@@ -1339,8 +1362,15 @@ export async function syncPlayerProfile(
 // settle stamp. `completedAt` is the only record of WHEN a table settled — the
 // deploy clock can be days earlier — and it is what the casino profile's history
 // dates each row by.
-function archivedMission(mission: GMMission, potShares: Map<string, number>, now: number): GMMission {
+function archivedMission(
+  mission: GMMission,
+  potShares: Map<string, number>,
+  now: number,
+  mercOut: Map<string, number> = new Map(),
+  mercPayouts: Record<string, MercPayout> = {},
+): GMMission {
   const settled: GMMission = { ...mission, state: 'complete', completedAt: now };
+  if (Object.keys(mercPayouts).length) settled.mercPayouts = mercPayouts;
   // Room-pace samples are live telemetry for the status report, not part of the
   // settled record — a fortnight of them per table would sit in history forever
   // answering a question nobody asks of a finished room.
@@ -1350,10 +1380,12 @@ function archivedMission(mission: GMMission, potShares: Map<string, number>, now
   const participants: Record<string, GMParticipant> = {};
   for (const [pid, p] of Object.entries(mission.participants ?? {})) {
     const potShare = potShares.get(pid) ?? 0;
+    const given    = mercOut.get(pid) ?? 0;
     participants[pid] = {
       ...p,
       potShare,
-      net: (p.goldSwing ?? 0) + potShare - casinoSeatPaid(mission, pid),
+      ...(given ? { mercOut: given } : {}),
+      net: (p.goldSwing ?? 0) - given + potShare - casinoSeatPaid(mission, pid),
     };
   }
   return { ...settled, participants };
@@ -1389,14 +1421,27 @@ export async function completeMission(
   const updates: Record<string, unknown> = {};
 
   // For casino missions, pre-compute each recipient's weighted pot share. Weights
-  // are in seat units (see casinoTableShares): a full hand is one unit, voids
-  // release their fraction back to the table, kicks reserve theirs for a claimant.
-  // Gold comes from goldSwing (card values) + that share; no feat multiplier on
-  // gambling winnings.
+  // are in seat units (see casinoTableSettlement): a full hand is one unit, voids
+  // release their fraction back to the table, kicks reserve theirs for a claimant,
+  // and a merced slot moves half its weight to the merc. Gold comes from goldSwing
+  // (card values) + that share; no feat multiplier on gambling winnings.
   let potShares = new Map<string, number>();
+  let mercPot   = new Map<string, number>();
   if (mission.type === 'casino') {
-    potShares = casinoTableShares(mission);
+    ({ seat: potShares, merc: mercPot } = casinoTableSettlement(mission));
   }
+
+  // Every player write below is an ABSOLUTE value, and one player can be owed from
+  // several directions at once — their own seat, plus a slot they merc on someone
+  // else's. So awards are accumulated first and written once per player.
+  const awards = new Map<string, { xp: number; gold: number }>();
+  const credit = (pid: string, xp: number, gold: number) => {
+    const a = awards.get(pid) ?? { xp: 0, gold: 0 };
+    a.xp += xp; a.gold += gold;
+    awards.set(pid, a);
+  };
+  const mercIn: MercCuts = new Map();
+  const mercOut          = new Map<string, number>();
 
   for (const [pid, participant] of Object.entries(mission.participants ?? {})) {
     const player = players[pid];
@@ -1404,14 +1449,15 @@ export async function completeMission(
 
     const isCasino = mission.type === 'casino';
 
+    // The claim may already have been reclaimed early (slots done); clearing the
+    // specific key is idempotent either way.
+    updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
+
     // A folded / never-played casino seat wins nothing — just free its claim.
     // Someone who only ever CLAIMED a vacated slot has no `played` flag of their
     // own but is still owed the slot's card value and its fraction of the pot, so
     // they must not be swept up by this.
-    if (isCasino && !participant.played && claimedWeight(participant) <= 0) {
-      updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
-      continue;
-    }
+    if (isCasino && !participant.played && claimedWeight(participant) <= 0) continue;
 
     // Feat bonuses (mentor/treasurer) — same calculation as tile rewards. They
     // apply to a mission's fixed XP/GP reward, NOT to casino winnings (card
@@ -1428,48 +1474,26 @@ export async function completeMission(
     // mission floor for both. For casino, gold = card values + pot share.
     let earnedXP:   number;
     let earnedGold: number;
+    let cuts:       MercCuts;
     if (isCasino) {
       earnedXP   = Math.round((mission.xp ?? 0) * xpMultiplier);
       earnedGold = (participant.goldSwing ?? 0) + (potShares.get(pid) ?? 0);
+      // The pot share above already excludes the merced weight; this takes the
+      // merced half of each card (and an even share of the XP).
+      cuts = casinoMercCuts(participant, earnedXP);
     } else {
       earnedXP   = Math.round(mission.xp * xpMultiplier);
       earnedGold = Math.round(mission.gp * goldMultiplier);
+      cuts = flatMercCuts(earnedXP, earnedGold, participant.slots ?? [], pid);
       for (const slot of participant.slots ?? []) {
-        earnedXP   += slot.bonusXP   ?? 0;
-        earnedGold += slot.bonusGold ?? 0;
+        earnedXP   += slot?.bonusXP   ?? 0;
+        earnedGold += slot?.bonusGold ?? 0;
       }
     }
-
-    // Gold and mission-release are written for everyone. The claim may already
-    // have been reclaimed early (slots done); clearing the specific key is
-    // idempotent either way.
-    updates[sPath(`players/${pid}/gold`)]                         = (player.gold ?? 0) + earnedGold;
-    updates[sPath(`players/${pid}/activeMissions/${mission.id}`)] = null;
-
-    // XP, level-grants and completion history are only written in a season that
-    // awards XP (map). A casino-only season (S1.5) is gold-only — XP is inert
-    // (gambit XP is paid as gold) and its players carry no adventurers, so this
-    // whole block is skipped. In a MAP season (S2), casino participants DO earn
-    // XP from their gambit-raised floor and can level up, like any other mission.
-    if (shell !== 'casino') {
-      const baseXp        = player.xp ?? 0;
-      const prevLevel     = calcLevel(baseXp);
-      const newXp         = baseXp + earnedXP;
-      const newLevel      = calcLevel(newXp);
-      const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
-
-      updates[sPath(`players/${pid}/xp`)]         = newXp;
-      updates[sPath(`players/${pid}/adventurers`)] = updatedPlayer.adventurers;
-
-      const entryKey = push(sRef(db!, `players/${pid}/completedChallenges`)).key!;
-      updates[sPath(`players/${pid}/completedChallenges/${entryKey}`)] = {
-        coord:       'D3',
-        name:        label,
-        xpAwarded:   earnedXP,
-        goldAwarded: earnedGold,
-        completedAt: now,
-      };
-    }
+    const out = mercTotals(cuts);
+    credit(pid, earnedXP - out.xp, earnedGold - out.gold);
+    if (out.gold > 0) mercOut.set(pid, out.gold);
+    mergeMercCuts(mercIn, cuts);
 
     // Casino Coat earn path: mark this game type completed; grant the Coat once
     // the player has successfully completed a table of all four game types. Works
@@ -1478,7 +1502,8 @@ export async function completeMission(
     // Gated on `played`: the Coat is earned by SITTING a table of each game, and a
     // pure claimant never played the game at all — they took over an abandoned slot
     // without anteing, being dealt to, or locking a hand. Crediting them would let
-    // four claims buy the Coat without ever playing a hand.
+    // four claims buy the Coat without ever playing a hand. (Mercs never reach this
+    // loop at all — they are not participants.)
     if (isCasino && mission.casinoGame && participant.played) {
       updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
       const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
@@ -1494,7 +1519,51 @@ export async function completeMission(
     }
   }
 
-  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares, now);
+  // Mercs: half of each slot they helped on, plus (casino) the pot weight that
+  // rode on those halves. A merc owns no seat and holds no claim, so there is no
+  // claim to free and no Coat or Basic Training credit — just the payout.
+  const mercPayouts: Record<string, MercPayout> = {};
+  for (const [mid, c] of mercIn) {
+    if (!players[mid]) continue;
+    const gold = c.gold + (mercPot.get(mid) ?? 0);
+    const xp   = shell !== 'casino' ? c.xp : 0;
+    credit(mid, xp, gold);
+    mercPayouts[mid] = { playerName: players[mid].displayName ?? c.playerName, xp, gold, slots: c.slots };
+  }
+
+  for (const [pid, award] of awards) {
+    const player = players[pid];
+    if (!player) continue;
+
+    updates[sPath(`players/${pid}/gold`)] = (player.gold ?? 0) + award.gold;
+
+    // XP, level-grants and completion history are only written in a season that
+    // awards XP (map). A casino-only season (S1.5) is gold-only — XP is inert
+    // (gambit XP is paid as gold) and its players carry no adventurers, so this
+    // whole block is skipped. In a MAP season (S2), casino participants DO earn
+    // XP from their gambit-raised floor and can level up, like any other mission.
+    if (shell !== 'casino') {
+      const baseXp        = player.xp ?? 0;
+      const prevLevel     = calcLevel(baseXp);
+      const newXp         = baseXp + award.xp;
+      const newLevel      = calcLevel(newXp);
+      const updatedPlayer = checkAndGrantAdventurers(player, prevLevel, newLevel);
+
+      updates[sPath(`players/${pid}/xp`)]         = newXp;
+      updates[sPath(`players/${pid}/adventurers`)] = updatedPlayer.adventurers;
+
+      const entryKey = push(sRef(db!, `players/${pid}/completedChallenges`)).key!;
+      updates[sPath(`players/${pid}/completedChallenges/${entryKey}`)] = {
+        coord:       'D3',
+        name:        pid in (mission.participants ?? {}) ? label : `${label} (merc)`,
+        xpAwarded:   award.xp,
+        goldAwarded: award.gold,
+        completedAt: now,
+      };
+    }
+  }
+
+  updates[sPath(`missionsHistory/${mission.id}`)] = archivedMission(mission, potShares, now, mercOut, mercPayouts);
   updates[sPath(`missions/${mission.id}`)]         = null;
 
   await update(ref(db!), updates);

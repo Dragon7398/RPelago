@@ -120,10 +120,26 @@
           "$coord": {
             "adventurers": {
               "$advId": {
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && (newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid)))",
-                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('seasons').child($seasonId).child('tiles').child($coord).child('state').val() !== 'inprogress' || root.child('seasons').child($seasonId).child('tiles').child($coord).child('claimableSlots').exists()))",
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && (newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid) && ((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists()))))",
+                ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists())) && newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('seasons').child($seasonId).child('tiles').child($coord).child('state').val() !== 'inprogress' || root.child('seasons').child($seasonId).child('tiles').child($coord).child('claimableSlots').exists()))",
                 "statusNote": {
                   ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
+                },
+                // A merc is hired / replaced / removed only through the setSlotMerc
+                // callable (Admin SDK, so rules don't apply to it). The owner can
+                // otherwise rewrite their own adventurer entry, so pin the merc here:
+                // a non-admin write must leave each slot's merc exactly as it was.
+                // Removal is the case that matters — an owner who could drop their
+                // merc could hire help early and boot it before settle.
+                // (The slots/0..9 terms in the .write and .validate above are the other
+                // half of this: .validate never runs on a DELETED node, so dropping the
+                // merced slot, the slots list, or the whole adventurer would slip past
+                // the per-slot rule here. Rules can't iterate; 0–9 is well past any
+                // adventurer's slot count.)
+                "slots": {
+                  "$slotIdx": {
+                    ".validate": "root.child('config/adminId').val() === auth.uid || newData.child('merc/playerId').val() === data.child('merc/playerId').val()"
+                  }
                 }
               }
             },

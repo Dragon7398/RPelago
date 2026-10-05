@@ -127,7 +127,7 @@ export default function InProgressState({
                     <span className="lb-adv-class">{entry.cls}</span>
                   </span>
                 </div>
-                <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} live />
                 <AdvNoteEditor note={entry.statusNote} isOwner={entry.owner === user?.id} coord={coord} advId={entry.advId} />
               </div>
             ))}
@@ -176,7 +176,7 @@ export default function InProgressState({
                     <span className="lb-adv-class">{entry.cls}</span>
                   </span>
                 </div>
-                <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} />
+                <AdvSlotBlock entry={entry} tile={tile} coord={coord} isOwner={entry.owner === user?.id} live />
                 <AdvNoteEditor note={entry.statusNote} isOwner={entry.owner === user?.id} coord={coord} advId={entry.advId} />
               </div>
             ))}

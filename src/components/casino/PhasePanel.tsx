@@ -5,6 +5,7 @@ import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
 import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { seatGames, type SeatGame } from './seatGames';
+import MercControl from '../MercControl';
 
 // The player's chosen name-color, resolved LIVE per playerId so a mid-mission
 // change is reflected everywhere. Provided by the shell (from gameState.players).
@@ -599,8 +600,10 @@ const NoteIcon = ({ filled }: { filled: boolean }) => (
  * A slot that is neither yours nor noted shows nothing at all (mirrors
  * AdvNoteEditor's `if (!isOwner && !note) return null`).
  */
-function SlotNote({ missionId, slotIdx, note, isOwner }: {
+function SlotNote({ missionId, slotIdx, note, isOwner, ownerId }: {
   missionId: string; slotIdx: number; note?: AdvStatusNote; isOwner: boolean;
+  /** Set only when the writer is the slot's MERC, so the note lands on the owner's seat. */
+  ownerId?: string;
 }) {
   const { setSlotStatusNote } = useGameState();
   const { addToast } = useToast();
@@ -614,7 +617,7 @@ function SlotNote({ missionId, slotIdx, note, isOwner }: {
   const save = async () => {
     setSaving(true);
     try {
-      await setSlotStatusNote(missionId, slotIdx, draft.trim() || null);
+      await setSlotStatusNote(missionId, slotIdx, draft.trim() || null, ownerId);
       setEditing(false);
     } catch {
       addToast('Could not save that note. Please try again.', 'error');
@@ -678,8 +681,10 @@ function SlotNote({ missionId, slotIdx, note, isOwner }: {
 //
 // `missionId` / `linkedAt` are threaded in for the note write path and the idle
 // clock's room-link fallback. Both callers already hold the mission.
-function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
+function TileGrid({ tiles, wide, missionId, linkedAt, now, uid, live }: {
   tiles: OwnedGame[]; wide?: boolean; missionId: string; linkedAt?: number | null; now: number;
+  /** Viewer, and whether the table is live — both only feed the merc control. */
+  uid?: string | null; live?: boolean;
 }) {
   const colorOf  = useNameColor();
   const handleOf = useHandle();
@@ -688,6 +693,9 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
       {tiles.map((t, i) => {
         const handle = handleOf(t.ownerId);
         const idle = slotIdleTier(t.raw, now, linkedAt);
+        // A merc is treated as the slot's holder for the note — they are often the
+        // one who knows where it stands — but never for the merc control itself.
+        const mercIsMe = !!uid && t.raw.merc?.playerId === uid;
         return (
           <div key={i} className={`mp-tile${isGoaled(t.status) ? ' goaled' : ''}${t.you ? ' you' : ''}`}
                style={{ '--th': hueOf(t.type) } as React.CSSProperties}>
@@ -698,7 +706,8 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
                       title={t.claimedFrom ? `Taken over from ${t.claimedFrom}` : 'Taken over from a vacated seat'}>⚐</span>
               )}
               {idle && <IdleBadge idle={idle} mine={t.you} ownerName={t.ownerName} />}
-              <SlotNote missionId={missionId} slotIdx={t.idx} note={t.raw.note} isOwner={t.you} />
+              <SlotNote missionId={missionId} slotIdx={t.idx} note={t.raw.note} isOwner={t.you || mercIsMe}
+                        ownerId={mercIsMe && !t.you ? t.ownerId : undefined} />
             </div>
             <div className="mp-tile-slot">{suitOf(t.type)} {t.cardName || t.slot}</div>
             <div className="mp-tile-game">{t.game}</div>
@@ -709,6 +718,8 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now }: {
                 {handle && <span className="mp-tile-handle">@{handle}</span>}
               </span>
             </div>
+            <MercControl variant="casino" ownerId={t.ownerId} merc={t.raw.merc} live={!!live}
+                         target={{ kind: 'mission', missionId, ownerId: t.ownerId, slotIndex: t.idx }} />
           </div>
         );
       })}
@@ -757,14 +768,14 @@ const byTierThenName = (a: OwnedGame, b: OwnedGame): number =>
  * seat) that rule survives per tile — your own Done games ignore the toggle and
  * the count only ever offers to hide other players'.
  */
-function GamesBoard({ tiles, wide, missionId, linkedAt, now, mine }: {
+function GamesBoard({ tiles, wide, missionId, linkedAt, now, mine, uid, live }: {
   tiles: OwnedGame[]; wide?: boolean; missionId: string; linkedAt?: number | null; now: number;
-  mine?: boolean;
+  mine?: boolean; uid?: string | null; live?: boolean;
 }) {
   const [showDone, setShowDone] = useState(false);
   const sorted = [...tiles].sort(byTierThenName);
   const grid = (list: OwnedGame[]) =>
-    <TileGrid tiles={list} wide={wide} missionId={missionId} linkedAt={linkedAt} now={now} />;
+    <TileGrid tiles={list} wide={wide} missionId={missionId} linkedAt={linkedAt} now={now} uid={uid} live={live} />;
 
   if (mine) return grid(sorted);
 
@@ -857,14 +868,14 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
             Your games {!pending && <span className="mp-mine-count">{myGoaled}/{mine.length} goaled</span>}
           </div>
           {mine.length
-            ? <GamesBoard tiles={mine} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} mine />
+            ? <GamesBoard tiles={mine} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} mine uid={uid} live={m.state === 'inprogress'} />
             : <span className="mp-muted">No games recorded for your seat yet.</span>}
         </div>
 
         {others.length > 0 && (
           <div>
             <div className="mp-cell-lbl">The rest of the table</div>
-            <GamesBoard tiles={others} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} />
+            <GamesBoard tiles={others} wide={wide} missionId={m.id} linkedAt={m.linkedAt} now={now} uid={uid} live={m.state === 'inprogress'} />
           </div>
         )}
 
@@ -902,9 +913,54 @@ export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
       <OpenSlots m={m} uid={uid} />
       {tiles.length
         ? <div style={{ marginTop: '1rem' }}>
-            <GamesBoard tiles={tiles} wide missionId={m.id} linkedAt={m.linkedAt} now={now} />
+            <GamesBoard tiles={tiles} wide missionId={m.id} linkedAt={m.linkedAt} now={now} uid={uid} live={m.state === 'inprogress'} />
           </div>
         : <p className="mp-muted" style={{ marginTop: '0.8rem' }}>No games are recorded at this table yet.</p>}
+    </PlayerCtx>
+  );
+}
+
+/**
+ * Every live slot the viewer is MERCING, grouped by table. A merc holds no seat,
+ * so without this they would have no sign on the landing that the work exists —
+ * the slots would only show up, tagged, on boards they happen to open. The note
+ * button is live on each (they may report on the slot they were hired for).
+ */
+export function MercWork({ missions, uid, now, colorOf, handleOf }: {
+  missions: GMMission[]; uid: string; now: number;
+  colorOf: (playerId: string) => string;
+  handleOf: (playerId: string) => string | null;
+}) {
+  const groups = missions
+    .map(m => {
+      const tiles: OwnedGame[] = [];
+      Object.values(m.participants ?? {}).forEach((p, idx) => {
+        for (const g of seatGames(p)) {
+          if (g.raw.merc?.playerId !== uid) continue;
+          tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash,
+                       you: false, ownerHue: seatHue(idx) });
+        }
+      });
+      return { m, tiles };
+    })
+    .filter(g => g.tiles.length > 0);
+  if (!groups.length) return null;
+
+  return (
+    <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
+      <div className="rl-sec">
+        <div className="rl-sec-head">
+          <span className="rl-sec-title">Slots you’re mercing</span>
+          <span className="rl-sec-note">You take half of each slot’s reward when its table settles</span>
+        </div>
+        {groups.map(({ m, tiles }) => (
+          <div key={m.id} style={{ marginBottom: '1rem' }}>
+            <div className="mp-cell-lbl">{missionDisplayLabel(m)}</div>
+            <TileGrid tiles={tiles} missionId={m.id} linkedAt={m.linkedAt} now={now} uid={uid}
+                      live={m.state === 'inprogress'} />
+          </div>
+        ))}
+      </div>
     </PlayerCtx>
   );
 }
@@ -919,11 +975,12 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
     .map((seat, i) => ({
       seat,
       hue:     seatHue(i),
-      hand:    seat.goldSwing ?? 0,
+      // What the hand actually paid THIS player — a merced card's half went to the merc.
+      hand:    (seat.goldSwing ?? 0) - (seat.mercOut ?? 0),
       pot:     seat.potShare  ?? 0,
       entries: casinoSeatPaid(m, seat.playerId),
       // `net` is stamped at settle; the fallback keeps pre-stamp tables readable.
-      net:     seat.net ?? (seat.goldSwing ?? 0) + (seat.potShare ?? 0) - casinoSeatPaid(m, seat.playerId),
+      net:     seat.net ?? (seat.goldSwing ?? 0) - (seat.mercOut ?? 0) + (seat.potShare ?? 0) - casinoSeatPaid(m, seat.playerId),
       games:   seatGames(seat),
     }))
     .sort((a, b) => b.net - a.net);
@@ -973,6 +1030,20 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
             </div>
           );
         })}
+        {/* Mercs paid nothing in, so their whole take is net. Their gold already
+            includes their slice of the pot (see casinoTableSettlement). */}
+        {Object.entries(m.mercPayouts ?? {}).map(([mid, mp]) => (
+          <div key={`merc-${mid}`} className={`st-lrow${mid === uid ? ' you' : ''}`}>
+            <span className="st-lname">
+              <span style={{ color: colorOf(mid) }}>⚔ {mp.playerName}</span>
+            </span>
+            <span className="st-chips mp-muted">merc · {mp.slots} slot{mp.slots === 1 ? '' : 's'}</span>
+            <span className="st-lnum">—</span>
+            <span className="st-lnum">—</span>
+            <span className="st-lnum">—</span>
+            <span className="st-lnum"><NetBadge n={mp.gold} /></span>
+          </div>
+        ))}
       </div>
 
       <div className="rl-ct-acts" style={{ justifyContent: 'center' }}>

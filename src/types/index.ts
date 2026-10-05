@@ -58,6 +58,19 @@ export interface AdvSlot {
   claimed?: boolean;
   claimedFraction?: number;
   claimedFrom?: string;   // the vacating player's name, for provenance
+  // A MERCENARY helping on this slot. Lighter than a claim: the slot stays the
+  // owner's (their adventurer / mission claim, their status-report incidents),
+  // the merc holds no seat and spends no claim — they just get HALF this slot's
+  // value at settle (XP and gold alike; for casino, half its card and half its
+  // pot weight). Written only by the `setSlotMerc` callable. See mercLogic.ts.
+  merc?: SlotMerc;
+}
+
+export interface SlotMerc {
+  playerId:   string;
+  playerName: string;   // display name at the time of hire, for rendering
+  since:      number;   // ms epoch
+  by?:        string;   // uid that set it — the owner, or the admin
 }
 
 export interface AdvStatusNote {
@@ -515,7 +528,8 @@ export interface GMParticipant {
   // Stamped onto the ARCHIVED copy at settle (see completeMission). The pot split
   // has a random remainder, so the ledger cannot re-derive it — it must be recorded.
   potShare?:    number;              // gold this seat took from the pot
-  net?:         number;              // goldSwing + potShare − entry costs actually paid
+  net?:         number;              // goldSwing − mercOut + potShare − entry costs actually paid
+  mercOut?:     number;              // card gold this seat handed to mercs at settle (its pot share already excludes theirs)
 }
 
 export interface GMMission {
@@ -591,6 +605,17 @@ export interface GMMission {
   // Kicks deliberately do NOT touch this — their weight stays reserved on the
   // claimable slot for whoever takes it, and goes unpaid if nobody does.
   casinoVoidedShare?: number;
+  // Stamped onto the ARCHIVED copy at settle: what each mercenary took home from
+  // this world, keyed by their playerId. Casino gold includes their slice of the
+  // pot, whose random remainder means the ledger could not re-derive it.
+  mercPayouts?: Record<string, MercPayout>;
+}
+
+export interface MercPayout {
+  playerName: string;
+  xp:         number;
+  gold:       number;
+  slots:      number;   // how many slots they were mercing
 }
 
 // A vacated slot offered up for another player to take over. Only created from an

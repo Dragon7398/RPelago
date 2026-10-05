@@ -422,3 +422,56 @@ describe('config is admin-owned', () => {
     );
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Mercenaries on tile slots — only the setSlotMerc callable (Admin SDK) may hire,
+// replace or remove one. A tile adventurer entry is otherwise client-writable by
+// its owner, so the rules pin each slot's merc against that owner. Removal is the
+// case that matters: an owner who could drop their merc could hire help early and
+// boot it before settle. Mission seats need no rule — they are server-write-only.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('tile slot mercs — owner cannot hire, swap or shed one from the client', () => {
+  const ADV  = `seasons/${CASINO}/tiles/B2/adventurers/a1`;
+  const MERC = { playerId: OTHER_UID, playerName: 'Player Two', since: 1 };
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.database();
+      await db.ref(`seasons/${CASINO}/players/${PLAYER_UID}/adventurers/a1`).set({ firstName: 'A', lastName: 'B' });
+      await db.ref(`seasons/${CASINO}/tiles/B2`).set({
+        state: 'inprogress', name: 'Battle',
+        adventurers: {
+          a1: {
+            advId: 'a1', owner: PLAYER_UID, ownerName: 'Player One', name: 'A B', cls: 'fighter',
+            slots: [{ name: 's0', game: 'g', merc: MERC }, { name: 's1', game: 'g' }],
+          },
+        },
+      });
+    });
+  });
+
+  it('the owner can still edit their slots, the merced one included', async () => {
+    await assertSucceeds(player().ref(`${ADV}/slots/1/status`).set('In-Progress'));
+    await assertSucceeds(player().ref(`${ADV}/slots/0/status`).set('In-Progress'));
+  });
+
+  it('the owner cannot remove or replace the merc', async () => {
+    await assertFails(player().ref(`${ADV}/slots/0/merc`).remove());
+    await assertFails(player().ref(`${ADV}/slots/0/merc/playerId`).set(PLAYER_UID));
+  });
+
+  it('the owner cannot hire one directly either', async () => {
+    await assertFails(player().ref(`${ADV}/slots/1/merc`).set(MERC));
+  });
+
+  it('the owner cannot drop the merced slot, the slot list, or the adventurer', async () => {
+    await assertFails(player().ref(`${ADV}/slots`).set([{ name: 's1', game: 'g' }]));
+    await assertFails(player().ref(`${ADV}/slots/0`).remove());
+    await assertFails(player().ref(`${ADV}/slots`).remove());
+    await assertFails(player().ref(ADV).remove());
+  });
+
+  it('the admin can remove a merc', async () => {
+    await assertSucceeds(admin().ref(`${ADV}/slots/0/merc`).remove());
+  });
+});

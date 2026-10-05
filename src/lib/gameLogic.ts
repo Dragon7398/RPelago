@@ -2,6 +2,7 @@ import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from 
 import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, BASE_YAML_LIMITS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
 import type { YamlLimits } from './apYaml';
 import { slotsFromEntry } from './slotHelpers';
+import { flatMercCuts, mercTotals, mergeMercCuts, type MercCuts } from './mercLogic';
 import { randomAdvName, randomAdvClass } from './tileGen';
 
 export function calcLevel(xp: number): number {
@@ -268,6 +269,7 @@ export function awardTileRewards(
 
   const ownerIds = [...new Set(adventurers.map(a => a.owner))];
   const updated = { ...players };
+  const mercIn: MercCuts = new Map();
 
   for (const ownerId of ownerIds) {
     const p = updated[ownerId];
@@ -286,24 +288,43 @@ export function awardTileRewards(
     }
 
     // Sum flat slot bonuses across all this player's adventurers on the tile
+    const ownerSlots = adventurers
+      .filter(a => a.owner === ownerId)
+      .flatMap(a => slotsFromEntry(a));
     let slotBonusXP = 0;
     let slotBonusGold = 0;
-    for (const adv of adventurers.filter(a => a.owner === ownerId)) {
-      const advSlots = slotsFromEntry(adv);
-      for (const slot of advSlots) {
-        slotBonusXP   += slot.bonusXP   ?? 0;
-        slotBonusGold += slot.bonusGold ?? 0;
-      }
+    for (const slot of ownerSlots) {
+      slotBonusXP   += slot.bonusXP   ?? 0;
+      slotBonusGold += slot.bonusGold ?? 0;
     }
 
     const { xpMultiplier, goldMultiplier } = calcFeatBonuses(ownerId, ownerIds, updated);
+    const baseXp   = Math.round((tile.xp   ?? 0) * xpMultiplier);
+    const baseGold = Math.round((tile.gold ?? 0) * goldMultiplier);
+    // The reward is per OWNER, not per adventurer — so a merced slot's value is
+    // an even share of it across every slot they hold here (see mercLogic).
+    const cuts = flatMercCuts(baseXp, baseGold, ownerSlots, ownerId);
+    const out  = mercTotals(cuts);
+    mergeMercCuts(mercIn, cuts);
     const prevLevel = calcLevel(p.xp);
-    const newXp    = p.xp   + Math.round((tile.xp   ?? 0) * xpMultiplier) + slotBonusXP;
-    const newGold  = p.gold + Math.round((tile.gold ?? 0) * goldMultiplier) + slotBonusGold;
+    const newXp    = p.xp   + baseXp   + slotBonusXP   - out.xp;
+    const newGold  = p.gold + baseGold + slotBonusGold - out.gold;
     const newLevel = calcLevel(newXp);
     let updatedPlayer = { ...p, xp: newXp, gold: newGold, adventurers: clearedAdvs };
     updatedPlayer = checkAndGrantAdventurers(updatedPlayer, prevLevel, newLevel);
     updated[ownerId] = updatedPlayer;
+  }
+
+  // Mercs are paid after every owner, from the already-updated records, so a merc
+  // who is also an owner on this tile keeps both awards.
+  for (const [mercId, c] of mercIn) {
+    const m = updated[mercId];
+    if (!m) continue;
+    const prevLevel = calcLevel(m.xp);
+    const newXp     = m.xp + c.xp;
+    updated[mercId] = checkAndGrantAdventurers(
+      { ...m, xp: newXp, gold: m.gold + c.gold }, prevLevel, calcLevel(newXp),
+    );
   }
 
   return updated;

@@ -694,6 +694,15 @@ interface GMSlot {
   claimed?:         boolean;      // casino: taken over from a vacated seat (pays flat, no deck boost)
   claimedFraction?: number;       // casino: the pot weight this slot arrived with (see src/types)
   claimedFrom?:     string;       // casino: the vacating player's name, for provenance
+  merc?:            SlotMerc;     // a mercenary helping on this slot (see setSlotMerc)
+}
+
+// Mirrors SlotMerc in src/types/index.ts.
+interface SlotMerc {
+  playerId:   string;
+  playerName: string;
+  since:      number;
+  by?:        string;
 }
 
 // A vacated slot offered up for a replacement. Mirrors ClaimableEntry in
@@ -798,6 +807,7 @@ interface TileSlot {
   name:    string;
   status?: SlotStatus;
   room?:   1 | 2;
+  merc?:   SlotMerc;
   lastActivity?: number | null;   // Cheesetracker: STRONG — last server-verified activity
   lastChecked?:  number | null;   // Cheesetracker: WEAK — last manual self-report
 }
@@ -1198,6 +1208,9 @@ function makeClaimEntry(
   delete clean.claimed;
   delete clean.claimedFraction;
   delete clean.claimedFrom;
+  // So is the merc: they were hired by the player who just left, and whoever
+  // claims the slot picks their own help.
+  delete clean.merc;
   return {
     slots: [clean],
     ...(card ? { card } : {}),
@@ -1363,8 +1376,8 @@ export const setMissionParticipantStatusNote = onCall(async (request) => {
 export const setSlotStatusNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
 
-  const { missionId, slotIndex, note, seasonId: reqSeason } = request.data as {
-    missionId?: string; slotIndex?: number; note?: string | null; seasonId?: string;
+  const { missionId, slotIndex, note, ownerId: reqOwner, seasonId: reqSeason } = request.data as {
+    missionId?: string; slotIndex?: number; note?: string | null; ownerId?: string; seasonId?: string;
   };
   if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
   if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
@@ -1379,14 +1392,21 @@ export const setSlotStatusNote = onCall(async (request) => {
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = missionSnap.val() as GMMission;
 
-  const seat = mission.participants?.[uid];
+  // By default the note goes on the caller's own seat. A MERC addresses the
+  // owner's seat instead, and may write only on the slot they were hired for —
+  // they are often the one who knows where the game stands, and their note
+  // refreshes `lastReported` for the owner exactly as the owner's would.
+  const ownerId = reqOwner ?? uid;
+  const seat = mission.participants?.[ownerId];
   if (!seat) throw new HttpsError('failed-precondition', 'Not a participant.');
   // Bounds-check against the seat's OWN slots — a note may only ever be attached
   // to a slot the caller actually holds.
   if (slotIndex >= (seat.slots ?? []).length)
     throw new HttpsError('failed-precondition', 'No such slot on your seat.');
+  if (ownerId !== uid && seat.slots?.[slotIndex]?.merc?.playerId !== uid)
+    throw new HttpsError('permission-denied', 'You can only note a slot you own or are mercing.');
 
-  const base = sp(seasonId, `missions/${missionId}/participants/${uid}/slots/${slotIndex}`);
+  const base = sp(seasonId, `missions/${missionId}/participants/${ownerId}/slots/${slotIndex}`);
   const updates: Record<string, unknown> = {};
 
   if (note == null || note.trim() === '') {
@@ -1399,6 +1419,160 @@ export const setSlotStatusNote = onCall(async (request) => {
 
   await db.ref().update(updates);
   return { success: true };
+});
+
+// ── Mercenaries ──────────────────────────────────────────────────────────────
+//
+// A merc helps play one slot and takes half its value at settle (the math is
+// client-side, in src/lib/mercLogic.ts). The slot stays its owner's in every other
+// respect — claim, adventurer, status-report incidents — so this callable only
+// ever writes one leaf: `slots/{i}/merc`.
+//
+// WHO may do WHAT is the whole point of routing this through a callable:
+//   • the owner may HIRE, but only onto a slot with no merc yet;
+//   • only the admin may REPLACE or REMOVE one.
+// Letting the owner remove (or swap out) their own merc would let a player hire
+// help early, then boot it near the end and keep the full reward. The admin is the
+// escape hatch for a merc that has gone badly.
+
+/** `@Name ` → `name`. Discord usernames are lowercase, but a typed one may not be. */
+function normalizeHandle(raw: string): string {
+  return raw.trim().replace(/^@+/, '').trim().toLowerCase();
+}
+
+interface MercTarget {
+  owner:    string;
+  slotPath: string;               // full RTDB path of the slot itself
+  merc?:    SlotMerc | null;
+  live:     boolean;              // the world is in progress
+}
+
+async function resolveMercTarget(
+  db: ReturnType<typeof getDatabase>,
+  seasonId: string,
+  data: { kind?: string; missionId?: string; ownerId?: string; coord?: string; advId?: string; slotIndex?: number },
+): Promise<MercTarget> {
+  const { kind, slotIndex } = data;
+  if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
+    throw new HttpsError('invalid-argument', 'Missing or invalid slotIndex.');
+
+  // Slots may come back as a dense array or as an object with numeric keys (a
+  // sparse array). The client indexes `normalizeSlots(raw)`, i.e. Object.values
+  // order, which for integer keys is ascending — so Object.keys gives the same key.
+  const keyAt = (raw: unknown): string | null => {
+    if (Array.isArray(raw)) return raw[slotIndex] ? String(slotIndex) : null;
+    if (raw && typeof raw === 'object') return Object.keys(raw)[slotIndex] ?? null;
+    return null;
+  };
+
+  if (kind === 'mission') {
+    const { missionId, ownerId } = data;
+    if (!missionId || !ownerId) throw new HttpsError('invalid-argument', 'Missing missionId or ownerId.');
+    const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+    if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+    const mission = snap.val() as GMMission;
+    const seat = mission.participants?.[ownerId];
+    if (!seat) throw new HttpsError('not-found', 'That player is not on this mission.');
+    const key = keyAt(seat.slots);
+    if (key == null) throw new HttpsError('not-found', 'No such slot.');
+    const slot = (seat.slots as unknown as Record<string, GMSlot>)[key];
+    return {
+      owner:    ownerId,
+      slotPath: sp(seasonId, `missions/${missionId}/participants/${ownerId}/slots/${key}`),
+      merc:     slot?.merc ?? null,
+      live:     mission.state === 'inprogress',
+    };
+  }
+
+  if (kind === 'tile') {
+    const { coord, advId } = data;
+    if (!coord || !advId) throw new HttpsError('invalid-argument', 'Missing coord or advId.');
+    const snap = await db.ref(sp(seasonId, `tiles/${coord}`)).get();
+    if (!snap.exists()) throw new HttpsError('not-found', 'Challenge not found.');
+    const tile = snap.val() as Tile;
+    const adv = tile.adventurers?.[advId];
+    if (!adv) throw new HttpsError('not-found', 'That adventurer is not on this challenge.');
+    const key = keyAt(adv.slots);
+    if (key == null) throw new HttpsError('not-found', 'No such slot.');
+    const slot = (adv.slots as unknown as Record<string, TileSlot>)[key];
+    return {
+      owner:    adv.owner,
+      slotPath: sp(seasonId, `tiles/${coord}/adventurers/${advId}/slots/${key}`),
+      merc:     slot?.merc ?? null,
+      live:     tile.state === 'inprogress',
+    };
+  }
+
+  throw new HttpsError('invalid-argument', 'kind must be "mission" or "tile".');
+}
+
+/**
+ * Hire (handle given) or remove (handle null/empty) a merc on one slot.
+ * `kind: 'mission'` addresses `{missionId, ownerId, slotIndex}`; `kind: 'tile'`
+ * addresses `{coord, advId, slotIndex}` (the owner is read off the adventurer).
+ */
+export const setSlotMerc = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+
+  const data = request.data as {
+    kind?: string; missionId?: string; ownerId?: string; coord?: string; advId?: string;
+    slotIndex?: number; handle?: string | null; seasonId?: string;
+  };
+
+  const uid = request.auth.uid;
+  const db  = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, data.seasonId, db);
+
+  const adminSnap = await db.ref('config/adminId').get();
+  const isAdmin   = adminSnap.exists() && adminSnap.val() === uid;
+
+  const target = await resolveMercTarget(db, seasonId, data);
+  if (!isAdmin && target.owner !== uid)
+    throw new HttpsError('permission-denied', 'Only the slot’s owner or the admin can hire a merc for it.');
+  if (!target.live)
+    throw new HttpsError('failed-precondition', 'Mercs can only be hired while the world is in progress.');
+
+  const handle = typeof data.handle === 'string' ? normalizeHandle(data.handle) : '';
+
+  // ── Remove ── admin only, always.
+  if (!handle) {
+    if (!isAdmin)
+      throw new HttpsError('permission-denied', 'Only the admin can remove a merc.');
+    await db.ref(`${target.slotPath}/merc`).remove();
+    return { success: true, removed: true };
+  }
+
+  // ── Hire ── an owner may not REPLACE an existing merc: swapping one out is a
+  // removal with extra steps.
+  if (target.merc && !isAdmin)
+    throw new HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
+
+  // Resolve the typed handle against this season's players. A season roster is
+  // tens of players, so one read beats maintaining an index on a field players
+  // never query by.
+  const playersSnap = await db.ref(sp(seasonId, 'players')).get();
+  const players = (playersSnap.val() ?? {}) as Record<string, PlayerRecord & { id?: string; disabled?: boolean }>;
+  const matches = Object.entries(players)
+    .filter(([, p]) => p && p.id && typeof p.discordHandle === 'string'
+      && normalizeHandle(p.discordHandle) === handle);
+  if (matches.length === 0)
+    throw new HttpsError('not-found', `No player in this season has the Discord handle @${handle}.`);
+  if (matches.length > 1)
+    throw new HttpsError('failed-precondition', `More than one player matches @${handle}; ask the admin.`);
+
+  const [mercId, merc] = matches[0];
+  if (mercId === target.owner)
+    throw new HttpsError('invalid-argument', 'A player can’t merc their own slot.');
+  if (merc.disabled)
+    throw new HttpsError('failed-precondition', `@${handle} can’t take merc work right now.`);
+
+  await db.ref(`${target.slotPath}/merc`).set({
+    playerId:   mercId,
+    playerName: merc.displayName ?? handle,
+    since:      Date.now(),
+    by:         uid,
+  });
+  return { success: true, mercId, mercName: merc.displayName ?? handle };
 });
 
 // ── Claim an open spot on an in-progress mission (kicked player replacement) ──
@@ -2105,6 +2279,15 @@ export const resubmitCasinoYaml = onCall(async (request) => {
 
     const choice = deckChoiceOf(seat);
     const slots  = cardsToSlots(committed);
+    // A merc stays with its CARD. The rebuild starts from fresh slots, so carry
+    // each own card's merc across by uid (claimed cards are a different uid space
+    // and are carried whole below). A card the player drops takes its merc with it
+    // — the slot no longer exists. This path is only open live on a host deny, so
+    // it is admin-mediated, never a quiet way for an owner to shed their merc.
+    const mercByUid = new Map<number, SlotMerc>();
+    splitSeatCards(seat).own.forEach(({ card, slot }) => {
+      if (slot.merc) mercByUid.set(card.uid, slot.merc);
+    });
     committed.forEach((card, i) => {
       const m    = manifest?.[String(card.uid)];
       const game = clip(m?.game, 120);
@@ -2112,6 +2295,8 @@ export const resubmitCasinoYaml = onCall(async (request) => {
       if (!game) throw new HttpsError('failed-precondition', 'Every committed card needs a game before you can resubmit.');
       slots[i].game = game;
       if (name) slots[i].name = name;
+      const merc = mercByUid.get(card.uid);
+      if (merc) (slots[i] as GMSlot).merc = merc;
     });
 
     // Slots this seat CLAIMED from someone else are not part of the re-selection —

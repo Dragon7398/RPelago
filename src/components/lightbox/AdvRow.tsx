@@ -3,6 +3,7 @@ import { FEATS } from '../../lib/constants';
 import { getPlayerFeatIds } from '../../lib/gameLogic';
 import { slotsFromEntry } from '../../lib/slotHelpers';
 import type { TileAdventurer, Player } from '../../types';
+import MercControl from '../MercControl';
 
 export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -75,9 +76,11 @@ export function SlotBonusPills({ bonusXP, bonusGold }: { bonusXP?: number; bonus
   );
 }
 
-export function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }: {
+export function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true, live = false }: {
   entry: TileAdventurer; tile: { name: string }; coord: string;
   isOwner: boolean; showPrompt?: boolean;
+  /** The challenge is in progress — the only time a merc can be hired or removed. */
+  live?: boolean;
 }) {
   const slots = slotsFromEntry(entry);
   if (slots.length > 0) {
@@ -92,6 +95,8 @@ export function AdvSlotBlock({ entry, tile, coord, isOwner, showPrompt = true }:
             <span className="lb-slot-game">{s.game}</span>
             {s.details && <span className="lb-slot-details">{s.details}</span>}
             {s.status && <span className={`lb-slot-status ss-${s.status.replace('%', 'pct').replace('-', '')}`}>{s.status}</span>}
+            <MercControl ownerId={entry.owner} merc={s.merc} live={live}
+                         target={{ kind: 'tile', coord, advId: entry.advId, slotIndex: i }} />
           </div>
         ))}
         <SlotBonusPills bonusXP={totalBonusXP || undefined} bonusGold={totalBonusGold || undefined} />

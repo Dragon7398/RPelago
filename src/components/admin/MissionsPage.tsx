@@ -14,6 +14,7 @@ import { checkProgressionBalancing, checkBlanketTargets, checkYamlLimits, summar
 import { yamlLimitsForPlayer, releasesClaimsEarly } from '../../lib/gameLogic';
 import { GAMBIT_DEFS_BY_ID } from '../../lib/casinoGambits';
 import { zipSync } from 'fflate';
+import MercControl from '../MercControl';
 
 
 const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string }[] = [
@@ -214,6 +215,10 @@ function MissionParticipantSlots({
           >
             {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
           </select>
+          {/* Deliberately outside the 🔒 lock: hiring or dropping a merc is a policy
+              call, not a hand-typed room value the lock exists to protect. */}
+          <MercControl ownerId={playerId} merc={s.merc} live={!!isLive}
+                       target={{ kind: 'mission', missionId, ownerId: playerId, slotIndex: i }} />
           {!locked && (confirmDel?.i === i ? (
             <span className="admin-remove-confirm">
               <span className="admin-remove-explain">

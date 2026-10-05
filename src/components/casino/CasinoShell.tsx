@@ -8,7 +8,7 @@ import HelpModal from '../HelpModal';
 import LoginModal from '../LoginModal';
 import PrivacyModal from '../PrivacyModal';
 import ProfileLink from '../ProfileLink';
-import PhasePanel, { TableSlotsBoard, GameChip } from './PhasePanel';
+import PhasePanel, { TableSlotsBoard, GameChip, MercWork } from './PhasePanel';
 import { seatGames, type SeatGame } from './seatGames';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
@@ -667,6 +667,16 @@ export default function CasinoShell() {
   }, [gameState?.missions, me?.activeMissions, user?.id]);
   const myTableIds = useMemo(() => new Set(myTables.map(m => m.id)), [myTables]);
 
+  // Live tables where the player is MERCING a slot. They hold no seat for it, so
+  // these never appear in myTables; MercWork lists the slots themselves.
+  const mercTables = useMemo(() => {
+    const uid = user?.id;
+    if (!uid) return [] as GMMission[];
+    return Object.values(gameState?.missions ?? {})
+      .filter(m => m.type === 'casino' && m.state === 'inprogress'
+        && Object.values(m.participants ?? {}).some(p => (p.slots ?? []).some(s => s?.merc?.playerId === uid)));
+  }, [gameState?.missions, user?.id]);
+
   // Deployed tables the player holds NO seat at. Shown as read-only progress cards
   // so the floor's live rooms are visible alongside the ones still taking seats.
   const liveTables = useMemo(() => {
@@ -797,6 +807,13 @@ export default function CasinoShell() {
               handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
             />
           )}
+
+      {user?.id && (
+        <MercWork missions={mercTables} uid={user.id} now={now}
+          colorOf={pid => nameColorValue(gameState?.players?.[pid]?.nameColor)}
+          handleOf={pid => gameState?.players?.[pid]?.discordHandle ?? null}
+        />
+      )}
 
       <div className="rl-sec">
         <div className="rl-sec-head">
