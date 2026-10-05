@@ -204,8 +204,12 @@ function SlotRow({ ws, telemetry, state, incidents, now }: {
 
 // ── The panel ────────────────────────────────────────────────────────────────
 
-export default function RoomPeek({ kind, id, now }: {
+export default function RoomPeek({ kind, id, now, showOpenSlots = true }: {
   kind: 'mission' | 'tile'; id: string; now: number;
+  /** The admin Missions card already carries its own OPEN SLOTS panel, with the
+   *  ⊘ release control this read-only one lacks — two headers on one card is
+   *  noise, so that caller turns this half off. */
+  showOpenSlots?: boolean;
 }) {
   const { gameState } = useGameState();
   const mission: GMMission | undefined = kind === 'mission' ? gameState?.missions?.[id] : undefined;
@@ -237,7 +241,7 @@ export default function RoomPeek({ kind, id, now }: {
   const scope = mission ? missionScope(mission) : tileScope(tile!);
   const slots = worldSlotReport(scope, players, now);
   const incidents = (mission ?? tile!).statusIncidents ?? {};
-  const open = mission ? claimEntries(mission) : [];
+  const open = mission && showOpenSlots ? claimEntries(mission) : [];
 
   const progressFor = (room: 1 | 2): Record<string, RoomProgressSample> | undefined =>
     mission ? mission.roomProgress : (room === 1 ? tile!.roomProgress : tile!.roomProgress2);

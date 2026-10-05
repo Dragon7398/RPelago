@@ -120,7 +120,9 @@ export default function AdvSlotEditor({ tile, selectedCoord, unassigned1, unassi
                 >
                   {SLOT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
                 </select>
-                <MercControl ownerId={entry.owner} merc={s.merc} live={tile.state === 'inprogress'}
+                <MercControl ownerId={entry.owner} slot={s} live={tile.state === 'inprogress'} casino={false}
+                             ownerSlots={entries.filter(e => e.owner === entry.owner).flatMap(e =>
+                               normalizeSlots(e.slots as AdvSlot[] | Record<string, AdvSlot> | undefined))}
                              target={{ kind: 'tile', coord: selectedCoord, advId: entry.advId, slotIndex: i }} />
                 {!locked && <button className="admin-slot-del" onClick={() => save(slots.filter((_, j) => j !== i))} title="Remove slot">✕</button>}
               </div>

@@ -550,9 +550,15 @@ export async function claimClaimableSlot(
   entry: TileAdventurer,
 ): Promise<void> {
   assertDb();
+  // Stamp the adopted slots `claimed`, so the claimant can't pass one straight on
+  // to a merc (see mercHireBlockers). Tile settlement never reads the flag.
+  const slots = normalizeSlots(entry.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
+  const claimedEntry: TileAdventurer = slots.length
+    ? { ...entry, slots: slots.map(s => ({ ...s, claimed: true })) }
+    : entry;
   const updates: Record<string, unknown> = {
     [sPath(`tiles/${coord}/claimableSlots/${slotKey}`)]:                 null,
-    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
+    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                claimedEntry,
     [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
     [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
   };
@@ -1064,9 +1070,12 @@ export type MercTarget =
 // Hire by Discord handle (the server resolves it), or pass null to remove. The
 // server enforces the rules: the owner or admin may hire onto an empty slot; only
 // the admin may replace or remove a merc.
-export async function setSlotMerc(target: MercTarget, handle: string | null): Promise<{ mercName?: string }> {
+// `confirm` is the admin hiring past the limits (mercHireBlockers); a player can't.
+export async function setSlotMerc(target: MercTarget, handle: string | null, confirm = false): Promise<{ mercName?: string }> {
   assertFunctions();
-  const res = await httpsCallable(functions!, 'setSlotMerc')({ ...target, handle, seasonId: getCurrentSeason() });
+  const res = await httpsCallable(functions!, 'setSlotMerc')({
+    ...target, handle, seasonId: getCurrentSeason(), ...(confirm ? { confirm: true } : {}),
+  });
   return (res.data ?? {}) as { mercName?: string };
 }
 

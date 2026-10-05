@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useToast } from '../../contexts/ToastContext';
+import RoomPeek from './statusReportPage/RoomPeek';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { useSeason } from '../../contexts/SeasonContext';
@@ -217,7 +218,7 @@ function MissionParticipantSlots({
           </select>
           {/* Deliberately outside the 🔒 lock: hiring or dropping a merc is a policy
               call, not a hand-typed room value the lock exists to protect. */}
-          <MercControl ownerId={playerId} merc={s.merc} live={!!isLive}
+          <MercControl ownerId={playerId} slot={s} ownerSlots={slots} casino={!!isCasino} live={!!isLive}
                        target={{ kind: 'mission', missionId, ownerId: playerId, slotIndex: i }} />
           {!locked && (confirmDel?.i === i ? (
             <span className="admin-remove-confirm">
@@ -791,6 +792,9 @@ function MissionCard({ mission, pinned, onInteract }: {
   // Mount-time only, deliberately: setting the link on a live panel must not yank
   // the section closed while the host is still working in it.
   const [slotsOpen, setSlotsOpen] = useState(() => !mission.link);
+  // The room peek — the same panel the Report tab expands, so a host triaging a
+  // live table does not have to go to Report to see slot progress and timers.
+  const [peekOpen, setPeekOpen] = useState(false);
   // Ticks the Elapsed / since-report clocks below. A status-report monitor is only
   // useful if the times advance live, so re-render once a second rather than only
   // on RTDB changes.
@@ -902,12 +906,22 @@ function MissionCard({ mission, pinned, onInteract }: {
         {mission.cheese && (
           <a className="dash-tile-link" href={`https://cheesetrackers.theincrediblewheelofchee.se/tracker/${mission.cheese}`} target="_blank" rel="noopener noreferrer" title="Open Cheesetracker">🧀</a>
         )}
+        {mission.state === 'inprogress' && (
+          <button
+            className="dash-tile-link dash-peek-btn"
+            aria-expanded={peekOpen}
+            onClick={() => setPeekOpen(o => !o)}
+            title={peekOpen ? 'Hide room detail' : 'Room detail — slot progress, timers, notes, pace'}
+          >🔍</button>
+        )}
         {(mission.link || link) && (
           <button className="dash-copy-room-btn ap-sync-btn" onClick={handleSync} disabled={syncing}>
             {syncing ? '…' : 'Sync'}
           </button>
         )}
       </div>
+
+      {peekOpen && <RoomPeek kind="mission" id={mission.id} now={now} showOpenSlots={false} />}
 
       {/* Elapsed + time-since-last-report clocks — for admin status-report cadence */}
       <div style={{ display: 'flex', gap: '1.2rem', flexWrap: 'wrap', fontSize: '0.62rem', color: 'var(--gold-dim)', marginTop: '0.3rem' }}>

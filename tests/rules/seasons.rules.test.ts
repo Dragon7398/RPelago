@@ -471,6 +471,15 @@ describe('tile slot mercs — owner cannot hire, swap or shed one from the clien
     await assertFails(player().ref(ADV).remove());
   });
 
+  it('the owner cannot clear a slot’s claimed flag (it bars passing a claimed slot to a merc)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(`${ADV}/slots/1/claimed`).set(true);
+    });
+    await assertFails(player().ref(`${ADV}/slots/1/claimed`).remove());
+    await assertFails(player().ref(`${ADV}/slots/1`).set({ name: 's1', game: 'g' }));
+    await assertSucceeds(player().ref(`${ADV}/slots/1/status`).set('In-Progress'));
+  });
+
   it('the admin can remove a merc', async () => {
     await assertSucceeds(admin().ref(`${ADV}/slots/0/merc`).remove());
   });

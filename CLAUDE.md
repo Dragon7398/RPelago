@@ -287,6 +287,7 @@ A **lighter claim**: the slot's owner (or the admin) hires another player to hel
 
 - **Data**: `AdvSlot.merc?: SlotMerc` (`{ playerId, playerName, since, by }`) on the slot itself, so it works for tile adventurer slots, mission slots and casino seats alike. Both status-sync paths write leaf fields, so it survives syncs.
 - **Hire / remove only via `setSlotMerc`.** The owner types a Discord handle; the server resolves it against the season's `players/*/discordHandle` (`normalizeHandle`: trim, strip `@`, lowercase — mirrored in `mercLogic.ts` for the picker's live preview). **The owner may hire only onto a slot with no merc; only the admin may replace or remove one** — an owner who could shed their merc could hire help early and boot it before settle to keep the full reward. In-progress worlds only. Mission seats are already server-write-only; **tile adventurer entries are owner-writable, so `database.rules.json` pins the merc there**: a per-slot `.validate` keeps `merc/playerId` unchanged for non-admins, and because `.validate` never runs on a *deleted* node, the `$advId` `.write`/`.validate` also refuse dropping a merced slot, the slot list, or the adventurer (indices 0–9 spelled out — rules can't iterate). Pinned in `tests/rules/seasons.rules.test.ts`.
+- **Hiring limits** (`mercHireBlockers`, client in `mercLogic.ts` + server mirror in `index.ts` — change both): **HARD for players, SOFT for the admin** (the callable refuses a player; for the admin it throws with `details.mercWarnings` unless `confirm: true`, and `MercControl` shows the reasons with a **Hire anyway** button). (1) **`claimed`** — a claimed slot can't be merced; tile (`claimClaimableSlot`) and non-casino mission (`claimMissionSlot`) claims now stamp `claimed: true` too (casino always did; non-casino settlement never reads it), and the tile rules forbid a non-admin clearing it. Slots claimed before that stamp carry no flag and aren't caught. (2) **`casinoLimit`** — an owner may have at most ONE merced slot per casino table. (3) **`allSlots`** — an owner may never merc every slot they hold on a world (their seat; every adventurer of theirs on a tile). The target is excluded from the "already merced" count, so replacing a merc never trips a limit.
 - **"Half the slot's value"** (`src/lib/mercLogic.ts`, pure; settlement is client-side so there is no server mirror):
   - **Casino** — explicit per card: half the card's gold (deck-boosted for an own card, flat for a claimed one, mirroring `seatGoldSwing`) and half its pot weight (`1/lockedCount`, or `claimedFraction`). `casinoTableSettlement` moves that weight from the owner's entry to the merc's under a separate key, so **total weight is unchanged** (no minting, denominator untouched) and a merc who is also seated gets two separately-floored shares. `casinoTableShares` is the merged view.
   - **Tiles / non-casino missions** pay per *player*, not per slot, so a slot is worth the owner's **feat-multiplied** base ÷ their slot count, plus that slot's own `bonusXP`/`bonusGold`. The merc gets no feat bonuses of their own. Casino XP uses the same even-share rule.
@@ -463,9 +464,10 @@ for its `100%` test and then discarded.
 - `archivedMission` **strips `roomProgress`** — live telemetry, not part of the
   settled record.
 
-### The room peek (admin Report tab)
+### The room peek (admin Report / Missions / Challenges)
 
-Clicking a world's name on a report card expands `RoomPeek`
+Clicking a world's name on a report card — or the **🔍** beside the room links on an
+in-progress card on the admin **Missions** or **Challenges** tab — expands `RoomPeek`
 ([src/components/admin/statusReportPage/RoomPeek.tsx](src/components/admin/statusReportPage/RoomPeek.tsx)):
 the room's pace chart plus one row per slot — handle, slot name, game, status,
 progress, daily movement, all three timers, the player's note, every finding that
@@ -508,7 +510,24 @@ requiring a round trip to Cheesetracker.
   is display-only, for the peek's grouping.
 - A slot whose `{NUMBER}` never resolved matches no series and renders **"no
   tracker match"** — its stored name is not the one the room generated, and showing
-  someone else's numbers would be worse than showing none.
+  someone else's numbers would be worse than showing none. That message is one of
+  **four** (`TelemetryState`): an in-flight fetch, a rejected one, and a tree with
+  no samples for this room each say so in their own words. Only the last of the
+  four blames the slot, and saying it while the tree is merely empty sends the host
+  hunting a bug that isn't there.
+- **The toggle is a real `<button>` with `aria-expanded`** on all three surfaces,
+  not a clickable span. On Missions it passes **`showOpenSlots={false}`**: that card
+  already carries its own OPEN SLOTS panel with the ⊘ release control this
+  read-only one lacks, and two headers on one card is noise. Challenges needs no
+  such flag — the open-slots block is mission-only.
+- **Every row renders all five grid cells, empty ones included.** `.sr-peek-row` is
+  a CSS **grid** with fixed tracks: `flex-grow` distributes only the LEFTOVER
+  space, so a row whose identity text was shorter put its timers somewhere else
+  entirely, and a row that skipped the bars/delta cells knocked the rest out of
+  line. **Never dim a whole row with `opacity`** either — finished slots were at
+  `0.62`, which multiplies against tokens already near the 4.5:1 floor and made a
+  settling table unreadable. De-emphasis is the rail and a muted handle; rank
+  already sorts them last.
 
 `renderProblemsMarkdown` filters excused players out and drops a world heading left with nobody to ping. A world where *everyone* was excused sent no ping at all, so `runOfficialStatusReport` also leaves its `lastReportAt` alone (`hasUnexcusedProblem`) — it stays visible in **Active** instead of hiding under **Recently Reported** for 24h. Warnings are never excusable; they count against nobody.
 

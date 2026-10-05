@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import type { SlotMerc } from '../types';
+import type { AdvSlot } from '../types';
 import { setSlotMerc, type MercTarget } from '../firebase/db';
 import { useGameState } from '../contexts/GameStateContext';
 import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { playersByHandle } from '../lib/mercLogic';
+import { MERC_BLOCKER_TEXT, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
 
 /**
  * The merc tag and hire/remove affordance for ONE slot, used on every surface
@@ -17,12 +17,22 @@ import { playersByHandle } from '../lib/mercLogic';
  * An owner who could remove their own merc could hire help early and boot it
  * before settle to keep the whole reward.
  *
+ * On top of that, the hiring limits (`mercHireBlockers`: no claimed slot, one per
+ * casino table, never every slot) are HARD for players — the button is withheld
+ * or disabled with the reason — and SOFT for the admin, who sees the same reasons
+ * as warnings and can "Hire anyway".
+ *
  * `variant` only picks the class prefix — the casino landing and the map/admin
  * pages run different token sets (themes.css vs index.css).
  */
-export default function MercControl({ target, merc, ownerId, live, variant = 'map' }: {
+export default function MercControl({ target, slot, ownerSlots, casino, ownerId, live, variant = 'map' }: {
   target:   MercTarget;
-  merc?:    SlotMerc | null;
+  /** The slot itself — its `merc` and `claimed` flags. */
+  slot:     AdvSlot;
+  /** Everything the owner holds on this world (their seat; every adventurer of theirs on a tile). */
+  ownerSlots: readonly (AdvSlot | null | undefined)[];
+  /** A casino table — the one-merced-slot limit applies. */
+  casino:   boolean;
   ownerId:  string;
   /** The world is in progress — hiring and removing are refused at any other time. */
   live:     boolean;
@@ -37,9 +47,16 @@ export default function MercControl({ target, merc, ownerId, live, variant = 'ma
   const [draft,   setDraft]   = useState('');
   const [busy,    setBusy]    = useState(false);
 
+  const merc     = slot.merc;
   const p        = variant === 'casino' ? 'mp-merc' : 'merc';
   const isOwner  = !!uid && uid === ownerId;
-  const canHire  = live && (isAdmin || (isOwner && !merc));
+  const blockers = mercHireBlockers(slot, ownerSlots, casino);
+  const reasons  = blockers.map(b => MERC_BLOCKER_TEXT[b]);
+  // A claimed slot can never be merced by its owner, so a player isn't shown a
+  // button for it at all. The count limits can lift (the admin removes another
+  // merc), so those leave the button visible but disabled, with the reason.
+  const canHire  = live && (isAdmin || (isOwner && !merc && !blockers.includes('claimed')));
+  const blocked  = !isAdmin && blockers.length > 0;
   const canClear = live && isAdmin && !!merc;
 
   const tag = merc ? (
@@ -65,7 +82,8 @@ export default function MercControl({ target, merc, ownerId, live, variant = 'ma
   const run = async (handle: string | null) => {
     setBusy(true);
     try {
-      const res = await setSlotMerc(target, handle);
+      // The admin has seen the warnings in the form; hiring past them is the confirmation.
+      const res = await setSlotMerc(target, handle, isAdmin && blockers.length > 0);
       addToast(handle ? `${res.mercName ?? 'Merc'} is now mercing this slot.` : 'Merc removed.', 'success');
       setEditing(false); setConfirm(false); setDraft('');
     } catch (err) {
@@ -79,8 +97,9 @@ export default function MercControl({ target, merc, ownerId, live, variant = 'ma
     <span className={`${p}`}>
       {tag}
       {!editing && !confirm && canHire && (
-        <button type="button" className={`${p}-btn`} onClick={() => setEditing(true)}
-                title={merc ? 'Hand this slot to a different merc (admin)' : 'Hire a mercenary to help play this slot'}>
+        <button type="button" className={`${p}-btn`} onClick={() => setEditing(true)} disabled={blocked}
+                title={blocked ? reasons.join(' ')
+                  : merc ? 'Hand this slot to a different merc (admin)' : 'Hire a mercenary to help play this slot'}>
           {merc ? 'Change' : '+ Merc'}
         </button>
       )}
@@ -116,11 +135,14 @@ export default function MercControl({ target, merc, ownerId, live, variant = 'ma
           <span className={`${p}-hint${problem ? ' bad' : ''}`}>
             {problem ?? (match ? `→ ${match.displayName}` : '')}
           </span>
-          <button type="button" className={`${p}-btn`} disabled={busy || !match || !!problem}
+          <button type="button" className={`${p}-btn${blockers.length ? ' danger' : ''}`}
+                  disabled={busy || !match || !!problem}
                   onClick={() => void run(draft)}>
-            {busy ? '…' : 'Hire'}
+            {busy ? '…' : blockers.length ? 'Hire anyway' : 'Hire'}
           </button>
           <button type="button" className={`${p}-btn`} disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
+          {/* Only the admin ever reaches the form with blockers — warn, then allow. */}
+          {reasons.map(r => <span key={r} className={`${p}-hint bad`}>⚠ {r}</span>)}
           {/* Owners get one shot at this — say so before they commit. */}
           {!isAdmin && (
             <span className={`${p}-hint`}>They take half this slot’s reward. Only the admin can remove a merc once hired.</span>

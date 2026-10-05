@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  flatMercCuts, casinoMercCuts, mercTotals, normalizeHandle, playersByHandle,
+  flatMercCuts, casinoMercCuts, mercTotals, normalizeHandle, playersByHandle, mercHireBlockers,
 } from '../../src/lib/mercLogic';
 import { casinoTableSettlement, casinoTableShares } from '../../src/lib/missionLogic';
 import { awardTileRewards } from '../../src/lib/gameLogic';
@@ -136,5 +136,41 @@ describe('handle matching', () => {
     };
     expect(playersByHandle(players, '@Tamsin').map(p => p.id)).toEqual(['x']);
     expect(playersByHandle(players, '')).toEqual([]);
+  });
+});
+
+describe('mercHireBlockers', () => {
+  it('a claimed slot can never be merced', () => {
+    const t = slot({ claimed: true });
+    expect(mercHireBlockers(t, [t, slot(), slot()], false)).toEqual(['claimed']);
+  });
+
+  it('a single slot cannot be merced at all', () => {
+    const t = slot();
+    expect(mercHireBlockers(t, [t], false)).toEqual(['allSlots']);
+  });
+
+  it('of three slots, two may be merced but not the third (non-casino)', () => {
+    const [a, b, c] = [slot(), slot(), slot()];
+    expect(mercHireBlockers(b, [a, b, c], false)).toEqual([]);
+    a.merc = merc('m');
+    expect(mercHireBlockers(b, [a, b, c], false)).toEqual([]);
+    b.merc = merc('n');
+    expect(mercHireBlockers(c, [a, b, c], false)).toEqual(['allSlots']);
+  });
+
+  it('a casino seat may have only one merced slot', () => {
+    const [a, b, c] = [slot({ merc: merc('m') }), slot(), slot()];
+    expect(mercHireBlockers(b, [a, b, c], true)).toEqual(['casinoLimit']);
+  });
+
+  it('replacing the merc already on a slot does not count that slot against itself', () => {
+    const [a, b] = [slot({ merc: merc('m') }), slot()];
+    expect(mercHireBlockers(a, [a, b], true)).toEqual([]);
+  });
+
+  it('ignores null holes when counting', () => {
+    const t = slot();
+    expect(mercHireBlockers(t, [null, t, undefined, slot()], false)).toEqual([]);
   });
 });

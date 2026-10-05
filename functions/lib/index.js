@@ -1090,6 +1090,25 @@ exports.setSlotStatusNote = (0, https_1.onCall)(async (request) => {
 function normalizeHandle(raw) {
     return raw.trim().replace(/^@+/, '').trim().toLowerCase();
 }
+const MERC_BLOCKER_TEXT = {
+    claimed: 'This slot was claimed from another player — it can’t be passed on to a merc.',
+    casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
+    allSlots: 'At least one of the owner’s slots on this world must stay un-merced.',
+};
+function mercHireBlockers(target, ownerSlots, casino) {
+    const live = ownerSlots.filter(Boolean);
+    const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
+    const out = [];
+    if (target.claimed)
+        out.push('claimed');
+    if (casino && others >= 1)
+        out.push('casinoLimit');
+    if (others + 1 >= live.length)
+        out.push('allSlots');
+    return out;
+}
+/** Firebase hands a sparse array back as an object with numeric keys. */
+const slotList = (raw) => !raw ? [] : Array.isArray(raw) ? raw : Object.values(raw);
 async function resolveMercTarget(db, seasonId, data) {
     const { kind, slotIndex } = data;
     if (typeof slotIndex !== 'number' || !Number.isInteger(slotIndex) || slotIndex < 0)
@@ -1122,8 +1141,11 @@ async function resolveMercTarget(db, seasonId, data) {
         return {
             owner: ownerId,
             slotPath: (0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${ownerId}/slots/${key}`),
+            slot,
             merc: slot?.merc ?? null,
             live: mission.state === 'inprogress',
+            ownerSlots: slotList(seat.slots),
+            casino: mission.type === 'casino',
         };
     }
     if (kind === 'tile') {
@@ -1141,11 +1163,18 @@ async function resolveMercTarget(db, seasonId, data) {
         if (key == null)
             throw new https_1.HttpsError('not-found', 'No such slot.');
         const slot = adv.slots[key];
+        // A tile pays per OWNER, so the limits count every adventurer of theirs here.
+        const ownerSlots = Object.values(tile.adventurers ?? {})
+            .filter(a => a.owner === adv.owner)
+            .flatMap(a => slotList(a.slots));
         return {
             owner: adv.owner,
             slotPath: (0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/adventurers/${advId}/slots/${key}`),
+            slot: slot,
             merc: slot?.merc ?? null,
             live: tile.state === 'inprogress',
+            ownerSlots: ownerSlots,
+            casino: false,
         };
     }
     throw new https_1.HttpsError('invalid-argument', 'kind must be "mission" or "tile".');
@@ -1181,6 +1210,13 @@ exports.setSlotMerc = (0, https_1.onCall)(async (request) => {
     // removal with extra steps.
     if (target.merc && !isAdmin)
         throw new https_1.HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
+    // The hiring limits: a refusal for a player, a warning the admin must confirm
+    // past. `details.mercWarnings` is how the client tells the two apart.
+    const blockers = mercHireBlockers(target.slot, target.ownerSlots, target.casino);
+    if (blockers.length && (!isAdmin || data.confirm !== true)) {
+        const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
+        throw new https_1.HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
+    }
     // Resolve the typed handle against this season's players. A season roster is
     // tens of players, so one read beats maintaining an index on a field players
     // never query by.
@@ -1307,7 +1343,9 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
             playerId: uid,
             playerName: player.displayName,
             joinedAt: now,
-            ...(inheritedSlots.length ? { slots: inheritedSlots } : {}),
+            // Stamped so a claimant can't pass the slot straight on to a merc (see
+            // mercHireBlockers). Non-casino settlement never reads the flag.
+            ...(inheritedSlots.length ? { slots: inheritedSlots.map(s => ({ ...s, claimed: true })) } : {}),
         };
         updates[(0, seasonPaths_1.sp)(seasonId, `players/${uid}/activeMissions/${missionId}`)] = true;
     }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
+import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
 import { nameColorValue } from '../../lib/constants';
@@ -482,7 +482,11 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
 }
 
 // A player's committed game, tagged with its owner — for the board's tile grids.
-interface OwnedGame extends SeatGame { ownerName: string; ownerId: string; ownerAvatar?: string | null; you: boolean; ownerHue: number; }
+interface OwnedGame extends SeatGame {
+  ownerName: string; ownerId: string; ownerAvatar?: string | null; you: boolean; ownerHue: number;
+  /** The owner's whole seat — the merc hiring limits count across it. */
+  seatSlots: AdvSlot[];
+}
 
 function Completion({ goaled, total }: { goaled: number; total: number }) {
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
@@ -718,7 +722,7 @@ function TileGrid({ tiles, wide, missionId, linkedAt, now, uid, live }: {
                 {handle && <span className="mp-tile-handle">@{handle}</span>}
               </span>
             </div>
-            <MercControl variant="casino" ownerId={t.ownerId} merc={t.raw.merc} live={!!live}
+            <MercControl variant="casino" ownerId={t.ownerId} slot={t.raw} ownerSlots={t.seatSlots} casino live={!!live}
                          target={{ kind: 'mission', missionId, ownerId: t.ownerId, slotIndex: t.idx }} />
           </div>
         );
@@ -816,7 +820,7 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
   Object.values(m.participants ?? {}).forEach((p, idx) => {
     const you = p.playerId === uid;
     const hue = seatHue(idx);
-    for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, you, ownerHue: hue });
+    for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you, ownerHue: hue });
   });
   const all       = [...mine, ...others];
   const goaled    = all.filter(g => isGoaled(g.status)).length;
@@ -902,7 +906,7 @@ export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
   Object.values(m.participants ?? {}).forEach((p, idx) => {
     const hue = seatHue(idx);
     for (const g of seatGames(p))
-      tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, you: p.playerId === uid, ownerHue: hue });
+      tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you: p.playerId === uid, ownerHue: hue });
   });
   const goaled = tiles.filter(g => isGoaled(g.status)).length;
   return (
@@ -937,7 +941,7 @@ export function MercWork({ missions, uid, now, colorOf, handleOf }: {
       Object.values(m.participants ?? {}).forEach((p, idx) => {
         for (const g of seatGames(p)) {
           if (g.raw.merc?.playerId !== uid) continue;
-          tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash,
+          tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [],
                        you: false, ownerHue: seatHue(idx) });
         }
       });

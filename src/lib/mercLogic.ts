@@ -157,3 +157,43 @@ export function playersByHandle<P extends { id?: string; discordHandle?: string 
   return Object.values(players ?? {}).filter(p =>
     p && p.id && typeof p.discordHandle === 'string' && normalizeHandle(p.discordHandle) === h);
 }
+
+// ── Hiring limits ────────────────────────────────────────────────────────────
+//
+// Three guards against abuse. HARD for players (the server refuses), SOFT for the
+// admin (warned, then allowed on confirmation). Mirrored by `mercHireBlockers` in
+// functions/src/index.ts — a change to one must be made in both.
+//
+//   claimed     — a slot the owner CLAIMED is already a take-over; passing it on
+//                 again would just pass the buck.
+//   casinoLimit — on a casino table an owner may have at most ONE merced slot,
+//                 or a player could commit a fat hand expecting to merc it out
+//                 for free money. Casino only.
+//   allSlots    — an owner may never merc every slot they hold on a world (one
+//                 slot ⇒ none; three ⇒ two). Someone has to still be playing.
+//
+// Counting is by the owner's whole holding on the world: their seat on a mission,
+// every adventurer of theirs on a tile. The target is excluded from "already
+// merced", so the admin REPLACING a merc never trips a limit it already met.
+
+export type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots';
+
+export const MERC_BLOCKER_TEXT: Readonly<Record<MercBlocker, string>> = {
+  claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
+  casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
+  allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+};
+
+export function mercHireBlockers(
+  target: AdvSlot,
+  ownerSlots: readonly (AdvSlot | null | undefined)[],
+  casino: boolean,
+): MercBlocker[] {
+  const live   = ownerSlots.filter((s): s is AdvSlot => !!s);
+  const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
+  const out: MercBlocker[] = [];
+  if (target.claimed)                 out.push('claimed');
+  if (casino && others >= 1)          out.push('casinoLimit');
+  if (others + 1 >= live.length)      out.push('allSlots');
+  return out;
+}

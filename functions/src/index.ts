@@ -1441,11 +1441,36 @@ function normalizeHandle(raw: string): string {
 }
 
 interface MercTarget {
-  owner:    string;
-  slotPath: string;               // full RTDB path of the slot itself
-  merc?:    SlotMerc | null;
-  live:     boolean;              // the world is in progress
+  owner:      string;
+  slotPath:   string;               // full RTDB path of the slot itself
+  slot:       GMSlot;
+  merc?:      SlotMerc | null;
+  live:       boolean;              // the world is in progress
+  ownerSlots: GMSlot[];             // everything the owner holds on this world (for the limits)
+  casino:     boolean;
 }
+
+// Mirrors MercBlocker / MERC_BLOCKER_TEXT / mercHireBlockers in src/lib/mercLogic.ts
+// — a change to one must be made in both. HARD for players, SOFT for the admin.
+type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots';
+const MERC_BLOCKER_TEXT: Record<MercBlocker, string> = {
+  claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
+  casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
+  allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+};
+function mercHireBlockers(target: GMSlot, ownerSlots: GMSlot[], casino: boolean): MercBlocker[] {
+  const live   = ownerSlots.filter(Boolean);
+  const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
+  const out: MercBlocker[] = [];
+  if (target.claimed)            out.push('claimed');
+  if (casino && others >= 1)     out.push('casinoLimit');
+  if (others + 1 >= live.length) out.push('allSlots');
+  return out;
+}
+
+/** Firebase hands a sparse array back as an object with numeric keys. */
+const slotList = <T>(raw: T[] | Record<string, T> | undefined): T[] =>
+  !raw ? [] : Array.isArray(raw) ? raw : Object.values(raw);
 
 async function resolveMercTarget(
   db: ReturnType<typeof getDatabase>,
@@ -1477,10 +1502,13 @@ async function resolveMercTarget(
     if (key == null) throw new HttpsError('not-found', 'No such slot.');
     const slot = (seat.slots as unknown as Record<string, GMSlot>)[key];
     return {
-      owner:    ownerId,
-      slotPath: sp(seasonId, `missions/${missionId}/participants/${ownerId}/slots/${key}`),
-      merc:     slot?.merc ?? null,
-      live:     mission.state === 'inprogress',
+      owner:      ownerId,
+      slotPath:   sp(seasonId, `missions/${missionId}/participants/${ownerId}/slots/${key}`),
+      slot,
+      merc:       slot?.merc ?? null,
+      live:       mission.state === 'inprogress',
+      ownerSlots: slotList(seat.slots),
+      casino:     mission.type === 'casino',
     };
   }
 
@@ -1495,11 +1523,18 @@ async function resolveMercTarget(
     const key = keyAt(adv.slots);
     if (key == null) throw new HttpsError('not-found', 'No such slot.');
     const slot = (adv.slots as unknown as Record<string, TileSlot>)[key];
+    // A tile pays per OWNER, so the limits count every adventurer of theirs here.
+    const ownerSlots = Object.values(tile.adventurers ?? {})
+      .filter(a => a.owner === adv.owner)
+      .flatMap(a => slotList(a.slots as TileSlot[] | Record<string, TileSlot> | undefined));
     return {
-      owner:    adv.owner,
-      slotPath: sp(seasonId, `tiles/${coord}/adventurers/${advId}/slots/${key}`),
-      merc:     slot?.merc ?? null,
-      live:     tile.state === 'inprogress',
+      owner:      adv.owner,
+      slotPath:   sp(seasonId, `tiles/${coord}/adventurers/${advId}/slots/${key}`),
+      slot:       slot as GMSlot,
+      merc:       slot?.merc ?? null,
+      live:       tile.state === 'inprogress',
+      ownerSlots: ownerSlots as GMSlot[],
+      casino:     false,
     };
   }
 
@@ -1517,6 +1552,8 @@ export const setSlotMerc = onCall(async (request) => {
   const data = request.data as {
     kind?: string; missionId?: string; ownerId?: string; coord?: string; advId?: string;
     slotIndex?: number; handle?: string | null; seasonId?: string;
+    /** Admin only: proceed past the hiring limits after being warned. */
+    confirm?: boolean;
   };
 
   const uid = request.auth.uid;
@@ -1546,6 +1583,14 @@ export const setSlotMerc = onCall(async (request) => {
   // removal with extra steps.
   if (target.merc && !isAdmin)
     throw new HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
+
+  // The hiring limits: a refusal for a player, a warning the admin must confirm
+  // past. `details.mercWarnings` is how the client tells the two apart.
+  const blockers = mercHireBlockers(target.slot, target.ownerSlots, target.casino);
+  if (blockers.length && (!isAdmin || data.confirm !== true)) {
+    const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
+    throw new HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
+  }
 
   // Resolve the typed handle against this season's players. A season roster is
   // tens of players, so one read beats maintaining an index on a field players
@@ -1684,7 +1729,9 @@ export const claimMissionSlot = onCall(async (request) => {
       playerId:   uid,
       playerName: player.displayName,
       joinedAt:   now,
-      ...(inheritedSlots.length ? { slots: inheritedSlots } : {}),
+      // Stamped so a claimant can't pass the slot straight on to a merc (see
+      // mercHireBlockers). Non-casino settlement never reads the flag.
+      ...(inheritedSlots.length ? { slots: inheritedSlots.map(s => ({ ...s, claimed: true })) } : {}),
     } satisfies GMParticipant;
     updates[sp(seasonId, `players/${uid}/activeMissions/${missionId}`)] = true;
   }

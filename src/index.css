@@ -2288,6 +2288,15 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 }
 .dash-tile-link:hover { filter: brightness(1.4); }
 
+/* The room-peek toggle in a card header. Styled as one of the room links beside
+   it, but it is a real <button> — it opens a panel rather than navigating, so it
+   must be reachable and announce its state. */
+.dash-peek-btn {
+  background: none; border: none; padding: 0; cursor: pointer; line-height: 1;
+  font-family: inherit;
+}
+.dash-peek-btn[aria-expanded="true"] { filter: brightness(1.5); }
+
 /* Generic admin-dashboard action button — a gold-leaf ghost that fits the
    parchment theme (Cinzel small-caps, soft gold border/wash, glow on hover). Add
    `.danger` for destructive actions. Inline font-size/padding still override for
@@ -5193,6 +5202,9 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
   display: flex; flex-direction: column; gap: 0.7rem;
   font-variant-numeric: tabular-nums;
 }
+/* On the Challenges / Missions cards the peek is a section in the middle of a
+   card, not its last child, so it closes with a rule of its own. */
+.dash-tile-card > .sr-peek { margin-bottom: 0.7rem; padding-bottom: 0.6rem; border-bottom: 1px solid oklch(from var(--gold-dim) l c h / 0.3); }
 .sr-peek-empty, .sr-peek-nodata, .sr-peek-nonote {
   font-size: 0.66rem; color: var(--gold-dim); font-style: italic;
 }

@@ -49,11 +49,12 @@ export interface AdvSlot {
   // callable, which stamps `lastReported` in the same update. Readable by anyone
   // at the table; editable only by the slot's owner.
   note?: AdvStatusNote;
-  // Casino only: this slot was CLAIMED from a vacated seat rather than dealt to
-  // its holder. Its card pays out flat (no deck boost — the claimant never chose
-  // the deck), and it carries its OWN pot weight rather than a slice of the
-  // holder's hand, because it was carved off a different seat with a different
-  // `lockedCount`. Storing the fraction on the slot keeps that unambiguous: a
+  // This slot was CLAIMED from a vacated seat rather than dealt to its holder.
+  // On every world it bars the claimant from passing the slot on to a merc. The
+  // pay effects are casino only: its card pays out flat (no deck boost — the
+  // claimant never chose the deck), and it carries its OWN pot weight rather than
+  // a slice of the holder's hand, because it was carved off a different seat with
+  // a different `lockedCount`. Storing the fraction on the slot keeps that unambiguous: a
   // seat-level total could not say which slot contributed what.
   claimed?: boolean;
   claimedFraction?: number;

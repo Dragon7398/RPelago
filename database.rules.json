@@ -138,7 +138,9 @@
                 // adventurer's slot count.)
                 "slots": {
                   "$slotIdx": {
-                    ".validate": "root.child('config/adminId').val() === auth.uid || newData.child('merc/playerId').val() === data.child('merc/playerId').val()"
+                    // ...and `claimed` may not be cleared either: it is what bars a
+                    // claimant from passing the slot on to a merc.
+                    ".validate": "root.child('config/adminId').val() === auth.uid || (newData.child('merc/playerId').val() === data.child('merc/playerId').val() && (data.child('claimed').val() !== true || newData.child('claimed').val() === true))"
                   }
                 }
               }

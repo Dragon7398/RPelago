@@ -382,7 +382,8 @@ function MissionRoster({ mission, uid, players }: { mission: GMMission; uid: str
                           <span className="lb-slot-sep">—</span>
                           <span className="lb-slot-game">{slot.game}</span>
                           <span className={`lb-slot-status ${statusCls}`}>{slot.status ?? 'Unstarted'}</span>
-                          <MercControl ownerId={p.playerId} merc={slot.merc} live={mission.state === 'inprogress'}
+                          <MercControl ownerId={p.playerId} slot={slot} ownerSlots={p.slots as AdvSlot[]}
+                                       casino={mission.type === 'casino'} live={mission.state === 'inprogress'}
                                        target={{ kind: 'mission', missionId: mission.id, ownerId: p.playerId, slotIndex: i }} />
                         </div>
                         {slot.details && (
