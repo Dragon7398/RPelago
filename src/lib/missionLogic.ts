@@ -764,8 +764,8 @@ const MERC_KEY = ' merc ';
  * The weights → shares pipeline for a whole table, as settlement uses it, split
  * into what each SEAT takes and what each MERC takes.
  *
- * A merced slot moves half its pot weight from its owner to the merc (see
- * casinoMercCuts). Weight is only moved, never created, so the denominator is
+ * A merced slot moves the merc's share (60%) of its pot weight from its owner
+ * to the merc (see casinoMercCuts). Weight is only moved, never created, so the denominator is
  * untouched and the pot can't overpay.
  */
 export function casinoTableSettlement(

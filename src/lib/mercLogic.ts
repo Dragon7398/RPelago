@@ -6,19 +6,33 @@
 //   • the slot stays the OWNER's: their adventurer / mission claim, their status
 //     report incidents, their early-release clock. Nothing moves.
 //   • the merc holds no seat and spends no claim or adventurer.
-//   • at settle the merc takes HALF the slot's value, and the owner keeps the rest.
+//   • at settle the merc takes MERC_SHARE (60%) of the slot's value, and the
+//     owner keeps the rest (40%).
 //
 // "The slot's value" is only explicit on a casino seat (a card, and a pot weight).
 // Tiles and non-casino missions pay per PLAYER, not per slot, so a slot's value
 // there is defined as the owner's feat-multiplied base reward divided by their slot
 // count, plus that slot's own bonusXP / bonusGold. The merc gets no feat bonuses of
-// their own. Every half is FLOORED; the rounding remainder stays with the owner.
+// their own. Every merc cut is FLOORED; the rounding remainder stays with the owner.
 //
 // All pure: settlement (completeMission / awardTileRewards / casinoTableShares) is
 // client-side, so there is no server mirror of this math.
 
 import type { AdvSlot, GMParticipant, SlotMerc } from '../types';
 import { DECK_VARIANTS, deckChoiceOf } from './casinoData';
+
+/**
+ * The merc's cut of a merced slot, as a ratio so the arithmetic stays exact on
+ * integers (`x * 3 / 5` never lands a hair under a whole number the way `x * 0.6`
+ * can before a floor). The owner keeps the remaining 2/5.
+ */
+export const MERC_SHARE_NUM = 3;
+export const MERC_SHARE_DEN = 5;
+/** For copy: "60%". */
+export const MERC_SHARE_PCT = Math.round((MERC_SHARE_NUM / MERC_SHARE_DEN) * 100);
+
+/** The merc's floored cut of a value. */
+const mercPart = (v: number): number => Math.floor((v * MERC_SHARE_NUM) / MERC_SHARE_DEN);
 
 /** One mercenary's take from one or more slots. `weight` is casino pot weight, in seat units. */
 export interface MercCut {
@@ -35,7 +49,7 @@ export type MercCuts = Map<string, MercCut>;
 /**
  * The slot's merc, if it has a valid one. A merc naming the owner themselves is
  * ignored (the callable refuses it, but a hand-edited record must not pay a player
- * half their own slot as if it were someone else's).
+ * a cut of their own slot as if it were someone else's).
  */
 export function mercOf(slot: AdvSlot | null | undefined, ownerId: string): SlotMerc | null {
   const m = slot?.merc;
@@ -72,7 +86,7 @@ export function mercTotals(cuts: MercCuts): { xp: number; gold: number; weight: 
  *
  * `baseXp` / `baseGold` are the owner's reward AFTER feat multipliers and BEFORE
  * slot bonuses; each slot is worth an even share of that plus its own bonus, and a
- * merced slot gives away half of it.
+ * merced slot gives away MERC_SHARE of it.
  */
 export function flatMercCuts(
   baseXp: number,
@@ -89,7 +103,7 @@ export function flatMercCuts(
     if (!m) continue;
     const xp   = baseXp   / n + (s.bonusXP   ?? 0);
     const gold = baseGold / n + (s.bonusGold ?? 0);
-    addCut(cuts, m, Math.floor(xp / 2), Math.floor(gold / 2), 0);
+    addCut(cuts, m, mercPart(xp), mercPart(gold), 0);
   }
   return cuts;
 }
@@ -102,7 +116,7 @@ export function flatMercCuts(
  *            a claimed one (mirrors seatPotWeight);
  *   xp     — an even share of `baseXp` (the seat's feat-multiplied mission XP; the
  *            casino has no per-card XP).
- * The merc takes half of each. `slots` and `lockedCards` are compacted before
+ * The merc takes MERC_SHARE of each. `slots` and `lockedCards` are compacted before
  * pairing, exactly as the server's splitSeatCards does, so a null hole left by an
  * old repair cannot shift which card a slot is read against.
  */
@@ -123,7 +137,8 @@ export function casinoMercCuts(p: GMParticipant, baseXp: number): MercCuts {
     const value  = cards[i]?.value ?? 0;
     const gold   = s.claimed ? value : value * (1 + boost);
     const weight = s.claimed ? (s.claimedFraction ?? 0) : (denom > 0 ? 1 / denom : 0);
-    addCut(cuts, m, Math.floor(baseXp / n / 2), Math.floor(gold / 2), weight / 2);
+    addCut(cuts, m, mercPart(baseXp / n), mercPart(gold),
+           (weight * MERC_SHARE_NUM) / MERC_SHARE_DEN);
   });
   return cuts;
 }

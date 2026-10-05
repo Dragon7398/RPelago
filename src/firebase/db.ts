@@ -1432,7 +1432,7 @@ export async function completeMission(
   // For casino missions, pre-compute each recipient's weighted pot share. Weights
   // are in seat units (see casinoTableSettlement): a full hand is one unit, voids
   // release their fraction back to the table, kicks reserve theirs for a claimant,
-  // and a merced slot moves half its weight to the merc. Gold comes from goldSwing
+  // and a merced slot moves the merc's share of its weight to the merc. Gold comes from goldSwing
   // (card values) + that share; no feat multiplier on gambling winnings.
   let potShares = new Map<string, number>();
   let mercPot   = new Map<string, number>();
@@ -1488,7 +1488,7 @@ export async function completeMission(
       earnedXP   = Math.round((mission.xp ?? 0) * xpMultiplier);
       earnedGold = (participant.goldSwing ?? 0) + (potShares.get(pid) ?? 0);
       // The pot share above already excludes the merced weight; this takes the
-      // merced half of each card (and an even share of the XP).
+      // merc's cut of each merced card (and of an even share of the XP).
       cuts = casinoMercCuts(participant, earnedXP);
     } else {
       earnedXP   = Math.round(mission.xp * xpMultiplier);
@@ -1528,7 +1528,7 @@ export async function completeMission(
     }
   }
 
-  // Mercs: half of each slot they helped on, plus (casino) the pot weight that
+  // Mercs: their cut of each slot they helped on, plus (casino) the pot weight that
   // rode on those halves. A merc owns no seat and holds no claim, so there is no
   // claim to free and no Coat or Basic Training credit — just the payout.
   const mercPayouts: Record<string, MercPayout> = {};

@@ -61,8 +61,8 @@ export interface AdvSlot {
   claimedFrom?: string;   // the vacating player's name, for provenance
   // A MERCENARY helping on this slot. Lighter than a claim: the slot stays the
   // owner's (their adventurer / mission claim, their status-report incidents),
-  // the merc holds no seat and spends no claim — they just get HALF this slot's
-  // value at settle (XP and gold alike; for casino, half its card and half its
+  // the merc holds no seat and spends no claim — they just get 60% of this slot's
+  // value at settle (XP and gold alike; for casino, 60% of its card and of its
   // pot weight). Written only by the `setSlotMerc` callable. See mercLogic.ts.
   merc?: SlotMerc;
 }

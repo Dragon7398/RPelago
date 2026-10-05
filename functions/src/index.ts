@@ -1423,7 +1423,7 @@ export const setSlotStatusNote = onCall(async (request) => {
 
 // ── Mercenaries ──────────────────────────────────────────────────────────────
 //
-// A merc helps play one slot and takes half its value at settle (the math is
+// A merc helps play one slot and takes 60% of its value at settle (the math is
 // client-side, in src/lib/mercLogic.ts). The slot stays its owner's in every other
 // respect — claim, adventurer, status-report incidents — so this callable only
 // ever writes one leaf: `slots/{i}/merc`.

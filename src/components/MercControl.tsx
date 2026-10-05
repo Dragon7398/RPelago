@@ -5,7 +5,7 @@ import { useGameState } from '../contexts/GameStateContext';
 import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { MERC_BLOCKER_TEXT, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
+import { MERC_BLOCKER_TEXT, MERC_SHARE_PCT, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
 
 /**
  * The merc tag and hire/remove affordance for ONE slot, used on every surface
@@ -62,7 +62,7 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
   const tag = merc ? (
     <span className={`${p}-tag`}
           title={`${merc.playerName} is mercing this slot (since ${new Date(merc.since).toLocaleDateString()}). `
-               + 'They take half of its reward at settle; the slot stays its owner’s responsibility.'}>
+               + `They take ${MERC_SHARE_PCT}% of its reward at settle; the slot stays its owner’s responsibility.`}>
       ⚔ {merc.playerName}
     </span>
   ) : null;
@@ -145,7 +145,7 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
           {reasons.map(r => <span key={r} className={`${p}-hint bad`}>⚠ {r}</span>)}
           {/* Owners get one shot at this — say so before they commit. */}
           {!isAdmin && (
-            <span className={`${p}-hint`}>They take half this slot’s reward. Only the admin can remove a merc once hired.</span>
+            <span className={`${p}-hint`}>They take {MERC_SHARE_PCT}% of this slot’s reward. Only the admin can remove a merc once hired.</span>
           )}
         </span>
       )}

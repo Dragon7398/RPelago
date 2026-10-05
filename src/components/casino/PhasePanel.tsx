@@ -6,6 +6,7 @@ import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { seatGames, type SeatGame } from './seatGames';
 import MercControl from '../MercControl';
+import { MERC_SHARE_PCT } from '../../lib/mercLogic';
 
 // The player's chosen name-color, resolved LIVE per playerId so a mid-mission
 // change is reflected everywhere. Provided by the shell (from gameState.players).
@@ -955,7 +956,7 @@ export function MercWork({ missions, uid, now, colorOf, handleOf }: {
       <div className="rl-sec">
         <div className="rl-sec-head">
           <span className="rl-sec-title">Slots you’re mercing</span>
-          <span className="rl-sec-note">You take half of each slot’s reward when its table settles</span>
+          <span className="rl-sec-note">You take {MERC_SHARE_PCT}% of each slot’s reward when its table settles</span>
         </div>
         {groups.map(({ m, tiles }) => (
           <div key={m.id} style={{ marginBottom: '1rem' }}>
@@ -979,7 +980,7 @@ function LedgerView({ m, uid, onDismiss }: { m: GMMission; uid: string; onDismis
     .map((seat, i) => ({
       seat,
       hue:     seatHue(i),
-      // What the hand actually paid THIS player — a merced card's half went to the merc.
+      // What the hand actually paid THIS player — a merced card's merc cut went to the merc.
       hand:    (seat.goldSwing ?? 0) - (seat.mercOut ?? 0),
       pot:     seat.potShare  ?? 0,
       entries: casinoSeatPaid(m, seat.playerId),
