@@ -84,7 +84,7 @@ that contradicts them.
 
 ## Implementation status
 
-Updated 2026-09-13. Branch `s2/board-foundation`. Everything below is behind the
+Updated 2026-10-05. Branch `s2/board-foundation`. Everything below is behind the
 `rpelago_s2` **draft** season — invisible to players, and inert for the live
 casino season, which renders no map.
 
@@ -98,6 +98,8 @@ casino season, which renders no map.
 | 1.4 | Pass-through cascade | Fixpoint in both `computeRecalcUpdates` and generation |
 | 1.5 | Castle / Dungeon / Tower panels | `CastlePanel`, `DungeonSection`, `TowerSection` (replaces `BossSection` on S2) |
 | 1.6 | Orb sourcing | 9 elite drops; board-aware `defaultOrbConfig` and admin Orbs page |
+| 0.5 | Universal YAML-at-join | `joinChallenge` / `claimChallengeSlot` callables, `yaml/**` Storage tree, `yamlAt` marker, full config screening |
+| 1.7 | Districts — the Capital Ward | `src/components/districts/`; `districtView` in `App.tsx`; HUD mission chips re-pointed. **S2 is now playable end to end.** |
 
 **To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
 then preview that season.
@@ -114,10 +116,14 @@ then preview that season.
 **Not yet authorable.** `TraitEditor` still writes `{ value }` (Phase C), which
 `traitLevel` tolerates as level 1 — the read path is ready, the write path is not.
 
-**S2 is inspectable, not playable.** `GuildmasterMissions` renders only inside
-`TownLightbox`, and S2 has no town tiles — so **missions and the shop are both
-unreachable** in an S2 season today. §1.7 districts is what fixes that, and it
-is the gate on end-to-end playtesting.
+**S2 is playable end to end** as of §1.7. The Capital Ward below the map is the
+route to Guildmaster Missions on a board with no town tiles, so a draft-season
+player can now level, enlist, join a challenge with a config, and settle.
+
+Two doors in the ward are deliberately interim: the **Shop** waits on §1.8 (its
+data model is still keyed by town tile, and S2 has none), and the **Casino**
+waits on §1.9 (`CasinoLanding` extraction). Both are wired and routed — §1.8 and
+§1.9 each fill a body rather than build a door.
 
 ### Revised after the casino-season audit (2026-09-29)
 
@@ -128,6 +134,27 @@ never iterates the map at all, and keeping them separate would have meant a thir
 branch in five server systems — two of which (slot sync, adventurer-free) are
 load-bearing enough that interiors could never resolve without them. See §3.3 and
 decisions 34–37.
+### Folded in from the casino season (2026-10-05)
+
+The `main` merge brought **mercenaries** and the **blanket-target config screen**.
+Neither needed an S2 design change, but two things had to be reconciled:
+
+- **`claimChallengeSlot` stamps `claimed: true`** on the slots it hands over. The
+  flag is what stops a claimant passing a live slot straight to a merc
+  (`mercHireBlockers`), and it arrived on the client claim path that §0.5.2
+  replaced with a callable — so the intent had to move server-side or be lost.
+- **The join form screens what the casino screens.** `checkBlanketTargets` (hard
+  block, no exception path) and `checkWorldCount` were missing from
+  `JoinChallengeForm`, which predates them. Since §0.5 makes that form the config
+  intake for *every* S2 challenge, it was the weakest point in the chain, and the
+  server cannot cover it — it verifies the object exists, never its contents.
+  The form also now fills the declared slots from the attached config.
+
+`mercLogic` is otherwise decoupled from S2's open questions: it takes `baseXp` /
+`baseGold` already feat-multiplied, so retiring feats (§1.10) touches its callers
+and not the split math. `resolveMercTarget` reads `tiles/{coord}` with no shape
+assumption, so interior compound coords (§3.3) work with no special case.
+
 ### Deviations from this plan, and why
 
 Recorded because each one is load-bearing and none is obvious from the code alone.
@@ -178,9 +205,9 @@ those first would be wasted work. This is also the first slice needing a
 
 | Scope | Status |
 |-------|--------|
-| §0.5 Universal YAML-at-join | not started — includes §0.5.7 kick/reset → callables and §0.5.9 submitted-marker |
+| §0.5 Universal YAML-at-join | ✅ **done** — §0.5.7 withdrawn; §0.5.9 marker shipped as `yamlAt`. One piece held: the YAML check on `enlistInMission` |
 | §0.6 / traits Phase A — data model + `resolveTrait` | ✅ **done** (model + readers + rolls; admin editor is Phase C) |
-| §1.7 Districts (ward + Town Hall / Shop / Barn panels) | not started |
+| §1.7 Districts (ward + Town Hall / Shop / Barn panels) | ✅ **done** — Shop body deferred to §1.8, casino view to §1.9, sprites pending art |
 | §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | not started |
 | §1.9 Casino district (`CasinoLanding` extraction) | not started |
 | §1.10 Feat retirement + Advisor | not started — entangled with §0.6 and §2.3 |
@@ -348,9 +375,9 @@ atomic update** as the removal, in all three paths —
 
 | Path | Clears |
 |------|--------|
-| `adminKickAdventurer` (new callable, §0.5.7) | `tiles/{coord}/statusIncidents/{playerId}` |
+| `adminKickAdventurer` (stays a CLIENT write — §0.5.7 withdrawn) | `tiles/{coord}/statusIncidents/{playerId}` |
 | `adminKickMissionParticipant` (existing callable) | `missions/{missionId}/statusIncidents/{playerId}` |
-| `playerReset` (new callable, §0.5.7) | the entry on **every** container it removes the player from |
+| `playerReset` (stays a CLIENT write — §0.5.7 withdrawn) | the entry on **every** container it removes the player from |
 
 ### 0.5.7 ~~Kick and reset must become callables~~ — WITHDRAWN
 

@@ -12,10 +12,18 @@ interface Props {
   onProfileClick: () => void;
   onTileClick: (coord: string) => void;
   onHelpClick: () => void;
+  /**
+   * Where the mission chips lead. Omitted on a board WITH town tiles (S1), where
+   * the start tile is the guild hall and holds the mission board itself. Supplied
+   * on S2, whose start tile is the Castle and has no missions on it — without it
+   * the chips would open a panel that cannot answer them.
+   */
+  onMissionsClick?: () => void;
 }
 
-export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick }: Props) {
+export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick, onMissionsClick }: Props) {
   const { user, signOut } = useAuth();
+  const openMissions = onMissionsClick ?? (() => onTileClick(activeBoard().startCoord));
   const { gameState }     = useGameState();
   const { addToast }      = useToast();
 
@@ -71,7 +79,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         {missionLabel ? (
           <button
             className="hud-mission-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(activeBoard().startCoord); }}
+            onClick={e => { e.stopPropagation(); openMissions(); }}
             title={`Currently undertaking: ${missionLabel} — click to view`}
           >
             ⚜ {missionLabel}
@@ -79,7 +87,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         ) : (
           <button
             className="hud-idle-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(activeBoard().startCoord); }}
+            onClick={e => { e.stopPropagation(); openMissions(); }}
             title="No active mission — click to view Guildmaster Missions"
           >
             ⚜ Idle

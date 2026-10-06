@@ -630,7 +630,13 @@ function ActiveBanner({ mission, onStandDown }: { mission: GMMission; onStandDow
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
-export default function GuildmasterMissions() {
+// `types` narrows which mission types this board shows. S2 splits the three kinds
+// across districts — commissions in the Town Hall, tables in the Casino, Field Work
+// in the Barn — so each surface passes its own set.
+//
+// It is OPTIONAL and unfiltered by default: S1's TownLightbox renders every type on
+// one board, and that behaviour has to stay byte-identical for the archived season.
+export default function GuildmasterMissions({ types }: { types?: readonly GMMission['type'][] } = {}) {
   const { gameState, enlistInMission, standDownFromMission } = useGameState();
   const { user } = useAuth();
 
@@ -660,6 +666,7 @@ export default function GuildmasterMissions() {
 
   const cards: GMMissionCard[] = Object.values(missions)
     .filter(m => m.state !== 'complete')
+    .filter(m => !types || types.includes(m.type))
     .map(m => computeMissionCard(m, uid, heldMissionIds.length, capacity, basicTrainingDone, now, player?.gold, player?.restricted === true))
     .sort((a, b) => {
       const ga = sortGroup(a), gb = sortGroup(b);
@@ -677,9 +684,13 @@ export default function GuildmasterMissions() {
 
   const [btExpanded, setBtExpanded] = useState(false);
 
+  // Filtered the same way as the cards: a district should only ever talk about
+  // its own missions. Without this the Town Hall would raise an active banner —
+  // stand-down button and all — for a casino table belonging to another district.
   const heldMissions = heldMissionIds
     .map(id => missions[id])
-    .filter((m): m is GMMission => m != null);
+    .filter((m): m is GMMission => m != null)
+    .filter(m => !types || types.includes(m.type));
 
   const handleEnlist = async (card: GMMissionCard) => {
     const label = missionDisplayLabel(card.mission);

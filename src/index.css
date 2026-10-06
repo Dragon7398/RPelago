@@ -625,6 +625,96 @@ header p {
 .sw-inprogress{ background: oklch(from var(--state-prog-border) calc(l + 0.15) c h);      border-color: var(--state-prog-border); }
 .sw-complete  { background: oklch(from var(--state-done-border) calc(l + 0.15) c h);      border-color: var(--state-done-border); }
 
+/* ── The Capital Ward (districts, map plan §1.7) ──────────────────────────────
+   Every colour here is a theme token or a color-mix against one, never a fixed
+   lightness: a hardcoded dark L renders as a near-black slab in the four light
+   themes, which is the mistake the sealed panels already made once. */
+.ward {
+  margin: 1.6rem auto 0; max-width: 980px; padding: 1rem 1rem 1.2rem;
+  border: 1px solid var(--border-ornate, var(--gold-dim));
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--gold) 4%, var(--bg-card));
+}
+.ward-head {
+  display: flex; align-items: center; gap: 0.6rem; justify-content: center;
+  font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.16em;
+  color: var(--gold); margin-bottom: 0.9rem;
+}
+.ward-rule {
+  flex: 1; height: 1px; max-width: 160px;
+  background: linear-gradient(to right, transparent, var(--gold-dim));
+}
+.ward-rule.r { background: linear-gradient(to left, transparent, var(--gold-dim)); }
+.ward-note {
+  text-align: center; margin: -0.3rem 0 0.8rem;
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.82rem; color: var(--text-muted);
+}
+.ward-grid {
+  display: grid; gap: 0.7rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.district-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  padding: 0.9rem 0.6rem; cursor: pointer; text-align: center;
+  border: 1px solid var(--gold-dim); border-radius: 3px;
+  background: var(--bg-deep); color: var(--parchment);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.district-card:hover:not(.disabled) {
+  border-color: var(--gold); transform: translateY(-2px);
+  background: color-mix(in oklch, var(--gold) 8%, var(--bg-deep));
+}
+.district-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* Logged out: visible but inert (decision 19). Dimmed via the TOKENS rather than
+   `opacity`, which multiplies against tokens already near the 4.5:1 floor and
+   would push the light themes under it — the same trap RoomPeek’s rows hit. */
+.district-card.disabled {
+  cursor: default; pointer-events: none;
+  border-color: color-mix(in oklch, var(--gold-dim) 45%, var(--bg-deep));
+  color: var(--text-muted);
+}
+.district-art {
+  width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
+}
+.district-sprite {
+  width: 100%; height: 100%; object-fit: contain;
+  image-rendering: pixelated;
+}
+.district-glyph { font-size: 1.9rem; line-height: 1; }
+.district-name {
+  font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.1em;
+  color: inherit;
+}
+.district-card:not(.disabled) .district-name { color: var(--gold); }
+.district-line {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.76rem; line-height: 1.3; color: var(--text-muted);
+}
+
+/* Interim copy inside a district whose contents land in a later slice. */
+.district-pending {
+  padding: 1.2rem 0.8rem; text-align: center;
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.9rem; color: var(--text-muted);
+}
+.district-pending.full { padding: 4rem 1rem; }
+
+.district-modal { max-width: 720px; }
+
+.casino-district { max-width: 980px; margin: 0 auto; }
+.district-back {
+  font-family: 'Cinzel', serif; font-size: 0.64rem; letter-spacing: 0.1em;
+  padding: 0.4rem 0.8rem; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--gold-dim); background: var(--bg-deep); color: var(--gold);
+}
+.district-back:hover { border-color: var(--gold); }
+
+@media (max-width: 720px) {
+  .ward-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* ── Settings popout ── */
 .settings-toggle {
   position: fixed; bottom: 24px; left: 24px; z-index: 90;
