@@ -177,7 +177,11 @@ function AppContent() {
           above. Mounted unconditionally so each panel keeps its own open/close
           transition, exactly as the tile lightboxes do. */}
       <TownHallPanel open={districtView === 'questboard'} onClose={() => setDistrictView(null)} />
-      <ShopPanel     open={districtView === 'shop'}       onClose={() => setDistrictView(null)} />
+      <ShopPanel
+        open={districtView === 'shop'}
+        onClose={() => setDistrictView(null)}
+        onLoginRequest={() => setLoginOpen(true)}
+      />
       <BarnPanel     open={districtView === 'fields'}     onClose={() => setDistrictView(null)} />
 
       <ProfileLightbox open={profileOpen} onClose={() => setProfileOpen(false)} />

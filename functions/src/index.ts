@@ -345,30 +345,40 @@ const ITEM_COSTS: Record<string, number> = {
 // Items that cannot be purchased more than once
 const NON_CONSUMABLE_ITEMS = new Set(['coat_of_many_colors', 'wand_of_piercing', 'throwing_dagger', 'ring_of_resistance', 'warhammer']);
 
-const ORB_SHOP_COST = 1500;
-
 // ── purchaseShopItem ──────────────────────────────────────────────────────────
 export const purchaseShopItem = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
 
   const { itemId, coord, seasonId: reqSeason } = request.data as { itemId?: string; coord?: string; seasonId?: string };
-  if (!itemId || !coord) throw new HttpsError('invalid-argument', 'Missing itemId or coord.');
+  if (!itemId) throw new HttpsError('invalid-argument', 'Missing itemId.');
 
   const uid = request.auth.uid;
   const db  = getDatabase();
   const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
 
-  const tileSnap = await db.ref(sp(seasonId, `tiles/${coord}`)).get();
-  if (!tileSnap.exists()) throw new HttpsError('not-found', 'Tile not found.');
+  // `coord` is OPTIONAL as of §1.8. With one, this is an S1 town shop and the tile
+  // names which of the four it is; without one, it is S2's single global shop at a
+  // fixed path. Keyed off the request rather than off a board lookup so the server
+  // needs no mirror of `BOARD_SPECS` — the caller either has a shop tile or does
+  // not, and S2's client never sends a coord.
+  let stocked: string[];
+  if (coord) {
+    const tileSnap = await db.ref(sp(seasonId, `tiles/${coord}`)).get();
+    if (!tileSnap.exists()) throw new HttpsError('not-found', 'Tile not found.');
 
-  const shopId = (tileSnap.val() as { shopId?: string }).shopId;
-  if (!shopId) throw new HttpsError('failed-precondition', 'No shop at this tile.');
+    const shopId = (tileSnap.val() as { shopId?: string }).shopId;
+    if (!shopId) throw new HttpsError('failed-precondition', 'No shop at this tile.');
 
-  const shopSnap = await db.ref(sp(seasonId, `shops/${shopId}`)).get();
-  if (!shopSnap.exists()) throw new HttpsError('not-found', 'Shop not found.');
+    const shopSnap = await db.ref(sp(seasonId, `shops/${shopId}`)).get();
+    if (!shopSnap.exists()) throw new HttpsError('not-found', 'Shop not found.');
+    stocked = (shopSnap.val() as { itemIds?: string[] }).itemIds ?? [];
+  } else {
+    const shopSnap = await db.ref(sp(seasonId, 'shop')).get();
+    if (!shopSnap.exists()) throw new HttpsError('not-found', 'This season has no shop.');
+    stocked = (shopSnap.val() as { itemIds?: string[] }).itemIds ?? [];
+  }
 
-  const shop = shopSnap.val() as { itemIds?: string[]; name?: string };
-  if (!(shop.itemIds ?? []).includes(itemId))
+  if (!stocked.includes(itemId))
     throw new HttpsError('failed-precondition', 'Item not sold at this shop.');
 
   const cost = ITEM_COSTS[itemId];
@@ -402,85 +412,15 @@ export const purchaseShopItem = onCall(async (request) => {
   return { success: true };
 });
 
-// ── purchaseShopOrb ───────────────────────────────────────────────────────────
-export const purchaseShopOrb = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
-
-  const { coord, seasonId: reqSeason } = request.data as { coord?: string; seasonId?: string };
-  if (!coord) throw new HttpsError('invalid-argument', 'Missing coord.');
-
-  const uid = request.auth.uid;
-  const db  = getDatabase();
-  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
-
-  const tileSnap = await db.ref(sp(seasonId, `tiles/${coord}`)).get();
-  if (!tileSnap.exists()) throw new HttpsError('not-found', 'Tile not found.');
-
-  const shopId = (tileSnap.val() as { shopId?: string }).shopId;
-  if (!shopId) throw new HttpsError('failed-precondition', 'No shop at this tile.');
-
-  const [shopSnap, playerSnap] = await Promise.all([
-    db.ref(sp(seasonId, `shops/${shopId}`)).get(),
-    db.ref(sp(seasonId, `players/${uid}`)).get(),
-  ]);
-
-  if (!shopSnap.exists())   throw new HttpsError('not-found', 'Shop not found.');
-  if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
-
-  const shop   = shopSnap.val()   as { orbId?: string | null; name?: string };
-  const player = playerSnap.val() as { gold: number; displayName: string; disabled?: boolean };
-
-  if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
-
-  const orbId = shop.orbId ?? null;
-  if (!orbId) throw new HttpsError('failed-precondition', 'No orb sold at this shop.');
-
-  if (player.gold < ORB_SHOP_COST)
-    throw new HttpsError('failed-precondition', 'Not enough gold.');
-
-  const acquisition = {
-    method:    'shop',
-    tileCoord: coord,
-    tileName:  shop.name ?? coord,
-    buyerName: player.displayName,
-  };
-
-  // Atomically claim the orb so two concurrent purchases can't both succeed.
-  const { committed } = await db.ref(sp(seasonId, `orbState/${orbId}`)).transaction(current => {
-    if (current !== null) return; // abort — already claimed
-    return acquisition;
-  });
-  if (!committed) throw new HttpsError('already-exists', 'This orb has already been claimed.');
-
-  // Deduct gold via transaction so stale snapshot value can't cause incorrect set().
-  const snapGold = player.gold;
-  let goldAbortReason = 'Gold deduction failed.';
-  const { committed: goldCommitted } = await db.ref(sp(seasonId, `players/${uid}/gold`)).transaction(
-    (current: number | null) => {
-      const gold = typeof current === 'number' ? current : snapGold;
-      if (gold < ORB_SHOP_COST) { goldAbortReason = 'Not enough gold.'; return undefined; }
-      return gold - ORB_SHOP_COST;
-    },
-  );
-  if (!goldCommitted) {
-    try {
-      await db.ref(sp(seasonId, `orbState/${orbId}`)).remove();
-    } catch (e) {
-      console.error(`[purchaseShopOrb] Rollback failed for orb ${orbId}, player ${uid}:`, e);
-    }
-    throw new HttpsError('failed-precondition', goldAbortReason);
-  }
-
-  const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
-  await db.ref(sp(seasonId, 'activityLog')).push().set({
-    timestamp: Date.now(),
-    type:      'orb_purchased',
-    message:   `${player.displayName} purchased the ${orbLabel} Orb from ${shop.name ?? coord}.`,
-    icon:      '🔮',
-  });
-
-  return { success: true, orbId };
-});
+// ── purchaseShopOrb — REMOVED (map plan §1.8) ─────────────────────────────────
+//
+// S1 sold two of the nine orbs from town shops. S2 sources every orb from an
+// elite drop, so there is nothing to buy and the callable is gone rather than
+// left deployed and unreachable.
+//
+// S1 is archived, not deleted, so its town panels still RENDER their orb slot —
+// as a record of who claimed it, with no purchase control. An archived season is
+// read-only, so that is the correct presentation there regardless.
 
 // ── onTileComplete ────────────────────────────────────────────────────────────
 

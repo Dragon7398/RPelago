@@ -392,10 +392,20 @@ export interface OrbAcquisition {
   buyerName?: string;
 }
 
+// S1's per-town shop. Four of them, one per town tile, each with an optional orb
+// slot. RETAINED for archived-season rendering — S1 data still holds these nodes
+// and `TownLightbox` still draws them. S2 uses `GlobalShop` below.
 export interface Shop {
   id: string;
   name: string;
   orbId: string | null;
+  itemIds: string[];
+}
+
+// S2's single shop (map plan §1.8, decision 17). No `orbId`: S2 sources all nine
+// orbs from elite drops, so nothing is bought with gold. No `name` or `id` either
+// — there is one, and it lives at a fixed path.
+export interface GlobalShop {
   itemIds: string[];
 }
 
@@ -408,7 +418,11 @@ export interface GameState {
   missionsHistory: Record<string, GMMission>;
   orbState: Record<string, OrbAcquisition>;
   orbConfig: OrbConfig;
+  // S1: one shop per town tile, keyed by shop id. Empty on an S2 season.
   shops:    Record<string, Shop>;
+  // S2: the single global shop. Absent on an S1 season, so every reader must treat
+  // a missing node as "no shop", never as an error.
+  shop?:    GlobalShop;
   // Casino-season audit trail of weekly gold-floor top-ups — the one place outside
   // gold enters the economy. Absent (→ {}) in map seasons. Written by weeklyGoldTopUp.
   goldTopUpLog: Record<string, GoldTopUpEntry>;

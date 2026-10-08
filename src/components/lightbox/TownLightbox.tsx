@@ -1,12 +1,10 @@
-import { useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useIsAdmin } from '../../contexts/SeasonContext';
-import { useToast } from '../../contexts/ToastContext';
-import { ALL_ORBS, SHOP_ITEMS, ORB_SHOP_COST, ITEM_TRAIT_REFS } from '../../lib/constants';
+import { ALL_ORBS, ORB_SHOP_COST } from '../../lib/constants';
 import { activeBoard } from '../../lib/board';
-import { renderTraitDesc } from './lbHelpers';
 import GuildmasterMissions from './GuildmasterMissions';
+import ShopItemList from '../shop/ShopItemList';
 import type { Tile } from '../../types';
 
 interface Props {
@@ -18,11 +16,12 @@ interface Props {
   onLoginRequest: () => void;
 }
 
+// S1 ONLY. Town tiles exist on no S2 board (§1.8 moves the shop to the Capital
+// Ward), but S1 is archived rather than deleted and stays readable — so this is
+// still the only renderer for its town tiles, orb slot and all.
 export default function TownLightbox({ coord, tile, info, open, onClose, onLoginRequest }: Props) {
-  const { gameState, purchaseOrb, purchaseItem } = useGameState();
+  const { gameState } = useGameState();
   const { user } = useAuth();
-  const { addToast } = useToast();
-  const [purchasing, setPurchasing] = useState(false);
 
   const player       = user && gameState ? gameState.players[user.id] : null;
   const orbState     = gameState?.orbState ?? {};
@@ -31,26 +30,8 @@ export default function TownLightbox({ coord, tile, info, open, onClose, onLogin
   const shopOrb      = shopOrbId ? ALL_ORBS.find(o => o.id === shopOrbId) : null;
   const orbAcq       = shopOrbId ? orbState[shopOrbId] : null;
   const alreadyOwned = !!orbAcq;
-  const canAffordOrb = !!player && player.gold >= ORB_SHOP_COST;
   const shopItemIds  = shop?.itemIds ?? [];
-  const shopItemDefs = shopItemIds
-    .map((id: string) => SHOP_ITEMS.find(i => i.id === id))
-    .filter(Boolean) as typeof SHOP_ITEMS[number][];
-  const hasShopContent = shopOrb || shopItemDefs.length > 0;
-
-  const handlePurchaseOrb = async () => {
-    if (purchasing) return;
-    setPurchasing(true);
-    try {
-      await purchaseOrb(coord);
-      addToast('Orb claimed!', 'success');
-      onClose();
-    } catch {
-      addToast('Purchase failed. Please try again.', 'error');
-    } finally {
-      setPurchasing(false);
-    }
-  };
+  const hasShopContent = !!shopOrb || shopItemIds.length > 0;
 
   const isAdmin = useIsAdmin();
 
@@ -93,53 +74,16 @@ export default function TownLightbox({ coord, tile, info, open, onClose, onLogin
                     <div className="lb-shop-orb-buyer">Claimed by {orbAcq.buyerName}</div>
                   )}
                 </div>
-                {alreadyOwned ? (
-                  <button className="lb-shop-orb-btn owned" disabled>✓ CLAIMED</button>
-                ) : (
-                  <button
-                    className={`lb-shop-orb-btn${!canAffordOrb ? ' cant-afford' : ''}`}
-                    onClick={canAffordOrb && !purchasing ? handlePurchaseOrb : undefined}
-                    disabled={!canAffordOrb || purchasing}
-                  >
-                    {purchasing ? '…' : canAffordOrb ? `⚗ OBTAIN · 🪙 ${ORB_SHOP_COST.toLocaleString()}` : `NOT ENOUGH GOLD · 🪙 ${ORB_SHOP_COST.toLocaleString()}`}
-                  </button>
-                )}
+                {/* A RECORD, never a control. The orb slot is S1 history: the
+                    purchase callable is gone (§1.8) and an archived season is
+                    read-only anyway, so an unclaimed slot shows its price as the
+                    thing it cost rather than a button that cannot work. */}
+                <button className="lb-shop-orb-btn owned" disabled>
+                  {alreadyOwned ? '✓ CLAIMED' : `UNCLAIMED · 🪙 ${ORB_SHOP_COST.toLocaleString()}`}
+                </button>
               </div>
             )}
-            {shopItemDefs.map(item => {
-              const qty          = player.inventory?.[item.id] ?? 0;
-              const itemOwned    = !item.consumable && qty > 0;
-              const canAfford    = !itemOwned && player.gold >= item.cost;
-              return (
-                <div key={item.id} className="lb-shop-item">
-                  <div className="lb-shop-item-info">
-                    <div className="lb-shop-item-name">{item.name}</div>
-                    <div className="lb-shop-item-desc">{renderTraitDesc(item.description, ITEM_TRAIT_REFS[item.id] ?? [])}</div>
-                    {item.consumable && qty > 0 && <div className="lb-shop-item-owned">Owned: {qty}</div>}
-                  </div>
-                  <div className="lb-shop-item-right">
-                    <div className="lb-shop-item-cost">🪙 {item.cost}</div>
-                    <button
-                      className={`lb-shop-item-btn${itemOwned ? ' owned' : !canAfford ? ' cant-afford' : ''}`}
-                      onClick={canAfford && !purchasing ? async () => {
-                        setPurchasing(true);
-                        try {
-                          await purchaseItem(item.id, coord);
-                          addToast(`${item.name} purchased.`, 'success');
-                        } catch {
-                          addToast('Purchase failed. Please try again.', 'error');
-                        } finally {
-                          setPurchasing(false);
-                        }
-                      } : undefined}
-                      disabled={!canAfford || itemOwned || purchasing}
-                    >
-                      {itemOwned ? '✓ OWNED' : canAfford ? 'BUY' : 'NOT ENOUGH GOLD'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            <ShopItemList itemIds={shopItemIds} player={player} coord={coord} />
           </>
         )}
         {tile.details && <div className="lb-details">{tile.details}</div>}

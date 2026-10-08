@@ -4,7 +4,7 @@ import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry, MercPayout } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
-import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
+import { ALL_ORBS, CASINO_OPEN_TABLES, DEFAULT_S2_SHOP_ITEM_IDS } from '../lib/constants';
 import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
@@ -431,6 +431,15 @@ export async function resetOrbs(): Promise<void> {
 }
 
 // ── Shop ──────────────────────────────────────────────────────────────────────
+// ── S2: the single global shop (§1.8) ────────────────────────────────────────
+// Writes the whole stock list, not a patch: it is one array, and a merge-shaped
+// write of an array in RTDB is how you end up with a sparse object.
+export async function setGlobalShopItems(itemIds: readonly string[]): Promise<void> {
+  assertDb();
+  await set(sRef(db!, 'shop/itemIds'), [...itemIds]);
+}
+
+// S1 only — per-town shops, kept for archived seasons.
 export async function updateShop(shopId: string, updates: Partial<Shop>): Promise<void> {
   await update(sRef(db!, `shops/${shopId}`), updates);
 }
@@ -912,6 +921,12 @@ export async function mapReset(): Promise<void> {
   // Preserve orb config and shops (admin may have customized both); update meta
   updates[sPath('orbConfig')] = orbConfig;
   // shops is intentionally NOT reset — admin customizations are preserved
+  // Same rule for S2's single shop (§1.8): seed it when the season has none yet,
+  // never overwrite a stocked one. Gated on the board having no shop TILES, since
+  // that is what makes the global shop the only one.
+  if (!activeBoard().hasShopTiles && current?.shop == null) {
+    updates[sPath('shop')] = { itemIds: [...DEFAULT_S2_SHOP_ITEM_IDS] };
+  }
   // adminId is no longer here; it lives at the global config/adminId.
   updates[sPath('meta')] = { initialized: true, seed };
 

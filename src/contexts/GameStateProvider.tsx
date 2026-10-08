@@ -12,7 +12,7 @@ import {
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
   completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
-  consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
+  consumePlayerItem, mapReset, updateShop, setGlobalShopItems, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerRestricted, setPlayerNameColor, subscribeToActivityLog, logActivity,
   selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
   claimClaimableSlot as dbClaimClaimableSlot,
@@ -147,20 +147,20 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await removeAdventurer(coord, advId, ownerId);
   }, []);
 
-  const purchaseOrb = useCallback(async (coord: string) => {
-    if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopOrb')({ coord, seasonId });
-  }, [seasonId]);
-
   const renameAdventurer = useCallback(async (
     playerId: string, advId: string, firstName: string, lastName: string,
   ) => {
     await updateAdventurer(playerId, advId, { firstName, lastName });
   }, []);
 
-  const purchaseItem = useCallback(async (itemId: string, coord: string) => {
+  // `coord` is optional as of §1.8 — see the context type. It is omitted from the
+  // payload entirely when absent, which is what tells the server to validate
+  // against the season's single global shop instead of a town tile's.
+  const purchaseItem = useCallback(async (itemId: string, coord?: string) => {
     if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopItem')({ itemId, coord, seasonId });
+    await httpsCallable(functions, 'purchaseShopItem')({
+      itemId, seasonId, ...(coord ? { coord } : {}),
+    });
   }, [seasonId]);
 
   const selectFeat = useCallback(async (
@@ -338,6 +338,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await setAdminId(playerId);
   }, []);
 
+  const adminSetGlobalShopItems = useCallback(async (itemIds: readonly string[]) => {
+    await setGlobalShopItems(itemIds);
+  }, []);
+
   const adminUpdateShop = useCallback(async (shopId: string, updates: Partial<Shop>) => {
     await updateShop(shopId, updates);
   }, []);
@@ -500,9 +504,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
-      sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer, selectFeat,
+      sendAdventurer, recallAdventurer, purchaseItem, renameAdventurer, selectFeat,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
+      adminSetGlobalShopItems,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
       adminSetPlayerRestricted,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,

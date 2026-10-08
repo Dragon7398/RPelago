@@ -100,6 +100,7 @@ casino season, which renders no map.
 | 1.6 | Orb sourcing | 9 elite drops; board-aware `defaultOrbConfig` and admin Orbs page |
 | 0.5 | Universal YAML-at-join | `joinChallenge` / `claimChallengeSlot` callables, `yaml/**` Storage tree, `yamlAt` marker, full config screening |
 | 1.7 | Districts — the Capital Ward | `src/components/districts/`; `districtView` in `App.tsx`; HUD mission chips re-pointed. **S2 is now playable end to end.** |
+| 1.8 | Shop collapse | One `seasons/{id}/shop`; `purchaseShopOrb` REMOVED; `purchaseShopItem` coord optional; board-aware admin tab. **Needs a functions deploy.** |
 
 **To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
 then preview that season.
@@ -155,6 +156,36 @@ Neither needed an S2 design change, but two things had to be reconciled:
 and not the split math. `resolveMercTarget` reads `tiles/{coord}` with no shape
 assumption, so interior compound coords (§3.3) work with no special case.
 
+### §1.8 deviations — three places the plan said DELETE and the code says KEEP
+
+Each one would have been a silent regression for the ARCHIVED S1 season, which is
+read-only but still fully rendered.
+
+1. **`SHOP_ITEMS` keeps all eight entries.** The four passive items are no longer
+   STOCKED (that is what `DEFAULT_S2_SHOP_ITEM_IDS` controls), but the array is a
+   catalogue, not a stock list — `ProfileLightbox` and the admin `PlayerCard` look
+   an owned item up in it by id, so removing the entries would blank the inventory
+   of every S1 player who bought one. Deprecated means "not sold".
+2. **`traitEffect()` and `ITEM_TRAIT_REFS` stay where they are.** Both are keyed by
+   item, so they are already inert for an S2 player who owns none — exactly the
+   argument §1.10 makes for `calcFeatBonuses`. No `legacyItems.ts` was needed.
+3. **`TownLightbox.tsx` is NOT deleted.** It is the only renderer for town tiles
+   (`TileLightbox` dispatches to it on `town` / `town_center`), and S1 is archived
+   rather than deleted. Instead the buyable rows were extracted to
+   `components/shop/ShopItemList.tsx` and are now shared by it and `ShopPanel`, so
+   there is one implementation rather than two. Its orb slot became a **record**
+   (`CLAIMED` / `UNCLAIMED · price`) with no control, since the callable behind it
+   is gone and an archived season is read-only anyway.
+
+Also: the client `ORB_SHOP_COST` survives (the help text and that archived orb row
+quote it); only the server copy went, with `purchaseShopOrb`. The **help sections**
+still describe S1's four town shops and buying orbs — that rewrite is §1.11.
+
+The global shop node needs no rule of its own: `seasons/$seasonId` grants `.write`
+to the admin alone and every player write is a child carve-out, so `shop` is
+admin-only by inheritance. Pinned in `tests/rules/seasons.rules.test.ts` precisely
+because no rule names it.
+
 ### Deviations from this plan, and why
 
 Recorded because each one is load-bearing and none is obvious from the code alone.
@@ -208,7 +239,7 @@ those first would be wasted work. This is also the first slice needing a
 | §0.5 Universal YAML-at-join | ✅ **done** — §0.5.7 withdrawn; §0.5.9 marker shipped as `yamlAt`. One piece held: the YAML check on `enlistInMission` |
 | §0.6 / traits Phase A — data model + `resolveTrait` | ✅ **done** (model + readers + rolls; admin editor is Phase C) |
 | §1.7 Districts (ward + Town Hall / Shop / Barn panels) | ✅ **done** — Shop body deferred to §1.8, casino view to §1.9, sprites pending art |
-| §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | not started |
+| §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | ✅ **done** — see the three deviations below; help text deferred to §1.11 |
 | §1.9 Casino district (`CasinoLanding` extraction) | not started |
 | §1.10 Feat retirement + Advisor | not started — entangled with §0.6 and §2.3 |
 | §1.11 Admin + help | not started |

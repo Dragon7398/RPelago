@@ -3156,6 +3156,41 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-shop-item-cost  { font-size: 0.68rem; color: oklch(68% 0.14 75); }
 .dash-shop-item-desc  { font-size: 0.72rem; font-style: italic; color: var(--text-muted); line-height: 1.35; }
 
+/* §1.8 global shop editor. Backgrounds are color-mix against tokens rather than
+   the fixed dark oklch the older admin rules use, so these stay legible if the
+   dashboard is ever themed. */
+.dash-shop-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; line-height: 1.4; color: var(--text-muted);
+  margin: -0.2rem 0 0.6rem;
+}
+.dash-shop-unseeded {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  padding: 0.45rem 0.6rem; margin-bottom: 0.6rem; border-radius: 2px;
+  border-left: 3px solid var(--amber); color: var(--text-muted);
+  background: color-mix(in oklch, var(--amber) 10%, var(--bg-card));
+}
+.dash-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  padding: 0.28rem 0.6rem; border-radius: 2px; cursor: pointer;
+  border: 1px solid var(--gold-dim); color: var(--gold);
+  background: var(--bg-deep);
+}
+.dash-btn:hover { border-color: var(--gold); }
+/* A retired item is still listed so the host can see what is gone — de-emphasised
+   by the tag and muted text, NOT by opacity, which would compound against the
+   muted token and drop it under contrast. */
+.dash-shop-item-toggle.deprecated .dash-shop-item-name,
+.dash-shop-item-toggle.deprecated .dash-shop-item-cost {
+  color: var(--text-muted);
+}
+.dash-shop-item-tag {
+  margin-left: 0.4rem; padding: 0.05rem 0.3rem; border-radius: 2px;
+  font-size: 0.52rem; letter-spacing: 0.1em; vertical-align: middle;
+  border: 1px solid var(--text-muted); color: var(--text-muted);
+}
+
 /* ── Orbs page ── */
 .dash-orb-loc {
   display: flex; align-items: flex-start; gap: 0.5rem;

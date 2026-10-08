@@ -1,4 +1,4 @@
-import type { AdvClass, OrbDef, ShopItem, Shop } from '../types';
+import type { AdvClass, OrbDef, ShopItem } from '../types';
 // Type-only: apYaml.ts is a standalone primitive (its only import is `yaml`), so
 // naming its shape here can't form a cycle.
 import type { YamlLimits } from './apYaml';
@@ -135,7 +135,12 @@ export const TILE_TRAITS: readonly TraitDef[] = [
     description: 'Progression balancing will be set to 0 for this challenge.' },
 ];
 
-// Maps item ID → trait IDs whose names should be underlined in the shop description
+// Maps item ID → trait IDs whose names should be underlined in the shop description.
+//
+// Every entry here is a PASSIVE item, and S2 stocks none of them (§1.8) — but this
+// stays put for the same reason `traitEffect` and `calcFeatBonuses` do: it is keyed
+// by item, so it is inert for a player who owns none, and archived S1 panels still
+// need it to underline what their items negated.
 export const ITEM_TRAIT_REFS: Readonly<Record<string, readonly string[]>> = {
   wand_of_piercing:   ['magicresist', 'physresist'],
   throwing_dagger:    ['aerial', 'agile'],
@@ -237,7 +242,26 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
   },
 ];
 
+// S1 only — S2 sources every orb from an elite drop, and `purchaseShopOrb` is gone
+// (§1.8). Kept because the help text and archived S1 town panels still quote it.
 export const ORB_SHOP_COST = 1500;
+
+// ── S2's single shop (§1.8, decision 17) ──────────────────────────────────────
+//
+// What the one global shop stocks on a fresh S2 season. The four PASSIVE items are
+// deliberately absent: each one negated a trait, and the trait rework replaced that
+// mechanic wholesale, so selling them would sell an effect that no longer exists.
+//
+// They are NOT removed from `SHOP_ITEMS`, which is a catalogue rather than a stock
+// list — `ProfileLightbox` and the admin `PlayerCard` look an owned item up there by
+// id, so dropping the entries would blank the inventories of every S1 player who
+// bought one. Deprecated means "not sold", not "forgotten".
+export const DEFAULT_S2_SHOP_ITEM_IDS: readonly string[] = [
+  'map',
+  'scroll_of_magnetism',
+  'scroll_of_generosity',
+  'coat_of_many_colors',
+];
 
 // ── S2 Tower ──────────────────────────────────────────────────────────────────
 // Orbs needed to unlock each Tower floor. The Sorcerer waits on floor 3, so the
@@ -260,14 +284,9 @@ export function orbsToNextTowerFloor(orbCount: number): number | null {
   return next == null ? null : next - orbCount;
 }
 
-// The four named shops. orbId and itemIds can be edited by admin in Firebase;
-// these are the defaults written on first initialization.
-export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {
-  centralia:  { id: 'centralia',  name: 'Centralia',  orbId: null,    itemIds: ['map'] },
-  frostshear: { id: 'frostshear', name: 'Frostshear', orbId: null,    itemIds: []      },
-  flamefell:  { id: 'flamefell',  name: 'Flamefell',  orbId: 'fire',  itemIds: []      },
-  pinereach:  { id: 'pinereach',  name: 'Pinereach',  orbId: 'earth', itemIds: []      },
-};
+// S1's four named shops retired with the shop collapse (§1.8) — S2 has one global
+// shop seeded from DEFAULT_S2_SHOP_ITEM_IDS above. The S1 nodes still live in that
+// season's RTDB data, so nothing here is needed to render them.
 
 // Non-center shop IDs assigned to the three non-center towns via seeded shuffle
 export const NON_CENTER_SHOP_IDS = ['frostshear', 'flamefell', 'pinereach'] as const;

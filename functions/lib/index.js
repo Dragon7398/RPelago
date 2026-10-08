@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.claimChallengeSlot = exports.joinChallenge = exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setSlotMerc = exports.setSlotStatusNote = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopOrb = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
+exports.claimChallengeSlot = exports.joinChallenge = exports.fetchCheeseDetails = exports.fetchCheesetracker = exports.kmkClaimTrial = exports.tickSlotStatuses = exports.weeklyGoldTopUp = exports.tickGuildmasterMissions = exports.onMissionComplete = exports.syncPlayerProfile = exports.adminForceDeploy = exports.adminKickMissionParticipant = exports.adminUnbanDiscordId = exports.adminBanDiscordId = exports.adminSetPlayerDisabled = exports.adminVoidCasinoSeat = exports.adminReleaseClaimableSlot = exports.adminRemoveCasinoSlot = exports.adminDenyCasinoYaml = exports.adminGetCasinoHands = exports.adminGetCasinoYamls = exports.holdemFold = exports.holdemPlayOn = exports.dealHoldemHole = exports.resubmitCasinoYaml = exports.lockCasinoResult = exports.playCasinoGambit = exports.dealGambitOffer = exports.casinoFold = exports.casinoDraw = exports.dealCasinoHand = exports.setCasinoDeckChoice = exports.claimMissionSlot = exports.setSlotMerc = exports.setSlotStatusNote = exports.setMissionParticipantStatusNote = exports.standDownFromMission = exports.enlistInMission = exports.pruneActivityLog = exports.onOrbAcquired = exports.onTileComplete = exports.purchaseShopItem = exports.exchangeDiscordCode = exports.ensureSeasonPlayer = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const database_1 = require("firebase-functions/v2/database");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -286,28 +286,41 @@ const ITEM_COSTS = {
 };
 // Items that cannot be purchased more than once
 const NON_CONSUMABLE_ITEMS = new Set(['coat_of_many_colors', 'wand_of_piercing', 'throwing_dagger', 'ring_of_resistance', 'warhammer']);
-const ORB_SHOP_COST = 1500;
 // ── purchaseShopItem ──────────────────────────────────────────────────────────
 exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
     const { itemId, coord, seasonId: reqSeason } = request.data;
-    if (!itemId || !coord)
-        throw new https_1.HttpsError('invalid-argument', 'Missing itemId or coord.');
+    if (!itemId)
+        throw new https_1.HttpsError('invalid-argument', 'Missing itemId.');
     const uid = request.auth.uid;
     const db = (0, database_2.getDatabase)();
     const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const tileSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get();
-    if (!tileSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Tile not found.');
-    const shopId = tileSnap.val().shopId;
-    if (!shopId)
-        throw new https_1.HttpsError('failed-precondition', 'No shop at this tile.');
-    const shopSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `shops/${shopId}`)).get();
-    if (!shopSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Shop not found.');
-    const shop = shopSnap.val();
-    if (!(shop.itemIds ?? []).includes(itemId))
+    // `coord` is OPTIONAL as of §1.8. With one, this is an S1 town shop and the tile
+    // names which of the four it is; without one, it is S2's single global shop at a
+    // fixed path. Keyed off the request rather than off a board lookup so the server
+    // needs no mirror of `BOARD_SPECS` — the caller either has a shop tile or does
+    // not, and S2's client never sends a coord.
+    let stocked;
+    if (coord) {
+        const tileSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get();
+        if (!tileSnap.exists())
+            throw new https_1.HttpsError('not-found', 'Tile not found.');
+        const shopId = tileSnap.val().shopId;
+        if (!shopId)
+            throw new https_1.HttpsError('failed-precondition', 'No shop at this tile.');
+        const shopSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `shops/${shopId}`)).get();
+        if (!shopSnap.exists())
+            throw new https_1.HttpsError('not-found', 'Shop not found.');
+        stocked = shopSnap.val().itemIds ?? [];
+    }
+    else {
+        const shopSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'shop')).get();
+        if (!shopSnap.exists())
+            throw new https_1.HttpsError('not-found', 'This season has no shop.');
+        stocked = shopSnap.val().itemIds ?? [];
+    }
+    if (!stocked.includes(itemId))
         throw new https_1.HttpsError('failed-precondition', 'Item not sold at this shop.');
     const cost = ITEM_COSTS[itemId];
     if (cost == null)
@@ -341,82 +354,15 @@ exports.purchaseShopItem = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('failed-precondition', abortReason);
     return { success: true };
 });
-// ── purchaseShopOrb ───────────────────────────────────────────────────────────
-exports.purchaseShopOrb = (0, https_1.onCall)(async (request) => {
-    if (!request.auth)
-        throw new https_1.HttpsError('unauthenticated', 'Not signed in.');
-    const { coord, seasonId: reqSeason } = request.data;
-    if (!coord)
-        throw new https_1.HttpsError('invalid-argument', 'Missing coord.');
-    const uid = request.auth.uid;
-    const db = (0, database_2.getDatabase)();
-    const { seasonId } = await (0, seasonPaths_1.resolveWriteSeason)(uid, reqSeason, db);
-    const tileSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}`)).get();
-    if (!tileSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Tile not found.');
-    const shopId = tileSnap.val().shopId;
-    if (!shopId)
-        throw new https_1.HttpsError('failed-precondition', 'No shop at this tile.');
-    const [shopSnap, playerSnap] = await Promise.all([
-        db.ref((0, seasonPaths_1.sp)(seasonId, `shops/${shopId}`)).get(),
-        db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}`)).get(),
-    ]);
-    if (!shopSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Shop not found.');
-    if (!playerSnap.exists())
-        throw new https_1.HttpsError('not-found', 'Player not found.');
-    const shop = shopSnap.val();
-    const player = playerSnap.val();
-    if (player.disabled)
-        throw new https_1.HttpsError('permission-denied', 'Account restricted.');
-    const orbId = shop.orbId ?? null;
-    if (!orbId)
-        throw new https_1.HttpsError('failed-precondition', 'No orb sold at this shop.');
-    if (player.gold < ORB_SHOP_COST)
-        throw new https_1.HttpsError('failed-precondition', 'Not enough gold.');
-    const acquisition = {
-        method: 'shop',
-        tileCoord: coord,
-        tileName: shop.name ?? coord,
-        buyerName: player.displayName,
-    };
-    // Atomically claim the orb so two concurrent purchases can't both succeed.
-    const { committed } = await db.ref((0, seasonPaths_1.sp)(seasonId, `orbState/${orbId}`)).transaction(current => {
-        if (current !== null)
-            return; // abort — already claimed
-        return acquisition;
-    });
-    if (!committed)
-        throw new https_1.HttpsError('already-exists', 'This orb has already been claimed.');
-    // Deduct gold via transaction so stale snapshot value can't cause incorrect set().
-    const snapGold = player.gold;
-    let goldAbortReason = 'Gold deduction failed.';
-    const { committed: goldCommitted } = await db.ref((0, seasonPaths_1.sp)(seasonId, `players/${uid}/gold`)).transaction((current) => {
-        const gold = typeof current === 'number' ? current : snapGold;
-        if (gold < ORB_SHOP_COST) {
-            goldAbortReason = 'Not enough gold.';
-            return undefined;
-        }
-        return gold - ORB_SHOP_COST;
-    });
-    if (!goldCommitted) {
-        try {
-            await db.ref((0, seasonPaths_1.sp)(seasonId, `orbState/${orbId}`)).remove();
-        }
-        catch (e) {
-            console.error(`[purchaseShopOrb] Rollback failed for orb ${orbId}, player ${uid}:`, e);
-        }
-        throw new https_1.HttpsError('failed-precondition', goldAbortReason);
-    }
-    const orbLabel = orbId.charAt(0).toUpperCase() + orbId.slice(1);
-    await db.ref((0, seasonPaths_1.sp)(seasonId, 'activityLog')).push().set({
-        timestamp: Date.now(),
-        type: 'orb_purchased',
-        message: `${player.displayName} purchased the ${orbLabel} Orb from ${shop.name ?? coord}.`,
-        icon: '🔮',
-    });
-    return { success: true, orbId };
-});
+// ── purchaseShopOrb — REMOVED (map plan §1.8) ─────────────────────────────────
+//
+// S1 sold two of the nine orbs from town shops. S2 sources every orb from an
+// elite drop, so there is nothing to buy and the callable is gone rather than
+// left deployed and unreachable.
+//
+// S1 is archived, not deleted, so its town panels still RENDER their orb slot —
+// as a record of who claimed it, with no purchase control. An archived season is
+// read-only, so that is the correct presentation there regardless.
 // ── onTileComplete ────────────────────────────────────────────────────────────
 // A player who racked up this many official-report Problem incidents on a world
 // gets an auto profile warning when that world completes.

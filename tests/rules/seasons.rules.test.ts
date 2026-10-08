@@ -424,6 +424,36 @@ describe('config is admin-owned', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// S2's global shop (§1.8) is ADMIN-ONLY, by inheritance rather than its own rule.
+//
+// `seasons/$seasonId` grants `.write` to the admin and nothing else; the player
+// writes are all carved out by CHILD rules (adventurers, nameColor, feats…). The
+// `shop` node adds no such carve-out, so it is admin-only for free.
+//
+// That is worth a test precisely BECAUSE no rule names it: a later carve-out added
+// one level too high would hand players the stock list, and nothing in this file
+// would otherwise notice. Purchases go through `purchaseShopItem` (Admin SDK),
+// which reads this node to decide what is for sale — a player who could write it
+// could put anything on the shelves.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('the global shop node is admin-only', () => {
+  const SHOP = `seasons/${CASINO}/shop`;
+
+  it('a player cannot stock the shop, create it, or empty it', async () => {
+    await assertFails(player().ref(`${SHOP}/itemIds`).set(['map']));
+    await assertFails(player().ref(SHOP).set({ itemIds: ['map'] }));
+    await assertFails(player().ref(SHOP).remove());
+  });
+
+  it('an alpha user cannot either — alpha is for draft playtesting, not stock', async () => {
+    await assertFails(alpha().ref(`${SHOP}/itemIds`).set(['map']));
+  });
+
+  it('the admin can', async () => {
+    await assertSucceeds(admin().ref(`${SHOP}/itemIds`).set(['map', 'coat_of_many_colors']));
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
 // Joining a challenge is SERVER-ONLY (S2) — but only CREATION is.
 //
 // The config requirement cannot be expressed in a rule (a database rule cannot
