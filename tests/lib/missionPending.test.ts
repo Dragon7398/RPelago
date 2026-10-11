@@ -3,7 +3,7 @@ import {
   missionPendingAction, missionReadyToComplete, tileReadyToComplete, missionSettleBlockers,
   seatsMissingConfig, seatsAwaitingConfig,
   seatOwesConfig, outstandingConfigsBlockRoom, missionClockOrigin, compareMissionsForAdmin,
-  holdPinned, hasUnfinishedSlots,
+  holdPinned, hasUnfinishedSlots, roomGoalProgress,
 } from '../../src/lib/missionLogic';
 import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant, Tile } from '../../src/types';
 
@@ -445,5 +445,36 @@ describe('missionSettleBlockers', () => {
     const empty = mission({ participants: {} });
     expect(missionSettleBlockers(empty).total).toBe(0);
     expect(missionReadyToComplete(empty)).toBe(false);
+  });
+});
+
+describe('roomGoalProgress — the "X / Y goaled" meter counts open slots too', () => {
+  const m = (extra: Partial<GMMission>) => ({
+    id: 'r', type: 'casino', state: 'inprogress',
+    participants: {
+      a: { playerId: 'a', playerName: 'A', joinedAt: 0, slots: [{ name: '', game: '', status: 'Goaled' }, { name: '', game: '', status: 'Done' }] },
+    },
+    ...extra,
+  }) as unknown as GMMission;
+
+  it('a table with every seat goaled but an open slot is NOT complete', () => {
+    const r = roomGoalProgress(m({
+      claimableSlots: { k: { slots: [{ name: '', game: '', status: 'In-Progress' }] } },
+    } as Partial<GMMission>));
+    expect(r).toEqual({ goaled: 2, total: 3 });
+  });
+
+  it('an open slot that already goaled counts as goaled', () => {
+    const r = roomGoalProgress(m({
+      claimableSlots: { k: { slots: [{ name: '', game: '', status: 'Goaled' }] } },
+    } as Partial<GMMission>));
+    expect(r).toEqual({ goaled: 3, total: 3 });
+  });
+
+  it('reads legacy bare-array entries and a 100% slot as not goaled', () => {
+    const r = roomGoalProgress(m({
+      claimableSlots: { k: [{ name: '', game: '', status: '100%' }] },
+    } as unknown as Partial<GMMission>));
+    expect(r).toEqual({ goaled: 2, total: 3 });
   });
 });

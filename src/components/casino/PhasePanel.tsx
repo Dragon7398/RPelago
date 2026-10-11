@@ -30,7 +30,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, roomGoalProgress, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
 import { claimEntries, claimRefusal, CLAIM_REFUSAL_TEXT } from '../../lib/slotHelpers';
 import { slotIdleTier, type SlotIdle } from '../../lib/statusReport';
 import { useSeason } from '../../contexts/SeasonContext';
@@ -831,8 +831,8 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
     const hue = seatHue(idx);
     for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you, ownerHue: hue });
   });
-  const all       = [...mine, ...others];
-  const goaled    = all.filter(g => isGoaled(g.status)).length;
+  // The room meter counts open (claimable) slots too — see roomGoalProgress.
+  const room      = roomGoalProgress(m);
   const myGoaled  = mine.filter(g => isGoaled(g.status)).length;
   // Elapsed counts from the room link going up (when play can actually start),
   // not from deploy — a table can sit deployed for a while before it has a room.
@@ -868,7 +868,7 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
         <div className="mp-row" style={{ gap: '1.6rem', alignItems: 'flex-start' }}>
           {/* No room means no play, so 0/N goaled is a foregone zero — a full-width
               empty meter that only reads as failure. Hidden until there's a room. */}
-          {!pending && <Completion goaled={goaled} total={all.length} />}
+          {!pending && <Completion goaled={room.goaled} total={room.total} />}
           <Telemetry m={m} elapsed={elapsed} />
         </div>
 
@@ -917,11 +917,11 @@ export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
     for (const g of seatGames(p))
       tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you: p.playerId === uid, ownerHue: hue });
   });
-  const goaled = tiles.filter(g => isGoaled(g.status)).length;
+  const room   = roomGoalProgress(m);   // open slots included, as on the Board view
   return (
     <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
       {/* Mirrors BoardView: no room yet ⇒ the completion meter is a guaranteed zero. */}
-      {!awaitingRoom(m) && <Completion goaled={goaled} total={tiles.length} />}
+      {!awaitingRoom(m) && <Completion goaled={room.goaled} total={room.total} />}
       <ChallengeLinks m={m} />
       <OpenSlots m={m} uid={uid} />
       {tiles.length

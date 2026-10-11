@@ -258,6 +258,30 @@ export function missionReadyToComplete(m: GMMission): boolean {
   return claimEntries(m).every(([, e]) => e.slots.length > 0 && e.slots.every(goaled));
 }
 
+/**
+ * Slots goaled over every slot in the ROOM — the "X / Y goaled" meter on the
+ * casino landing (Board view, the table peek, the live-table cards).
+ *
+ * The room is the seats AND the open (claimable) slots: a kicked player's slot is
+ * still a live Archipelago slot that has to goal before the world can close, which
+ * is exactly why missionReadyToComplete counts it. Leaving it out made a table read
+ * "7 / 7" while it was still waiting on an unclaimed slot. Uses the same `goaled`
+ * predicate as the ready-to-settle ✓, so the meter and the ✓ agree.
+ */
+export function roomGoalProgress(m: GMMission): { goaled: number; total: number } {
+  let goaled_ = 0, total = 0;
+  const count = (slots: readonly (AdvSlot | null | undefined)[]) => {
+    for (const s of slots) {
+      if (!s) continue;
+      total++;
+      if (goaled(s)) goaled_++;
+    }
+  };
+  for (const p of Object.values(m.participants ?? {})) count(p.slots ?? []);
+  for (const [, e] of claimEntries(m)) count(e.slots);
+  return { goaled: goaled_, total };
+}
+
 /** What is still standing between a mission and settlement, itemised. */
 export interface SettleBlockers {
   seats: number;   // participants whose slots are not all Goaled/Done
