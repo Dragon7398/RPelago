@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  flatMercCuts, casinoMercCuts, mercTotals, normalizeHandle, playersByHandle, mercHireBlockers,
+  flatMercCuts, casinoMercCuts, mercTotals, normalizeHandle, playersByHandle, mercHireBlockers, mercCandidateBlockers,
 } from '../../src/lib/mercLogic';
 import { casinoTableSettlement, casinoTableShares } from '../../src/lib/missionLogic';
 import { awardTileRewards } from '../../src/lib/gameLogic';
+import { claimRefusal } from '../../src/lib/slotHelpers';
 import type { AdvSlot, GMMission, GMParticipant, Player, Tile } from '../../src/types';
 import type { DeckCard } from '../../src/lib/casinoData';
 
@@ -175,5 +176,46 @@ describe('mercHireBlockers', () => {
   it('ignores null holes when counting', () => {
     const t = slot();
     expect(mercHireBlockers(t, [null, t, undefined, slot()], false)).toEqual([]);
+  });
+});
+
+describe('mercCandidateBlockers', () => {
+  const world = { kickedPlayers: { k: { at: 1 } } };
+
+  it('passes an ordinary player', () => {
+    expect(mercCandidateBlockers({ id: 'x' }, world)).toEqual([]);
+  });
+
+  it('refuses a restricted player', () => {
+    expect(mercCandidateBlockers({ id: 'x', restricted: true }, world)).toEqual(['mercRestricted']);
+  });
+
+  it('refuses a player kicked off this world', () => {
+    expect(mercCandidateBlockers({ id: 'k' }, world)).toEqual(['mercKicked']);
+  });
+
+  it('does not carry a kick to a different world', () => {
+    expect(mercCandidateBlockers({ id: 'k' }, {})).toEqual([]);
+  });
+});
+
+describe('claimRefusal', () => {
+  const world = { kickedPlayers: { k: { at: 1 } } };
+
+  it('lets an ordinary player claim', () => {
+    expect(claimRefusal(world, { id: 'x' })).toBeNull();
+  });
+
+  it('refuses the kicked player on the world they left, and only there', () => {
+    expect(claimRefusal(world, { id: 'k' })).toBe('kicked');
+    expect(claimRefusal({}, { id: 'k' })).toBeNull();
+  });
+
+  it('refuses a restricted player anywhere', () => {
+    expect(claimRefusal({}, { id: 'x', restricted: true })).toBe('restricted');
+  });
+
+  it('a cleared restriction (null) is not a restriction', () => {
+    expect(claimRefusal({}, { id: 'x', restricted: null })).toBeNull();
   });
 });

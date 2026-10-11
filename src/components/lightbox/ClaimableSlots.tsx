@@ -1,5 +1,5 @@
 import { ADV_ICONS } from '../../lib/constants';
-import { normalizeSlots } from '../../lib/slotHelpers';
+import { normalizeSlots, CLAIM_REFUSAL_TEXT, type ClaimRefusal } from '../../lib/slotHelpers';
 import { SlotBonusPills } from './AdvRow';
 import type { AdvSlot, Adventurer, AuthUser } from '../../types';
 
@@ -11,17 +11,20 @@ interface Props {
   claimingSlotKey: string | null;
   setClaimingSlotKey: (key: string | null) => void;
   onClaimSlot: (slotKey: string, slots: AdvSlot[], advId: string) => Promise<void>;
+  /** Kicked off this tile, or restricted — the database rules refuse the claim. */
+  refusal?: ClaimRefusal | null;
 }
 
 export default function ClaimableSlots({
-  entries, user, alreadySent, freeAdvs, claimingSlotKey, setClaimingSlotKey, onClaimSlot,
+  entries, user, alreadySent, freeAdvs, claimingSlotKey, setClaimingSlotKey, onClaimSlot, refusal,
 }: Props) {
   if (entries.length === 0) return null;
-  const canClaim = !!user && !alreadySent && freeAdvs.length > 0;
+  const canClaim = !!user && !alreadySent && freeAdvs.length > 0 && !refusal;
   return (
     <div className="lb-claimable-slots">
       <div className="lb-claimable-header">CLAIMABLE SLOTS</div>
       <div className="lb-claimable-note">A player has vacated this challenge. You can take over their game slot.</div>
+      {user && refusal && <div className="lb-claimable-note">{CLAIM_REFUSAL_TEXT[refusal]}</div>}
       {entries.map(([slotKey, rawVal]) => {
         const slotArr   = normalizeSlots(rawVal as AdvSlot[] | Record<string, AdvSlot>);
         const isClaiming = claimingSlotKey === slotKey;

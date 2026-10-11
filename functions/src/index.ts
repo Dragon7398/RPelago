@@ -787,6 +787,7 @@ interface GMMission {
   participants: Record<string, GMParticipant>;
   claimableSlots?: Record<string, GMSlot[]>;
   statusIncidents?: Record<string, number>;   // per-player official-report Problem count
+  kickedPlayers?:   Record<string, KickRecord>; // kicked while in progress (see KickRecord)
   // casino-only
   variableReward?: boolean;
   tableUrl?:       string;
@@ -834,6 +835,15 @@ interface Tile {
   publicSlots?: TileSlot[];
   name?:        string;
   statusIncidents?: Record<string, number>;   // per-player official-report Problem count
+  kickedPlayers?:   Record<string, KickRecord>; // kicked while in progress (see KickRecord)
+}
+
+// Mirrors KickRecord in src/types/index.ts: a player kicked off a world while it
+// was in progress. Never cleared — for the rest of that world they may not claim
+// its open slots back nor be hired as a merc on it.
+interface KickRecord {
+  at:    number;
+  name?: string;
 }
 
 // ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
@@ -1448,16 +1458,28 @@ interface MercTarget {
   live:       boolean;              // the world is in progress
   ownerSlots: GMSlot[];             // everything the owner holds on this world (for the limits)
   casino:     boolean;
+  kicked?:    Record<string, KickRecord>;   // the world's kickedPlayers
 }
 
 // Mirrors MercBlocker / MERC_BLOCKER_TEXT / mercHireBlockers in src/lib/mercLogic.ts
 // — a change to one must be made in both. HARD for players, SOFT for the admin.
-type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots';
+type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots' | 'mercRestricted' | 'mercKicked';
 const MERC_BLOCKER_TEXT: Record<MercBlocker, string> = {
   claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
   casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
   allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+  mercRestricted: 'That player is restricted and can’t take merc work.',
+  mercKicked:     'That player was removed from this world, so they can’t merc on it.',
 };
+/** Mirrors mercCandidateBlockers: the limits on WHO may be hired. */
+function mercCandidateBlockers(
+  candidateId: string, candidate: { restricted?: boolean | null }, kicked: Record<string, unknown> | undefined,
+): MercBlocker[] {
+  const out: MercBlocker[] = [];
+  if (candidate.restricted === true) out.push('mercRestricted');
+  if (kicked?.[candidateId])         out.push('mercKicked');
+  return out;
+}
 function mercHireBlockers(target: GMSlot, ownerSlots: GMSlot[], casino: boolean): MercBlocker[] {
   const live   = ownerSlots.filter(Boolean);
   const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
@@ -1509,6 +1531,7 @@ async function resolveMercTarget(
       live:       mission.state === 'inprogress',
       ownerSlots: slotList(seat.slots),
       casino:     mission.type === 'casino',
+      kicked:     mission.kickedPlayers,
     };
   }
 
@@ -1535,6 +1558,7 @@ async function resolveMercTarget(
       live:       tile.state === 'inprogress',
       ownerSlots: ownerSlots as GMSlot[],
       casino:     false,
+      kicked:     tile.kickedPlayers,
     };
   }
 
@@ -1584,19 +1608,11 @@ export const setSlotMerc = onCall(async (request) => {
   if (target.merc && !isAdmin)
     throw new HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
 
-  // The hiring limits: a refusal for a player, a warning the admin must confirm
-  // past. `details.mercWarnings` is how the client tells the two apart.
-  const blockers = mercHireBlockers(target.slot, target.ownerSlots, target.casino);
-  if (blockers.length && (!isAdmin || data.confirm !== true)) {
-    const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
-    throw new HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
-  }
-
   // Resolve the typed handle against this season's players. A season roster is
   // tens of players, so one read beats maintaining an index on a field players
   // never query by.
   const playersSnap = await db.ref(sp(seasonId, 'players')).get();
-  const players = (playersSnap.val() ?? {}) as Record<string, PlayerRecord & { id?: string; disabled?: boolean }>;
+  const players = (playersSnap.val() ?? {}) as Record<string, PlayerRecord & { id?: string; disabled?: boolean; restricted?: boolean | null }>;
   const matches = Object.entries(players)
     .filter(([, p]) => p && p.id && typeof p.discordHandle === 'string'
       && normalizeHandle(p.discordHandle) === handle);
@@ -1610,6 +1626,18 @@ export const setSlotMerc = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'A player can’t merc their own slot.');
   if (merc.disabled)
     throw new HttpsError('failed-precondition', `@${handle} can’t take merc work right now.`);
+
+  // The hiring limits — on the slot, and on who is being hired. A refusal for a
+  // player, a warning the admin must confirm past; `details.mercWarnings` is how
+  // the client tells the two apart.
+  const blockers = [
+    ...mercHireBlockers(target.slot, target.ownerSlots, target.casino),
+    ...mercCandidateBlockers(mercId, merc, target.kicked),
+  ];
+  if (blockers.length && (!isAdmin || data.confirm !== true)) {
+    const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
+    throw new HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
+  }
 
   await db.ref(`${target.slotPath}/merc`).set({
     playerId:   mercId,
@@ -1641,7 +1669,7 @@ export const claimMissionSlot = onCall(async (request) => {
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
 
-  const player  = playerSnap.val() as { displayName: string; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const player  = playerSnap.val() as { displayName: string; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean; restricted?: boolean | null };
   const mission = missionSnap.val() as GMMission;
 
   const isCasino = mission.type === 'casino';
@@ -1650,6 +1678,13 @@ export const claimMissionSlot = onCall(async (request) => {
   if (player.disabled)      throw new HttpsError('permission-denied',  'Account restricted.');
   if (mission.state !== 'inprogress')
     throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+  // Mirrors claimRefusal in src/lib/slotHelpers.ts. A kicked player may not claim
+  // their way back into the world they abandoned; a restricted one may not take on
+  // the extra capacity a claim is — restriction exists to stop exactly that.
+  if (mission.kickedPlayers?.[uid])
+    throw new HttpsError('failed-precondition', 'You were removed from this world, so you can’t claim its open slots.');
+  if (player.restricted === true)
+    throw new HttpsError('failed-precondition', 'Your account is restricted, so you can’t claim open slots right now.');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
 
@@ -2922,6 +2957,10 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
   };
 
   if (kick) {
+    // A kicked card is abandoned work: the player may not claim it back, nor merc
+    // on this table (see KickRecord) — even though they keep the rest of their seat.
+    updates[sp(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+      { at: now, name: seat.playerName } satisfies KickRecord;
     // Reserved: the fraction rides on the claimable slot, not back to the table.
     const claimRef = db.ref(sp(seasonId, `missions/${missionId}/claimableSlots`)).push();
     updates[sp(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] =
@@ -3230,6 +3269,12 @@ export const adminKickMissionParticipant = onCall(async (request) => {
       message:   `Removed from ${label} by admin.`,
       auto:      true,
     };
+  }
+
+  // Only a LIVE kick abandons anything — a forming removal reopens nothing.
+  if (mission.state === 'inprogress') {
+    updates[sp(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+      { at: now, name: participant.playerName } satisfies KickRecord;
   }
 
   if (mission.state === 'forming') {

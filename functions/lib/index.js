@@ -1094,7 +1094,18 @@ const MERC_BLOCKER_TEXT = {
     claimed: 'This slot was claimed from another player — it can’t be passed on to a merc.',
     casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
     allSlots: 'At least one of the owner’s slots on this world must stay un-merced.',
+    mercRestricted: 'That player is restricted and can’t take merc work.',
+    mercKicked: 'That player was removed from this world, so they can’t merc on it.',
 };
+/** Mirrors mercCandidateBlockers: the limits on WHO may be hired. */
+function mercCandidateBlockers(candidateId, candidate, kicked) {
+    const out = [];
+    if (candidate.restricted === true)
+        out.push('mercRestricted');
+    if (kicked?.[candidateId])
+        out.push('mercKicked');
+    return out;
+}
 function mercHireBlockers(target, ownerSlots, casino) {
     const live = ownerSlots.filter(Boolean);
     const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
@@ -1146,6 +1157,7 @@ async function resolveMercTarget(db, seasonId, data) {
             live: mission.state === 'inprogress',
             ownerSlots: slotList(seat.slots),
             casino: mission.type === 'casino',
+            kicked: mission.kickedPlayers,
         };
     }
     if (kind === 'tile') {
@@ -1175,6 +1187,7 @@ async function resolveMercTarget(db, seasonId, data) {
             live: tile.state === 'inprogress',
             ownerSlots: ownerSlots,
             casino: false,
+            kicked: tile.kickedPlayers,
         };
     }
     throw new https_1.HttpsError('invalid-argument', 'kind must be "mission" or "tile".');
@@ -1210,13 +1223,6 @@ exports.setSlotMerc = (0, https_1.onCall)(async (request) => {
     // removal with extra steps.
     if (target.merc && !isAdmin)
         throw new https_1.HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
-    // The hiring limits: a refusal for a player, a warning the admin must confirm
-    // past. `details.mercWarnings` is how the client tells the two apart.
-    const blockers = mercHireBlockers(target.slot, target.ownerSlots, target.casino);
-    if (blockers.length && (!isAdmin || data.confirm !== true)) {
-        const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
-        throw new https_1.HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
-    }
     // Resolve the typed handle against this season's players. A season roster is
     // tens of players, so one read beats maintaining an index on a field players
     // never query by.
@@ -1234,6 +1240,17 @@ exports.setSlotMerc = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('invalid-argument', 'A player can’t merc their own slot.');
     if (merc.disabled)
         throw new https_1.HttpsError('failed-precondition', `@${handle} can’t take merc work right now.`);
+    // The hiring limits — on the slot, and on who is being hired. A refusal for a
+    // player, a warning the admin must confirm past; `details.mercWarnings` is how
+    // the client tells the two apart.
+    const blockers = [
+        ...mercHireBlockers(target.slot, target.ownerSlots, target.casino),
+        ...mercCandidateBlockers(mercId, merc, target.kicked),
+    ];
+    if (blockers.length && (!isAdmin || data.confirm !== true)) {
+        const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
+        throw new https_1.HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
+    }
     await db.ref(`${target.slotPath}/merc`).set({
         playerId: mercId,
         playerName: merc.displayName ?? handle,
@@ -1269,6 +1286,13 @@ exports.claimMissionSlot = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError('permission-denied', 'Account restricted.');
     if (mission.state !== 'inprogress')
         throw new https_1.HttpsError('failed-precondition', 'Mission is not in progress.');
+    // Mirrors claimRefusal in src/lib/slotHelpers.ts. A kicked player may not claim
+    // their way back into the world they abandoned; a restricted one may not take on
+    // the extra capacity a claim is — restriction exists to stop exactly that.
+    if (mission.kickedPlayers?.[uid])
+        throw new https_1.HttpsError('failed-precondition', 'You were removed from this world, so you can’t claim its open slots.');
+    if (player.restricted === true)
+        throw new https_1.HttpsError('failed-precondition', 'Your account is restricted, so you can’t claim open slots right now.');
     if (mission.type === 'basic' && player.basicTrainingDone)
         throw new https_1.HttpsError('failed-precondition', 'basic-training-used');
     if (isCasino) {
@@ -2417,6 +2441,10 @@ exports.adminRemoveCasinoSlot = (0, https_1.onCall)(async (request) => {
         [logPath]: logEntry,
     };
     if (kick) {
+        // A kicked card is abandoned work: the player may not claim it back, nor merc
+        // on this table (see KickRecord) — even though they keep the rest of their seat.
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+            { at: now, name: seat.playerName };
         // Reserved: the fraction rides on the claimable slot, not back to the table.
         const claimRef = db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots`)).push();
         updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] =
@@ -2699,6 +2727,11 @@ exports.adminKickMissionParticipant = (0, https_1.onCall)(async (request) => {
             message: `Removed from ${label} by admin.`,
             auto: true,
         };
+    }
+    // Only a LIVE kick abandons anything — a forming removal reopens nothing.
+    if (mission.state === 'inprogress') {
+        updates[(0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+            { at: now, name: participant.playerName };
     }
     if (mission.state === 'forming') {
         // Reset the decay timer if this was the last participant.

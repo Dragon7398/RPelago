@@ -2,7 +2,7 @@ import { ref, set, update, get, onValue, remove, push, increment } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
-import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry, MercPayout } from '../types';
+import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KickRecord, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry, MercPayout } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
 import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
@@ -432,9 +432,11 @@ export async function adminKickAdventurer(
   assertDb();
 
   let slotsToAdd: AdvSlot[] = [];
+  let ownerName: string | undefined;
   if (convertToClaimableSlot) {
     const taSnap = await get(sRef(db!, `tiles/${coord}/adventurers/${advId}`));
     const ta = taSnap.exists() ? (taSnap.val() as TileAdventurer) : null;
+    ownerName = ta?.ownerName;
     const rawSlots = normalizeSlots(ta?.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
     slotsToAdd = rawSlots.length > 0
       ? rawSlots.map(s => ({ name: s.name, game: s.game, ...(s.details   ? { details:   s.details   } : {}), ...(s.room      ? { room:      s.room      } : {}), ...(s.bonusXP   ? { bonusXP:   s.bonusXP   } : {}), ...(s.bonusGold ? { bonusGold: s.bonusGold } : {}) }))
@@ -450,6 +452,11 @@ export async function adminKickAdventurer(
   if (convertToClaimableSlot) {
     const newSlotRef = push(sRef(db!, `tiles/${coord}/claimableSlots`));
     updates[sPath(`tiles/${coord}/claimableSlots/${newSlotRef.key}`)] = slotsToAdd;
+    // Reopening their slots is what makes this an abandonment: the player may not
+    // claim them back, nor merc on this tile (see KickRecord).
+    updates[sPath(`tiles/${coord}/kickedPlayers/${ownerId}`)] = {
+      at: Date.now(), ...(ownerName ? { name: ownerName } : {}),
+    } satisfies KickRecord;
   }
 
   if (autoWarning) {
@@ -923,6 +930,8 @@ export async function playerReset(playerId: string): Promise<void> {
         : [{ name: '', game: '' }];
       const newSlotRef = push(sRef(db!, `tiles/${coord}/claimableSlots`));
       updates[sPath(`tiles/${coord}/claimableSlots/${newSlotRef.key}`)] = slotsToAdd;
+      updates[sPath(`tiles/${coord}/kickedPlayers/${playerId}`)] =
+        { at: Date.now(), name: player.displayName } satisfies KickRecord;
     }
   }
 
@@ -946,6 +955,8 @@ export async function playerReset(playerId: string): Promise<void> {
     } else if (mission.state === 'inprogress') {
       // Full kick: create claimable slot(s) + warning
       const participant = mission.participants?.[playerId];
+      updates[sPath(`missions/${missionId}/kickedPlayers/${playerId}`)] =
+        { at: Date.now(), name: player.displayName } satisfies KickRecord;
       if (mission.type === 'casino') {
         // Mirrors adminKickMissionParticipant: a casino seat reopens one card at a
         // time, each entry carrying its card (the only record of its gold value)

@@ -31,7 +31,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
   );
 }
 import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
-import { claimEntries } from '../../lib/slotHelpers';
+import { claimEntries, claimRefusal, CLAIM_REFUSAL_TEXT } from '../../lib/slotHelpers';
 import { slotIdleTier, type SlotIdle } from '../../lib/statusReport';
 import { useSeason } from '../../contexts/SeasonContext';
 import { useGameState } from '../../contexts/GameStateContext';
@@ -411,7 +411,7 @@ function shareLabel(fraction: number | undefined): string | null {
 }
 
 function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
-  const { claimMissionSlot } = useGameState();
+  const { claimMissionSlot, gameState } = useGameState();
   const { addToast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -422,6 +422,8 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
   // One claimed slot per player per table — otherwise a single player could absorb
   // an entire vacated hand. Holding your own seat here does NOT block you.
   const alreadyClaimed = !!seat && (seat.slots ?? []).some(s => s?.claimed);
+  // Kicked off this table, or restricted — the server refuses either, so say why here.
+  const refusal = claimRefusal(m, uid ? gameState?.players?.[uid] : null);
 
   const take = async (key: string) => {
     setBusy(key);
@@ -431,6 +433,8 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
       addToast(
         code.includes('already-claimed-here') ? 'You already hold an open slot at this table.'
         : code.includes('Slot no longer available') ? 'Someone else just took that slot.'
+        : code.includes('removed from this world') ? CLAIM_REFUSAL_TEXT.kicked
+        : code.includes('restricted') ? CLAIM_REFUSAL_TEXT.restricted
         : 'Could not claim that slot. Please try again.', 'error');
     }
     finally { setBusy(null); }
@@ -468,10 +472,14 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
                 ? <div className="mp-openslot-login">Sign in to take this slot.</div>
                 : (
                   <button className="rl-btn primary mp-openslot-btn"
-                    disabled={alreadyClaimed || busy !== null}
-                    title={alreadyClaimed ? 'You already hold an open slot at this table' : undefined}
+                    disabled={!!refusal || alreadyClaimed || busy !== null}
+                    title={refusal ? CLAIM_REFUSAL_TEXT[refusal]
+                      : alreadyClaimed ? 'You already hold an open slot at this table' : undefined}
                     onClick={() => void take(key)}>
-                    {busy === key ? '…' : alreadyClaimed ? 'Already holding one' : '⚐ Take this slot'}
+                    {busy === key ? '…'
+                      : refusal === 'kicked' ? 'You left this table'
+                      : refusal === 'restricted' ? 'Restricted'
+                      : alreadyClaimed ? 'Already holding one' : '⚐ Take this slot'}
                   </button>
                 )}
             </div>

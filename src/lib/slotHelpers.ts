@@ -93,3 +93,29 @@ export function countUnfinishedSets(
   }
   return count;
 }
+
+// ── Who may claim an open slot ────────────────────────────────────────────────
+//
+// Two players are barred from taking a kicked slot, on every world type:
+//   kicked     — they were kicked off THIS world; it's the game they abandoned.
+//   restricted — a claim is extra capacity, and restriction exists precisely to
+//                stop that player getting overextended again.
+// Enforced server-side for missions (`claimMissionSlot`) and by the database rules
+// for tiles (a tile claim is a client write). This is what the UI reads to say why.
+
+export type ClaimRefusal = 'kicked' | 'restricted';
+
+export const CLAIM_REFUSAL_TEXT: Readonly<Record<ClaimRefusal, string>> = {
+  kicked:     'You were removed from this world, so you can’t claim its open slots.',
+  restricted: 'Your account is restricted, so you can’t claim open slots right now.',
+};
+
+export function claimRefusal(
+  world: { kickedPlayers?: Record<string, unknown> } | null | undefined,
+  player: { id?: string; restricted?: boolean | null } | null | undefined,
+): ClaimRefusal | null {
+  if (!player?.id) return null;
+  if (world?.kickedPlayers?.[player.id]) return 'kicked';
+  if (player.restricted === true)        return 'restricted';
+  return null;
+}

@@ -191,13 +191,34 @@ export function playersByHandle<P extends { id?: string; discordHandle?: string 
 // every adventurer of theirs on a tile. The target is excluded from "already
 // merced", so the admin REPLACING a merc never trips a limit it already met.
 
-export type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots';
+export type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots' | 'mercRestricted' | 'mercKicked';
 
 export const MERC_BLOCKER_TEXT: Readonly<Record<MercBlocker, string>> = {
   claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
   casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
   allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+  mercRestricted: 'That player is restricted and can’t take merc work.',
+  mercKicked:     'That player was removed from this world, so they can’t merc on it.',
 };
+
+/**
+ * The limits on WHO may be hired — the other half of mercHireBlockers, which
+ * judges the slot. Same HARD-for-players / SOFT-for-admin handling.
+ *   mercRestricted — merc work is extra capacity, which restriction exists to
+ *                    curb (the same reason a restricted player can't claim).
+ *   mercKicked     — the candidate was kicked off this world; mercing would put
+ *                    them straight back into the game they abandoned.
+ */
+export function mercCandidateBlockers(
+  candidate: { id?: string; restricted?: boolean | null } | null | undefined,
+  world: { kickedPlayers?: Record<string, unknown> } | null | undefined,
+): MercBlocker[] {
+  if (!candidate?.id) return [];
+  const out: MercBlocker[] = [];
+  if (candidate.restricted === true)              out.push('mercRestricted');
+  if (world?.kickedPlayers?.[candidate.id])        out.push('mercKicked');
+  return out;
+}
 
 export function mercHireBlockers(
   target: AdvSlot,
