@@ -1089,6 +1089,15 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
   // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
   // and clear per-seat deck data (no longer needed once deployed).
   if (m.type === 'casino' && m.casinoStats) {
+    // Roll from the odds re-derived off the final roster, not the stored running
+    // total — the last chance to drop a gambit whose seat has since left (and the
+    // repair for tables that lost one before departures reverted it).
+    const shell: SeasonShell = seasonInfo(await getConfig(db), seasonId)?.shell ?? 'map';
+    const live = liveCasinoStats(m, shell);
+    if (live) {
+      m.casinoStats = live;
+      updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = live;
+    }
     const { releaseOn, collectOn } = rollCasinoOdds(m.casinoStats);
     updates[sp(seasonId, `missions/${missionId}/release`)] = releaseOn ? 'on' : 'off';
     updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
@@ -1318,7 +1327,7 @@ export const standDownFromMission = onCall(async (request) => {
 
   const uid = request.auth.uid;
   const db  = getDatabase();
-  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(uid, reqSeason, db);
 
   const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
@@ -1334,6 +1343,8 @@ export const standDownFromMission = onCall(async (request) => {
     [sp(seasonId, `players/${uid}/activeMissions/${missionId}`)]: null,
     // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
     ...clearSeatSecrets(seasonId, missionId, uid),
+    // A seat that leaves takes its gambit with it — the odds are the cohort's.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, uid, shell),
   };
 
   const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
@@ -1822,6 +1833,77 @@ function casinoLogWrite(
   return [sp(seasonId, `missions/${missionId}/casinoLog/${key}`), { ts: Date.now(), ...entry }];
 }
 
+// The gambit log entries that still bind a table: those played by a seat that is
+// STILL SEATED, during its current sitting. A gambit reshapes the whole cohort's
+// odds, so it must leave with the seat that played it — and an entry from before
+// `joinedAt` belongs to an earlier sitting that already stood down (the same
+// player can leave and re-sit; skipping a gambit writes no entry, so "their latest
+// entry" would wrongly resurrect the old one). Push keys sort chronologically, and
+// order matters because the stats clamp.
+function liveGambitEntries(m: GMMission): CasinoLogEntry[] {
+  return Object.keys(m.casinoLog ?? {}).sort()
+    .map(k => m.casinoLog![k])
+    .filter(e => {
+      if (e.event !== 'gambit' || !e.gambitDefId) return false;
+      const seat = m.participants?.[e.uid];
+      return !!seat && e.ts >= (seat.joinedAt ?? 0);
+    });
+}
+
+// The table's odds re-derived from first principles: the frozen opening roll with
+// every live gambit replayed onto it, exactly as playCasinoGambit applied them
+// (in a casino shell the gambit XP is paid as gold, so xp never moves). Being a
+// pure function of the roster, this both drops a departed seat's gambit and
+// repairs a table that lost a seat before the fix. Null for a table predating
+// `casinoOpenStats` — there is no baseline to replay from.
+function liveCasinoStats(m: GMMission, shell: SeasonShell): CasinoStats | null {
+  if (!m.casinoOpenStats) return null;
+  let stats: CasinoStats = { ...m.casinoOpenStats };
+  for (const e of liveGambitEntries(m)) {
+    const def = GAMBIT_DEFS_BY_ID[e.gambitDefId!] as GambitDef | undefined;
+    if (!def) continue;
+    const next = applyGambit(stats, def).stats;
+    stats = shell === 'casino' ? { ...next, xp: stats.xp } : next;
+  }
+  return stats;
+}
+
+// Updates that take a departing seat's gambit back off a FORMING table: the odds
+// are re-derived without it, and the pot it added is withdrawn. Once a table is
+// live the odds have already been rolled into the room, so there is nothing to
+// undo. The seat's own gold (a bonus gambit's cost, a penalty's payout) is left
+// alone — like the forfeited ante, that was between the player and the house.
+function revertSeatGambitUpdates(
+  seasonId: string, missionId: string, m: GMMission, uid: string, shell: SeasonShell,
+): Record<string, unknown> {
+  if (m.type !== 'casino' || m.state !== 'forming') return {};
+  const seat = m.participants?.[uid];
+  if (!seat?.gambitPlayed) return {};
+  const mine = liveGambitEntries(m).filter(e => e.uid === uid);
+  if (mine.length === 0) return {};   // seat skipped its gambit
+
+  const updates: Record<string, unknown> = {};
+  const without: GMMission = { ...m, participants: { ...m.participants } };
+  delete without.participants[uid];
+  const stats = liveCasinoStats(without, shell);
+  if (stats) {
+    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = stats;
+  } else {
+    // Pre-baseline table: invert this seat's deltas on the current odds instead.
+    let cur: CasinoStats = { ...(m.casinoStats ?? CASINO_START_STATS) };
+    for (const e of mine) {
+      const def = GAMBIT_DEFS_BY_ID[e.gambitDefId!] as GambitDef | undefined;
+      if (!def) continue;
+      const next = applyGambit(cur, { ...def, delta: -def.delta, xp: -def.xp }).stats;
+      cur = shell === 'casino' ? { ...next, xp: cur.xp } : next;
+    }
+    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = cur;
+  }
+  const potAdd = mine.reduce((sum, e) => sum + (e.potAdd ?? 0), 0);
+  if (potAdd > 0) updates[sp(seasonId, `missions/${missionId}/pot`)] = ServerValue.increment(-potAdd);
+  return updates;
+}
+
 // Set (or change) which deck variant this seat draws from. Allowed any time the
 // seat isn't mid-round; frozen once a hand has been dealt until it's locked or folded.
 // Also remembers the choice on the player's own record as next cohort's default.
@@ -2121,7 +2203,10 @@ export const playCasinoGambit = onCall(async (request) => {
     if (!seat.gambitOffer?.includes(gambitDefId))
       throw new HttpsError('failed-precondition', 'That gambit was not offered to you.');
 
-    const currentStats: CasinoStats = mission.casinoStats ?? { ...CASINO_START_STATS };
+    // Build on the re-derived odds, not the stored running total, so a departed
+    // seat's gambit can never be carried forward by this write.
+    const currentStats: CasinoStats =
+      liveCasinoStats(mission, shell) ?? mission.casinoStats ?? { ...CASINO_START_STATS };
     const result = applyGambit(currentStats, gambitDef);
 
     if (gambitDef.goldCost > 0) {
@@ -3028,7 +3113,7 @@ export const adminVoidCasinoSeat = onCall(async (request) => {
 
   const db  = getDatabase();
   const now = Date.now();
-  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
   const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = snap.val() as GMMission;
@@ -3049,6 +3134,8 @@ export const adminVoidCasinoSeat = onCall(async (request) => {
     [sp(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
     [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
     ...clearSeatSecrets(seasonId, missionId, playerId),
+    // Forming only (no-op once live): the seat's gambit leaves with it.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, playerId, shell),
     [logPath]: logEntry,
   };
   // Only meaningful once the table is live. `casinoShareUnits` is banked at deploy
@@ -3235,7 +3322,7 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   if (!missionId || !playerId) throw new HttpsError('invalid-argument', 'Missing parameters.');
 
   const db = getDatabase();
-  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
   const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = missionSnap.val() as GMMission;
@@ -3253,6 +3340,8 @@ export const adminKickMissionParticipant = onCall(async (request) => {
     [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
     // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
     ...clearSeatSecrets(seasonId, missionId, playerId),
+    // Forming casino only (no-op otherwise): the seat's gambit leaves with it.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, playerId, shell),
   };
 
   // The void/kick distinction — and the warning that comes with a kick — only

@@ -583,6 +583,8 @@ Two card games are offered:
 
 After locking a hand, the player is dealt **gambit cards** that shift shared `casinoStats` (release %, collect %, hint cost) for the entire mission cohort. Bonus gambits cost gold; penalty gambits add XP and pot to the mission.
 
+> **A gambit leaves with its seat.** `casinoStats` is a running total, but the server treats it as derived: `liveCasinoStats` replays `casinoOpenStats` + the `casinoLog` gambit entries of seats **still seated, from their current sitting** (`ts >= joinedAt` — a re-sat player's old gambit doesn't count, and a skipped gambit logs nothing). Stand-down and forming void/kick apply `revertSeatGambitUpdates` (re-derived odds, pot minus that gambit's `potAdd`; the player's own gold is untouched, like the forfeited ante); `playCasinoGambit` builds on the re-derived odds; `deployMission` re-derives once more before rolling. Live tables are untouched — their odds are already rolled into the room.
+
 Locked cards are converted to mission `AdvSlot`s via `cardsToSlots()` (`casinoSlots.ts`): each card becomes a slot with blank `name`/`game` and the card's genre + gold value stamped into `details` (format: `"Genre · Ng"`).
 
 **Config (YAML) submission workflow** — the manifest phase is the submission, gated end-to-end:
