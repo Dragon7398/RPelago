@@ -56,6 +56,13 @@ export const AP_LISTS: readonly ApList[] = [
     // built off the Early August sheet and want a re-check against this one.
     from:  Date.parse('2026-09-05T08:00:00-05:00'),
   },
+  {
+    id:    'mid-oct',
+    label: 'Mid October',
+    // Adopted the evening of Oct 13th. Rooms generated before this instant were
+    // built off the Early September sheet and want a re-check against this one.
+    from:  Date.parse('2026-10-13T21:00:00-05:00'),
+  },
 ];
 
 /** The sheet in force right now — the one new downloads are checked against. */
