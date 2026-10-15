@@ -2980,10 +2980,10 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
    that scrolls independently of its numbers is worse than no header. The counts are
    fixed-width so the column edges hold whatever the names do. */
 .dash-gold-wrap { overflow-x: auto; }
-.dash-gold-scroll { display: flex; flex-direction: column; gap: 0.2rem; min-width: 30rem; }
+.dash-gold-scroll { display: flex; flex-direction: column; gap: 0.2rem; min-width: 36rem; }
 .dash-gold-grid {
   display: grid; align-items: center; gap: 0.55rem;
-  grid-template-columns: 1.4rem minmax(6rem, 1fr) repeat(5, 2.6rem) 5.5rem;
+  grid-template-columns: 1.4rem minmax(6rem, 1fr) repeat(7, 2.6rem) 5.5rem;
 }
 .dash-gold-head {
   /* Transparent border matching the rows', so the header sits on the same column
