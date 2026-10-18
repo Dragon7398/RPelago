@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ADV_ICONS } from '../../lib/constants';
-import { normalizeSlots } from '../../lib/slotHelpers';
+import { normalizeSlots, claimRefusal } from '../../lib/slotHelpers';
 import { resolveNameColor } from './lbHelpers';
 import { AdvStatusIcons, AdvSlotBlock, AdvFeatIcons } from './AdvRow';
 import PublicSlotsList from './PublicSlotsList';
@@ -188,6 +188,7 @@ export default function InProgressState({
           user={user}
           alreadySent={alreadySent}
           freeAdvs={freeAdvs}
+          refusal={claimRefusal(tile, user ? players[user.id] : null)}
           claimingSlotKey={claimingSlotKey}
           setClaimingSlotKey={setClaimingSlotKey}
           onClaimSlot={onClaimSlot}

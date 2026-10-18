@@ -16,11 +16,11 @@ import { DeckPreview } from '../../casino/DeckPreview';
 import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
-import { awaitingRoom, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, roomGoalProgress, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { claimableCount } from '../../lib/slotHelpers';
 import { toRoman } from '../../lib/constants';
-import type { GMMission, ActivityEntry, Player, SlotStatus, TriState } from '../../types';
+import type { GMMission, ActivityEntry, Player, TriState } from '../../types';
 import '../../casino/themes.css';
 import './landing.css';
 
@@ -181,19 +181,6 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
 // slots-goaled meter mirrors the Board view's Completion, so a forming-table grid
 // and a live-table grid read as one shelf.
 
-const GOALED_STATUSES: SlotStatus[] = ['Goaled', 'Done'];
-
-// Slots goaled over slots committed, summed across every seat at the table.
-function tableProgress(m: GMMission): { goaled: number; total: number } {
-  let goaled = 0, total = 0;
-  for (const p of Object.values(m.participants ?? {})) {
-    for (const s of p.slots ?? []) {
-      total++;
-      if (s.status && GOALED_STATUSES.includes(s.status)) goaled++;
-    }
-  }
-  return { goaled, total };
-}
 
 // Once a table deploys, Release/Collect have actually ROLLED — so an in-progress
 // card shows the resolved On/Off outcome, not the pre-deploy % chance the forming
@@ -231,7 +218,7 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
   const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg   = CASINO_GAMES[game];
   const seats = Object.values(m.participants ?? {}).length;
-  const { goaled, total } = tableProgress(m);
+  const { goaled, total } = roomGoalProgress(m);
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
   const done = total > 0 && goaled === total;
   // Slots a player vacated. Anyone can take one over for free, so it's the single

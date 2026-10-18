@@ -162,6 +162,8 @@ export interface Tile {
   // Per-player count of official reports where the player had ≥1 Problem slot here.
   // Read at completion to auto-warn players with 5+ incidents.
   statusIncidents?: Record<string, number>;
+  // Players kicked off this tile while it was in progress (see KickRecord).
+  kickedPlayers?: Record<string, KickRecord>;
   tracker?: string;
   tracker2?: string;
   cheese?: string;
@@ -702,6 +704,19 @@ export interface GMMission {
   // this world, keyed by their playerId. Casino gold includes their slice of the
   // pot, whose random remainder means the ledger could not re-derive it.
   mercPayouts?: Record<string, MercPayout>;
+  // Players kicked off this mission while it was in progress (see KickRecord).
+  kickedPlayers?: Record<string, KickRecord>;
+}
+
+// A player kicked off a world while it was IN PROGRESS — the abandonment that
+// reopens their slots for someone else. Keyed by playerId on the world itself
+// (`kickedPlayers`), and never cleared: for the rest of that world the player may
+// not claim one of its open slots back, nor be hired as a merc on any of its
+// slots. Written by every in-progress kick path and by a player reset. A forming
+// removal writes none — nothing was abandoned.
+export interface KickRecord {
+  at:    number;   // ms epoch
+  name?: string;   // display name at the time, for the admin's reference
 }
 
 export interface MercPayout {

@@ -6,7 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { TILE_TYPES, ALL_ORBS } from '../lib/constants';
 import { rcFromCoord } from '../lib/board';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
-import { normalizeSlots } from '../lib/slotHelpers';
+import { normalizeSlots, claimRefusal } from '../lib/slotHelpers';
 import TownLightbox    from './lightbox/TownLightbox';
 import BossSection     from './lightbox/BossSection';
 import CastlePanel     from './lightbox/CastlePanel';
@@ -191,6 +191,7 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
                 entries={claimableEntries} user={user} alreadySent={alreadySent}
                 freeAdvs={freeAdvs} claimingSlotKey={claimingSlotKey}
                 setClaimingSlotKey={setClaimingSlotKey} onClaimSlot={handleClaimSlot}
+                refusal={claimRefusal(tile, player)}
               />
             )}
             <div className="lb-divider" />

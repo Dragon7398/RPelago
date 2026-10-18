@@ -5,7 +5,7 @@ import { useGameState } from '../contexts/GameStateContext';
 import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { MERC_BLOCKER_TEXT, MERC_SHARE_PCT, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
+import { MERC_BLOCKER_TEXT, MERC_SHARE_PCT, mercCandidateBlockers, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
 
 /**
  * The merc tag and hire/remove affordance for ONE slot, used on every surface
@@ -79,11 +79,21 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
     : merc?.playerId === match!.id ? 'Already mercing this slot.'
     : null;
 
+  // Limits on WHO is being hired: restricted, or kicked off this world. Like the
+  // slot limits, a refusal for the owner and a warning for the admin.
+  const world = target.kind === 'mission'
+    ? gameState?.missions?.[target.missionId]
+    : gameState?.tiles?.[target.coord];
+  const candBlockers = match && !problem ? mercCandidateBlockers(match, world) : [];
+  const candProblem  = !isAdmin && candBlockers.length ? MERC_BLOCKER_TEXT[candBlockers[0]] : null;
+  // Everything the admin is warned about, and hires past with "Hire anyway".
+  const warnings = isAdmin ? [...reasons, ...candBlockers.map(b => MERC_BLOCKER_TEXT[b])] : [];
+
   const run = async (handle: string | null) => {
     setBusy(true);
     try {
       // The admin has seen the warnings in the form; hiring past them is the confirmation.
-      const res = await setSlotMerc(target, handle, isAdmin && blockers.length > 0);
+      const res = await setSlotMerc(target, handle, isAdmin && warnings.length > 0);
       addToast(handle ? `${res.mercName ?? 'Merc'} is now mercing this slot.` : 'Merc removed.', 'success');
       setEditing(false); setConfirm(false); setDraft('');
     } catch (err) {
@@ -126,23 +136,23 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Escape') setEditing(false);
-              if (e.key === 'Enter' && match && !problem && !busy) void run(draft);
+              if (e.key === 'Enter' && match && !problem && !candProblem && !busy) void run(draft);
             }}
             placeholder="@discord handle"
             maxLength={40}
             autoFocus
           />
-          <span className={`${p}-hint${problem ? ' bad' : ''}`}>
-            {problem ?? (match ? `→ ${match.displayName}` : '')}
+          <span className={`${p}-hint${problem || candProblem ? ' bad' : ''}`}>
+            {problem ?? candProblem ?? (match ? `→ ${match.displayName}` : '')}
           </span>
-          <button type="button" className={`${p}-btn${blockers.length ? ' danger' : ''}`}
-                  disabled={busy || !match || !!problem}
+          <button type="button" className={`${p}-btn${warnings.length ? ' danger' : ''}`}
+                  disabled={busy || !match || !!problem || !!candProblem}
                   onClick={() => void run(draft)}>
-            {busy ? '…' : blockers.length ? 'Hire anyway' : 'Hire'}
+            {busy ? '…' : warnings.length ? 'Hire anyway' : 'Hire'}
           </button>
           <button type="button" className={`${p}-btn`} disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
           {/* Only the admin ever reaches the form with blockers — warn, then allow. */}
-          {reasons.map(r => <span key={r} className={`${p}-hint bad`}>⚠ {r}</span>)}
+          {warnings.map(r => <span key={r} className={`${p}-hint bad`}>⚠ {r}</span>)}
           {/* Owners get one shot at this — say so before they commit. */}
           {!isAdmin && (
             <span className={`${p}-hint`}>They take {MERC_SHARE_PCT}% of this slot’s reward. Only the admin can remove a merc once hired.</span>

@@ -7,6 +7,7 @@ import { awaitingRoom, computeMissionCard, fmtClock, missionDisplayLabel, type G
 import { calcFeatBonuses, buildXpBonusTooltip, buildGoldBonusTooltip, missionClaimCapacity } from '../../lib/gameLogic';
 import { AdvFeatIcons, CopyButton } from './AdvRow';
 import MercControl from '../MercControl';
+import { claimRefusal, CLAIM_REFUSAL_TEXT } from '../../lib/slotHelpers';
 import { MISSION_DEFS, toRoman } from '../../lib/constants';
 import { resolveNameColor } from './lbHelpers';
 import { handStakeFromSlots } from '../../lib/casinoSlots';
@@ -21,7 +22,7 @@ function ClaimableSlots({
   claimsFull: boolean;
   basicTrainingDone: boolean;
 }) {
-  const { claimMissionSlot } = useGameState();
+  const { claimMissionSlot, gameState } = useGameState();
   const [loading, setLoading] = useState<string | null>(null);
 
   const entries = Object.entries(mission.claimableSlots ?? {});
@@ -30,6 +31,18 @@ function ClaimableSlots({
   const alreadyIn    = uid in (mission.participants ?? {});
   const btBlocked    = mission.type === 'basic' && basicTrainingDone;
   if (alreadyIn || claimsFull || btBlocked) return null;
+
+  // Kicked off this mission, or restricted: the server refuses the claim, so show
+  // the spots with the reason instead of buttons that can only fail.
+  const refusal = claimRefusal(mission, gameState?.players?.[uid]);
+  if (refusal) {
+    return (
+      <div className="gm-claim-section">
+        <div className="gm-roster-head" style={{ marginTop: '0.6rem' }}>⚐ OPEN SPOTS — REPLACEMENT AVAILABLE</div>
+        <div className="gm-slot-prompt">{CLAIM_REFUSAL_TEXT[refusal]}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="gm-claim-section">

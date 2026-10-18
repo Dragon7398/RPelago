@@ -727,6 +727,7 @@ interface GMMission {
   participants: Record<string, GMParticipant>;
   claimableSlots?: Record<string, GMSlot[]>;
   statusIncidents?: Record<string, number>;   // per-player official-report Problem count
+  kickedPlayers?:   Record<string, KickRecord>; // kicked while in progress (see KickRecord)
   // casino-only
   variableReward?: boolean;
   tableUrl?:       string;
@@ -774,6 +775,15 @@ interface Tile {
   publicSlots?: TileSlot[];
   name?:        string;
   statusIncidents?: Record<string, number>;   // per-player official-report Problem count
+  kickedPlayers?:   Record<string, KickRecord>; // kicked while in progress (see KickRecord)
+}
+
+// Mirrors KickRecord in src/types/index.ts: a player kicked off a world while it
+// was in progress. Never cleared — for the rest of that world they may not claim
+// its open slots back nor be hired as a merc on it.
+interface KickRecord {
+  at:    number;
+  name?: string;
 }
 
 // ── Mission definitions (mirrors src/lib/constants.ts MISSION_DEFS) ──────────
@@ -1019,6 +1029,15 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
   // Casino: roll the release/collect odds from the settled casinoStats, lock xp/hint,
   // and clear per-seat deck data (no longer needed once deployed).
   if (m.type === 'casino' && m.casinoStats) {
+    // Roll from the odds re-derived off the final roster, not the stored running
+    // total — the last chance to drop a gambit whose seat has since left (and the
+    // repair for tables that lost one before departures reverted it).
+    const shell: SeasonShell = seasonInfo(await getConfig(db), seasonId)?.shell ?? 'map';
+    const live = liveCasinoStats(m, shell);
+    if (live) {
+      m.casinoStats = live;
+      updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = live;
+    }
     const { releaseOn, collectOn } = rollCasinoOdds(m.casinoStats);
     updates[sp(seasonId, `missions/${missionId}/release`)] = releaseOn ? 'on' : 'off';
     updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
@@ -1248,7 +1267,7 @@ export const standDownFromMission = onCall(async (request) => {
 
   const uid = request.auth.uid;
   const db  = getDatabase();
-  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(uid, reqSeason, db);
 
   const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
@@ -1264,6 +1283,8 @@ export const standDownFromMission = onCall(async (request) => {
     [sp(seasonId, `players/${uid}/activeMissions/${missionId}`)]: null,
     // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
     ...clearSeatSecrets(seasonId, missionId, uid),
+    // A seat that leaves takes its gambit with it — the odds are the cohort's.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, uid, shell),
   };
 
   const remaining = Object.keys(mission.participants ?? {}).filter(id => id !== uid);
@@ -1388,16 +1409,28 @@ interface MercTarget {
   live:       boolean;              // the world is in progress
   ownerSlots: GMSlot[];             // everything the owner holds on this world (for the limits)
   casino:     boolean;
+  kicked?:    Record<string, KickRecord>;   // the world's kickedPlayers
 }
 
 // Mirrors MercBlocker / MERC_BLOCKER_TEXT / mercHireBlockers in src/lib/mercLogic.ts
 // — a change to one must be made in both. HARD for players, SOFT for the admin.
-type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots';
+type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots' | 'mercRestricted' | 'mercKicked';
 const MERC_BLOCKER_TEXT: Record<MercBlocker, string> = {
   claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
   casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
   allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+  mercRestricted: 'That player is restricted and can’t take merc work.',
+  mercKicked:     'That player was removed from this world, so they can’t merc on it.',
 };
+/** Mirrors mercCandidateBlockers: the limits on WHO may be hired. */
+function mercCandidateBlockers(
+  candidateId: string, candidate: { restricted?: boolean | null }, kicked: Record<string, unknown> | undefined,
+): MercBlocker[] {
+  const out: MercBlocker[] = [];
+  if (candidate.restricted === true) out.push('mercRestricted');
+  if (kicked?.[candidateId])         out.push('mercKicked');
+  return out;
+}
 function mercHireBlockers(target: GMSlot, ownerSlots: GMSlot[], casino: boolean): MercBlocker[] {
   const live   = ownerSlots.filter(Boolean);
   const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
@@ -1449,6 +1482,7 @@ async function resolveMercTarget(
       live:       mission.state === 'inprogress',
       ownerSlots: slotList(seat.slots),
       casino:     mission.type === 'casino',
+      kicked:     mission.kickedPlayers,
     };
   }
 
@@ -1475,6 +1509,7 @@ async function resolveMercTarget(
       live:       tile.state === 'inprogress',
       ownerSlots: ownerSlots as GMSlot[],
       casino:     false,
+      kicked:     tile.kickedPlayers,
     };
   }
 
@@ -1524,19 +1559,11 @@ export const setSlotMerc = onCall(async (request) => {
   if (target.merc && !isAdmin)
     throw new HttpsError('failed-precondition', 'This slot already has a merc. Ask the admin to change it.');
 
-  // The hiring limits: a refusal for a player, a warning the admin must confirm
-  // past. `details.mercWarnings` is how the client tells the two apart.
-  const blockers = mercHireBlockers(target.slot, target.ownerSlots, target.casino);
-  if (blockers.length && (!isAdmin || data.confirm !== true)) {
-    const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
-    throw new HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
-  }
-
   // Resolve the typed handle against this season's players. A season roster is
   // tens of players, so one read beats maintaining an index on a field players
   // never query by.
   const playersSnap = await db.ref(sp(seasonId, 'players')).get();
-  const players = (playersSnap.val() ?? {}) as Record<string, PlayerRecord & { id?: string; disabled?: boolean }>;
+  const players = (playersSnap.val() ?? {}) as Record<string, PlayerRecord & { id?: string; disabled?: boolean; restricted?: boolean | null }>;
   const matches = Object.entries(players)
     .filter(([, p]) => p && p.id && typeof p.discordHandle === 'string'
       && normalizeHandle(p.discordHandle) === handle);
@@ -1550,6 +1577,18 @@ export const setSlotMerc = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'A player can’t merc their own slot.');
   if (merc.disabled)
     throw new HttpsError('failed-precondition', `@${handle} can’t take merc work right now.`);
+
+  // The hiring limits — on the slot, and on who is being hired. A refusal for a
+  // player, a warning the admin must confirm past; `details.mercWarnings` is how
+  // the client tells the two apart.
+  const blockers = [
+    ...mercHireBlockers(target.slot, target.ownerSlots, target.casino),
+    ...mercCandidateBlockers(mercId, merc, target.kicked),
+  ];
+  if (blockers.length && (!isAdmin || data.confirm !== true)) {
+    const text = blockers.map(b => MERC_BLOCKER_TEXT[b]).join(' ');
+    throw new HttpsError('failed-precondition', text, isAdmin ? { mercWarnings: blockers } : undefined);
+  }
 
   await db.ref(`${target.slotPath}/merc`).set({
     playerId:   mercId,
@@ -1581,7 +1620,7 @@ export const claimMissionSlot = onCall(async (request) => {
   if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
 
-  const player  = playerSnap.val() as { displayName: string; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean };
+  const player  = playerSnap.val() as { displayName: string; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean; restricted?: boolean | null };
   const mission = missionSnap.val() as GMMission;
 
   const isCasino = mission.type === 'casino';
@@ -1590,6 +1629,13 @@ export const claimMissionSlot = onCall(async (request) => {
   if (player.disabled)      throw new HttpsError('permission-denied',  'Account restricted.');
   if (mission.state !== 'inprogress')
     throw new HttpsError('failed-precondition', 'Mission is not in progress.');
+  // Mirrors claimRefusal in src/lib/slotHelpers.ts. A kicked player may not claim
+  // their way back into the world they abandoned; a restricted one may not take on
+  // the extra capacity a claim is — restriction exists to stop exactly that.
+  if (mission.kickedPlayers?.[uid])
+    throw new HttpsError('failed-precondition', 'You were removed from this world, so you can’t claim its open slots.');
+  if (player.restricted === true)
+    throw new HttpsError('failed-precondition', 'Your account is restricted, so you can’t claim open slots right now.');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
 
@@ -1725,6 +1771,77 @@ function casinoLogWrite(
 ): [string, CasinoLogEntry] {
   const key = db.ref(sp(seasonId, `missions/${missionId}/casinoLog`)).push().key!;
   return [sp(seasonId, `missions/${missionId}/casinoLog/${key}`), { ts: Date.now(), ...entry }];
+}
+
+// The gambit log entries that still bind a table: those played by a seat that is
+// STILL SEATED, during its current sitting. A gambit reshapes the whole cohort's
+// odds, so it must leave with the seat that played it — and an entry from before
+// `joinedAt` belongs to an earlier sitting that already stood down (the same
+// player can leave and re-sit; skipping a gambit writes no entry, so "their latest
+// entry" would wrongly resurrect the old one). Push keys sort chronologically, and
+// order matters because the stats clamp.
+function liveGambitEntries(m: GMMission): CasinoLogEntry[] {
+  return Object.keys(m.casinoLog ?? {}).sort()
+    .map(k => m.casinoLog![k])
+    .filter(e => {
+      if (e.event !== 'gambit' || !e.gambitDefId) return false;
+      const seat = m.participants?.[e.uid];
+      return !!seat && e.ts >= (seat.joinedAt ?? 0);
+    });
+}
+
+// The table's odds re-derived from first principles: the frozen opening roll with
+// every live gambit replayed onto it, exactly as playCasinoGambit applied them
+// (in a casino shell the gambit XP is paid as gold, so xp never moves). Being a
+// pure function of the roster, this both drops a departed seat's gambit and
+// repairs a table that lost a seat before the fix. Null for a table predating
+// `casinoOpenStats` — there is no baseline to replay from.
+function liveCasinoStats(m: GMMission, shell: SeasonShell): CasinoStats | null {
+  if (!m.casinoOpenStats) return null;
+  let stats: CasinoStats = { ...m.casinoOpenStats };
+  for (const e of liveGambitEntries(m)) {
+    const def = GAMBIT_DEFS_BY_ID[e.gambitDefId!] as GambitDef | undefined;
+    if (!def) continue;
+    const next = applyGambit(stats, def).stats;
+    stats = shell === 'casino' ? { ...next, xp: stats.xp } : next;
+  }
+  return stats;
+}
+
+// Updates that take a departing seat's gambit back off a FORMING table: the odds
+// are re-derived without it, and the pot it added is withdrawn. Once a table is
+// live the odds have already been rolled into the room, so there is nothing to
+// undo. The seat's own gold (a bonus gambit's cost, a penalty's payout) is left
+// alone — like the forfeited ante, that was between the player and the house.
+function revertSeatGambitUpdates(
+  seasonId: string, missionId: string, m: GMMission, uid: string, shell: SeasonShell,
+): Record<string, unknown> {
+  if (m.type !== 'casino' || m.state !== 'forming') return {};
+  const seat = m.participants?.[uid];
+  if (!seat?.gambitPlayed) return {};
+  const mine = liveGambitEntries(m).filter(e => e.uid === uid);
+  if (mine.length === 0) return {};   // seat skipped its gambit
+
+  const updates: Record<string, unknown> = {};
+  const without: GMMission = { ...m, participants: { ...m.participants } };
+  delete without.participants[uid];
+  const stats = liveCasinoStats(without, shell);
+  if (stats) {
+    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = stats;
+  } else {
+    // Pre-baseline table: invert this seat's deltas on the current odds instead.
+    let cur: CasinoStats = { ...(m.casinoStats ?? CASINO_START_STATS) };
+    for (const e of mine) {
+      const def = GAMBIT_DEFS_BY_ID[e.gambitDefId!] as GambitDef | undefined;
+      if (!def) continue;
+      const next = applyGambit(cur, { ...def, delta: -def.delta, xp: -def.xp }).stats;
+      cur = shell === 'casino' ? { ...next, xp: cur.xp } : next;
+    }
+    updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = cur;
+  }
+  const potAdd = mine.reduce((sum, e) => sum + (e.potAdd ?? 0), 0);
+  if (potAdd > 0) updates[sp(seasonId, `missions/${missionId}/pot`)] = ServerValue.increment(-potAdd);
+  return updates;
 }
 
 // Set (or change) which deck variant this seat draws from. Allowed any time the
@@ -2026,7 +2143,10 @@ export const playCasinoGambit = onCall(async (request) => {
     if (!seat.gambitOffer?.includes(gambitDefId))
       throw new HttpsError('failed-precondition', 'That gambit was not offered to you.');
 
-    const currentStats: CasinoStats = mission.casinoStats ?? { ...CASINO_START_STATS };
+    // Build on the re-derived odds, not the stored running total, so a departed
+    // seat's gambit can never be carried forward by this write.
+    const currentStats: CasinoStats =
+      liveCasinoStats(mission, shell) ?? mission.casinoStats ?? { ...CASINO_START_STATS };
     const result = applyGambit(currentStats, gambitDef);
 
     if (gambitDef.goldCost > 0) {
@@ -2862,6 +2982,10 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
   };
 
   if (kick) {
+    // A kicked card is abandoned work: the player may not claim it back, nor merc
+    // on this table (see KickRecord) — even though they keep the rest of their seat.
+    updates[sp(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+      { at: now, name: seat.playerName } satisfies KickRecord;
     // Reserved: the fraction rides on the claimable slot, not back to the table.
     const claimRef = db.ref(sp(seasonId, `missions/${missionId}/claimableSlots`)).push();
     updates[sp(seasonId, `missions/${missionId}/claimableSlots/${claimRef.key}`)] =
@@ -2929,7 +3053,7 @@ export const adminVoidCasinoSeat = onCall(async (request) => {
 
   const db  = getDatabase();
   const now = Date.now();
-  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
   const snap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = snap.val() as GMMission;
@@ -2950,6 +3074,8 @@ export const adminVoidCasinoSeat = onCall(async (request) => {
     [sp(seasonId, `missions/${missionId}/participants/${playerId}`)]: null,
     [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
     ...clearSeatSecrets(seasonId, missionId, playerId),
+    // Forming only (no-op once live): the seat's gambit leaves with it.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, playerId, shell),
     [logPath]: logEntry,
   };
   // Only meaningful once the table is live. `casinoShareUnits` is banked at deploy
@@ -3136,7 +3262,7 @@ export const adminKickMissionParticipant = onCall(async (request) => {
   if (!missionId || !playerId) throw new HttpsError('invalid-argument', 'Missing parameters.');
 
   const db = getDatabase();
-  const { seasonId } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
+  const { seasonId, shell } = await resolveWriteSeason(request.auth.uid, reqSeason, db);
   const missionSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
   if (!missionSnap.exists()) throw new HttpsError('not-found', 'Mission not found.');
   const mission = missionSnap.val() as GMMission;
@@ -3154,6 +3280,8 @@ export const adminKickMissionParticipant = onCall(async (request) => {
     [sp(seasonId, `players/${playerId}/activeMissions/${missionId}`)]: null,
     // Clear the secret hand/deck too — otherwise the orphan blocks the next seat.
     ...clearSeatSecrets(seasonId, missionId, playerId),
+    // Forming casino only (no-op otherwise): the seat's gambit leaves with it.
+    ...revertSeatGambitUpdates(seasonId, missionId, mission, playerId, shell),
   };
 
   // The void/kick distinction — and the warning that comes with a kick — only
@@ -3175,6 +3303,12 @@ export const adminKickMissionParticipant = onCall(async (request) => {
       message:   `Removed from ${label} by admin.`,
       auto:      true,
     };
+  }
+
+  // Only a LIVE kick abandons anything — a forming removal reopens nothing.
+  if (mission.state === 'inprogress') {
+    updates[sp(seasonId, `missions/${missionId}/kickedPlayers/${playerId}`)] =
+      { at: now, name: participant.playerName } satisfies KickRecord;
   }
 
   if (mission.state === 'forming') {

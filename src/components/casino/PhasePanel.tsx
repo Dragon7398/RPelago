@@ -30,8 +30,8 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { awaitingRoom, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
-import { claimEntries } from '../../lib/slotHelpers';
+import { awaitingRoom, roomGoalProgress, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { claimEntries, claimRefusal, CLAIM_REFUSAL_TEXT } from '../../lib/slotHelpers';
 import { slotIdleTier, type SlotIdle } from '../../lib/statusReport';
 import { useSeason } from '../../contexts/SeasonContext';
 import { useGameState } from '../../contexts/GameStateContext';
@@ -411,7 +411,7 @@ function shareLabel(fraction: number | undefined): string | null {
 }
 
 function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
-  const { claimMissionSlot } = useGameState();
+  const { claimMissionSlot, gameState } = useGameState();
   const { addToast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -422,6 +422,8 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
   // One claimed slot per player per table — otherwise a single player could absorb
   // an entire vacated hand. Holding your own seat here does NOT block you.
   const alreadyClaimed = !!seat && (seat.slots ?? []).some(s => s?.claimed);
+  // Kicked off this table, or restricted — the server refuses either, so say why here.
+  const refusal = claimRefusal(m, uid ? gameState?.players?.[uid] : null);
 
   const take = async (key: string) => {
     setBusy(key);
@@ -431,6 +433,8 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
       addToast(
         code.includes('already-claimed-here') ? 'You already hold an open slot at this table.'
         : code.includes('Slot no longer available') ? 'Someone else just took that slot.'
+        : code.includes('removed from this world') ? CLAIM_REFUSAL_TEXT.kicked
+        : code.includes('restricted') ? CLAIM_REFUSAL_TEXT.restricted
         : 'Could not claim that slot. Please try again.', 'error');
     }
     finally { setBusy(null); }
@@ -468,10 +472,14 @@ function OpenSlots({ m, uid }: { m: GMMission; uid: string | null }) {
                 ? <div className="mp-openslot-login">Sign in to take this slot.</div>
                 : (
                   <button className="rl-btn primary mp-openslot-btn"
-                    disabled={alreadyClaimed || busy !== null}
-                    title={alreadyClaimed ? 'You already hold an open slot at this table' : undefined}
+                    disabled={!!refusal || alreadyClaimed || busy !== null}
+                    title={refusal ? CLAIM_REFUSAL_TEXT[refusal]
+                      : alreadyClaimed ? 'You already hold an open slot at this table' : undefined}
                     onClick={() => void take(key)}>
-                    {busy === key ? '…' : alreadyClaimed ? 'Already holding one' : '⚐ Take this slot'}
+                    {busy === key ? '…'
+                      : refusal === 'kicked' ? 'You left this table'
+                      : refusal === 'restricted' ? 'Restricted'
+                      : alreadyClaimed ? 'Already holding one' : '⚐ Take this slot'}
                   </button>
                 )}
             </div>
@@ -823,8 +831,8 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
     const hue = seatHue(idx);
     for (const g of seatGames(p)) (you ? mine : others).push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you, ownerHue: hue });
   });
-  const all       = [...mine, ...others];
-  const goaled    = all.filter(g => isGoaled(g.status)).length;
+  // The room meter counts open (claimable) slots too — see roomGoalProgress.
+  const room      = roomGoalProgress(m);
   const myGoaled  = mine.filter(g => isGoaled(g.status)).length;
   // Elapsed counts from the room link going up (when play can actually start),
   // not from deploy — a table can sit deployed for a while before it has a room.
@@ -860,7 +868,7 @@ function BoardView({ m, uid, now, seasonId, view }: { m: GMMission; uid: string;
         <div className="mp-row" style={{ gap: '1.6rem', alignItems: 'flex-start' }}>
           {/* No room means no play, so 0/N goaled is a foregone zero — a full-width
               empty meter that only reads as failure. Hidden until there's a room. */}
-          {!pending && <Completion goaled={goaled} total={all.length} />}
+          {!pending && <Completion goaled={room.goaled} total={room.total} />}
           <Telemetry m={m} elapsed={elapsed} />
         </div>
 
@@ -909,11 +917,11 @@ export function TableSlotsBoard({ m, uid, now, colorOf, handleOf }: {
     for (const g of seatGames(p))
       tiles.push({ ...g, ownerName: p.playerName, ownerId: p.playerId, ownerAvatar: p.avatarHash, seatSlots: p.slots ?? [], you: p.playerId === uid, ownerHue: hue });
   });
-  const goaled = tiles.filter(g => isGoaled(g.status)).length;
+  const room   = roomGoalProgress(m);   // open slots included, as on the Board view
   return (
     <PlayerCtx colorOf={colorOf} handleOf={handleOf}>
       {/* Mirrors BoardView: no room yet ⇒ the completion meter is a guaranteed zero. */}
-      {!awaitingRoom(m) && <Completion goaled={goaled} total={tiles.length} />}
+      {!awaitingRoom(m) && <Completion goaled={room.goaled} total={room.total} />}
       <ChallengeLinks m={m} />
       <OpenSlots m={m} uid={uid} />
       {tiles.length

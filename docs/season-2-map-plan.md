@@ -135,6 +135,41 @@ never iterates the map at all, and keeping them separate would have meant a thir
 branch in five server systems — two of which (slot sync, adventurer-free) are
 load-bearing enough that interiors could never resolve without them. See §3.3 and
 decisions 34–37.
+### Folded in from the casino season (2026-10-17) — kicked / restricted claims
+
+Main added **`kickedPlayers`** and the claim-refusal policy: a player kicked off a
+world while it was in progress may not claim its open slots, and a **restricted**
+player may not claim anywhere (a claim is extra capacity, which restriction exists
+to curb). It enforces this on missions in `claimMissionSlot`, and on tiles in
+`database.rules.json` — because on main a tile claim is a CLIENT write.
+
+> **On S2 it is not.** §0.5.2 routed every tile claim through
+> `claimChallengeSlot`, and the Admin SDK bypasses every rule in that file — so the
+> guard main added would simply never have run. A kicked player could have reclaimed
+> the slot they abandoned, and a restricted player could have claimed freely.
+> **`claimChallengeSlot` now carries the check itself**, mirroring
+> `claimMissionSlot` down to the wording.
+
+The rules conflict resolved as S2's `.write` (no client CREATE) plus **main's full
+`.validate`**, which is a strict superset of S2's — it adds owner, advId,
+adventurer-exists and the claim guard, and every one of those short-circuits on an
+update or a delete, so nothing S2 does client-side is affected. Main's create
+branch is unreachable under that `.write` and is kept deliberately: it is the belt
+to the callable's braces if the `.write` is ever relaxed, and the rule is where the
+policy stays legible.
+
+**The test block says so out loud.** With client creation refused for everyone, the
+rule no longer tells a kicked claimant from an ordinary one — main's three refusal
+tests would still pass with the kicked/restricted terms deleted. The reframed block
+in `tests/rules/seasons.rules.test.ts` warns against reading it as proof the policy
+works, and points at the callable.
+
+Also in this merge, needing no S2 work: `roomGoalProgress` (counts open claimable
+slots as ungoaled, matching the ready-to-settle ✓), `liveCasinoStats` /
+`revertSeatGambitUpdates` (a gambit leaves with its seat), `mercCandidateBlockers`
+(client + server mirror both present), and a clean **append** to `AP_LISTS`
+(`mid-oct`) — no past era edited, as that registry requires.
+
 ### Folded in from the casino season (2026-10-05)
 
 The `main` merge brought **mercenaries** and the **blanket-target config screen**.

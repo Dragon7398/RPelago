@@ -476,7 +476,11 @@ describe('challenge joins — creation is server-only, owner updates are not', (
 
   beforeEach(async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.database().ref(TILE).set({ state: 'inprogress', name: 'Battle' });
+      const db = ctx.database();
+      await db.ref(TILE).set({ state: 'inprogress', name: 'Battle' });
+      // The .validate requires the entry to name an adventurer the player actually
+      // owns, so the roster record is part of a valid fixture, not scenery.
+      await db.ref(`seasons/${CASINO}/players/${PLAYER_UID}/adventurers/a9`).set({ firstName: 'A', lastName: 'B' });
     });
   });
 
@@ -564,5 +568,67 @@ describe('tile slot mercs — owner cannot hire, swap or shed one from the clien
 
   it('the admin can remove a merc', async () => {
     await assertSucceeds(admin().ref(`${ADV}/slots/0/merc`).remove());
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Claiming a kicked tile slot — a tile claim is a CLIENT write (delete the open
+// slot + create the adventurer, atomically), so the rules are the enforcement.
+// Barred: a player kicked off this tile (`kickedPlayers/{uid}` — it's the game
+// they abandoned), and a restricted player (a claim is extra capacity).
+// ═════════════════════════════════════════════════════════════════════════════
+describe('tile claims — kicked and restricted players are refused', () => {
+  const TILE = `seasons/${CASINO}/tiles/C2`;
+
+  const claim = (db: ReturnType<typeof player>, uid: string) => db.ref().update({
+    [`${TILE}/claimableSlots/open1`]: null,
+    [`${TILE}/adventurers/a9`]: {
+      advId: 'a9', owner: uid, ownerName: uid, name: 'A B', cls: 'fighter',
+      slots: [{ name: 's', game: 'g', claimed: true }],
+    },
+  });
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.database();
+      for (const uid of [PLAYER_UID, OTHER_UID]) {
+        await db.ref(`seasons/${CASINO}/players/${uid}/adventurers/a9`).set({ firstName: 'A', lastName: 'B' });
+      }
+      await db.ref(TILE).set({
+        state: 'inprogress', name: 'Battle',
+        claimableSlots: { open1: [{ name: 's', game: 'g' }] },
+        kickedPlayers: { [PLAYER_UID]: { at: 1, name: 'Player One' } },
+      });
+    });
+  });
+
+  // ⚠ S2 CHANGED THE MECHANISM, NOT THE POLICY. Claiming a tile slot now goes
+  // through the `claimChallengeSlot` callable (§0.5.2), so the client write below is
+  // refused for EVERY player — kicked, restricted or ordinary alike. The rule here no
+  // longer discriminates between them, and the three refusals that follow would still
+  // pass with the kicked/restricted terms deleted.
+  //
+  // So do NOT read this block as proof the policy works. The live enforcement is in
+  // `claimChallengeSlot`, which refuses a kicked or restricted claimant itself,
+  // because the Admin SDK bypasses every rule in this file. These tests pin the
+  // belt — defence if the .write is ever relaxed — and the braces are in the
+  // callable.
+  it('NO client can claim — creation is server-only on this season model', async () => {
+    await assertFails(claim(other(), OTHER_UID));
+  });
+
+  it('the player kicked off this tile cannot claim back in', async () => {
+    await assertFails(claim(player(), PLAYER_UID));
+  });
+
+  it('…nor just delete the open slot', async () => {
+    await assertFails(player().ref(`${TILE}/claimableSlots/open1`).remove());
+  });
+
+  it('a restricted player cannot claim', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(`seasons/${CASINO}/players/${OTHER_UID}/restricted`).set(true);
+    });
+    await assertFails(claim(other(), OTHER_UID));
   });
 });

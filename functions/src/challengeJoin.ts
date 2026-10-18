@@ -108,6 +108,8 @@ interface JoinCtx {
   coord: string;
   advId: string;
   slots: DeclaredSlot[];
+  /** Read here so the claim path needs no second player fetch. Joining ignores it. */
+  restricted: boolean;
 }
 
 /** Shared prelude: auth, season, and the player's own adventurer. */
@@ -127,6 +129,7 @@ async function loadJoinCtx(request: Parameters<Parameters<typeof onCall>[0]>[0])
   const player = playerSnap.val() as {
     displayName: string;
     disabled?: boolean;
+    restricted?: boolean | null;
     adventurers?: Record<string, { firstName: string; lastName: string; cls: string; busy?: boolean }>;
   };
 
@@ -139,7 +142,9 @@ async function loadJoinCtx(request: Parameters<Parameters<typeof onCall>[0]>[0])
   if (!adv) throw new HttpsError('not-found', 'Adventurer not found.');
   if (adv.busy) throw new HttpsError('failed-precondition', 'That adventurer is already out.');
 
-  return { uid, seasonId, coord, advId, slots: cleanSlots(slots) };
+  // `restricted` rides along for claimChallengeSlot. It is deliberately NOT acted on
+  // here — see above: restriction delays the claim's return, it does not bar joining.
+  return { uid, seasonId, coord, advId, slots: cleanSlots(slots), restricted: player.restricted === true };
 }
 
 async function buildRecord(
@@ -238,6 +243,7 @@ export const claimChallengeSlot = onCall(async (request) => {
     state: string;
     adventurers?: Record<string, { owner: string }>;
     claimableSlots?: Record<string, DeclaredSlot[]>;
+    kickedPlayers?: Record<string, { at: number; name?: string }>;
   };
 
   if (tile.state !== 'inprogress') {
@@ -245,6 +251,20 @@ export const claimChallengeSlot = onCall(async (request) => {
   }
   if (Object.values(tile.adventurers ?? {}).some(a => a.owner === ctx.uid)) {
     throw new HttpsError('failed-precondition', 'You are already on this challenge.');
+  }
+
+  // Mirrors `claimRefusal` in src/lib/slotHelpers.ts, and the mission twin in
+  // `claimMissionSlot` — a kicked player may not claim their way back into the world
+  // they abandoned, and a restricted one may not take on extra capacity at all.
+  //
+  // THIS is the live enforcement for a tile, not the database rule. The rule carries
+  // the same guard, but S2 routes every claim through this callable and the Admin SDK
+  // bypasses rules — so a check that lives only there would never run.
+  if (tile.kickedPlayers?.[ctx.uid]) {
+    throw new HttpsError('failed-precondition', 'You were removed from this world, so you can’t claim its open slots.');
+  }
+  if (ctx.restricted) {
+    throw new HttpsError('failed-precondition', 'Your account is restricted, so you can’t claim open slots right now.');
   }
 
   // Read-then-write under the Admin SDK: the entry either exists here or another

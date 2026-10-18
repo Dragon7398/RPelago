@@ -173,25 +173,45 @@ function Pager({ win, unit, onPage }: {
 
 // ── Per-player table counts ───────────────────────────────────────────────────
 //
-// One participant record is one seat, so a player is counted ONCE per table however
-// many slots they hold on it (including a claimed slot, which also creates a
-// participant record). Release/Collect are read off the MISSION, not the seat —
-// they are a property of the generated room that every seat on it shares.
+// `tables` (and the four Rel/Col counts read off it) is the tables a player held a
+// FULL seat on — one they enlisted in, not one they only reached by claiming an
+// abandoned slot. A pure claimant also gets a participant record, so the two are
+// told apart the way `seatOwesConfig` does it: `played`, or else any slot of their
+// own (claimants' slots are all stamped `claimed`). A full seat counts ONCE per
+// table however many slots it holds. Release/Collect are read off the MISSION, not
+// the seat — they are a property of the generated room that every seat shares.
+//
+// `claims` counts claimed SLOTS, wherever they sit — a pure claimant's, or the one
+// extra slot a seated player may take on their own table (which is why it is not
+// simply "tables minus full seats"). `mercs` counts slots the player was hired to
+// play; a merc holds no seat, so it is found on the slot (`merc.playerId`), never
+// in `participants`.
 //
 // `tables` is carried alongside the four counts so the shortfall is legible: a
 // TriState may also be `special` (or, on a legacy record, missing), which is neither
 // on nor off, and without the total those tables would silently vanish from both
 // columns.
-interface TableTally { tables: number; relOn: number; relOff: number; colOn: number; colOff: number }
+interface TableTally {
+  tables: number; relOn: number; relOff: number; colOn: number; colOff: number;
+  claims: number; mercs: number;
+}
 
-const NO_TABLES: TableTally = { tables: 0, relOn: 0, relOff: 0, colOn: 0, colOff: 0 };
+const NO_TABLES: TableTally = { tables: 0, relOn: 0, relOff: 0, colOn: 0, colOff: 0, claims: 0, mercs: 0 };
 
 function tallyPlayerTables(live: GMMission[], done: GMMission[]): Record<string, TableTally> {
   const out: Record<string, TableTally> = {};
+  const of = (uid: string) => (out[uid] ??= { ...NO_TABLES });
   for (const m of [...live, ...done]) {
     for (const p of Object.values(m.participants ?? {})) {
       if (!p?.playerId) continue;
-      const t = (out[p.playerId] ??= { ...NO_TABLES });
+      const slots = normalizeSlots(p.slots as AdvSlot[] | Record<string, AdvSlot> | undefined).filter(Boolean);
+      for (const s of slots) {
+        if (s.claimed === true) of(p.playerId).claims++;
+        if (s.merc?.playerId) of(s.merc.playerId).mercs++;
+      }
+      const fullSeat = p.played === true || slots.length === 0 || slots.some(s => s.claimed !== true);
+      if (!fullSeat) continue;
+      const t = of(p.playerId);
       t.tables++;
       if (m.release === 'on') t.relOn++; else if (m.release === 'off') t.relOff++;
       if (m.collect === 'on') t.colOn++; else if (m.collect === 'off') t.colOff++;
@@ -401,11 +421,13 @@ export default function StatsPage() {
                 <div className="dash-gold-head dash-gold-grid">
                   <span />
                   <span>Player</span>
-                  <span className="num" title="Tables this player held a seat on, within the scope selected above">Tables</span>
+                  <span className="num" title="Tables this player held a full seat on (not just a claimed slot), within the scope selected above">Tables</span>
                   <span className="num" title="…of those, tables that generated with Release ON">Rel On</span>
                   <span className="num" title="…of those, tables that generated with Release OFF">Rel Off</span>
                   <span className="num" title="…of those, tables that generated with Collect ON">Col On</span>
                   <span className="num" title="…of those, tables that generated with Collect OFF">Col Off</span>
+                  <span className="num" title="Abandoned slots this player claimed, whether or not they also held a seat on that table">Claims</span>
+                  <span className="num" title="Slots this player was hired to play as a mercenary">Mercs</span>
                   <span className="num">Gold</span>
                 </div>
                 <ol className="dash-gold-board">
@@ -444,6 +466,8 @@ export default function StatsPage() {
                         <span className={`dash-gold-ct${t.relOff === 0 ? ' zero' : ''}`}>{t.relOff}</span>
                         <span className={`dash-gold-ct pair${t.colOn === 0 ? ' zero' : ''}`}>{t.colOn}</span>
                         <span className={`dash-gold-ct${t.colOff === 0 ? ' zero' : ''}`}>{t.colOff}</span>
+                        <span className={`dash-gold-ct pair${t.claims === 0 ? ' zero' : ''}`}>{t.claims}</span>
+                        <span className={`dash-gold-ct${t.mercs === 0 ? ' zero' : ''}`}>{t.mercs}</span>
                         <span className="dash-gold-amt">{(p.gold ?? 0).toLocaleString()}<span className="dash-gold-unit">g</span></span>
                       </li>
                     );
@@ -454,7 +478,9 @@ export default function StatsPage() {
             <Pager win={goldWin} unit="players" onPage={setPlayerPage} />
             <div className="dash-stat-note">
               Release and Collect belong to the generated room, so a player counts once per table they
-              held a seat on, whatever their slot count there. Only tables in the scope selected above
+              held a full seat on, whatever their slot count there. A table reached only by claiming an
+              abandoned slot counts under <em>Claims</em> instead, one per slot; <em>Mercs</em> counts
+              slots the player was hired to play. Only tables in the scope selected above
               are counted, and only ones that have deployed — both settings are rolled at deploy, so a
               forming table has nothing to count yet. On + Off can therefore fall short of Tables: a
               table that rolled <em>Special</em> is neither.
