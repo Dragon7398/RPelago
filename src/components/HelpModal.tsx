@@ -4,7 +4,6 @@ import SectionMap         from './help/SectionMap';
 import SectionAdventurers from './help/SectionAdventurers';
 import SectionChallenges  from './help/SectionChallenges';
 import SectionYaml        from './help/SectionYaml';
-import SectionFeats       from './help/SectionFeats';
 import SectionTraits      from './help/SectionTraits';
 import SectionOrbs        from './help/SectionOrbs';
 import SectionBoss        from './help/SectionBoss';
@@ -28,7 +27,6 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'adventurers', label: 'Adventurers',       icon: '🧙' },
   { id: 'challenges',  label: 'Challenges',        icon: '🏆' },
   { id: 'yaml',        label: 'YAML Rules',        icon: '📜' },
-  { id: 'feats',       label: 'Feats',             icon: '🏅' },
   { id: 'traits',      label: 'Traits & Items',    icon: '🔮' },
   { id: 'orbs',        label: 'Orbs',              icon: '✨' },
   { id: 'boss',        label: 'The Boss',          icon: '🐉' },
@@ -82,7 +80,6 @@ export default function HelpModal({ open, onClose, variant = 'map' }: Props) {
             {active === 'adventurers' && <SectionAdventurers />}
             {active === 'challenges'  && <SectionChallenges />}
             {active === 'yaml'        && <SectionYaml variant={variant} />}
-            {active === 'feats'       && <SectionFeats />}
             {active === 'traits'      && <SectionTraits />}
             {active === 'orbs'        && <SectionOrbs />}
             {active === 'boss'        && <SectionBoss />}

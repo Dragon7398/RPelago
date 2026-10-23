@@ -32,20 +32,45 @@ export function adventurerCountForLevel(lv: number): number {
   return count;
 }
 
+// ── The Advisor (S2, map plan §1.10) ─────────────────────────────────────────
+//
+// S2 retires feats and replaces the level-up reward with the ADVISOR: a second
+// mission claim, granted at a level. The levels themselves wait on the S2 level-curve
+// pass, so this is deliberately EMPTY — `advisorCountForLevel` returns 0 at every
+// level and `missionClaimCapacity` is provably still 1.
+//
+// ⚠ FILLING THIS ARRAY IS NOT A ONE-FILE CHANGE. `enlistInMission` and
+// `claimMissionSlot` gate on the SERVER's `MISSION_CLAIM_CAPACITY`, a flat 1, and
+// the server has no level math at all — no LEVEL_THRESHOLDS, no calcLevel. Raise
+// this side alone and a player who has earned the advisor is offered a second
+// table by the UI and refused by the server with `no-claims-free`.
+//
+// `tests/lib/advisor.test.ts` fails the moment this array is non-empty, and says so
+// there. Fill it only together with the server mirror.
+//
+// The same signal is also meant to grant a SECOND ADVENTURER —
+// `adventurerCountForLevel` above has its own S1 thresholds and will need to read
+// this when the curve lands, so the two cannot be allowed to drift apart.
+export const ADVISOR_LEVELS: readonly number[] = [];
+
+/** How many advisors `lv` has unlocked. 0 until ADVISOR_LEVELS is filled. */
+export function advisorCountForLevel(lv: number): number {
+  return ADVISOR_LEVELS.filter(n => lv >= n).length;
+}
+
 // How many missions a player may actively hold a claim on at once (the mission
-// analogue of the adventurer pool for Challenges). Base 1 — the guildmaster.
-// S2's advisor is a level-up bonus that raises this to 2 AND grants a second
-// adventurer, both gated on the same future advisor-unlocked signal; when that
-// lands it changes here and in adventurerCountForLevel together. A player may
-// hold any number of finished-but-settling tables — only un-finished claims
-// count against this cap (see missionLogic.hasUnfinishedSlots / activeMissions).
-// The param is unused today but is the S2 advisor's input (a level-up bonus that
-// raises this to 2); kept in the signature so call sites are already correct.
-// The `_` prefix satisfies tsc's noUnusedParameters (used by `tsc -b` in the
-// Netlify build); the eslint-disable covers ESLint, which doesn't honor the `_`.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function missionClaimCapacity(_player: Player): number {
-  return 1;
+// analogue of the adventurer pool for Challenges). Base 1 — the guildmaster — plus
+// one per advisor (see ADVISOR_LEVELS, empty today, so this still returns 1).
+//
+// A player may hold any number of finished-but-settling tables — only un-finished
+// claims count against this cap (see missionLogic.hasUnfinishedSlots /
+// activeMissions).
+//
+// The player param is now REAL rather than a placeholder, which is the point of the
+// §1.10 shape: every call site already passes the record, so the day the advisor
+// curve lands no caller changes. See the ADVISOR_LEVELS warning about the server.
+export function missionClaimCapacity(player: Player): number {
+  return 1 + advisorCountForLevel(calcLevel(player.xp ?? 0));
 }
 
 // ── Player status ─────────────────────────────────────────────────────────────
@@ -198,36 +223,18 @@ export function yamlLimitsForPlayer(player?: Player | null): YamlLimits {
   return yamlLimitsForFeats(getPlayerFeatIds(player?.feats));
 }
 
-// Returns feat IDs still available to pick for the given level slot
-export function getAvailableFeatsForSlot(
-  slot: 'level3' | 'level5' | 'level7',
-  currentFeats: PlayerFeats,
-): string[] {
-  const taken = new Set([currentFeats.level3, currentFeats.level5, currentFeats.level7].filter(Boolean));
-  const byLevel = (lv: 3 | 5 | 7) => FEATS.filter(f => f.availableAt === lv).map(f => f.id);
-
-  let candidates: string[];
-  if (slot === 'level3') {
-    candidates = byLevel(3);
-  } else if (slot === 'level5') {
-    candidates = [...byLevel(5), ...byLevel(3)];
-  } else {
-    candidates = [...byLevel(7), ...byLevel(5), ...byLevel(3)];
-  }
-
-  return candidates.filter(id => !taken.has(id));
-}
-
-// Returns the feat slot that is available for selection at the player's current level
-export function pendingFeatSlot(
-  level: number,
-  feats: PlayerFeats,
-): 'level3' | 'level5' | 'level7' | null {
-  if (level >= 7 && !feats.level7) return 'level7';
-  if (level >= 5 && !feats.level5) return 'level5';
-  if (level >= 3 && !feats.level3) return 'level3';
-  return null;
-}
+// `getAvailableFeatsForSlot` and `pendingFeatSlot` were here. REMOVED WITH THE
+// PICKER (map plan §1.10) — they existed only to drive it (what a slot could still
+// take; whether one was waiting), and no season offers a feat any more.
+//
+// What STAYS below is the part that reads feats a player already has:
+// `calcFeatBonuses`, `buildXpBonusTooltip`, `buildGoldBonusTooltip`,
+// `calcSeekerHintReduction`, `getPlayerFeatIds`, `getFeatWarnings` and
+// `yamlLimitsForFeats`. They are NOT dead and NOT S1-only: each is keyed off the
+// player record, so it no-ops for an S2 player who has none, while an archived S1
+// panel still renders its historical multipliers — and `yamlLimitsForFeats` is live
+// in the casino table today. That is why the plan’s `legacyFeats.ts` move was
+// dropped: a file by that name holding live code would be a lie.
 
 function hasFeat(playerId: string, featId: string, players: Record<string, Player>): boolean {
   const f = players[playerId]?.feats;

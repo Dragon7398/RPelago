@@ -794,15 +794,11 @@ export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<v
   }
 }
 
-// ── Player feats ──────────────────────────────────────────────────────────────
-export async function selectFeat(
-  playerId: string,
-  slot: 'level3' | 'level5' | 'level7',
-  featId: string,
-): Promise<void> {
-  assertDb();
-  await set(sRef(db!, `players/${playerId}/feats/${slot}`), featId);
-}
+// `selectFeat` was here. REMOVED WITH THE PICKER (map plan §1.10): it had exactly
+// one caller, and the `feats/$slot` player `.write` it depended on came out of
+// database.rules.json at the same time — so what remained was a context method that
+// could only fail silently for anyone but the admin. Stored feats are display-only
+// now; see ADVISOR_LEVELS in gameLogic.ts for what replaces the level-up reward.
 
 // ── Player name color ─────────────────────────────────────────────────────────
 export async function setPlayerNameColor(playerId: string, colorId: string | null): Promise<void> {

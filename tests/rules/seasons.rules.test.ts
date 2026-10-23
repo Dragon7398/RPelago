@@ -424,6 +424,36 @@ describe('config is admin-owned', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// `feats` is ADMIN-ONLY now the picker is retired (§1.10).
+//
+// It used to carry a player `.write` on `feats/$slot` so the level-up picker could
+// fill a slot once. That block came out with the picker, dropping `feats` back to
+// the season default — admin only — which is what a display-only field wants: S1’s
+// stored values stay readable, and their owner can no longer change them.
+//
+// Nothing covered the old player write, so nothing failed when it was removed.
+// That is the gap this pins: the field is still read by live code
+// (`yamlLimitsForFeats` in the casino table, the archived S1 tile panels), so a
+// player who could write it could raise their own YAML caps.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('feats are admin-only once the picker is retired', () => {
+  const FEATS = `seasons/${CASINO}/players/${PLAYER_UID}/feats`;
+
+  it('a player cannot pick, overwrite or clear their own feats', async () => {
+    await assertFails(player().ref(`${FEATS}/level3`).set('picky'));
+    await assertFails(player().ref(FEATS).set({ level3: 'picky' }));
+    await assertFails(player().ref(FEATS).remove());
+  });
+
+  it('nor anyone else’s', async () => {
+    await assertFails(other().ref(`${FEATS}/level3`).set('picky'));
+  });
+
+  it('the admin still can — the data is kept, just not player-writable', async () => {
+    await assertSucceeds(admin().ref(`${FEATS}/level3`).set('picky'));
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
 // S2's global shop (§1.8) is ADMIN-ONLY, by inheritance rather than its own rule.
 //
 // `seasons/$seasonId` grants `.write` to the admin and nothing else; the player

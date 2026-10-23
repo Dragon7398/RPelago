@@ -2,7 +2,7 @@ import { useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
-import { calcLevel, pendingFeatSlot } from '../lib/gameLogic';
+import { calcLevel } from '../lib/gameLogic';
 import { ADV_ICONS } from '../lib/constants';
 import { activeBoard } from '../lib/board';
 import { missionDisplayLabel } from '../lib/missionLogic';
@@ -30,7 +30,6 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
   const player = user && gameState ? gameState.players[user.id] : null;
   const level  = player ? calcLevel(player.xp) : 1;
   const adventurers = player ? Object.values(player.adventurers) : [];
-  const pending = player ? pendingFeatSlot(level, player.feats ?? {}) : null;
 
   // Pooled claims: the player may hold more than one mission at a time. The HUD
   // chip labels the first held claim and tallies the rest.
@@ -72,10 +71,9 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
 
   return (
     <div className="player-hud">
-      <span className="hud-name" onClick={onProfileClick} title={pending ? 'View your profile — feat available!' : 'View your profile'}>
+      <span className="hud-name" onClick={onProfileClick} title="View your profile">
         <span>⚔ {user.displayName.toUpperCase()}</span>
         <span className="hud-level-badge">LV {level}</span>
-        {pending && <span className="hud-feat-notify">!</span>}
         {missionLabel ? (
           <button
             className="hud-mission-chip"

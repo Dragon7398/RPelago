@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGameState } from '../../contexts/GameStateContext';
-import { useIsAdmin } from '../../contexts/SeasonContext';
+import { useIsAdmin, useSeason } from '../../contexts/SeasonContext';
 import { useToast } from '../../contexts/ToastContext';
 import SettingsPanel from '../SettingsPanel';
 import HelpModal from '../HelpModal';
@@ -510,11 +510,43 @@ function FeedModal({ entries, now, onClose }: { entries: ActivityEntry[]; now: n
 }
 
 // ── The landing shell ─────────────────────────────────────────────────────────
-export default function CasinoShell() {
+//
+// Serves two seasons' worth of duty:
+//
+//  • a CASINO season, where it IS the app (App renders it in place of the map); and
+//  • the Casino DISTRICT of a map season (S2, map plan §1.9), where `onBack`
+//    returns the player to the board.
+//
+// Decision 18 says the district "swaps the landing view" — so App returns this
+// component EARLY, above its own Header / PlayerHUD / SettingsPanel, rather than
+// embedding a panel inside the map page. That is not a stylistic preference:
+//
+//  1. This is a full-page shell. It owns a brand bar, a gold readout, the view
+//     toggle, SettingsPanel, the ⚙ ADMIN link and the Help / Login / Privacy
+//     modals — every one of which the map page also renders. Nested, they double.
+//  2. The casino palette is coupled to `body`. Every theme block in themes.css is
+//     `body.casino-scope.theme-*`, and SettingsPanel puts `theme-*` on body too, so
+//     both classes must sit on the SAME element. Scoping the tokens to a wrapper
+//     div would mean rewriting all 19 selectors — the live casino's whole palette —
+//     and the alternative, setting body.casino-scope under the map's header, repaints
+//     that header in felt tones.
+//
+// So the plan's `CasinoLanding` extraction was dropped. There is nothing to extract
+// once the district owns the page: the difference is this one prop.
+interface Props {
+  /** Supplied only by the map-season district; absent when this is the whole app. */
+  onBack?: () => void;
+}
+
+export default function CasinoShell({ onBack }: Props = {}) {
   const { user, signOut } = useAuth();
   const { gameState, enlistInMission, standDownFromMission, setNameColor, activityLog } = useGameState();
   const { addToast } = useToast();
   const isAdmin = useIsAdmin();
+  const { season } = useSeason();
+  // `onBack` is the district tell, and the only thing that varies with it is chrome:
+  // the back control, the brand kick, and which help sections apply.
+  const inDistrict = !!onBack;
   const [view, setView] = useState<View>(loadView);
   const [modal, setModal] = useState<null | 'profile' | 'games' | 'feed'>(null);
   // In-progress table whose slot overview is open, held by id so the modal tracks
@@ -735,8 +767,15 @@ export default function CasinoShell() {
 
       <div className="rl-top">
         <div className="rl-brand">
-          <span className="rl-kick">RPelago · Midseason</span>
+          {/* The casino SEASON's kick is left exactly as players know it. In a map
+              season "Midseason" is simply untrue, so the district names its own. */}
+          <span className="rl-kick">
+            {inDistrict ? `RPelago · ${season?.label ?? 'This Season'}` : 'RPelago · Midseason'}
+          </span>
           <h1>The Casino</h1>
+          {onBack && (
+            <button className="rl-back" onClick={onBack}>← Back to the map</button>
+          )}
         </div>
         <div className="rl-top-right">
           {user ? (
@@ -854,8 +893,14 @@ export default function CasinoShell() {
         </a>
       )}
 
-      {/* Shared guide, filtered to the sections a casino season actually has. */}
-      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} variant="casino" />
+      {/* Shared guide. A casino SEASON only has the casino sections; the district
+          sits inside a map season, where every section still applies — the player
+          came from the board and can go back to it. */}
+      <HelpModal
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        {...(inDistrict ? {} : { variant: 'casino' as const })}
+      />
 
       <LoginModal
         open={loginOpen}

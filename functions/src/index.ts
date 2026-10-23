@@ -874,10 +874,23 @@ function gmFilledCount(m: GMMission): number {
 }
 
 // How many missions a player may actively hold a claim on at once. Server copy of
-// src/lib/gameLogic.missionClaimCapacity (base 1 — the guildmaster; S2's advisor
-// raises it). Change both together. Un-finished claims live in
+// src/lib/gameLogic.missionClaimCapacity. Un-finished claims live in
 // players/{uid}/activeMissions; a settling table (slots done, claim reclaimed) is
 // already absent and does not count.
+//
+// ⚠ THIS IS FLAT WHERE THE CLIENT IS PER-PLAYER. The client now computes
+// `1 + advisorCountForLevel(calcLevel(player.xp))` (map plan §1.10). The two agree
+// today only because `ADVISOR_LEVELS` is empty, so that expression is always 1.
+//
+// It was NOT mirrored properly here on purpose: this file has no level math at all
+// — no LEVEL_THRESHOLDS, no calcLevel — and adding a third copy of the level curve
+// for a feature whose thresholds are still TBD buys nothing but another pair of
+// numbers to keep in step.
+//
+// So the moment ADVISOR_LEVELS gains an entry, this must gain the level math (or
+// the advisor must key off something already read here). Until then a client that
+// offered a second claim would be refused below with `no-claims-free`.
+// `tests/lib/advisor.test.ts` fails if that array is filled without this changing.
 const MISSION_CLAIM_CAPACITY = 1;
 
 function heldClaimCount(player: { activeMissions?: Record<string, true> | null }): number {

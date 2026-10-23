@@ -101,6 +101,8 @@ casino season, which renders no map.
 | 0.5 | Universal YAML-at-join | `joinChallenge` / `claimChallengeSlot` callables, `yaml/**` Storage tree, `yamlAt` marker, full config screening |
 | 1.7 | Districts — the Capital Ward | `src/components/districts/`; `districtView` in `App.tsx`; HUD mission chips re-pointed. **S2 is now playable end to end.** |
 | 1.8 | Shop collapse | One `seasons/{id}/shop`; `purchaseShopOrb` REMOVED; `purchaseShopItem` coord optional; board-aware admin tab. **Needs a functions deploy.** |
+| 1.9 | Casino district | `CasinoShell` takes an optional `onBack`; `App` returns it EARLY. No `CasinoLanding` extraction — see below. Frontend only. |
+| 1.10 | Feat retirement + Advisor | Picker, HUD badge, help section, `feats/$slot` rule and `selectFeat` all gone; `ADVISOR_LEVELS` + `advisorCountForLevel` landed empty. Display paths kept. |
 
 **To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
 then preview that season.
@@ -191,6 +193,86 @@ Neither needed an S2 design change, but two things had to be reconciled:
 and not the split math. `resolveMercTarget` reads `tiles/{coord}` with no shape
 assumption, so interior compound coords (§3.3) work with no special case.
 
+### §1.10 — what retired, what stayed, and the Advisor tripwire
+
+**Retired** (nothing can select a feat again, in any season — S1 is archived and
+therefore read-only, and S2 replaces the mechanic with companions):
+the picker in `ProfileLightbox`, the `!` badge in `PlayerHUD`, `SectionFeats` and
+its help tab, `getAvailableFeatsForSlot`, `pendingFeatSlot`, the `feats/$slot`
+player `.write`, and `selectFeat` end to end (db → provider → context).
+
+**Kept, and the plan's `legacyFeats.ts` move DROPPED.** The surviving helpers —
+`calcFeatBonuses`, the two tooltip builders, `calcSeekerHintReduction`,
+`getPlayerFeatIds`, `getFeatWarnings`, `yamlLimitsForFeats` — are each keyed off the
+player record, so they no-op for an S2 player while an archived S1 panel still
+renders its historical multipliers. Decisively, **`yamlLimitsForFeats` is live in
+the casino table today**: a file called `legacyFeats.ts` holding it would be
+mislabelled. `ProfileLightbox` keeps the earned-feats DISPLAY for the same reason —
+retiring a mechanic should not erase the record of it.
+
+`SectionYaml` also kept its feat-driven values: it already reads the player's own
+feats, so it shows base caps and no bonus banner for anyone who has none. Its prose
+still says "or a feat", which is wrong for an S2 player — that is a **help-text fix
+for §1.11**, with the rest of the rewrite.
+
+> **The Advisor shipped as a shape, not a curve.** `ADVISOR_LEVELS` is `[]`, so
+> `advisorCountForLevel` returns 0 and `missionClaimCapacity` is provably still 1 —
+> but it now takes and uses the player record, which is the point: no call site
+> changes when the curve lands.
+>
+> **It was NOT mirrored server-side, deliberately.** `functions/src/index.ts` has no
+> level math at all — no `LEVEL_THRESHOLDS`, no `calcLevel` — so a true mirror meant
+> a third copy of the level curve for thresholds that are still TBD. Instead
+> `MISSION_CLAIM_CAPACITY` stays a flat 1 with a comment naming the hazard, and
+> **`tests/lib/advisor.test.ts` fails the moment `ADVISOR_LEVELS` gains an entry** —
+> because at that instant the UI would offer a second table that `enlistInMission`
+> and `claimMissionSlot` still refuse with `no-claims-free`. Fill the array only
+> together with the server.
+>
+> The same signal is also meant to grant a second adventurer;
+> `adventurerCountForLevel` carries a note so the two cannot drift.
+
+**One untested path surfaced:** nothing covered the old `feats/$slot` player write,
+so removing it broke no test. `feats` is now admin-only by inheritance and pinned,
+since live code still reads the field — a player who could write it could raise
+their own YAML caps.
+
+### §1.9 deviation — no `CasinoLanding` extraction
+
+The plan called for extracting `CasinoShell`'s body into a `CasinoLanding` with an
+optional `onBack`, rendered inside the map page in place of `MapGrid`. Two findings
+killed that shape, and decision 18's own wording ("**swaps the landing view** …
+like the S1.5 landing") endorses the simpler one:
+
+1. **`CasinoShell` is a full-page shell, not a panel.** It owns a brand bar, a gold
+   readout, the Lounge/Floor toggle, `SettingsPanel`, the ⚙ ADMIN link and the
+   Help / Login / Privacy modals. The map page renders every one of those, so
+   nesting it would double all six.
+2. **The casino palette is coupled to `body`.** All 19 theme blocks in
+   `casino/themes.css` are `body.casino-scope.theme-*`, and `SettingsPanel` puts
+   `theme-*` on `body` too — both classes must sit on the SAME element. Scoping the
+   tokens to a wrapper div means rewriting the live casino's entire palette; the
+   alternative, setting `body.casino-scope` beneath the map's header, repaints that
+   header in felt tones.
+
+So the district **returns early from `App`**, above its own chrome, and
+`CasinoShell` gained one prop. `onBack` is the district tell; the only things that
+vary with it are the back control, the brand kick ("Midseason" is untrue in a map
+season, so the district names its own via `season.label`), and the help filter (a
+casino season has only casino sections; the district sits in a map season, where all
+of them still apply). The casino season's own path is unchanged — no `onBack`, same
+copy, same `variant="casino"`.
+
+`showXp` needed no work: `CasinoTable` already derives it from the shell, so a map
+season shows the XP row on its own. The §1.7 `CasinoDistrict.tsx` placeholder and
+its CSS are deleted; the routing it held open is unchanged.
+
+**The cost, recorded deliberately:** in the casino district the player gets the
+casino's chrome rather than the map's `Header` / `PlayerHUD`. Accepted — it is the
+better-suited chrome, it is what S1.5 players already know, and the back control
+covers navigation. Keeping the map header instead means the selector rewrite in (2),
+which should wait until the casino season winds down.
+
 ### §1.8 deviations — three places the plan said DELETE and the code says KEEP
 
 Each one would have been a silent regression for the ARCHIVED S1 season, which is
@@ -275,8 +357,8 @@ those first would be wasted work. This is also the first slice needing a
 | §0.6 / traits Phase A — data model + `resolveTrait` | ✅ **done** (model + readers + rolls; admin editor is Phase C) |
 | §1.7 Districts (ward + Town Hall / Shop / Barn panels) | ✅ **done** — Shop body deferred to §1.8, casino view to §1.9, sprites pending art |
 | §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | ✅ **done** — see the three deviations below; help text deferred to §1.11 |
-| §1.9 Casino district (`CasinoLanding` extraction) | not started |
-| §1.10 Feat retirement + Advisor | not started — entangled with §0.6 and §2.3 |
+| §1.9 Casino district | ✅ **done** — as a landing SWAP, not an extraction (deviation below) |
+| §1.10 Feat retirement + Advisor | ✅ **done** — Advisor curve is an empty placeholder with a tripwire test; see below |
 | §1.11 Admin + help | not started |
 | Phase 2 — Companions | not started |
 | Phase 3 — Dungeons & Tower | not started |

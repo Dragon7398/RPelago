@@ -22,7 +22,6 @@ export interface GameStateContextValue {
    */
   purchaseItem: (itemId: string, coord?: string) => Promise<void>;
   renameAdventurer: (playerId: string, advId: string, firstName: string, lastName: string) => Promise<void>;
-  selectFeat: (playerId: string, slot: 'level3' | 'level5' | 'level7', featId: string) => Promise<void>;
 
   // Admin tile actions
   adminSetTileState: (coord: string, state: TileState) => Promise<void>;

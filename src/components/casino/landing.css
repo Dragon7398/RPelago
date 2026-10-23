@@ -45,6 +45,18 @@ body.casino-scope #root { width: 100%; }
   text-shadow: 0 0 24px oklch(from var(--gold) l c h / 0.35);
 }
 .rl-brand .rl-sub { font-family:'Crimson Pro',serif; font-style: italic; color: var(--gold-dim); font-size: 0.9rem; margin-top: 0.1rem; }
+/* The map-season district’s way out (§1.9). Absent in a casino season, where this
+   shell IS the app and there is nothing behind it. Styled in the casino’s own
+   tokens because landing.css renders inside body.casino-scope. */
+.rl-brand .rl-back {
+  align-self: flex-start; margin-top: 0.4rem; cursor: pointer;
+  font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 0.3rem 0.6rem; border-radius: 5px;
+  background: oklch(from var(--bg-card) l c h / 0.85);
+  border: 1px solid var(--line); color: var(--gold-dim);
+  transition: color 0.15s, border-color 0.15s;
+}
+.rl-brand .rl-back:hover { color: var(--gold); border-color: var(--line-glow); }
 .rl-top-right { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 
 /* ── View toggle (Lounge / Floor) ── */

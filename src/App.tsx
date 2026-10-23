@@ -31,7 +31,6 @@ import DistrictWard from './components/districts/DistrictWard';
 import TownHallPanel from './components/districts/TownHallPanel';
 import ShopPanel from './components/districts/ShopPanel';
 import BarnPanel from './components/districts/BarnPanel';
-import CasinoDistrict from './components/districts/CasinoDistrict';
 import type { DistrictKey } from './components/districts/districtData';
 
 function LoadingScreen() {
@@ -99,15 +98,27 @@ function AppContent() {
 
   if (loading) return <LoadingScreen />;
 
+  // The ward exists because the board has no town tiles to hang missions and the
+  // shop off — which is precisely the condition, so it is the predicate rather
+  // than a board id. S1 keeps its towns and never renders a ward.
+  //
+  // Declared above the early returns below, because the casino-district one needs it.
+  const hasDistricts = !activeBoard().hasTowns;
+
   // Config-driven shell: a casino season renders the casino landing instead of
   // the map/tile app. Map seasons (S1, S2) fall through to the existing UI.
   if (season?.shell === 'casino') return <CasinoShell />;
 
-  // The ward exists because the board has no town tiles to hang missions and the
-  // shop off — which is precisely the condition, so it is the predicate rather
-  // than a board id. S1 keeps its towns and never renders a ward.
-  const hasDistricts = !activeBoard().hasTowns;
-  const inCasinoDistrict = hasDistricts && districtView === 'casino';
+  // The Casino district SWAPS THE LANDING (decision 18) rather than opening over the
+  // map, so it returns here — above this component's own Header / PlayerHUD /
+  // SettingsPanel / modals. Rendering it below them would double every one of those,
+  // and `body.casino-scope` (which the casino palette is coupled to) would repaint
+  // the map's header in felt tones. See the header comment on CasinoShell.
+  //
+  // The other three districts are modals and appear at the foot of the map page.
+  if (hasDistricts && districtView === 'casino') {
+    return <CasinoShell onBack={() => setDistrictView(null)} />;
+  }
 
   return (
     <div className="page-content">
@@ -127,21 +138,15 @@ function AppContent() {
         <ActivityFeed />
       </div>
       <div className="rule"><span>⚔</span></div>
-      {inCasinoDistrict ? (
-        <CasinoDistrict onBack={() => setDistrictView(null)} />
-      ) : (
-        <>
-          <MapGrid onTileClick={coord => setActiveTile(coord)} />
-          <div className="state-legend">
-            <div className="state-legend-item"><div className="state-swatch sw-hidden" /><span>Hidden</span></div>
-            <div className="state-legend-item"><div className="state-swatch sw-available" /><span>Available</span></div>
-            <div className="state-legend-item"><div className="state-swatch sw-inprogress" /><span>In Progress</span></div>
-            <div className="state-legend-item"><div className="state-swatch sw-complete" /><span>Complete</span></div>
-          </div>
-          {hasDistricts && (
-            <DistrictWard loggedIn={!!user} onOpen={setDistrictView} />
-          )}
-        </>
+      <MapGrid onTileClick={coord => setActiveTile(coord)} />
+      <div className="state-legend">
+        <div className="state-legend-item"><div className="state-swatch sw-hidden" /><span>Hidden</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-available" /><span>Available</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-inprogress" /><span>In Progress</span></div>
+        <div className="state-legend-item"><div className="state-swatch sw-complete" /><span>Complete</span></div>
+      </div>
+      {hasDistricts && (
+        <DistrictWard loggedIn={!!user} onOpen={setDistrictView} />
       )}
 
       <footer className="page-footer">

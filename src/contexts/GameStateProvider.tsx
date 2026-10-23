@@ -14,7 +14,7 @@ import {
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
   consumePlayerItem, mapReset, updateShop, setGlobalShopItems, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerRestricted, setPlayerNameColor, subscribeToActivityLog, logActivity,
-  selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
+  adminKickAdventurer as dbKickAdventurer,
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
@@ -162,14 +162,6 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       itemId, seasonId, ...(coord ? { coord } : {}),
     });
   }, [seasonId]);
-
-  const selectFeat = useCallback(async (
-    playerId: string,
-    slot: 'level3' | 'level5' | 'level7',
-    featId: string,
-  ) => {
-    await dbSelectFeat(playerId, slot, featId);
-  }, []);
 
   // ── Admin tile actions ──────────────────────────────────────────────────────
   const adminSetTileState = useCallback(async (coord: string, state: TileState) => {
@@ -504,7 +496,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
-      sendAdventurer, recallAdventurer, purchaseItem, renameAdventurer, selectFeat,
+      sendAdventurer, recallAdventurer, purchaseItem, renameAdventurer,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
       adminSetGlobalShopItems,

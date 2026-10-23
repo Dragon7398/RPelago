@@ -200,13 +200,12 @@
               ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))"
             },
 
-            "feats": {
-              "$slot": {
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))",
-                // A feat slot may be filled once and never re-selected.
-                ".validate": "newData.isString() && newData.val().length > 0 && (!data.exists() || root.child('config/adminId').val() === auth.uid)"
-              }
-            },
+            // `feats` had a player `.write` here so the level-up picker could fill a
+            // slot once. RETIRED IN S2 (map plan §1.10): the picker is gone from every
+            // season, so nothing client-side writes this any more and the block came
+            // out with it. `feats` now falls through to the season default — ADMIN
+            // ONLY — which is exactly right for a display-only field: S1's stored
+            // values stay readable, and their owner can no longer change them.
 
             "xp":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
             "gold": { ".validate": "newData.isNumber() && newData.val() >= 0" },
@@ -214,7 +213,7 @@
             // Middle player status: plays as normal, but claims are only returned
             // when the world resolves. Admin-only by construction — there is no
             // `.write` at or above this leaf except the season's admin one (the
-            // player-writable leaves are adventurers / nameColor / feats), so this
+            // player-writable leaves are adventurers / nameColor), so this
             // is a shape guard, not the permission boundary. Cleared by writing
             // null, which skips .validate, so the tri-state never leaves a `false`.
             "restricted": { ".validate": "newData.isBoolean()" },

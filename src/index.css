@@ -699,17 +699,9 @@ header p {
   font-family: 'Crimson Pro', serif; font-style: italic;
   font-size: 0.9rem; color: var(--text-muted);
 }
-.district-pending.full { padding: 4rem 1rem; }
 
 .district-modal { max-width: 720px; }
 
-.casino-district { max-width: 980px; margin: 0 auto; }
-.district-back {
-  font-family: 'Cinzel', serif; font-size: 0.64rem; letter-spacing: 0.1em;
-  padding: 0.4rem 0.8rem; border-radius: 3px; cursor: pointer;
-  border: 1px solid var(--gold-dim); background: var(--bg-deep); color: var(--gold);
-}
-.district-back:hover { border-color: var(--gold); }
 
 @media (max-width: 720px) {
   .ward-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
