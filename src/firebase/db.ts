@@ -92,36 +92,59 @@ export async function seedInitialMissions(): Promise<SeedResult> {
   const now      = Date.now();
   const updates: Record<string, unknown> = {};
 
-  if (shell === 'casino') {
+  // S2 is a MAP season that ALSO runs casino tables — they live in the Casino
+  // district (§1.9), not a casino shell — so table seeding is no longer
+  // shell-only. `!hasTowns` is the districts predicate the rest of the app uses
+  // (App.tsx, ShopsPage): a board with no town tiles is one whose missions and shop
+  // hang off the Capital Ward, and the Casino is one of its four doors.
+  const wantsTables = shell === 'casino' || !activeBoard().hasTowns;
+
+  let created = 0;
+
+  if (wantsTables) {
     const target  = listed?.casinoOpenTables ?? draft?.casinoOpenTables ?? CASINO_OPEN_TABLES;
     const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
-    if (forming >= target) return { shell, created: 0 };
+    if (forming < target) {
+      // Continue per-game cohort numbering from the persisted counters.
+      const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
+      const seriesSnap = await get(sRef(d, 'casinoSeries'));
+      if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
 
-    // Continue per-game cohort numbering from the persisted counters.
-    const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
-    const seriesSnap = await get(sRef(d, 'casinoSeries'));
-    if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
-
-    const working: Record<string, GMMission> = { ...existing };
-    for (let i = forming; i < target; i++) {
-      const game = pickNextCasinoGame(working);            // least-represented, sees tables added so far
-      series[game] = (series[game] ?? 0) + 1;
-      const r = push(sRef(d, 'missions'));
-      const table = { ...freshCasinoTable(game, series[game], now), id: r.key! } as GMMission;
-      updates[sPath(`missions/${r.key}`)] = table;
-      working[r.key!] = table;
+      const working: Record<string, GMMission> = { ...existing };
+      for (let i = forming; i < target; i++) {
+        const game = pickNextCasinoGame(working);          // least-represented, sees tables added so far
+        series[game] = (series[game] ?? 0) + 1;
+        const r = push(sRef(d, 'missions'));
+        const table = { ...freshCasinoTable(game, series[game], now), id: r.key! } as GMMission;
+        updates[sPath(`missions/${r.key}`)] = table;
+        working[r.key!] = table;
+      }
+      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
+      created += target - forming;
     }
-    for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
-    await update(ref(d), updates);
-    return { shell, created: target - forming };
+  }
+
+  // Nothing to write is nothing to send: before §1.11 each of these cases returned
+  // early, so keep them from firing an empty multi-path update on what is a live
+  // admin button.
+  const flush = async () => { if (Object.keys(updates).length > 0) await update(ref(d), updates); };
+
+  // A casino SHELL has no challenges and no guildmaster board, so it stops here.
+  // A map season continues into the basic/patrol bootstrap below. (Field Work joins
+  // it in Phase 2.)
+  if (shell === 'casino') {
+    await flush();
+    return { shell, created };
   }
 
   // Map shell — legacy single-cohort bootstrap for basic + patrol.
   const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
   const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
-  if (hasBasic && hasPatrol) return { shell, created: 0 };
+  if (hasBasic && hasPatrol) {
+    await flush();
+    return { shell, created };
+  }
 
-  let created = 0;
   if (!hasBasic) {
     const r = push(sRef(d, 'missions'));
     updates[sPath(`missions/${r.key}`)] = { ...freshMission('basic',  1, now), id: r.key };
@@ -133,7 +156,7 @@ export async function seedInitialMissions(): Promise<SeedResult> {
     created++;
   }
 
-  await update(ref(d), updates);
+  await flush();
   return { shell, created };
 }
 

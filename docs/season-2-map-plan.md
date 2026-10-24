@@ -103,6 +103,7 @@ casino season, which renders no map.
 | 1.8 | Shop collapse | One `seasons/{id}/shop`; `purchaseShopOrb` REMOVED; `purchaseShopItem` coord optional; board-aware admin tab. **Needs a functions deploy.** |
 | 1.9 | Casino district | `CasinoShell` takes an optional `onBack`; `App` returns it EARLY. No `CasinoLanding` extraction — see below. Frontend only. |
 | 1.10 | Feat retirement + Advisor | Picker, HUD badge, help section, `feats/$slot` rule and `selectFeat` all gone; `ADVISOR_LEVELS` + `advisorCountForLevel` landed empty. Display paths kept. |
+| 1.11 | Admin + help | Help sections made BOARD-AWARE (+ `SectionTower`, `SectionDistricts`); `seedInitialMissions` seeds S2's casino tables; MapPage needed nothing. **CLAUDE.md brought current.** |
 
 **To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
 then preview that season.
@@ -192,6 +193,50 @@ Neither needed an S2 design change, but two things had to be reconciled:
 `baseGold` already feat-multiplied, so retiring feats (§1.10) touches its callers
 and not the split math. `resolveMercTarget` reads `tiles/{coord}` with no shape
 assumption, so interior compound coords (§3.3) work with no special case.
+
+### §1.11 — board-aware help, not an S2 rewrite
+
+The plan said to rewrite `SectionMap`, replace `SectionBoss` with `SectionTower`
+and update `SectionShop`. Rewriting would have made **S1's own documentation
+wrong** — the help modal is season-agnostic and an archived season is still fully
+readable — so the board-dependent facts read from the `BoardSpec` instead:
+
+- **`SectionMap`** takes its dimensions from `board.cols × board.rows`, and swaps
+  the Town row for Castle and the Boss row for Dungeon + Tower on `hasTowns` /
+  `hasBoss`. Tile icons are read from `TILE_TYPES` rather than retyped — the first
+  pass put the Castle's glyph on the Tower, and help that disagrees with the board
+  about what a tile looks like is worse than no entry.
+- **`SectionBoss` is KEPT and `SectionTower` added**; `HelpModal` offers one or the
+  other on `hasBoss`, and `SectionDistricts` only when `!hasTowns`. They are a pair,
+  never an addition. `SectionTower` reads its gates from `TOWER_FLOOR_ORBS` and
+  `SectionDistricts` its list from `DISTRICTS`, so neither can drift.
+- **`SectionShop`** branches on `hasShopTiles`, and on S2 lists only
+  `DEFAULT_S2_SHOP_ITEM_IDS` — showing the whole catalogue would advertise the four
+  retired passives as purchasable.
+- **`SectionYaml`'s "or a feat" clause** (deferred from §1.10) now follows the
+  PLAYER, not the season: naming feats to someone who has none describes a route
+  they cannot take, while dropping the word for someone who does would contradict
+  the highlighted numbers below it.
+
+**`seedInitialMissions` gained S2's casino tables.** Table seeding was
+casino-shell-only; S2 is a MAP season that runs tables in its Casino district, so
+the casino block no longer returns early and a map season falls through into the
+basic/patrol bootstrap as well. Keyed on `!activeBoard().hasTowns`, the same
+districts predicate `App` and `ShopsPage` use. The casino-shell path is behaviourally
+unchanged. (Field Work joins in Phase 2.)
+
+**MapPage needed nothing.** The plan listed board-driven dimensions, a tile-type
+editor gaining the new types, and an S1-only boss-trait editor. On inspection
+`MapGridPanel` already reads `activeBoard()` (§1.1), `typeKeyForCoord` is already
+board-aware (§1.3) and `TILE_TYPES` already carries the three new entries (§1.2) —
+and **neither a tile-type dropdown nor a boss-trait editor exists**: types are
+seed-derived, so there was never anything to extend or gate.
+
+**CLAUDE.md was brought current** in the same pass (it had drifted on three
+sections and omitted every S2 module): per-board geometry, per-board orb sourcing,
+the two shop models, feats-as-display-only plus the Advisor tripwire, the removed
+`purchaseShopOrb`, the new join callables, a Season 2 section covering the board /
+districts / universal config intake, and eleven missing file-map rows.
 
 ### §1.10 — what retired, what stayed, and the Advisor tripwire
 
@@ -359,14 +404,17 @@ those first would be wasted work. This is also the first slice needing a
 | §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | ✅ **done** — see the three deviations below; help text deferred to §1.11 |
 | §1.9 Casino district | ✅ **done** — as a landing SWAP, not an extraction (deviation below) |
 | §1.10 Feat retirement + Advisor | ✅ **done** — Advisor curve is an empty placeholder with a tripwire test; see below |
-| §1.11 Admin + help | not started |
+| §1.11 Admin + help | ✅ **done** — board-aware rather than rewritten; see below |
 | Phase 2 — Companions | not started |
 | Phase 3 — Dungeons & Tower | not started |
 | Traits Phase B (generation) / C (UI) | blocked on open questions 1 and 2 |
 
+**PHASE 1 IS COMPLETE.** The remaining work is Phase 2 (Companions), Phase 3
+(Dungeons & the Tower) and traits Phase B/C.
+
 **Still blocked on design decisions** (traits plan §10): trait difficulty
-modifiers, the Sorcerer's loadout + orb interaction, and equipment↔traits. None
-of them block the near-term path.
+modifiers, the Sorcerer's loadout + orb interaction, and equipment↔traits. Traits
+B/C wait on the first two; nothing else does.
 
 **Hold until the casino season winds down**: the `decayHours` plumbing (§2.6),
 the YAML check on `enlistInMission` (§0.5), and the G2 reclaim fix (§2.7a).
