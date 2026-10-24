@@ -26,11 +26,16 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
   const hasPick = featIds.includes('picky');
   const hasHelp = featIds.includes('helpful');
   const hasPrep = featIds.includes('prepared');
+  // Feats are retired (§1.10) but a player who EARNED one still has their caps
+  // raised by it, so the prose follows the player rather than the season: naming
+  // feats to someone who has none describes a route they cannot take, and dropping
+  // the word for someone who does would contradict the highlighted numbers below.
+  const hasYamlFeat = hasKnow || hasPick || hasHelp || hasPrep;
 
   return (
     <div className="help-section">
       <h3>YAML Rules</h3>
-      {player && featIds.some(id => ['knowledgeable','picky','helpful','prepared'].includes(id)) && (
+      {player && hasYamlFeat && (
         <div className="help-callout">
           <span className="help-callout-icon">🏅</span>
           <span>Feat bonuses appear as <span className="help-yaml-new">highlighted</span> values below.</span>
@@ -70,7 +75,7 @@ export default function SectionYaml({ variant = 'map' }: { variant?: 'map' | 'ca
         </li>
         <li>
           <strong>YAML settings:</strong> Unless approved by special permission
-          {casino ? '' : ', a challenge, or a feat'}, you are limited to:
+          {casino ? '' : hasYamlFeat ? ', a challenge, or a feat' : ', or a challenge'}, you are limited to:
           <ul className="help-list help-list-sub">
             <li><YamlVal base={BASE_YAML_LIMITS.startInventory} bonus={hasPrep ? 1 : 0} /> starting inventory item{hasPrep ? 's' : ''} per game</li>
             <li><YamlVal base={BASE_YAML_LIMITS.priorityLocations} bonus={hasHelp ? 2 : 0} /> priority locations per game</li>

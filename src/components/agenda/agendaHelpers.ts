@@ -1,5 +1,5 @@
 import type { GameState, AdvSlot, TileTypeKey, GMMissionType, AdvClass } from '../../types';
-import { TILE_TRAITS } from '../../lib/constants';
+import { traitDef } from '../../lib/traits';
 import { typeKeyForCoord } from '../../lib/tileGen';
 import { normalizeSlots } from '../../lib/slotHelpers';
 import { awaitingRoom } from '../../lib/missionLogic';
@@ -92,8 +92,7 @@ function buildTile(
 
   const traitNames = tileTraits
     ? Object.keys(tileTraits).map(id => {
-        const def = TILE_TRAITS.find(t => t.id === id);
-        return def?.name ?? id;
+        return traitDef(id)?.name ?? id;
       })
     : [];
 

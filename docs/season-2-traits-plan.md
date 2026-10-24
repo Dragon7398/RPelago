@@ -435,6 +435,18 @@ each needs a decision first.
 
 ## 11. Sequencing & testing
 
+> **Status (2026-09-13): nothing in this document is implemented yet.** The map
+> plan's Phase 1 foundation has landed (board geometry, S2 generator, tile types
+> and themes, cascade, panels, orbs) but no trait work has started. Phase A here
+> lands together with [map plan §0.5](season-2-map-plan.md#05-universal-yaml-at-join-cross-cutting),
+> which is the next slice. Phases B and C remain blocked on open questions 1 and
+> 2 in §10.
+>
+> One thing already in place that Phase A must not disturb: `Tile.traits` is
+> still `{ value: number }` and `stunnedAdvId` / `tauntedAdvId` are still single
+> strings — the casino-season merges did not touch either, so the §1 and §5
+> migrations are exactly as written.
+
 **Phase A — model (lands with [map plan §0.5](season-2-map-plan.md)).** The join
 callable cannot validate a Horde floor without the level resolver, so this is a
 hard prerequisite.

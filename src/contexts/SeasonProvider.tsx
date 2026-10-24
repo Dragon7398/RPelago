@@ -3,6 +3,7 @@ import { onValue, ref } from 'firebase/database';
 import { onAuthStateChanged } from 'firebase/auth';
 import { firebaseReady, db as firebaseDb, auth as firebaseAuth } from '../firebase/config';
 import { setCurrentSeason, resolveSeason, selectableSeasons } from '../firebase/season';
+import { setActiveBoard } from '../lib/board';
 import { CLIENT_VERSION } from '../lib/version';
 import type { SeasonConfig, SeasonListEntry, DraftSeasonEntry } from '../types';
 import { SeasonContext } from './SeasonContext';
@@ -116,7 +117,15 @@ export function SeasonProvider({ children }: { children: ReactNode }) {
   // A parent's render body always runs before its children render, so this is
   // the only placement that actually holds the guarantee. setCurrentSeason is
   // idempotent, so StrictMode's double-render is harmless.
-  if (season) setCurrentSeason(season.id);
+  //
+  // The BOARD is published the same way and for the same reason: tileGen's
+  // initializeGrid runs from GameStateProvider's subscription, a descendant
+  // effect, so the board must be set during this render or the S2 generator
+  // never runs and the map silently falls back to S1 geometry.
+  if (season) {
+    setCurrentSeason(season.id);
+    setActiveBoard(season.board);
+  }
 
   // ── Version gate ───────────────────────────────────────────────────────────
   // The frontend (Netlify), rules, and functions deploy independently, so a

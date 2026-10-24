@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { TILE_TYPES } from '../lib/constants';
+import { TILE_TYPES, orbsToNextTowerFloor } from '../lib/constants';
 import { getTypeKey } from '../lib/tileGen';
-import { rcFromCoord } from '../lib/constants';
+import { rcFromCoord, activeBoard } from '../lib/board';
 import type { TileState } from '../types';
 
 interface Props {
@@ -22,7 +22,9 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const typeKey = getTypeKey(r, c);
   const info    = TILE_TYPES[typeKey] ?? TILE_TYPES.battle;
   const state: TileState = tile?.state ?? 'hidden';
-  const isCenter = coord === 'D3';
+  // The board's start tile (S1's Crossroads at D3, S2's Castle at D6) — was
+  // hardcoded to 'D3' before geometry became per-season.
+  const isCenter = coord === activeBoard().startCoord;
 
   const filled       = tile ? Object.keys(tile.adventurers ?? {}).length : 0;
   const required     = tile?.required ?? 0;
@@ -64,18 +66,40 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
 
   const animDelay = `${(rowIndex * 7 + colIndex) * 18}ms`;
 
+  // Types that are not joinable challenges. S1 towns behaved this way already;
+  // S2 adds the Castle (start tile) and the dungeon/tower DOORWAYS, whose
+  // challenges live inside their own sub-maps rather than on this tile.
+  const isFacility = typeKey === 'town' || typeKey === 'town_center' || typeKey === 'castle';
+  const isDoorway  = typeKey === 'dungeon' || typeKey === 'tower';
+  const nonChallenge = isFacility || isDoorway;
+
+  // NOTHING renders on a hidden tile: a doorway that announced itself as
+  // 'Locked' under fog would leak where the dungeons and Tower are.
   let progressText = '';
-  if (state === 'available') {
-    if (typeKey !== 'town' && typeKey !== 'town_center') {
-      progressText = `${filled}/${required} ⚔`;
+  if (hidden) {
+    progressText = '';
+  } else if (typeKey === 'castle') {
+    progressText = 'Start';
+  } else if (isDoorway) {
+    // Doorways never show an adventurer count: nobody is sent HERE.
+    // The Tower's gate is LIVE data (orb count), so show the real number rather
+    // than a flat 'Sealed'. The dungeon's gate is its interior, which does not
+    // exist until Phase 3 -- nothing to count yet.
+    if (typeKey === 'dungeon') {
+      progressText = 'Locked';
+    } else {
+      const need = orbsToNextTowerFloor(Object.keys(gameState?.orbState ?? {}).length);
+      progressText = need == null ? 'Open' : need + ' orb' + (need === 1 ? '' : 's');
     }
+  } else if (state === 'available') {
+    progressText = `${filled}/${required} ⚔`;
   } else if (state === 'inprogress') {
     progressText = hasClaimable ? 'Slot Open' : 'In Progress';
   }
 
   const icon = hidden
     ? '🌫️'
-    : state === 'complete' && typeKey !== 'town' && typeKey !== 'town_center'
+    : state === 'complete' && !nonChallenge
       ? '✅'
       : info.icon;
 
@@ -86,7 +110,7 @@ export default function Tile({ coord, rowIndex, colIndex, onClick }: Props) {
   const showBanner =
     !!tile?.name &&
     state !== 'hidden' &&
-    typeKey !== 'town' && typeKey !== 'town_center';
+    !nonChallenge;
 
   const showNameOnFace =
     showBanner && (state === 'available' || state === 'inprogress');

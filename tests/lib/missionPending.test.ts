@@ -35,8 +35,16 @@ describe('seatsMissingConfig', () => {
     expect(seatsMissingConfig(m)).toBe(2);
   });
 
-  it('is zero for a non-casino mission, which has no config step at all', () => {
+  it('counts a non-casino seat that has not submitted — every type has a config step now', () => {
+    // CHANGED by map plan §0.5: Patrol, Basic Training and Field Work all collect
+    // a config at join, so this is no longer casino-only. A seat is clear once
+    // `yamlAt` is stamped (the type-agnostic marker) or, for casino, `played`.
     const m = mission({ type: 'patrol', participants: seats(seated('a', { played: false })) });
+    expect(seatsMissingConfig(m)).toBe(1);
+  });
+
+  it('clears a non-casino seat once its config is marked present', () => {
+    const m = mission({ type: 'patrol', participants: seats(seated('a', { played: false, yamlAt: 1 })) });
     expect(seatsMissingConfig(m)).toBe(0);
   });
 });
@@ -83,9 +91,16 @@ describe('seatsAwaitingConfig — the roster the YAML view renders', () => {
       .toEqual([['c', 'denied'], ['b', 'unsubmitted']]);
   });
 
-  it('is empty for a non-casino mission, which has no config step', () => {
-    expect(seatsAwaitingConfig(mission({ type: 'patrol', participants: seats(seated('a', { played: false })) })))
-      .toEqual([]);
+  it('lists a non-casino seat too — every type has a config step now', () => {
+    const m = mission({ type: 'patrol', participants: seats(seated('a', { played: false })) });
+    expect(seatsAwaitingConfig(m).map(x => x.playerId)).toEqual(['a']);
+  });
+
+  it('drops a seat whose config is marked present via yamlAt', () => {
+    // `yamlAt` is what makes this type-agnostic: a Patrol seat never sets
+    // `played`, so testing that alone would accuse it forever.
+    const m = mission({ type: 'patrol', participants: seats(seated('a', { played: false, yamlAt: 1 })) });
+    expect(seatsAwaitingConfig(m)).toEqual([]);
   });
 });
 

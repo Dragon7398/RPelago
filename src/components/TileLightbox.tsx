@@ -3,18 +3,23 @@ import { useGameState } from '../contexts/GameStateContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
-import { TILE_TYPES, ALL_ORBS, rcFromCoord } from '../lib/constants';
+import { TILE_TYPES, ALL_ORBS } from '../lib/constants';
+import { rcFromCoord } from '../lib/board';
 import { getTypeKey, getBossLiveStats, orbIdForElite, orbIdForEdgeTile } from '../lib/tileGen';
 import { normalizeSlots, claimRefusal } from '../lib/slotHelpers';
 import TownLightbox    from './lightbox/TownLightbox';
 import BossSection     from './lightbox/BossSection';
+import CastlePanel     from './lightbox/CastlePanel';
+import DungeonSection  from './lightbox/DungeonSection';
+import TowerSection    from './lightbox/TowerSection';
 import TileDetails     from './lightbox/TileDetails';
 import PublicSlotsList from './lightbox/PublicSlotsList';
 import ClaimableSlots  from './lightbox/ClaimableSlots';
 import AvailableState  from './lightbox/AvailableState';
 import InProgressState from './lightbox/InProgressState';
 import CompleteState   from './lightbox/CompleteState';
-import type { TileAdventurer, AdvClass, AdvSlot } from '../types';
+import type { AdvSlot, DeclaredSlot } from '../types';
+import { joinErrorText } from './lightbox/joinErrors';
 
 interface Props {
   coord: string | null;
@@ -53,7 +58,10 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
   const orbConfig = gameState.orbConfig;
   const advEntries = Object.values(tile.adventurers ?? {});
 
-  const handleSendAdventurer = async (advId: string) => {
+  // The join now carries the player's DECLARED SLOTS and requires an attached
+  // config; the server re-validates both (map plan §0.5). The declaration UI is
+  // JoinChallengeForm, which owns the slots/config state and hands them here.
+  const handleSendAdventurer = async (advId: string, slots: DeclaredSlot[]) => {
     if (!user || !player) return;
     const adv = player.adventurers[advId];
     if (!adv) return;
@@ -61,36 +69,25 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
       addToast('This challenge is already full.', 'error');
       return;
     }
-    const entry: TileAdventurer = {
-      advId, name: `${adv.firstName} ${adv.lastName}`,
-      cls: adv.cls as AdvClass, owner: user.id, ownerName: user.displayName,
-    };
     try {
-      await sendAdventurer(coord, entry);
+      await sendAdventurer(coord, advId, slots);
       addToast(`${adv.firstName} ${adv.lastName} dispatched to ${tile.name || coord}.`, 'success');
-    } catch {
-      addToast('Failed to send Adventurer. Please try again.', 'error');
+    } catch (err) {
+      addToast(joinErrorText(err), 'error');
     }
   };
 
-  const handleClaimSlot = async (slotKey: string, slots: AdvSlot[], advId: string) => {
+  // A claim INHERITS the vacated slot, so it sends no slots and no config.
+  const handleClaimSlot = async (slotKey: string, _slots: AdvSlot[], advId: string) => {
     if (!user || !player) return;
     const adv = player.adventurers[advId];
     if (!adv) return;
-    const hasContent = slots.length > 0 && (slots[0].name || slots[0].game);
-    const slotRoom   = slots[0]?.room;
-    const entry: TileAdventurer = {
-      advId, name: `${adv.firstName} ${adv.lastName}`,
-      cls: adv.cls as AdvClass, owner: user.id, ownerName: user.displayName,
-      ...(hasContent ? { slots } : {}),
-      ...(slotRoom   ? { room: slotRoom } : {}),
-    };
     try {
-      await claimClaimableSlot(coord!, slotKey, entry);
+      await claimClaimableSlot(coord!, slotKey, advId);
       setClaimingSlotKey(null);
       addToast(`${adv.firstName} ${adv.lastName} claimed a slot at ${tile.name || coord}.`, 'success');
-    } catch {
-      addToast('Failed to claim slot. Please try again.', 'error');
+    } catch (err) {
+      addToast(joinErrorText(err), 'error');
     }
   };
 
@@ -108,9 +105,21 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
     return <TownLightbox coord={coord} tile={tile} info={info} open={open} onClose={onClose} onLoginRequest={onLoginRequest} />;
   }
 
+  // The Castle is auto-complete and never a challenge — its own panel, no
+  // adventurer/slot chrome at all.
+  if (typeKey === 'castle') {
+    return <CastlePanel coord={coord} tile={tile} open={open} onClose={onClose} isAdmin={isAdmin} />;
+  }
+
   const orbCount   = Object.keys(orbState).length;
   const minOrbs    = orbConfig?.bossMinOrbs ?? 5;
   const bossLocked = typeKey === 'boss' && orbCount < minOrbs && state !== 'complete';
+
+  // Dungeon / Tower surface tiles are DOORWAYS: their challenges live inside a
+  // sub-map (Phase 3), so they show a sealed panel and never the join/slot
+  // chrome. Suppressing it here is the UI half of the join block; the DB rule
+  // is the half that actually enforces it.
+  const isDoorway = typeKey === 'dungeon' || typeKey === 'tower';
 
   let displayRelease = tile.release;
   let displayCollect = tile.collect;
@@ -165,7 +174,10 @@ export default function TileLightbox({ coord, onClose, onLoginRequest }: Props) 
           <BossSection bossLocked={bossLocked} orbState={orbState} orbConfig={orbConfig} minOrbs={minOrbs} orbCount={orbCount} />
         )}
 
-        {!bossLocked && (
+        {typeKey === 'dungeon' && <DungeonSection />}
+        {typeKey === 'tower'   && <TowerSection orbCount={orbCount} />}
+
+        {!bossLocked && !isDoorway && (
           <>
             <TileDetails
               tile={tile} player={player} user={user} advEntries={advEntries}

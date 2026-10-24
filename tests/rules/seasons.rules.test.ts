@@ -424,6 +424,122 @@ describe('config is admin-owned', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// `feats` is ADMIN-ONLY now the picker is retired (§1.10).
+//
+// It used to carry a player `.write` on `feats/$slot` so the level-up picker could
+// fill a slot once. That block came out with the picker, dropping `feats` back to
+// the season default — admin only — which is what a display-only field wants: S1’s
+// stored values stay readable, and their owner can no longer change them.
+//
+// Nothing covered the old player write, so nothing failed when it was removed.
+// That is the gap this pins: the field is still read by live code
+// (`yamlLimitsForFeats` in the casino table, the archived S1 tile panels), so a
+// player who could write it could raise their own YAML caps.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('feats are admin-only once the picker is retired', () => {
+  const FEATS = `seasons/${CASINO}/players/${PLAYER_UID}/feats`;
+
+  it('a player cannot pick, overwrite or clear their own feats', async () => {
+    await assertFails(player().ref(`${FEATS}/level3`).set('picky'));
+    await assertFails(player().ref(FEATS).set({ level3: 'picky' }));
+    await assertFails(player().ref(FEATS).remove());
+  });
+
+  it('nor anyone else’s', async () => {
+    await assertFails(other().ref(`${FEATS}/level3`).set('picky'));
+  });
+
+  it('the admin still can — the data is kept, just not player-writable', async () => {
+    await assertSucceeds(admin().ref(`${FEATS}/level3`).set('picky'));
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
+// S2's global shop (§1.8) is ADMIN-ONLY, by inheritance rather than its own rule.
+//
+// `seasons/$seasonId` grants `.write` to the admin and nothing else; the player
+// writes are all carved out by CHILD rules (adventurers, nameColor, feats…). The
+// `shop` node adds no such carve-out, so it is admin-only for free.
+//
+// That is worth a test precisely BECAUSE no rule names it: a later carve-out added
+// one level too high would hand players the stock list, and nothing in this file
+// would otherwise notice. Purchases go through `purchaseShopItem` (Admin SDK),
+// which reads this node to decide what is for sale — a player who could write it
+// could put anything on the shelves.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('the global shop node is admin-only', () => {
+  const SHOP = `seasons/${CASINO}/shop`;
+
+  it('a player cannot stock the shop, create it, or empty it', async () => {
+    await assertFails(player().ref(`${SHOP}/itemIds`).set(['map']));
+    await assertFails(player().ref(SHOP).set({ itemIds: ['map'] }));
+    await assertFails(player().ref(SHOP).remove());
+  });
+
+  it('an alpha user cannot either — alpha is for draft playtesting, not stock', async () => {
+    await assertFails(alpha().ref(`${SHOP}/itemIds`).set(['map']));
+  });
+
+  it('the admin can', async () => {
+    await assertSucceeds(admin().ref(`${SHOP}/itemIds`).set(['map', 'coat_of_many_colors']));
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
+// Joining a challenge is SERVER-ONLY (S2) — but only CREATION is.
+//
+// The config requirement cannot be expressed in a rule (a database rule cannot
+// see a Storage object), so the entry may only come into existence through the
+// joinChallenge / claimChallengeSlot callables. The rule says that with the
+// `owner` term alone: on a create there is no `data`, so owner is null.
+//
+// Expressing it as `!newData.exists()` instead — delete-only — is the trap these
+// tests exist to catch: it reads as "server-only" and passes every create test,
+// while silently killing setAdventurerStatusNote and making the statusNote
+// .validate unreachable.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('challenge joins — creation is server-only, owner updates are not', () => {
+  const TILE = `seasons/${CASINO}/tiles/B3`;
+  const ADV  = `${TILE}/adventurers/a9`;
+  const ENTRY = {
+    advId: 'a9', owner: PLAYER_UID, ownerName: 'Player One', name: 'A B', cls: 'fighter',
+    slots: [{ name: 's0', game: 'g' }],
+  };
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.database();
+      await db.ref(TILE).set({ state: 'inprogress', name: 'Battle' });
+      // The .validate requires the entry to name an adventurer the player actually
+      // owns, so the roster record is part of a valid fixture, not scenery.
+      await db.ref(`seasons/${CASINO}/players/${PLAYER_UID}/adventurers/a9`).set({ firstName: 'A', lastName: 'B' });
+    });
+  });
+
+  it('a player cannot create their own adventurer entry (no config check in a rule)', async () => {
+    await assertFails(player().ref(ADV).set(ENTRY));
+  });
+
+  it('a player cannot create one for someone else either', async () => {
+    await assertFails(player().ref(ADV).set({ ...ENTRY, owner: OTHER_UID }));
+  });
+
+  it('the owner CAN update and recall an entry the server created', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(ADV).set(ENTRY);
+    });
+    // The player-facing status note is a direct client write; delete-only kills it.
+    await assertSucceeds(player().ref(`${ADV}/statusNote`).set({ text: 'stuck', timestamp: 1 }));
+    await assertSucceeds(player().ref(ADV).remove());
+  });
+
+  it('a non-owner can neither update nor recall it', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.database().ref(ADV).set(ENTRY);
+    });
+    await assertFails(other().ref(`${ADV}/statusNote`).set({ text: 'nope', timestamp: 1 }));
+    await assertFails(other().ref(ADV).remove());
+  });
+});
+// ═════════════════════════════════════════════════════════════════════════════
 // Mercenaries on tile slots — only the setSlotMerc callable (Admin SDK) may hire,
 // replace or remove one. A tile adventurer entry is otherwise client-writable by
 // its owner, so the rules pin each slot's merc against that owner. Removal is the
@@ -516,8 +632,19 @@ describe('tile claims — kicked and restricted players are refused', () => {
     });
   });
 
-  it('an ordinary player can claim', async () => {
-    await assertSucceeds(claim(other(), OTHER_UID));
+  // ⚠ S2 CHANGED THE MECHANISM, NOT THE POLICY. Claiming a tile slot now goes
+  // through the `claimChallengeSlot` callable (§0.5.2), so the client write below is
+  // refused for EVERY player — kicked, restricted or ordinary alike. The rule here no
+  // longer discriminates between them, and the three refusals that follow would still
+  // pass with the kicked/restricted terms deleted.
+  //
+  // So do NOT read this block as proof the policy works. The live enforcement is in
+  // `claimChallengeSlot`, which refuses a kicked or restricted claimant itself,
+  // because the Admin SDK bypasses every rule in this file. These tests pin the
+  // belt — defence if the .write is ever relaxed — and the braces are in the
+  // callable.
+  it('NO client can claim — creation is server-only on this season model', async () => {
+    await assertFails(claim(other(), OTHER_UID));
   });
 
   it('the player kicked off this tile cannot claim back in', async () => {

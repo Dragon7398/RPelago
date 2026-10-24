@@ -4,7 +4,9 @@ import { db, firebaseReady, functions } from './config';
 import { sRef, sPath, getCurrentSeason } from './season';
 import type { GameState, Tile, TileState, Player, Adventurer, AdvClass, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, ActivityType, PlayerWarning, AdvStatusNote, SlotStatus, TriState, GMMission, GMParticipant, ClaimableEntry, KickRecord, KmkStatus, CasinoGame, OfficialReport, DiscordBan, GoldTopUpEntry, MercPayout } from '../types';
 import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } from '../lib/tileGen';
-import { ALL_ORBS, CASINO_OPEN_TABLES } from '../lib/constants';
+import { ALL_ORBS, CASINO_OPEN_TABLES, DEFAULT_S2_SHOP_ITEM_IDS } from '../lib/constants';
+import { activeBoard } from '../lib/board';
+import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
@@ -22,6 +24,17 @@ function defaultOrbConfig(): OrbConfig {
   ALL_ORBS.forEach(o => {
     effects[o.id] = `The ${o.label} curse weakens your party while the ${o.label} Orb is absent.`;
   });
+
+  // S2: all nine orbs come from elites — three on the surface, six inside the
+  // dungeons (Phase 3). No shop orbs, no edge-tile orbs, and the Tower's floor
+  // gate replaces bossMinOrbs (see TOWER_FLOOR_ORBS).
+  if (activeBoard().id === 's2') {
+    return {
+      eliteDrops:     ALL_ORBS.map((_, i) => i),   // [0..8]
+      bossNegEffects: effects,
+    };
+  }
+
   return {
     eliteDrops:    [0, 1, 2, 3, 4],
     shopOrbs:      [5, 6],
@@ -79,36 +92,59 @@ export async function seedInitialMissions(): Promise<SeedResult> {
   const now      = Date.now();
   const updates: Record<string, unknown> = {};
 
-  if (shell === 'casino') {
+  // S2 is a MAP season that ALSO runs casino tables — they live in the Casino
+  // district (§1.9), not a casino shell — so table seeding is no longer
+  // shell-only. `!hasTowns` is the districts predicate the rest of the app uses
+  // (App.tsx, ShopsPage): a board with no town tiles is one whose missions and shop
+  // hang off the Capital Ward, and the Casino is one of its four doors.
+  const wantsTables = shell === 'casino' || !activeBoard().hasTowns;
+
+  let created = 0;
+
+  if (wantsTables) {
     const target  = listed?.casinoOpenTables ?? draft?.casinoOpenTables ?? CASINO_OPEN_TABLES;
     const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
-    if (forming >= target) return { shell, created: 0 };
+    if (forming < target) {
+      // Continue per-game cohort numbering from the persisted counters.
+      const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
+      const seriesSnap = await get(sRef(d, 'casinoSeries'));
+      if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
 
-    // Continue per-game cohort numbering from the persisted counters.
-    const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
-    const seriesSnap = await get(sRef(d, 'casinoSeries'));
-    if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
-
-    const working: Record<string, GMMission> = { ...existing };
-    for (let i = forming; i < target; i++) {
-      const game = pickNextCasinoGame(working);            // least-represented, sees tables added so far
-      series[game] = (series[game] ?? 0) + 1;
-      const r = push(sRef(d, 'missions'));
-      const table = { ...freshCasinoTable(game, series[game], now), id: r.key! } as GMMission;
-      updates[sPath(`missions/${r.key}`)] = table;
-      working[r.key!] = table;
+      const working: Record<string, GMMission> = { ...existing };
+      for (let i = forming; i < target; i++) {
+        const game = pickNextCasinoGame(working);          // least-represented, sees tables added so far
+        series[game] = (series[game] ?? 0) + 1;
+        const r = push(sRef(d, 'missions'));
+        const table = { ...freshCasinoTable(game, series[game], now), id: r.key! } as GMMission;
+        updates[sPath(`missions/${r.key}`)] = table;
+        working[r.key!] = table;
+      }
+      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
+      created += target - forming;
     }
-    for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
-    await update(ref(d), updates);
-    return { shell, created: target - forming };
+  }
+
+  // Nothing to write is nothing to send: before §1.11 each of these cases returned
+  // early, so keep them from firing an empty multi-path update on what is a live
+  // admin button.
+  const flush = async () => { if (Object.keys(updates).length > 0) await update(ref(d), updates); };
+
+  // A casino SHELL has no challenges and no guildmaster board, so it stops here.
+  // A map season continues into the basic/patrol bootstrap below. (Field Work joins
+  // it in Phase 2.)
+  if (shell === 'casino') {
+    await flush();
+    return { shell, created };
   }
 
   // Map shell — legacy single-cohort bootstrap for basic + patrol.
   const hasBasic  = active.some(m => m.type === 'basic'  && m.state !== 'complete');
   const hasPatrol = active.some(m => m.type === 'patrol' && m.state !== 'complete');
-  if (hasBasic && hasPatrol) return { shell, created: 0 };
+  if (hasBasic && hasPatrol) {
+    await flush();
+    return { shell, created };
+  }
 
-  let created = 0;
   if (!hasBasic) {
     const r = push(sRef(d, 'missions'));
     updates[sPath(`missions/${r.key}`)] = { ...freshMission('basic',  1, now), id: r.key };
@@ -120,7 +156,7 @@ export async function seedInitialMissions(): Promise<SeedResult> {
     created++;
   }
 
-  await update(ref(d), updates);
+  await flush();
   return { shell, created };
 }
 
@@ -156,20 +192,39 @@ export function subscribeToGame(
 }
 
 // ── Tile mutations ────────────────────────────────────────────────────────────
+// Every roll field a tile carries while `inprogress`. THE CLEARING INVARIANT:
+// setTileState nulls all of them on any transition, so a stale roll can never
+// survive a state bounce. Adding a fourth roll field means adding it HERE and
+// nowhere else — the legacy S1 singulars are included so an archived-shaped
+// tile also gets cleaned if it is ever transitioned.
+const TILE_ROLL_FIELDS = [
+  'stunnedAdvIds', 'tauntedAdvIds', 'thiefAdvIds',
+  'stunnedAdvId',  'tauntedAdvId',
+] as const;
+
+function clearedRollFields(): Record<string, null> {
+  return Object.fromEntries(TILE_ROLL_FIELDS.map(f => [f, null]));
+}
+
 export async function setTileState(coord: string, state: TileState): Promise<void> {
-  await update(sRef(db!, `tiles/${coord}`), { state, stunnedAdvId: null, tauntedAdvId: null });
+  await update(sRef(db!, `tiles/${coord}`), { state, ...clearedRollFields() });
 }
 
 export async function setTileInProgress(
   coord: string,
-  stunnedAdvId: string | null,
-  tauntedAdvId: string | null,
+  roll: TraitTargetRoll,
   roomAssignments?: Record<string, 1 | 2>,
   extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
   const updates: Record<string, unknown> = { [sPath(`tiles/${coord}/state`)]: 'inprogress' };
-  updates[sPath(`tiles/${coord}/stunnedAdvId`)] = stunnedAdvId;
-  updates[sPath(`tiles/${coord}/tauntedAdvId`)] = tauntedAdvId;
+  // Clear first, then write only the non-empty rolls, so a previous roll (or a
+  // legacy singular) is wiped even when this trait now targets nobody.
+  for (const [f, v] of Object.entries(clearedRollFields())) {
+    updates[sPath(`tiles/${coord}/${f}`)] = v;
+  }
+  for (const [f, ids] of Object.entries(roll)) {
+    if (ids.length) updates[sPath(`tiles/${coord}/${f}`)] = ids;
+  }
   if (roomAssignments) {
     for (const [advId, room] of Object.entries(roomAssignments)) {
       updates[sPath(`tiles/${coord}/adventurers/${advId}/room`)] = room;
@@ -203,8 +258,7 @@ export async function resetTileStats(coord: string, stats: Partial<Tile>): Promi
 export async function setTilesAvailability(
   stateUpdates: Record<string, TileState>,
   inProgressCoord?: string,
-  stunnedAdvId?: string | null,
-  tauntedAdvId?: string | null,
+  roll?: TraitTargetRoll,
   roomAssignments?: Record<string, 1 | 2>,
   extraUpdates?: Record<string, unknown>,
 ): Promise<void> {
@@ -214,8 +268,12 @@ export async function setTilesAvailability(
     updates[sPath(`tiles/${c}/state`)] = s;
   }
   if (inProgressCoord != null) {
-    updates[sPath(`tiles/${inProgressCoord}/stunnedAdvId`)] = stunnedAdvId ?? null;
-    updates[sPath(`tiles/${inProgressCoord}/tauntedAdvId`)] = tauntedAdvId ?? null;
+    for (const [f, v] of Object.entries(clearedRollFields())) {
+      updates[sPath(`tiles/${inProgressCoord}/${f}`)] = v;
+    }
+    for (const [f, ids] of Object.entries(roll ?? emptyTraitRoll())) {
+      if (ids.length) updates[sPath(`tiles/${inProgressCoord}/${f}`)] = ids;
+    }
     if (roomAssignments) {
       for (const [advId, room] of Object.entries(roomAssignments)) {
         updates[sPath(`tiles/${inProgressCoord}/adventurers/${advId}/room`)] = room;
@@ -226,11 +284,21 @@ export async function setTilesAvailability(
   await update(ref(db!), updates);
 }
 
-export async function assignAdventurer(coord: string, entry: TileAdventurer): Promise<void> {
-  await update(ref(db!), {
-    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                entry,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
+/**
+ * Join an available challenge. Goes through the `joinChallenge` CALLABLE, not a
+ * direct RTDB write: the config requirement is unenforceable from a database
+ * rule, which cannot see a Storage object (map plan §0.5.2). The server
+ * re-validates everything — tile state, adventurer ownership, capacity, the
+ * Horde floor — and stamps the `yamlAt` submitted-marker.
+ */
+export async function assignAdventurer(
+  coord: string,
+  advId: string,
+  slots: { name: string; game: string; details?: string }[],
+): Promise<void> {
+  assertFunctions();
+  await httpsCallable(functions!, 'joinChallenge')({
+    coord, advId, slots, seasonId: getCurrentSeason(),
   });
 }
 
@@ -386,6 +454,15 @@ export async function resetOrbs(): Promise<void> {
 }
 
 // ── Shop ──────────────────────────────────────────────────────────────────────
+// ── S2: the single global shop (§1.8) ────────────────────────────────────────
+// Writes the whole stock list, not a patch: it is one array, and a merge-shaped
+// write of an array in RTDB is how you end up with a sparse object.
+export async function setGlobalShopItems(itemIds: readonly string[]): Promise<void> {
+  assertDb();
+  await set(sRef(db!, 'shop/itemIds'), [...itemIds]);
+}
+
+// S1 only — per-town shops, kept for archived seasons.
 export async function updateShop(shopId: string, updates: Partial<Shop>): Promise<void> {
   await update(sRef(db!, `shops/${shopId}`), updates);
 }
@@ -445,6 +522,10 @@ export async function adminKickAdventurer(
 
   const updates: Record<string, unknown> = {
     [sPath(`tiles/${coord}/adventurers/${advId}`)]:            null,
+    // A kick is the HARD consequence; status incidents are the soft nag counter
+    // that would otherwise fire again at completion for the same abandonment
+    // (decision 36). Cleared in the same atomic update as the removal.
+    [sPath(`tiles/${coord}/statusIncidents/${ownerId}`)]:      null,
     [sPath(`players/${ownerId}/adventurers/${advId}/busy`)]:    false,
     [sPath(`players/${ownerId}/adventurers/${advId}/busyTile`)]: null,
   };
@@ -551,25 +632,25 @@ export async function adminGrantGold(
 }
 
 // ── Player: claim a claimable slot ───────────────────────────────────────────
+/**
+ * Claim a vacated slot on an in-progress challenge. A CALLABLE now — it consumes
+ * the entry under the Admin SDK, which retires the Firebase pre-write evaluation
+ * trick the old rule depended on (the slot still existing in `data` during the
+ * atomic update that deleted it).
+ *
+ * Takes NO config: a claimable slot only ever exists on a world whose
+ * Archipelago room is already generated, so the claimant adopts a LIVE slot and
+ * inherits its declaration rather than submitting one (map plan §0.5.8).
+ */
 export async function claimClaimableSlot(
   coord: string,
   slotKey: string,
-  entry: TileAdventurer,
+  advId: string,
 ): Promise<void> {
-  assertDb();
-  // Stamp the adopted slots `claimed`, so the claimant can't pass one straight on
-  // to a merc (see mercHireBlockers). Tile settlement never reads the flag.
-  const slots = normalizeSlots(entry.slots as AdvSlot[] | Record<string, AdvSlot> | undefined);
-  const claimedEntry: TileAdventurer = slots.length
-    ? { ...entry, slots: slots.map(s => ({ ...s, claimed: true })) }
-    : entry;
-  const updates: Record<string, unknown> = {
-    [sPath(`tiles/${coord}/claimableSlots/${slotKey}`)]:                 null,
-    [sPath(`tiles/${coord}/adventurers/${entry.advId}`)]:                claimedEntry,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busy`)]:    true,
-    [sPath(`players/${entry.owner}/adventurers/${entry.advId}/busyTile`)]: coord,
-  };
-  await update(ref(db!), updates);
+  assertFunctions();
+  await httpsCallable(functions!, 'claimChallengeSlot')({
+    coord, slotKey, advId, seasonId: getCurrentSeason(),
+  });
 }
 
 // ── Tile traits (orb effects — does not set adminOverride) ───────────────────
@@ -736,15 +817,11 @@ export async function setPublicSlots(coord: string, slots: AdvSlot[]): Promise<v
   }
 }
 
-// ── Player feats ──────────────────────────────────────────────────────────────
-export async function selectFeat(
-  playerId: string,
-  slot: 'level3' | 'level5' | 'level7',
-  featId: string,
-): Promise<void> {
-  assertDb();
-  await set(sRef(db!, `players/${playerId}/feats/${slot}`), featId);
-}
+// `selectFeat` was here. REMOVED WITH THE PICKER (map plan §1.10): it had exactly
+// one caller, and the `feats/$slot` player `.write` it depended on came out of
+// database.rules.json at the same time — so what remained was a context method that
+// could only fail silently for anyone but the admin. Stored feats are display-only
+// now; see ADVISOR_LEVELS in gameLogic.ts for what replaces the level-up reward.
 
 // ── Player name color ─────────────────────────────────────────────────────────
 export async function setPlayerNameColor(playerId: string, colorId: string | null): Promise<void> {
@@ -870,6 +947,12 @@ export async function mapReset(): Promise<void> {
   // Preserve orb config and shops (admin may have customized both); update meta
   updates[sPath('orbConfig')] = orbConfig;
   // shops is intentionally NOT reset — admin customizations are preserved
+  // Same rule for S2's single shop (§1.8): seed it when the season has none yet,
+  // never overwrite a stocked one. Gated on the board having no shop TILES, since
+  // that is what makes the global shop the only one.
+  if (!activeBoard().hasShopTiles && current?.shop == null) {
+    updates[sPath('shop')] = { itemIds: [...DEFAULT_S2_SHOP_ITEM_IDS] };
+  }
   // adminId is no longer here; it lives at the global config/adminId.
   updates[sPath('meta')] = { initialized: true, seed };
 
@@ -914,6 +997,9 @@ export async function playerReset(playerId: string): Promise<void> {
     const tile = tileSnap.val() as Tile;
 
     updates[sPath(`tiles/${coord}/adventurers/${advId}`)] = null;
+    // Same soft-counter rule as a kick (decision 36): the reset is the hard
+    // consequence, so the nag counter must not fire again at completion.
+    updates[sPath(`tiles/${coord}/statusIncidents/${playerId}`)] = null;
 
     if (tile.state === 'inprogress') {
       const rawSlots = normalizeSlots(
@@ -945,6 +1031,7 @@ export async function playerReset(playerId: string): Promise<void> {
 
     // Remove from participants
     updates[sPath(`missions/${missionId}/participants/${playerId}`)] = null;
+    updates[sPath(`missions/${missionId}/statusIncidents/${playerId}`)] = null;
 
     if (mission.state === 'forming') {
       // Check if this was the last participant; if so, reset firstJoinAt

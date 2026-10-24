@@ -117,6 +117,25 @@ html { font-size: calc(16px * var(--font-scale, 1)); }
   --boss-bg-1:   oklch(15% 0.08 40);
   --boss-bg-2:   oklch(20% 0.06 40);
 
+  /* S2 Dungeon (Arcane Violet). Per-theme values live in each body.theme-* block;
+     see docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(66% 0.14 270);
+  --dungeon-bg-1: oklch(13% 0.06 270);
+  --dungeon-bg-2: oklch(17% 0.05 270);
+
+  /* S2 Tower and Castle are ALIASES, declared once. Custom properties resolve at
+     USE time, so these follow whatever the active theme sets for boss/town --
+     no per-theme copies, and they cannot drift if a theme is retuned.
+       Tower  = the S1 boss colour: it holds the season goal tile.
+       Castle = the vacated town rung: S2 has no towns, and the rung is already
+                balanced in all ten themes. */
+  --tower-fg:     var(--boss-fg);
+  --tower-bg-1:   var(--boss-bg-1);
+  --tower-bg-2:   var(--boss-bg-2);
+  --castle-fg:    var(--town-fg);
+  --castle-bg-1:  var(--town-bg-1);
+  --castle-bg-2:  var(--town-bg-2);
+
   /* ── Guildmaster mission accent ─────────────────────────────── */
   --gm-accent:   oklch(68% 0.15 285);
   --gm-accent-d: oklch(50% 0.14 285);
@@ -449,6 +468,41 @@ header p {
 .tile.state-inprogress.tile-boss .tile-label,
 .tile.state-complete.tile-boss .tile-label { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
 
+/* ── S2 tile types ─────────────────────────────────────────── */
+.tile.state-available.tile-dungeon,
+.tile.state-inprogress.tile-dungeon,
+.tile.state-complete.tile-dungeon {
+  background: linear-gradient(145deg, var(--dungeon-bg-1) 0%, var(--dungeon-bg-2) 100%);
+}
+.tile.state-available.tile-dungeon:hover,
+.tile.state-inprogress.tile-dungeon:hover,
+.tile.state-complete.tile-dungeon:hover { border-color: var(--dungeon-fg) !important; box-shadow: 0 8px 24px oklch(from var(--dungeon-fg) l c h / 0.3); }
+.tile.state-available.tile-dungeon .tile-label,
+.tile.state-inprogress.tile-dungeon .tile-label,
+.tile.state-complete.tile-dungeon .tile-label { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-tower,
+.tile.state-inprogress.tile-tower,
+.tile.state-complete.tile-tower {
+  background: linear-gradient(145deg, var(--tower-bg-1) 0%, var(--tower-bg-2) 100%);
+}
+.tile.state-available.tile-tower:hover,
+.tile.state-inprogress.tile-tower:hover,
+.tile.state-complete.tile-tower:hover { border-color: var(--tower-fg) !important; box-shadow: 0 8px 24px oklch(from var(--tower-fg) l c h / 0.3); }
+.tile.state-available.tile-tower .tile-label,
+.tile.state-inprogress.tile-tower .tile-label,
+.tile.state-complete.tile-tower .tile-label { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-castle,
+.tile.state-inprogress.tile-castle,
+.tile.state-complete.tile-castle {
+  background: linear-gradient(145deg, var(--castle-bg-1) 0%, var(--castle-bg-2) 100%);
+}
+.tile.state-available.tile-castle:hover,
+.tile.state-inprogress.tile-castle:hover,
+.tile.state-complete.tile-castle:hover { border-color: var(--castle-fg) !important; box-shadow: 0 8px 24px oklch(from var(--castle-fg) l c h / 0.3); }
+.tile.state-available.tile-castle .tile-label,
+.tile.state-inprogress.tile-castle .tile-label,
+.tile.state-complete.tile-castle .tile-label { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
+
 .tile.tile-center.state-complete { border-color: oklch(52% 0.14 75) !important; }
 
 /* Animations */
@@ -497,6 +551,12 @@ header p {
 .tile.state-inprogress.tile-elite  .tile-name { color: oklch(from var(--elite-fg) calc(l + 0.10) c h); }
 .tile.state-available.tile-boss    .tile-name,
 .tile.state-inprogress.tile-boss   .tile-name { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-dungeon  .tile-name,
+.tile.state-inprogress.tile-dungeon .tile-name { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-tower  .tile-name,
+.tile.state-inprogress.tile-tower .tile-name { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.tile.state-available.tile-castle  .tile-name,
+.tile.state-inprogress.tile-castle .tile-name { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 
 /* ── Tile name: parchment scroll banner (Hover & Always-on-hover) ── */
 .tile-name-banner {
@@ -564,6 +624,88 @@ header p {
 .sw-available { background: var(--state-avail-fg);                                        border-color: var(--state-avail-border); }
 .sw-inprogress{ background: oklch(from var(--state-prog-border) calc(l + 0.15) c h);      border-color: var(--state-prog-border); }
 .sw-complete  { background: oklch(from var(--state-done-border) calc(l + 0.15) c h);      border-color: var(--state-done-border); }
+
+/* ── The Capital Ward (districts, map plan §1.7) ──────────────────────────────
+   Every colour here is a theme token or a color-mix against one, never a fixed
+   lightness: a hardcoded dark L renders as a near-black slab in the four light
+   themes, which is the mistake the sealed panels already made once. */
+.ward {
+  margin: 1.6rem auto 0; max-width: 980px; padding: 1rem 1rem 1.2rem;
+  border: 1px solid var(--border-ornate, var(--gold-dim));
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--gold) 4%, var(--bg-card));
+}
+.ward-head {
+  display: flex; align-items: center; gap: 0.6rem; justify-content: center;
+  font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.16em;
+  color: var(--gold); margin-bottom: 0.9rem;
+}
+.ward-rule {
+  flex: 1; height: 1px; max-width: 160px;
+  background: linear-gradient(to right, transparent, var(--gold-dim));
+}
+.ward-rule.r { background: linear-gradient(to left, transparent, var(--gold-dim)); }
+.ward-note {
+  text-align: center; margin: -0.3rem 0 0.8rem;
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.82rem; color: var(--text-muted);
+}
+.ward-grid {
+  display: grid; gap: 0.7rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.district-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  padding: 0.9rem 0.6rem; cursor: pointer; text-align: center;
+  border: 1px solid var(--gold-dim); border-radius: 3px;
+  background: var(--bg-deep); color: var(--parchment);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.district-card:hover:not(.disabled) {
+  border-color: var(--gold); transform: translateY(-2px);
+  background: color-mix(in oklch, var(--gold) 8%, var(--bg-deep));
+}
+.district-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* Logged out: visible but inert (decision 19). Dimmed via the TOKENS rather than
+   `opacity`, which multiplies against tokens already near the 4.5:1 floor and
+   would push the light themes under it — the same trap RoomPeek’s rows hit. */
+.district-card.disabled {
+  cursor: default; pointer-events: none;
+  border-color: color-mix(in oklch, var(--gold-dim) 45%, var(--bg-deep));
+  color: var(--text-muted);
+}
+.district-art {
+  width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
+}
+.district-sprite {
+  width: 100%; height: 100%; object-fit: contain;
+  image-rendering: pixelated;
+}
+.district-glyph { font-size: 1.9rem; line-height: 1; }
+.district-name {
+  font-family: 'Cinzel', serif; font-size: 0.68rem; letter-spacing: 0.1em;
+  color: inherit;
+}
+.district-card:not(.disabled) .district-name { color: var(--gold); }
+.district-line {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.76rem; line-height: 1.3; color: var(--text-muted);
+}
+
+/* Interim copy inside a district whose contents land in a later slice. */
+.district-pending {
+  padding: 1.2rem 0.8rem; text-align: center;
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.9rem; color: var(--text-muted);
+}
+
+.district-modal { max-width: 720px; }
+
+
+@media (max-width: 720px) {
+  .ward-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ── Settings popout ── */
 .settings-toggle {
@@ -681,6 +823,9 @@ header p {
 .lb-title.town_center { color: oklch(from var(--town-fg) calc(l + 0.10) c h); }
 .lb-title.elite  { color: oklch(from var(--elite-fg) calc(l + 0.10) c h); }
 .lb-title.boss   { color: oklch(from var(--boss-fg) calc(l + 0.10) c h); }
+.lb-title.dungeon { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.lb-title.tower { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.lb-title.castle { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 .lb-divider { width: 60px; height: 1px; background: linear-gradient(to right, transparent, var(--border-glow), transparent); margin: 0.8rem auto; }
 
 .lb-progress-wrap { margin: 0.8rem 0; }
@@ -708,6 +853,81 @@ header p {
 .lb-login-prompt a { color: var(--gold-dim); cursor: pointer; text-decoration: underline; }
 .lb-login-prompt a:hover { color: var(--gold); }
 
+
+/* ── S2 join form (map plan §0.5.1) ─────────────────────────────────────────
+   Declare slots + attach a config, in one step. All colours come from theme
+   tokens, so this follows all ten themes with no per-theme rules. */
+.lb-join-form { display: flex; flex-direction: column; gap: 0.5rem; text-align: left; }
+.lb-join-label {
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.12em;
+  color: var(--gold-dim); margin-top: 0.4rem;
+  display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
+}
+.lb-join-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic; letter-spacing: 0;
+  font-size: 0.74rem; color: var(--text-muted);
+}
+.lb-join-slot { display: flex; gap: 0.35rem; align-items: center; }
+.lb-join-input {
+  flex: 1; min-width: 0;
+  font-family: 'Crimson Pro', serif; font-size: 0.85rem;
+  padding: 0.3rem 0.5rem; border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-deep); color: var(--parchment);
+}
+.lb-join-input:focus { outline: none; border-color: var(--border-glow); }
+.lb-join-slot-del {
+  flex: 0 0 auto; width: 1.5rem; height: 1.5rem; border-radius: 3px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); cursor: pointer; line-height: 1;
+}
+.lb-join-slot-del:hover { color: var(--red); border-color: var(--red); }
+.lb-join-add {
+  align-self: flex-start;
+  font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.1em;
+  padding: 0.25rem 0.6rem; border-radius: 3px;
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--gold-dim); cursor: pointer;
+}
+.lb-join-add:hover { border-color: var(--border-glow); color: var(--gold); }
+.lb-join-file { font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--text-muted); }
+.lb-join-file-name {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; color: var(--gold-dim);
+}
+/* Severity carries meaning, so each tier gets a border AND its own wording —
+   never hue alone. `reject` blocks submission; `warn` is advisory. */
+.lb-join-finding {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; line-height: 1.4;
+  padding: 0.35rem 0.55rem; border-radius: 3px; border-left: 3px solid;
+}
+.lb-join-finding.warn {
+  color: var(--text-muted); border-color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 10%, var(--bg-card));
+}
+.lb-join-finding.reject {
+  color: var(--parchment); border-color: var(--red);
+  background: color-mix(in oklch, var(--red) 12%, var(--bg-card));
+}
+/* The config auto-fill confirmation. Reuses the design system’s "available/go"
+   tokens rather than introducing a colour: they are declared per theme, so this
+   is correct in the colour-blind and light themes by construction. The leading
+   ✓ and the wording carry the meaning — never hue alone. */
+.lb-join-autofill {
+  font-family: 'Crimson Pro', serif; font-size: 0.8rem; line-height: 1.4;
+  padding: 0.3rem 0.55rem; border-radius: 3px;
+  border-left: 3px solid var(--state-avail-border);
+  color: var(--state-avail-fg);
+  background: color-mix(in oklch, var(--state-avail-fg) 10%, var(--bg-card));
+}
+.lb-join-submit {
+  margin-top: 0.4rem; padding: 0.45rem 1rem; border-radius: 3px;
+  font-family: 'Cinzel', serif; font-size: 0.66rem; letter-spacing: 0.12em;
+  border: 1px solid var(--state-avail-border); background: var(--bg-deep);
+  color: var(--state-avail-fg); cursor: pointer;
+}
+.lb-join-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+.lb-join-submit:not(:disabled):hover { border-color: var(--gold); color: var(--gold); }
+.lb-adv-pick-btn.selected { border-color: var(--gold); color: var(--gold); }
 .lb-send-section { margin-top: 0.8rem; }
 .lb-send-label { font-family: 'Cinzel', serif; font-size: 0.6rem; color: var(--gold-dim); letter-spacing: 0.12em; margin-bottom: 0.5rem; }
 .lb-adv-picker { display: flex; flex-direction: column; gap: 0.35rem; }
@@ -838,6 +1058,27 @@ header p {
 .lb-trait-name {
   font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.07em;
   color: var(--battle-fg);
+
+/* ── S2 leveled traits ──────────────────────────────────────────────────────
+   The level meter proper (segmented bar) is a later pass; this is the compact
+   `3/5` readout the tile panel needs now. Colour comes from theme tokens, so it
+   follows all ten themes. */
+.lb-trait-level {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--gold-dim); opacity: 0.9;
+}
+.lb-trait-targets {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.06em;
+  color: var(--gold-dim); margin-top: 0.2rem; display: block;
+}
+.help-trait-levels {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  color: var(--gold-dim);
+}
+.help-trait-blurb {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.82rem; color: var(--text-muted); display: block;
+}
 }
 .lb-trait-desc {
   font-family: 'Crimson Pro', serif; font-size: 0.75rem; color: var(--parchment);
@@ -935,6 +1176,96 @@ header p {
   display: flex; gap: 0.4rem; align-items: flex-start;
 }
 .lb-boss-neg-effect:last-child { border-bottom: none; }
+
+/* ── S2: Castle placeholder + sealed doorways (Dungeon / Tower) ──────────────
+   Theme-aware by construction: every colour derives from the tile-type token of
+   the thing being described, so these follow all ten themes with no per-theme
+   rules. .lb-sealed is tinted by the panel it sits in via --sealed-fg. */
+.lb-placeholder {
+  margin: 0.6rem 0; padding: 0.9rem 1rem; border-radius: 3px;
+  border: 1px dashed var(--border);
+  background: repeating-linear-gradient(45deg,
+    oklch(from var(--bg-card) calc(l + 0.03) c h / 0.5) 0 10px,
+    transparent 10px 20px);
+}
+.lb-placeholder-tag {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--gold-dim); margin-bottom: 0.4rem;
+}
+.lb-placeholder-body {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.88rem; line-height: 1.45; color: var(--text-muted);
+}
+
+.lb-sealed {
+  --sealed-fg: var(--dungeon-fg);
+  display: flex; flex-direction: column; gap: 0.55rem;
+  padding: 0.85rem 1rem; border-radius: 3px; margin: 0.6rem 0;
+  border: 1px solid oklch(from var(--sealed-fg) calc(l - 0.2) c h);
+  /* color-mix, NOT a hardcoded lightness: a fixed dark L would render as a
+     near-black slab in the four light themes. Mixing against --bg-card tints
+     toward the type colour while following whatever the theme sets. */
+  background: color-mix(in oklch, var(--sealed-fg) 12%, var(--bg-card));
+}
+.lb-sealed-tower { --sealed-fg: var(--tower-fg); }
+.lb-sealed-title {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.14em;
+  color: oklch(from var(--sealed-fg) calc(l + 0.08) c h); text-align: center;
+}
+.lb-sealed-body {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.85rem; line-height: 1.45; color: var(--text-muted); text-align: center;
+}
+
+/* Dungeon orb pips — both dark until Phase 3 lights them per Elite felled. */
+.lb-orb-pips { display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
+.lb-orb-pip {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 1px solid oklch(from var(--sealed-fg) calc(l - 0.15) c h);
+  background: var(--bg-deep);
+}
+.lb-orb-pip.lit {
+  background: var(--sealed-fg);
+  box-shadow: 0 0 7px oklch(from var(--sealed-fg) l c h / 0.6);
+}
+.lb-orb-pip-label {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.1em;
+  color: var(--gold-dim); margin-left: 0.3rem;
+}
+
+/* Tower floor ladder */
+.lb-tower-floors { display: flex; flex-direction: column; gap: 0.3rem; }
+.lb-tower-floor {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.3rem 0.55rem; border-radius: 2px;
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  opacity: 0.65;
+}
+.lb-tower-floor.open {
+  opacity: 1;
+  border-color: oklch(from var(--tower-fg) calc(l - 0.15) c h);
+  background: color-mix(in oklch, var(--tower-fg) 16%, var(--bg-card));
+}
+.lb-tower-floor-n {
+  font-family: 'Cinzel', serif; font-size: 0.66rem; font-weight: 700;
+  width: 1.1rem; text-align: center; color: var(--gold-dim);
+}
+.lb-tower-floor.open .lb-tower-floor-n { color: oklch(from var(--tower-fg) calc(l + 0.1) c h); }
+.lb-tower-floor-name {
+  flex: 1; font-family: 'Cinzel', serif; font-size: 0.62rem;
+  letter-spacing: 0.1em; color: var(--parchment);
+}
+.lb-tower-floor-req {
+  font-family: 'Cinzel', serif; font-size: 0.55rem; letter-spacing: 0.08em;
+  color: var(--gold-dim);
+}
+.lb-tower-floor.open .lb-tower-floor-req { color: oklch(from var(--tower-fg) calc(l + 0.1) c h); }
+.lb-tower-status {
+  font-family: 'Crimson Pro', serif; font-size: 0.82rem;
+  color: var(--text-muted); text-align: center;
+}
+.lb-tower-status-open { color: var(--state-avail-fg); }
 
 /* Orb reward */
 .lb-orb-reward {
@@ -2373,6 +2704,28 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-adv-note-time { font-size: 0.58rem; color: oklch(46% 0.05 75); white-space: nowrap; flex-shrink: 0; }
 
 /* ── Players page ── */
+/* ── Players roster bands ─────────────────────────────────────────────────────
+   The roster sorts into three claim-activity bands (see comparePlayersForAdmin),
+   so each gets a heading. Cards sit CLOSER together inside a band than the page's
+   own 1.5rem gap between bands, which is what makes the grouping read without
+   needing a heavy rule. Colour comes entirely from existing theme tokens, so the
+   light and high-contrast themes need no override — and the band always carries
+   its own words, so hue is only ever reinforcement. */
+.dash-player-band-group { display: flex; flex-direction: column; gap: 0.9rem; }
+.dash-player-band {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: 'Cinzel', serif; font-size: 0.7rem; letter-spacing: 0.14em;
+  color: var(--gold-dim); border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3rem; cursor: help;
+}
+/* In Play is the band an admin is scanning for, so it is the only one at full
+   gold; the other two step back rather than competing with it. */
+.dash-player-band--active  { color: var(--gold); border-bottom-color: var(--border-glow); }
+.dash-player-band--none    { color: var(--text-muted); }
+.dash-player-band-count {
+  font-size: 0.65rem; letter-spacing: 0.08em; opacity: 0.75;
+}
+
 .dash-player-card {
   background: oklch(14% 0.05 75 / 0.5); border: 1px solid oklch(28% 0.06 75);
   border-radius: 3px; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
@@ -2794,6 +3147,41 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
 .dash-shop-item-name  { font-family: 'Cinzel', serif; font-size: 0.65rem; letter-spacing: 0.08em; color: var(--parchment); }
 .dash-shop-item-cost  { font-size: 0.68rem; color: oklch(68% 0.14 75); }
 .dash-shop-item-desc  { font-size: 0.72rem; font-style: italic; color: var(--text-muted); line-height: 1.35; }
+
+/* §1.8 global shop editor. Backgrounds are color-mix against tokens rather than
+   the fixed dark oklch the older admin rules use, so these stay legible if the
+   dashboard is ever themed. */
+.dash-shop-hint {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.74rem; line-height: 1.4; color: var(--text-muted);
+  margin: -0.2rem 0 0.6rem;
+}
+.dash-shop-unseeded {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  font-family: 'Crimson Pro', serif; font-size: 0.78rem;
+  padding: 0.45rem 0.6rem; margin-bottom: 0.6rem; border-radius: 2px;
+  border-left: 3px solid var(--amber); color: var(--text-muted);
+  background: color-mix(in oklch, var(--amber) 10%, var(--bg-card));
+}
+.dash-btn {
+  font-family: 'Cinzel', serif; font-size: 0.6rem; letter-spacing: 0.08em;
+  padding: 0.28rem 0.6rem; border-radius: 2px; cursor: pointer;
+  border: 1px solid var(--gold-dim); color: var(--gold);
+  background: var(--bg-deep);
+}
+.dash-btn:hover { border-color: var(--gold); }
+/* A retired item is still listed so the host can see what is gone — de-emphasised
+   by the tag and muted text, NOT by opacity, which would compound against the
+   muted token and drop it under contrast. */
+.dash-shop-item-toggle.deprecated .dash-shop-item-name,
+.dash-shop-item-toggle.deprecated .dash-shop-item-cost {
+  color: var(--text-muted);
+}
+.dash-shop-item-tag {
+  margin-left: 0.4rem; padding: 0.05rem 0.3rem; border-radius: 2px;
+  font-size: 0.52rem; letter-spacing: 0.1em; vertical-align: middle;
+  border: 1px solid var(--text-muted); color: var(--text-muted);
+}
 
 /* ── Orbs page ── */
 .dash-orb-loc {
@@ -3602,6 +3990,14 @@ body.theme-moonlit {
   --boss-bg-1:   oklch(20% 0.07 95);
   --boss-bg-2:   oklch(24% 0.05 95);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(70% 0.10 290);
+  --dungeon-bg-1: oklch(18% 0.05 290);
+  --dungeon-bg-2: oklch(22% 0.04 290);
+
   --state-avail-fg:     oklch(68% 0.14 170);
   --state-avail-border: oklch(55% 0.12 170);
   --state-prog-border:  oklch(62% 0.16 80);
@@ -3644,6 +4040,14 @@ body.theme-verdant {
   --boss-bg-1:   oklch(19% 0.08 80);
   --boss-bg-2:   oklch(23% 0.06 80);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(66% 0.12 255);
+  --dungeon-bg-1: oklch(17% 0.06 255);
+  --dungeon-bg-2: oklch(21% 0.05 255);
+
   --state-avail-fg:     oklch(72% 0.18 140);
   --state-avail-border: oklch(60% 0.14 140);
   --state-prog-border:  oklch(62% 0.14 65);
@@ -3680,6 +4084,14 @@ body.theme-aether {
   --boss-bg-1:   oklch(18% 0.07 60);
   --boss-bg-2:   oklch(22% 0.05 60);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(65% 0.13 275);
+  --dungeon-bg-1: oklch(16% 0.06 275);
+  --dungeon-bg-2: oklch(20% 0.05 275);
+
   --state-avail-fg:     oklch(72% 0.18 130);
   --state-avail-border: oklch(55% 0.14 130);
   --state-prog-border:  oklch(52% 0.16 60);
@@ -3712,6 +4124,14 @@ body.theme-parchment {
   --boss-fg:     oklch(45% 0.18 50);
   --boss-bg-1:   oklch(82% 0.07 55);
   --boss-bg-2:   oklch(86% 0.05 55);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(36% 0.17 275);
+  --dungeon-bg-1: oklch(82% 0.05 275);
+  --dungeon-bg-2: oklch(86% 0.04 275);
 
   --state-avail-fg:     oklch(40% 0.16 150);
   --state-avail-border: oklch(45% 0.14 150);
@@ -3763,6 +4183,14 @@ body.theme-sakura {
   --boss-bg-1:   oklch(86% 0.06 50);
   --boss-bg-2:   oklch(90% 0.05 50);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(33% 0.16 288);
+  --dungeon-bg-1: oklch(86% 0.05 288);
+  --dungeon-bg-2: oklch(90% 0.04 288);
+
   --state-avail-fg:     oklch(42% 0.14 145);
   --state-avail-border: oklch(48% 0.14 145);
   --state-prog-border:  oklch(48% 0.18 50);
@@ -3811,6 +4239,14 @@ body.theme-mint {
   --boss-fg:     oklch(48% 0.18 50);
   --boss-bg-1:   oklch(84% 0.06 50);
   --boss-bg-2:   oklch(88% 0.05 50);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(30% 0.16 278);
+  --dungeon-bg-1: oklch(84% 0.05 278);
+  --dungeon-bg-2: oklch(88% 0.04 278);
 
   --state-avail-fg:     oklch(40% 0.16 150);
   --state-avail-border: oklch(45% 0.14 150);
@@ -3862,6 +4298,14 @@ body.theme-lapis {
   --boss-bg-1:   oklch(88% 0.09 85);
   --boss-bg-2:   oklch(92% 0.07 85);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(28% 0.14 300);
+  --dungeon-bg-1: oklch(84% 0.06 300);
+  --dungeon-bg-2: oklch(88% 0.05 300);
+
   --state-avail-fg:     oklch(46% 0.13 200);
   --state-avail-border: oklch(48% 0.13 200);
   --state-prog-border:  oklch(50% 0.20 50);
@@ -3912,6 +4356,14 @@ body.theme-obsidian {
   --boss-bg-1:   oklch(22% 0.08 95);
   --boss-bg-2:   oklch(26% 0.06 95);
 
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(86% 0.12 270);
+  --dungeon-bg-1: oklch(20% 0.07 270);
+  --dungeon-bg-2: oklch(24% 0.06 270);
+
   --state-avail-fg:     oklch(82% 0.18 150);
   --state-avail-border: oklch(70% 0.16 150);
   --state-prog-border:  oklch(75% 0.18 70);
@@ -3949,6 +4401,14 @@ body.theme-tidepool {
   --boss-fg:     oklch(90% 0.18 95);
   --boss-bg-1:   oklch(22% 0.07 95);
   --boss-bg-2:   oklch(26% 0.05 95);
+
+  /* S2 Dungeon (Arcane Violet). A hue rung where the theme has room; a distinct
+     LIGHTNESS rung where it does not (the four CVD themes). Chroma stays under
+     the elite value so the two separate on more than hue alone.
+     See docs/season-2-map-plan.md 1.2a before retuning. */
+  --dungeon-fg:   oklch(69% 0.11 280);
+  --dungeon-bg-1: oklch(17% 0.06 280);
+  --dungeon-bg-2: oklch(21% 0.05 280);
 
   --state-avail-fg:     oklch(80% 0.13 195);
   --state-avail-border: oklch(68% 0.12 195);
@@ -4895,12 +5355,18 @@ body.theme-lapis     .lb-trait-val-new { color: oklch(36% 0.12 145); }
 .ag-tile-name-town   { color: oklch(from var(--town-fg)   calc(l + 0.08) c h); }
 .ag-tile-name-elite  { color: oklch(from var(--elite-fg)  calc(l + 0.08) c h); }
 .ag-tile-name-boss   { color: oklch(from var(--boss-fg)   calc(l + 0.10) c h); }
+.ag-tile-name-dungeon { color: oklch(from var(--dungeon-fg) calc(l + 0.10) c h); }
+.ag-tile-name-tower { color: oklch(from var(--tower-fg) calc(l + 0.10) c h); }
+.ag-tile-name-castle { color: oklch(from var(--castle-fg) calc(l + 0.10) c h); }
 
 .ag-tile-badge-battle { color: var(--battle-fg); border-color: var(--battle-fg); background: var(--battle-bg-1); }
 .ag-tile-badge-puzzle { color: var(--puzzle-fg); border-color: var(--puzzle-fg); background: var(--puzzle-bg-1); }
 .ag-tile-badge-town   { color: var(--town-fg);   border-color: var(--town-fg);   background: var(--town-bg-1);   }
 .ag-tile-badge-elite  { color: var(--elite-fg);  border-color: var(--elite-fg);  background: var(--elite-bg-1);  }
 .ag-tile-badge-boss   { color: var(--boss-fg);   border-color: var(--boss-fg);   background: var(--boss-bg-1);   }
+.ag-tile-badge-dungeon { color: var(--dungeon-fg); border-color: var(--dungeon-fg); background: var(--dungeon-bg-1); }
+.ag-tile-badge-tower { color: var(--tower-fg); border-color: var(--tower-fg); background: var(--tower-bg-1); }
+.ag-tile-badge-castle { color: var(--castle-fg); border-color: var(--castle-fg); background: var(--castle-bg-1); }
 /* Room badge uses a fixed teal — hue kept consistent across all themes */
 .ag-tile-room-badge {
   font-family: 'Cinzel', serif; font-size: 0.5rem;

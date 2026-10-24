@@ -1,9 +1,10 @@
-import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats } from '../types';
-import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, BASE_YAML_LIMITS, getAdjCoords, FREE_COMPLETED_STATUSES } from './constants';
+import type { Player, Tile, TileState, AdvClass, Adventurer, PlayerFeats, GMMission } from '../types';
+import { getAdjCoords } from './board';
+import { LEVEL_THRESHOLDS, MAX_LEVEL, FEATS, BASE_YAML_LIMITS, FREE_COMPLETED_STATUSES } from './constants';
 import type { YamlLimits } from './apYaml';
 import { slotsFromEntry } from './slotHelpers';
 import { flatMercCuts, mercTotals, mergeMercCuts, type MercCuts } from './mercLogic';
-import { randomAdvName, randomAdvClass } from './tileGen';
+import { randomAdvName, randomAdvClass, isPassThroughType, typeKeyForCoord } from './tileGen';
 
 export function calcLevel(xp: number): number {
   let lv = 1;
@@ -31,20 +32,45 @@ export function adventurerCountForLevel(lv: number): number {
   return count;
 }
 
+// ── The Advisor (S2, map plan §1.10) ─────────────────────────────────────────
+//
+// S2 retires feats and replaces the level-up reward with the ADVISOR: a second
+// mission claim, granted at a level. The levels themselves wait on the S2 level-curve
+// pass, so this is deliberately EMPTY — `advisorCountForLevel` returns 0 at every
+// level and `missionClaimCapacity` is provably still 1.
+//
+// ⚠ FILLING THIS ARRAY IS NOT A ONE-FILE CHANGE. `enlistInMission` and
+// `claimMissionSlot` gate on the SERVER's `MISSION_CLAIM_CAPACITY`, a flat 1, and
+// the server has no level math at all — no LEVEL_THRESHOLDS, no calcLevel. Raise
+// this side alone and a player who has earned the advisor is offered a second
+// table by the UI and refused by the server with `no-claims-free`.
+//
+// `tests/lib/advisor.test.ts` fails the moment this array is non-empty, and says so
+// there. Fill it only together with the server mirror.
+//
+// The same signal is also meant to grant a SECOND ADVENTURER —
+// `adventurerCountForLevel` above has its own S1 thresholds and will need to read
+// this when the curve lands, so the two cannot be allowed to drift apart.
+export const ADVISOR_LEVELS: readonly number[] = [];
+
+/** How many advisors `lv` has unlocked. 0 until ADVISOR_LEVELS is filled. */
+export function advisorCountForLevel(lv: number): number {
+  return ADVISOR_LEVELS.filter(n => lv >= n).length;
+}
+
 // How many missions a player may actively hold a claim on at once (the mission
-// analogue of the adventurer pool for Challenges). Base 1 — the guildmaster.
-// S2's advisor is a level-up bonus that raises this to 2 AND grants a second
-// adventurer, both gated on the same future advisor-unlocked signal; when that
-// lands it changes here and in adventurerCountForLevel together. A player may
-// hold any number of finished-but-settling tables — only un-finished claims
-// count against this cap (see missionLogic.hasUnfinishedSlots / activeMissions).
-// The param is unused today but is the S2 advisor's input (a level-up bonus that
-// raises this to 2); kept in the signature so call sites are already correct.
-// The `_` prefix satisfies tsc's noUnusedParameters (used by `tsc -b` in the
-// Netlify build); the eslint-disable covers ESLint, which doesn't honor the `_`.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function missionClaimCapacity(_player: Player): number {
-  return 1;
+// analogue of the adventurer pool for Challenges). Base 1 — the guildmaster — plus
+// one per advisor (see ADVISOR_LEVELS, empty today, so this still returns 1).
+//
+// A player may hold any number of finished-but-settling tables — only un-finished
+// claims count against this cap (see missionLogic.hasUnfinishedSlots /
+// activeMissions).
+//
+// The player param is now REAL rather than a placeholder, which is the point of the
+// §1.10 shape: every call site already passes the record, so the day the advisor
+// curve lands no caller changes. See the ADVISOR_LEVELS warning about the server.
+export function missionClaimCapacity(player: Player): number {
+  return 1 + advisorCountForLevel(calcLevel(player.xp ?? 0));
 }
 
 // ── Player status ─────────────────────────────────────────────────────────────
@@ -81,6 +107,67 @@ export function playerStatus(player: StatusFlags): PlayerStatus {
  */
 export function releasesClaimsEarly(player: StatusFlags): boolean {
   return player?.restricted !== true;
+}
+
+// ── Admin roster ordering ─────────────────────────────────────────────────────
+// The Players page is a roster, not a work queue, so it stays alphabetical — but
+// an admin scanning it cares first about who is mid-something. Three bands, then
+// name (the player analogue of missionLogic.compareMissionsForAdmin).
+//
+//   active   — engaged with something LIVE right now.
+//   settled  — nothing live, but something behind them this season.
+//   none     — nothing this season yet.
+//
+// The band tracks the TABLE, not the claim: a settling seat — still a participant
+// on a live mission, claim already released because their own slots went terminal
+// — is `active`, because the admin's question is "who is still at a table", and a
+// freed claim does not take them off it. Same on the tile side: an adventurer
+// released early off an in-progress tile keeps its player in the top band. What
+// distinguishes held from freed is the card's own `· settling` tag, not this.
+
+export type ClaimActivity = 'active' | 'settled' | 'none';
+
+/** The mission/tile records the tier is derived from. All optional — a casino
+ *  season has no tiles, and a fresh season has no history. */
+export interface ClaimActivityCtx {
+  missions?:        Record<string, GMMission> | null;
+  missionsHistory?: Record<string, GMMission> | null;
+  tiles?:           Record<string, Tile> | null;
+}
+
+export function claimActivity(player: Player, ctx: ClaimActivityCtx): ClaimActivity {
+  const onTile = (state: TileState) => Object.values(ctx.tiles ?? {})
+    .some(tile => tile.state === state
+      && Object.values(tile.adventurers ?? {}).some(a => a.owner === player.id));
+
+  // Live: a held claim, a seat at a table that has not settled yet, or an
+  // adventurer on a tile still in play. `heldMission` is kept alongside the seat
+  // scan so a claim on a mission missing from `missions` still counts.
+  const heldMission = Object.keys(player.activeMissions ?? {}).length > 0;
+  const busyAdv     = Object.values(player.adventurers ?? {}).some(a => a.busy && a.busyTile);
+  const liveSeat    = Object.values(ctx.missions ?? {})
+    .some(m => (m.state === 'forming' || m.state === 'inprogress') && !!m.participants?.[player.id]);
+  const liveTile    = onTile('available') || onTile('inprogress');
+  if (heldMission || busyAdv || liveSeat || liveTile) return 'active';
+
+  // Settled: a finished mission, or an adventurer left on a tile they cleared.
+  const inHistory = Object.values(ctx.missionsHistory ?? {})
+    .some(m => !!m.participants?.[player.id]);
+  return inHistory || onTile('complete') ? 'settled' : 'none';
+}
+
+const CLAIM_ACTIVITY_RANK: Record<ClaimActivity, number> = { active: 0, settled: 1, none: 2 };
+
+/**
+ * Roster order for the admin Players page: claim activity first, then Discord
+ * username. Older records may predate `discordHandle`, so the name key falls back
+ * to the display name rather than sinking all of them under an empty key.
+ */
+export function comparePlayersForAdmin(a: Player, b: Player, ctx: ClaimActivityCtx): number {
+  const rank = CLAIM_ACTIVITY_RANK[claimActivity(a, ctx)] - CLAIM_ACTIVITY_RANK[claimActivity(b, ctx)];
+  if (rank !== 0) return rank;
+  const nameKey = (p: Player) => (p.discordHandle || p.displayName || '').toLowerCase();
+  return nameKey(a).localeCompare(nameKey(b));
 }
 
 export function checkAndGrantAdventurers(player: Player, prevLevel: number, newLevel: number): Player {
@@ -136,36 +223,18 @@ export function yamlLimitsForPlayer(player?: Player | null): YamlLimits {
   return yamlLimitsForFeats(getPlayerFeatIds(player?.feats));
 }
 
-// Returns feat IDs still available to pick for the given level slot
-export function getAvailableFeatsForSlot(
-  slot: 'level3' | 'level5' | 'level7',
-  currentFeats: PlayerFeats,
-): string[] {
-  const taken = new Set([currentFeats.level3, currentFeats.level5, currentFeats.level7].filter(Boolean));
-  const byLevel = (lv: 3 | 5 | 7) => FEATS.filter(f => f.availableAt === lv).map(f => f.id);
-
-  let candidates: string[];
-  if (slot === 'level3') {
-    candidates = byLevel(3);
-  } else if (slot === 'level5') {
-    candidates = [...byLevel(5), ...byLevel(3)];
-  } else {
-    candidates = [...byLevel(7), ...byLevel(5), ...byLevel(3)];
-  }
-
-  return candidates.filter(id => !taken.has(id));
-}
-
-// Returns the feat slot that is available for selection at the player's current level
-export function pendingFeatSlot(
-  level: number,
-  feats: PlayerFeats,
-): 'level3' | 'level5' | 'level7' | null {
-  if (level >= 7 && !feats.level7) return 'level7';
-  if (level >= 5 && !feats.level5) return 'level5';
-  if (level >= 3 && !feats.level3) return 'level3';
-  return null;
-}
+// `getAvailableFeatsForSlot` and `pendingFeatSlot` were here. REMOVED WITH THE
+// PICKER (map plan §1.10) — they existed only to drive it (what a slot could still
+// take; whether one was waiting), and no season offers a feat any more.
+//
+// What STAYS below is the part that reads feats a player already has:
+// `calcFeatBonuses`, `buildXpBonusTooltip`, `buildGoldBonusTooltip`,
+// `calcSeekerHintReduction`, `getPlayerFeatIds`, `getFeatWarnings` and
+// `yamlLimitsForFeats`. They are NOT dead and NOT S1-only: each is keyed off the
+// player record, so it no-ops for an S2 player who has none, while an archived S1
+// panel still renders its historical multipliers — and `yamlLimitsForFeats` is live
+// in the casino table today. That is why the plan’s `legacyFeats.ts` move was
+// dropped: a file by that name holding live code would be a lie.
 
 function hasFeat(playerId: string, featId: string, players: Record<string, Player>): boolean {
   const f = players[playerId]?.feats;
@@ -414,10 +483,17 @@ export function getFeatWarnings(player: Player, tiles: Record<string, Tile>): st
 
 // Pure function — given a tile state change, returns only the coords whose
 // state differs from the current map (hidden→available derivation included).
+//
+// `isPassThrough` is injected so this stays pure and unit-testable; it defaults
+// to the tileGen type lookup. A pass-through tile (S2 dungeon / Tower) reveals
+// its neighbours while merely REVEALED, without ever completing — see
+// isPassThroughType. On an S1 board nothing is pass-through and the behaviour is
+// byte-for-byte what it always was.
 export function computeRecalcUpdates(
   tiles: Record<string, Tile>,
   coord: string,
   newState: TileState,
+  isPassThrough: (coord: string) => boolean = defaultIsPassThrough,
 ): Record<string, TileState> {
   const map: Record<string, TileState> = {};
   for (const [c, t] of Object.entries(tiles)) map[c] = t.state;
@@ -434,9 +510,29 @@ export function computeRecalcUpdates(
     }
   }
 
+  // Fixpoint: a revealed pass-through tile reveals its own neighbours, which may
+  // reveal a further pass-through tile. Dungeons are ≥3 apart today so chains
+  // can't actually occur, but the loop costs nothing and survives a layout
+  // change. Bounded by the tile count — each pass reveals at least one tile or
+  // stops.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [c, state] of Object.entries(map)) {
+      if (state === 'hidden' || !isPassThrough(c)) continue;
+      for (const adjCoord of getAdjCoords(c)) {
+        if (map[adjCoord] === 'hidden') { map[adjCoord] = 'available'; changed = true; }
+      }
+    }
+  }
+
   const updates: Record<string, TileState> = {};
   for (const [c, s] of Object.entries(map)) {
     if (tiles[c]?.state !== s) updates[c] = s;
   }
   return updates;
+}
+
+function defaultIsPassThrough(coord: string): boolean {
+  return isPassThroughType(typeKeyForCoord(coord));
 }

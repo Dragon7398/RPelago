@@ -8,6 +8,13 @@ export type SlotStatus = 'Unstarted' | 'In-Progress' | '100%' | 'Goaled' | 'Done
 export type TileTypeKey =
   | 'town' | 'town_center' | 'battle' | 'puzzle' | 'elite' | 'boss'
   | 'castle' | 'dungeon' | 'tower';
+
+/**
+ * Which board geometry a season uses. The specs themselves live in
+ * src/lib/board.ts; the id is declared here so season types can reference it
+ * without board.ts and types/ importing each other.
+ */
+export type BoardId = 's1' | 's2';
 export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
 export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
@@ -74,6 +81,18 @@ export interface SlotMerc {
   by?:        string;   // uid that set it — the owner, or the admin
 }
 
+/**
+ * What a player declares when joining a world (map plan §0.5.1): one entry per
+ * game they are bringing, 1–5 of them. It is the subset of `AdvSlot` a player
+ * authors — status, timestamps, room and the casino's card fields are all
+ * stamped later by the system, never by the join form.
+ */
+export interface DeclaredSlot {
+  name:     string;
+  game:     string;
+  details?: string;
+}
+
 export interface AdvStatusNote {
   text: string;
   timestamp: number;
@@ -88,10 +107,27 @@ export interface TileAdventurer {
   slots?: AdvSlot[];
   room?: 1 | 2;
   statusNote?: AdvStatusNote;
+  /**
+   * When this player's config was verified present, ms epoch — the
+   * type-agnostic "has submitted" marker (map plan §0.5.9). Stamped by the join
+   * path in the same write as the join.
+   *
+   * It exists because the host board renders from world state alone (hitting
+   * Storage once per seat is not an option), and because the casino's `played`
+   * flag is casino-only. Absent on a CLAIMANT, who adopts a live slot and never
+   * submits anything. Read it through `seatOwesConfig`, never directly.
+   */
+  yamlAt?: number;
 }
 
 export interface Tile {
   state: TileState;
+  // The tile's generated type, persisted from S2 onward. It is derived from the
+  // season seed at runtime (tileGen), but the DB rules cannot run that code —
+  // and "you may not join a dungeon/tower/castle" has to be enforced
+  // server-side. Absent on S1 records, which predate it; read it through
+  // typeKeyForCoord, never directly.
+  typeKey?: TileTypeKey;
   required: number;
   adventurers: Record<string, TileAdventurer>;  // keyed by advId
   name: string;
@@ -103,7 +139,17 @@ export interface Tile {
   traits?: Record<string, { value: number }>;
   publicSlots?: AdvSlot[];
   claimableSlots?: Record<string, AdvSlot[]>;
+  // Lock-time target rolls, written when the tile enters `inprogress` and
+  // cleared on every transition away from it (see setTileState). Arrays because
+  // Stunning/Taunt/Thief target several players at their higher levels.
+  // Read them through rolledTargets() in lib/traits.ts, never directly — it
+  // handles the S1 singulars below.
+  stunnedAdvIds?: string[];
+  tauntedAdvIds?: string[];
+  thiefAdvIds?:   string[];
+  /** @deprecated S1 shape — single target, and no thief field existed. */
   stunnedAdvId?: string;
+  /** @deprecated S1 shape — see stunnedAdvId. */
   tauntedAdvId?: string;
   link: string;
   link2?: string;
@@ -212,11 +258,22 @@ export interface Player {
 }
 
 export interface OrbConfig {
-  eliteDrops: number[];   // indices into ALL_ORBS for each elite position
-  shopOrbs: number[];     // indices into ALL_ORBS for each shop town
-  battleOrb: number;      // index into ALL_ORBS for edge battle reward
-  puzzleOrb: number;      // index into ALL_ORBS for edge puzzle reward
-  bossMinOrbs: number;
+  /**
+   * Indices into ALL_ORBS, one per elite position in row-major order.
+   *   S1 — 5 entries (its five surface elites).
+   *   S2 — 9 entries: [0..2] the three surface elites, [3..8] the six dungeon
+   *        elites (two per dungeon), which do not exist until Phase 3 but are
+   *        assignable now so the season's orb layout can be authored up front.
+   */
+  eliteDrops: number[];
+  // ── S1 only ────────────────────────────────────────────────────────────────
+  // S2 has no shop tiles and no edge-tile orbs: all nine come from elites, and
+  // the Tower's gate replaced bossMinOrbs (see TOWER_FLOOR_ORBS). Left optional
+  // rather than removed so archived S1 configs still typecheck.
+  shopOrbs?: number[];     // indices into ALL_ORBS for each shop town
+  battleOrb?: number;      // index into ALL_ORBS for edge battle reward
+  puzzleOrb?: number;      // index into ALL_ORBS for edge puzzle reward
+  bossMinOrbs?: number;
   bossNegEffects: Record<string, string>;  // orbId -> curse text
 }
 
@@ -254,6 +311,12 @@ export interface SeasonListEntry {
   label:  string;
   shell:  SeasonShell;
   status: Exclude<SeasonStatus, 'draft'>;
+  /**
+   * Which board geometry this season renders. Absent means `s1` (5x7, town
+   * centre at D3), so every pre-existing config entry keeps working untouched.
+   * S2 sets `s2` (6x7, Castle at D6). See src/lib/board.ts.
+   */
+  board?: BoardId;
   /** Casino tables kept open concurrently. Per-season so S2 can differ from S1.5. */
   casinoOpenTables?: number;
 }
@@ -262,6 +325,8 @@ export interface SeasonListEntry {
 export interface DraftSeasonEntry {
   label: string;
   shell: SeasonShell;
+  /** Board geometry — see SeasonListEntry.board. */
+  board?: BoardId;
   casinoOpenTables?: number;
 }
 
@@ -281,6 +346,8 @@ export interface ResolvedSeason {
   id:     string;
   label:  string;
   shell:  SeasonShell;
+  /** Resolved board geometry. SeasonProvider publishes it via setActiveBoard. */
+  board:  BoardId;
   status: SeasonStatus;
   /** True when viewing an unlaunched season (admin/alpha preview + playtest). */
   isDraft: boolean;
@@ -327,10 +394,20 @@ export interface OrbAcquisition {
   buyerName?: string;
 }
 
+// S1's per-town shop. Four of them, one per town tile, each with an optional orb
+// slot. RETAINED for archived-season rendering — S1 data still holds these nodes
+// and `TownLightbox` still draws them. S2 uses `GlobalShop` below.
 export interface Shop {
   id: string;
   name: string;
   orbId: string | null;
+  itemIds: string[];
+}
+
+// S2's single shop (map plan §1.8, decision 17). No `orbId`: S2 sources all nine
+// orbs from elite drops, so nothing is bought with gold. No `name` or `id` either
+// — there is one, and it lives at a fixed path.
+export interface GlobalShop {
   itemIds: string[];
 }
 
@@ -343,7 +420,11 @@ export interface GameState {
   missionsHistory: Record<string, GMMission>;
   orbState: Record<string, OrbAcquisition>;
   orbConfig: OrbConfig;
+  // S1: one shop per town tile, keyed by shop id. Empty on an S2 season.
   shops:    Record<string, Shop>;
+  // S2: the single global shop. Absent on an S1 season, so every reader must treat
+  // a missing node as "no shop", never as an error.
+  shop?:    GlobalShop;
   // Casino-season audit trail of weekly gold-floor top-ups — the one place outside
   // gold enters the economy. Absent (→ {}) in map seasons. Written by weeklyGoldTopUp.
   goldTopUpLog: Record<string, GoldTopUpEntry>;
@@ -533,6 +614,17 @@ export interface GMParticipant {
   potShare?:    number;              // gold this seat took from the pot
   net?:         number;              // goldSwing − mercOut + potShare − entry costs actually paid
   mercOut?:     number;              // card gold this seat handed to mercs at settle (its pot share already excludes theirs)
+  /**
+   * When this player's config was verified present, ms epoch — the
+   * type-agnostic "has submitted" marker (map plan §0.5.9). Stamped by the join
+   * path in the same write as the join.
+   *
+   * It exists because the host board renders from world state alone (hitting
+   * Storage once per seat is not an option), and because the casino's `played`
+   * flag is casino-only. Absent on a CLAIMANT, who adopts a live slot and never
+   * submits anything. Read it through `seatOwesConfig`, never directly.
+   */
+  yamlAt?: number;
 }
 
 export interface GMMission {

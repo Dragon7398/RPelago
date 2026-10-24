@@ -2,8 +2,9 @@ import { useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
-import { calcLevel, pendingFeatSlot } from '../lib/gameLogic';
-import { ADV_ICONS, CENTER_COORD } from '../lib/constants';
+import { calcLevel } from '../lib/gameLogic';
+import { ADV_ICONS } from '../lib/constants';
+import { activeBoard } from '../lib/board';
 import { missionDisplayLabel } from '../lib/missionLogic';
 
 interface Props {
@@ -11,17 +12,24 @@ interface Props {
   onProfileClick: () => void;
   onTileClick: (coord: string) => void;
   onHelpClick: () => void;
+  /**
+   * Where the mission chips lead. Omitted on a board WITH town tiles (S1), where
+   * the start tile is the guild hall and holds the mission board itself. Supplied
+   * on S2, whose start tile is the Castle and has no missions on it — without it
+   * the chips would open a panel that cannot answer them.
+   */
+  onMissionsClick?: () => void;
 }
 
-export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick }: Props) {
+export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, onHelpClick, onMissionsClick }: Props) {
   const { user, signOut } = useAuth();
+  const openMissions = onMissionsClick ?? (() => onTileClick(activeBoard().startCoord));
   const { gameState }     = useGameState();
   const { addToast }      = useToast();
 
   const player = user && gameState ? gameState.players[user.id] : null;
   const level  = player ? calcLevel(player.xp) : 1;
   const adventurers = player ? Object.values(player.adventurers) : [];
-  const pending = player ? pendingFeatSlot(level, player.feats ?? {}) : null;
 
   // Pooled claims: the player may hold more than one mission at a time. The HUD
   // chip labels the first held claim and tallies the rest.
@@ -63,14 +71,13 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
 
   return (
     <div className="player-hud">
-      <span className="hud-name" onClick={onProfileClick} title={pending ? 'View your profile — feat available!' : 'View your profile'}>
+      <span className="hud-name" onClick={onProfileClick} title="View your profile">
         <span>⚔ {user.displayName.toUpperCase()}</span>
         <span className="hud-level-badge">LV {level}</span>
-        {pending && <span className="hud-feat-notify">!</span>}
         {missionLabel ? (
           <button
             className="hud-mission-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            onClick={e => { e.stopPropagation(); openMissions(); }}
             title={`Currently undertaking: ${missionLabel} — click to view`}
           >
             ⚜ {missionLabel}
@@ -78,7 +85,7 @@ export default function PlayerHUD({ onLoginClick, onProfileClick, onTileClick, o
         ) : (
           <button
             className="hud-idle-chip"
-            onClick={e => { e.stopPropagation(); onTileClick(CENTER_COORD); }}
+            onClick={e => { e.stopPropagation(); openMissions(); }}
             title="No active mission — click to view Guildmaster Missions"
           >
             ⚜ Idle

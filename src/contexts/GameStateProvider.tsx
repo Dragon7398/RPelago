@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { httpsCallable } from 'firebase/functions';
 import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref, remove } from 'firebase/database';
-import type { Tile, TileState, OrbConfig, TileAdventurer, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
+import type { Tile, TileState, OrbConfig, OrbAcquisition, Shop, AdvSlot, ActivityEntry, SlotStatus, TriState } from '../types';
 import { firebaseReady, functions, auth as firebaseAuth, db as firebaseDb } from '../firebase/config';
 import { sPath } from '../firebase/season';
 import { useAuth } from './AuthContext';
@@ -12,9 +12,9 @@ import {
   setTileState, setTileInProgress, updateTileAdmin, assignAdventurer, removeAdventurer,
   completeTile, updateAdventurer, resetTileStats, setTilesAvailability,
   collectOrb, updateOrbConfig, resetOrbs, setAdminId,
-  consumePlayerItem, mapReset, updateShop, setAdventurerSlots, setPublicSlots,
+  consumePlayerItem, mapReset, updateShop, setGlobalShopItems, setAdventurerSlots, setPublicSlots,
   setPlayerDisabled, setPlayerRestricted, setPlayerNameColor, subscribeToActivityLog, logActivity,
-  selectFeat as dbSelectFeat, adminKickAdventurer as dbKickAdventurer,
+  adminKickAdventurer as dbKickAdventurer,
   claimClaimableSlot as dbClaimClaimableSlot,
   setClaimableSlotBonus,
   addPlayerWarning, deletePlayerWarning, clearPlayerWarnings,
@@ -38,11 +38,12 @@ import {
 import { useToast } from './ToastContext';
 import { useSeason } from './SeasonContext';
 import { awardTileRewards, computeRecalcUpdates, releasesClaimsEarly } from '../lib/gameLogic';
-import { getAdjCoords, FREE_COMPLETED_STATUSES } from '../lib/constants';
+import { FREE_COMPLETED_STATUSES } from '../lib/constants';
 import { getTypeKey, typeKeyForCoord, orbIdForEdgeTile, orbIdForElite, initializeGrid, generateTileStats } from '../lib/tileGen';
-import { rcFromCoord } from '../lib/constants';
+import { getAdjCoords, rcFromCoord } from '../lib/board';
+import { rollTraitTargets } from '../lib/traits';
 import { GameStateContext } from './GameStateContext';
-import type { GameState } from '../types';
+import type { GameState, DeclaredSlot } from '../types';
 
 export function GameStateProvider({ children }: { children: ReactNode }) {
   const [gameState, setGameState]   = useState<GameState | null>(null);
@@ -136,18 +137,15 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, [seasonId]);
 
   // ── Player actions ──────────────────────────────────────────────────────────
-  const sendAdventurer = useCallback(async (coord: string, entry: TileAdventurer) => {
-    await assignAdventurer(coord, entry);
+  const sendAdventurer = useCallback(async (
+    coord: string, advId: string, slots: DeclaredSlot[],
+  ) => {
+    await assignAdventurer(coord, advId, slots);
   }, []);
 
   const recallAdventurer = useCallback(async (coord: string, advId: string, ownerId: string) => {
     await removeAdventurer(coord, advId, ownerId);
   }, []);
-
-  const purchaseOrb = useCallback(async (coord: string) => {
-    if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopOrb')({ coord, seasonId });
-  }, [seasonId]);
 
   const renameAdventurer = useCallback(async (
     playerId: string, advId: string, firstName: string, lastName: string,
@@ -155,18 +153,15 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await updateAdventurer(playerId, advId, { firstName, lastName });
   }, []);
 
-  const purchaseItem = useCallback(async (itemId: string, coord: string) => {
+  // `coord` is optional as of §1.8 — see the context type. It is omitted from the
+  // payload entirely when absent, which is what tells the server to validate
+  // against the season's single global shop instead of a town tile's.
+  const purchaseItem = useCallback(async (itemId: string, coord?: string) => {
     if (!functions) throw new Error('Firebase not configured.');
-    await httpsCallable(functions, 'purchaseShopItem')({ itemId, coord, seasonId });
+    await httpsCallable(functions, 'purchaseShopItem')({
+      itemId, seasonId, ...(coord ? { coord } : {}),
+    });
   }, [seasonId]);
-
-  const selectFeat = useCallback(async (
-    playerId: string,
-    slot: 'level3' | 'level5' | 'level7',
-    featId: string,
-  ) => {
-    await dbSelectFeat(playerId, slot, featId);
-  }, []);
 
   // ── Admin tile actions ──────────────────────────────────────────────────────
   const adminSetTileState = useCallback(async (coord: string, state: TileState) => {
@@ -175,9 +170,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
     if (state === 'inprogress' && tile) {
       const advIds = Object.keys(tile.adventurers ?? {});
-      const pick = () => advIds.length > 0 ? advIds[Math.floor(Math.random() * advIds.length)] : null;
-      const stunnedAdvId = tile.traits?.['stunning'] !== undefined ? pick() : null;
-      const tauntedAdvId = tile.traits?.['taunt']    !== undefined ? pick() : null;
+      // Stunning / Taunt / Thief roll their targets here, at lock time. Thief is
+      // NEW in S2 and is rolled by the system rather than picked by the admin --
+      // see rollTraitTargets.
+      const roll = rollTraitTargets(tile.traits, advIds);
       let roomAssignments: Record<string, 1 | 2> | undefined;
       let slotRoomUpdates: Record<string, unknown> | undefined;
       if (tile.traits?.['bifurcated'] !== undefined && advIds.length > 0) {
@@ -200,9 +196,9 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
       }
       if (wasComplete && gameState) {
         const recalc = computeRecalcUpdates(gameState.tiles, coord, 'inprogress');
-        await setTilesAvailability(recalc, coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
+        await setTilesAvailability(recalc, coord, roll, roomAssignments, slotRoomUpdates);
       } else {
-        await setTileInProgress(coord, stunnedAdvId, tauntedAdvId, roomAssignments, slotRoomUpdates);
+        await setTileInProgress(coord, roll, roomAssignments, slotRoomUpdates);
       }
     } else if (wasComplete && state !== 'complete' && gameState) {
       const recalc = computeRecalcUpdates(gameState.tiles, coord, state);
@@ -334,6 +330,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     await setAdminId(playerId);
   }, []);
 
+  const adminSetGlobalShopItems = useCallback(async (itemIds: readonly string[]) => {
+    await setGlobalShopItems(itemIds);
+  }, []);
+
   const adminUpdateShop = useCallback(async (shopId: string, updates: Partial<Shop>) => {
     await updateShop(shopId, updates);
   }, []);
@@ -391,9 +391,9 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   }, [gameState]);
 
   const claimClaimableSlot = useCallback(async (
-    coord: string, slotKey: string, entry: TileAdventurer,
+    coord: string, slotKey: string, advId: string,
   ) => {
-    await dbClaimClaimableSlot(coord, slotKey, entry);
+    await dbClaimClaimableSlot(coord, slotKey, advId);
   }, []);
 
   const adminSetClaimableSlotBonus = useCallback(async (
@@ -496,9 +496,10 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   return (
     <GameStateContext.Provider value={{
       gameState, loading, activityLog,
-      sendAdventurer, recallAdventurer, purchaseOrb, purchaseItem, renameAdventurer, selectFeat,
+      sendAdventurer, recallAdventurer, purchaseItem, renameAdventurer,
       adminSetTileState, adminUpdateTile, adminCompleteTile, adminRegenTileStats, adminGrantOrb,
       adminUpdateOrbConfig, adminResetOrbs, adminMapReset, adminConsumeItem, adminSetAdmin, adminUpdateShop,
+      adminSetGlobalShopItems,
       adminSetAdventurerSlots, adminSetPublicSlots, setNameColor, adminDisablePlayer, adminEnablePlayer,
       adminSetPlayerRestricted,
       adminKickAdventurer, claimClaimableSlot, adminSetClaimableSlotBonus,

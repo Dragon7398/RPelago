@@ -120,7 +120,36 @@
           "$coord": {
             "adventurers": {
               "$advId": {
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && (newData.child('owner').val() === auth.uid || data.child('owner').val() === auth.uid) && ((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists()))))",
+                // THREE intents merged here. Read the .write and .validate as a pair:
+                // the .write decides WHO may touch this node, the .validate decides what
+                // a surviving write may say.
+                //
+                // S2 — JOINING IS SERVER-ONLY. A player may not CREATE an entry; joins go
+                // through the joinChallenge / claimChallengeSlot callables, because the
+                // config requirement is unenforceable in a rule (a database rule cannot
+                // see a Storage object). The no-create test is the `owner` term in .write
+                // ALONE: on a create there is no `data`, so owner is null and can never
+                // equal a uid. Do NOT write it as `!newData.exists()` — that forbids every
+                // non-delete write, silently killing setAdventurerStatusNote and making the
+                // statusNote .validate below unreachable.
+                //
+                // MERCS — a non-admin write must not drop a slot that has one. Because
+                // .validate never runs on a DELETED node, the slots/0..9 terms in .write are
+                // what stop an owner RECALLING an adventurer that holds a merced slot; the
+                // per-slot rule below cannot see that case. Rules cannot iterate; 0–9 is
+                // well past any adventurer’s slot count.
+                //
+                // KICKED / RESTRICTED — the .validate keeps main’s full claim guard even
+                // though the .write above makes its create branch UNREACHABLE on this
+                // season model. Two reasons to keep it rather than trim it to the part that
+                // still fires: it is the belt to the callable’s braces if the .write is ever
+                // relaxed, and the rule is where the policy is legible. The live enforcement
+                // for S2 is in `claimChallengeSlot`, which must refuse a kicked or
+                // restricted claimant itself — a rule it bypasses cannot do it for them.
+                //
+                // Net effect: a player may UPDATE or DELETE their own entry, and only if no
+                // slot on it is merced. Creation is server-only.
+                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists())) && data.child('owner').val() === auth.uid && ((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists()))))",
                 ".validate": "!newData.exists() || root.child('config/adminId').val() === auth.uid || (((!data.child('slots/0/merc').exists() || newData.child('slots/0').exists()) && (!data.child('slots/1/merc').exists() || newData.child('slots/1').exists()) && (!data.child('slots/2/merc').exists() || newData.child('slots/2').exists()) && (!data.child('slots/3/merc').exists() || newData.child('slots/3').exists()) && (!data.child('slots/4/merc').exists() || newData.child('slots/4').exists()) && (!data.child('slots/5/merc').exists() || newData.child('slots/5').exists()) && (!data.child('slots/6/merc').exists() || newData.child('slots/6').exists()) && (!data.child('slots/7/merc').exists() || newData.child('slots/7').exists()) && (!data.child('slots/8/merc').exists() || newData.child('slots/8').exists()) && (!data.child('slots/9/merc').exists() || newData.child('slots/9').exists())) && newData.child('owner').val() === auth.uid && newData.child('advId').val() === $advId && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('adventurers').child($advId).exists() && (data.exists() || root.child('seasons').child($seasonId).child('tiles').child($coord).child('state').val() !== 'inprogress' || (root.child('seasons').child($seasonId).child('tiles').child($coord).child('claimableSlots').exists() && !root.child('seasons').child($seasonId).child('tiles').child($coord).child('kickedPlayers').child(auth.uid).exists() && root.child('seasons').child($seasonId).child('players').child(auth.uid).child('restricted').val() !== true)))",
                 "statusNote": {
                   ".validate": "!newData.exists() || (newData.hasChildren(['text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 280 && newData.child('timestamp').isNumber())"
@@ -171,13 +200,12 @@
               ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))"
             },
 
-            "feats": {
-              "$slot": {
-                ".write": "auth != null && (root.child('config/adminId').val() === auth.uid || (auth.uid === $playerId && ((root.child('config/seasonList').child($seasonId).child('status').val() === 'active' || root.child('config/seasonList').child($seasonId).child('status').val() === 'closing') || (!root.child('config/seasonList').child($seasonId).exists() && root.child('config/alphaUsers').child(auth.uid).exists()))))",
-                // A feat slot may be filled once and never re-selected.
-                ".validate": "newData.isString() && newData.val().length > 0 && (!data.exists() || root.child('config/adminId').val() === auth.uid)"
-              }
-            },
+            // `feats` had a player `.write` here so the level-up picker could fill a
+            // slot once. RETIRED IN S2 (map plan §1.10): the picker is gone from every
+            // season, so nothing client-side writes this any more and the block came
+            // out with it. `feats` now falls through to the season default — ADMIN
+            // ONLY — which is exactly right for a display-only field: S1's stored
+            // values stay readable, and their owner can no longer change them.
 
             "xp":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
             "gold": { ".validate": "newData.isNumber() && newData.val() >= 0" },
@@ -185,7 +213,7 @@
             // Middle player status: plays as normal, but claims are only returned
             // when the world resolves. Admin-only by construction — there is no
             // `.write` at or above this leaf except the season's admin one (the
-            // player-writable leaves are adventurers / nameColor / feats), so this
+            // player-writable leaves are adventurers / nameColor), so this
             // is a shape guard, not the permission boundary. Cleared by writing
             // null, which skips .validate, so the tri-state never leaves a `false`.
             "restricted": { ".validate": "newData.isBoolean()" },

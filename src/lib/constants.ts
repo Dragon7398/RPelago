@@ -1,11 +1,10 @@
-import type { AdvClass, OrbDef, ShopItem, Shop } from '../types';
+import type { AdvClass, OrbDef, ShopItem } from '../types';
 // Type-only: apYaml.ts is a standalone primitive (its only import is `yaml`), so
 // naming its shape here can't form a cycle.
 import type { YamlLimits } from './apYaml';
 
-export const COLS = 7;
-export const ROWS = 5;
-export const COL_CHARS = 'ABCDEFG';
+// Board geometry (ROWS / COLS / COL_CHARS / CENTER_COORD and the coord helpers)
+// moved to src/lib/board.ts — it is per-season now, not a set of constants.
 
 export const TILE_TYPES: Record<string, { label: string; icon: string; cls: string }> = {
   town:        { label: 'Town',   icon: '🏰', cls: 'tile-town'   },
@@ -13,6 +12,11 @@ export const TILE_TYPES: Record<string, { label: string; icon: string; cls: stri
   battle:      { label: 'Battle', icon: '⚔️',  cls: 'tile-battle' },
   puzzle:      { label: 'Puzzle', icon: '🧩', cls: 'tile-puzzle' },
   elite:       { label: 'Elite',  icon: '💀', cls: 'tile-elite'  },
+  // S2 types. Castle is the auto-complete start tile; dungeon and tower are
+  // DOORWAYS into their own sub-maps, never joinable challenges themselves.
+  castle:      { label: 'Castle', icon: '🏰', cls: 'tile-castle'  },
+  dungeon:     { label: 'Dungeon', icon: '🗝️', cls: 'tile-dungeon' },
+  tower:       { label: 'Tower',  icon: '🏯', cls: 'tile-tower'   },
   boss:        { label: 'Boss',   icon: '🐉', cls: 'tile-boss'   },
 };
 
@@ -131,7 +135,12 @@ export const TILE_TRAITS: readonly TraitDef[] = [
     description: 'Progression balancing will be set to 0 for this challenge.' },
 ];
 
-// Maps item ID → trait IDs whose names should be underlined in the shop description
+// Maps item ID → trait IDs whose names should be underlined in the shop description.
+//
+// Every entry here is a PASSIVE item, and S2 stocks none of them (§1.8) — but this
+// stays put for the same reason `traitEffect` and `calcFeatBonuses` do: it is keyed
+// by item, so it is inert for a player who owns none, and archived S1 panels still
+// need it to underline what their items negated.
 export const ITEM_TRAIT_REFS: Readonly<Record<string, readonly string[]>> = {
   wand_of_piercing:   ['magicresist', 'physresist'],
   throwing_dagger:    ['aerial', 'agile'],
@@ -233,16 +242,51 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
   },
 ];
 
+// S1 only — S2 sources every orb from an elite drop, and `purchaseShopOrb` is gone
+// (§1.8). Kept because the help text and archived S1 town panels still quote it.
 export const ORB_SHOP_COST = 1500;
 
-// The four named shops. orbId and itemIds can be edited by admin in Firebase;
-// these are the defaults written on first initialization.
-export const DEFAULT_SHOPS: Readonly<Record<string, Shop>> = {
-  centralia:  { id: 'centralia',  name: 'Centralia',  orbId: null,    itemIds: ['map'] },
-  frostshear: { id: 'frostshear', name: 'Frostshear', orbId: null,    itemIds: []      },
-  flamefell:  { id: 'flamefell',  name: 'Flamefell',  orbId: 'fire',  itemIds: []      },
-  pinereach:  { id: 'pinereach',  name: 'Pinereach',  orbId: 'earth', itemIds: []      },
-};
+// ── S2's single shop (§1.8, decision 17) ──────────────────────────────────────
+//
+// What the one global shop stocks on a fresh S2 season. The four PASSIVE items are
+// deliberately absent: each one negated a trait, and the trait rework replaced that
+// mechanic wholesale, so selling them would sell an effect that no longer exists.
+//
+// They are NOT removed from `SHOP_ITEMS`, which is a catalogue rather than a stock
+// list — `ProfileLightbox` and the admin `PlayerCard` look an owned item up there by
+// id, so dropping the entries would blank the inventories of every S1 player who
+// bought one. Deprecated means "not sold", not "forgotten".
+export const DEFAULT_S2_SHOP_ITEM_IDS: readonly string[] = [
+  'map',
+  'scroll_of_magnetism',
+  'scroll_of_generosity',
+  'coat_of_many_colors',
+];
+
+// ── S2 Tower ──────────────────────────────────────────────────────────────────
+// Orbs needed to unlock each Tower floor. The Sorcerer waits on floor 3, so the
+// season's win condition is gated at 7 of the 9 orbs — a player never needs a
+// full set. Index = floor - 1.
+export const TOWER_FLOOR_ORBS = [3, 5, 7] as const;
+export const TOWER_FLOORS = TOWER_FLOOR_ORBS.length;
+
+/** How many Tower floors `orbCount` orbs have unlocked (0 = still sealed). */
+export function towerFloorsUnlocked(orbCount: number): number {
+  return TOWER_FLOOR_ORBS.filter(n => orbCount >= n).length;
+}
+
+/**
+ * Orbs still needed to unlock the NEXT floor, or null once all are open.
+ * Drives both the tile face and the Tower panel, so the two cannot disagree.
+ */
+export function orbsToNextTowerFloor(orbCount: number): number | null {
+  const next = TOWER_FLOOR_ORBS.find(n => orbCount < n);
+  return next == null ? null : next - orbCount;
+}
+
+// S1's four named shops retired with the shop collapse (§1.8) — S2 has one global
+// shop seeded from DEFAULT_S2_SHOP_ITEM_IDS above. The S1 nodes still live in that
+// season's RTDB data, so nothing here is needed to render them.
 
 // Non-center shop IDs assigned to the three non-center towns via seeded shuffle
 export const NON_CENTER_SHOP_IDS = ['frostshear', 'flamefell', 'pinereach'] as const;
@@ -460,30 +504,3 @@ export function toRoman(n: number): string {
   return result;
 }
 
-export function coordFromRC(r: number, c: number): string {
-  return `${COL_CHARS[c]}${r + 1}`;
-}
-
-export function rcFromCoord(coord: string): [number, number] {
-  const c = COL_CHARS.indexOf(coord[0]);
-  const r = parseInt(coord.slice(1)) - 1;
-  return [r, c];
-}
-
-export function getAdjRC(r: number, c: number): [number, number][] {
-  const out: [number, number][] = [];
-  if (r > 0)       out.push([r - 1, c]);
-  if (r < ROWS - 1) out.push([r + 1, c]);
-  if (c > 0)       out.push([r, c - 1]);
-  if (c < COLS - 1) out.push([r, c + 1]);
-  return out;
-}
-
-export function getAdjCoords(coord: string): string[] {
-  const [r, c] = rcFromCoord(coord);
-  return getAdjRC(r, c).map(([ar, ac]) => coordFromRC(ar, ac));
-}
-
-export function isEdgeTile(r: number, c: number): boolean {
-  return r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1;
-}

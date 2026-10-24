@@ -3,7 +3,7 @@ import { get } from 'firebase/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useGameState } from '../contexts/GameStateContext';
 import { useToast } from '../contexts/ToastContext';
-import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds, getAvailableFeatsForSlot, pendingFeatSlot } from '../lib/gameLogic';
+import { calcLevel, xpForLevel, xpForNextLevel, getPlayerFeatIds } from '../lib/gameLogic';
 import { ADV_ICONS, MAX_LEVEL, SHOP_ITEMS, NAME_COLORS, FEATS } from '../lib/constants';
 import { db as firebaseDb } from '../firebase/config';
 import { sRef } from '../firebase/season';
@@ -16,15 +16,9 @@ interface Props {
   onClose: () => void;
 }
 
-const SLOT_LABELS: Record<string, string> = {
-  level3: 'Level 3',
-  level5: 'Level 5',
-  level7: 'Level 7',
-};
-
 export default function ProfileLightbox({ open, onClose }: Props) {
   const { user } = useAuth();
-  const { gameState, renameAdventurer, setNameColor, selectFeat } = useGameState();
+  const { gameState, renameAdventurer, setNameColor } = useGameState();
   const { addToast } = useToast();
 
   const player = user && gameState ? gameState.players[user.id] : null;
@@ -38,7 +32,6 @@ export default function ProfileLightbox({ open, onClose }: Props) {
 
   const feats    = player?.feats ?? {} as PlayerFeats;
   const featIds  = getPlayerFeatIds(feats);
-  const pending  = player ? pendingFeatSlot(level, feats) : null;
 
   // History — lazy loaded when lightbox opens
   const [pastChallenges, setPastChallenges] = useState<CompletedChallenge[] | null>(null);
@@ -60,8 +53,6 @@ export default function ProfileLightbox({ open, onClose }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const [pendingSelection, setPendingSelection] = useState<string | null>(null);
-  const [featSaving, setFeatSaving] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
 
@@ -104,20 +95,6 @@ export default function ProfileLightbox({ open, onClose }: Props) {
       addToast('Adventurer renamed successfully.', 'success');
     } catch {
       addToast('Failed to rename Adventurer. Please try again.', 'error');
-    }
-  };
-
-  const handleSelectFeat = async () => {
-    if (!user || !pending || !pendingSelection) return;
-    setFeatSaving(true);
-    try {
-      await selectFeat(user.id, pending, pendingSelection);
-      setPendingSelection(null);
-      addToast(`Feat selected: ${FEATS.find(f => f.id === pendingSelection)?.name ?? pendingSelection}.`, 'success');
-    } catch {
-      addToast('Failed to select feat. Please try again.', 'error');
-    } finally {
-      setFeatSaving(false);
     }
   };
 
@@ -175,12 +152,15 @@ export default function ProfileLightbox({ open, onClose }: Props) {
               )}
             </div>
 
-            {/* ── Feats ── */}
-            {(featIds.length > 0 || pending) && (
+            {/* ── Feats ── RETIRED IN S2 (map plan §1.10), DISPLAY ONLY.
+                The picker is gone: nothing can select a feat again, in any season.
+                S1 is archived (so read-only) and S2 replaces the mechanic with
+                companions. What a player EARNED still renders, here and on the S1
+                tile panels — retiring a mechanic should not erase the record of it. */}
+            {featIds.length > 0 && (
               <div className="profile-adv-section">
                 <div className="profile-adv-title">FEATS</div>
 
-                {/* Earned feats display */}
                 {(feats.level3 || feats.level5 || feats.level7) && (
                   <div className="profile-feats-list">
                     {(['level3', 'level5', 'level7'] as const).map(slot => {
@@ -201,39 +181,6 @@ export default function ProfileLightbox({ open, onClose }: Props) {
                   </div>
                 )}
 
-                {/* Pending feat selection */}
-                {pending && (
-                  <div className="profile-feat-select">
-                    <div className="profile-feat-select-title">
-                      ✦ {SLOT_LABELS[pending]} FEAT AVAILABLE — Choose one:
-                    </div>
-                    <div className="profile-feat-options">
-                      {getAvailableFeatsForSlot(pending, feats).map(featId => {
-                        const def = FEATS.find(f => f.id === featId);
-                        if (!def) return null;
-                        const selected = pendingSelection === featId;
-                        return (
-                          <button
-                            key={featId}
-                            className={`profile-feat-option${selected ? ' selected' : ''}`}
-                            onClick={() => setPendingSelection(selected ? null : featId)}
-                          >
-                            <span className="profile-feat-option-icon">{def.icon}</span>
-                            <span className="profile-feat-option-name">{def.name}</span>
-                            <span className="profile-feat-option-desc">{def.description}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button
-                      className="profile-feat-confirm"
-                      disabled={!pendingSelection || featSaving}
-                      onClick={handleSelectFeat}
-                    >
-                      {featSaving ? '…' : 'CONFIRM FEAT'}
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 

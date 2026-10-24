@@ -1,7 +1,8 @@
 import { ADV_ICONS } from '../../lib/constants';
+import JoinChallengeForm from './JoinChallengeForm';
 import { resolveNameColor } from './lbHelpers';
 import { AdvStatusIcons, AdvFeatIcons, AdvSlotBlock } from './AdvRow';
-import type { Tile, TileAdventurer, AdvClass, Player, Adventurer, AuthUser } from '../../types';
+import type { Tile, TileAdventurer, AdvClass, Player, Adventurer, AuthUser, DeclaredSlot } from '../../types';
 
 interface Props {
   tile: Tile;
@@ -11,7 +12,7 @@ interface Props {
   players: Record<string, Player>;
   alreadySent: boolean;
   freeAdvs: Adventurer[];
-  onSendAdventurer: (advId: string) => Promise<void>;
+  onSendAdventurer: (advId: string, slots: DeclaredSlot[]) => Promise<void>;
   onRecall: (advId: string) => Promise<void>;
   onLoginRequest: () => void;
   onClose: () => void;
@@ -84,20 +85,16 @@ export default function AvailableState({
       ) : (
         <div className="lb-send-section">
           <div className="lb-send-label">SEND AN ADVENTURER</div>
-          {freeAdvs.length === 0 ? (
-            <div className="lb-no-adv">All your Adventurers are currently on missions.</div>
+          {user && players[user.id] ? (
+            <JoinChallengeForm
+              tile={tile} coord={coord} player={players[user.id]} uid={user.id}
+              freeAdvs={freeAdvs} onJoin={onSendAdventurer}
+            />
           ) : (
-            <div className="lb-adv-picker">
-              {freeAdvs.map(adv => (
-                <button key={adv.id} className="lb-adv-pick-btn" onClick={() => onSendAdventurer(adv.id)}>
-                  <span>{ADV_ICONS[adv.cls] ?? '⚔️'}</span>
-                  <span className="btn-adv-name">{adv.firstName} {adv.lastName}</span>
-                  <span className="btn-adv-class">{adv.cls}</span>
-                </button>
-              ))}
-            </div>
+            <div className="lb-no-adv">Log in to join this challenge.</div>
           )}
         </div>
+
       )}
     </>
   );

@@ -58,6 +58,10 @@ that contradicts them.
 | 31 | **Win condition**: the Sorcerer falls on Floor 3 → the surface Tower tile flips to *Conquered*. **No automatic season state change** — the admin winds down manually so in-flight challenges can finish. |
 | 32 | **Every challenge and mission collects a YAML at join** (§0.5). Joining becomes one step — *declare slots, attach config* — enforced server-side. Tile joins move from client RTDB writes to **callables**. |
 | 33 | **Traits become leveled** (§0.6, full spec in [season-2-traits-plan.md](season-2-traits-plan.md)). The data model lands with §0.5; generation and UI are later passes, two of them blocked on open design questions. |
+| 34 | **Interior challenges are full citizens**: Cheesetracker sync, room telemetry, room health, status reports — all of it. This is what forced §3.3's reversal onto the main `tiles` map. |
+| 35 | **Interior completions write to `profiles/`** like any other challenge. The external profile site's tile counts will include them. |
+| 36 | **A dungeon is a CONTAINER, not a world.** Each interior challenge settles on its own — *every slot Goaled/Done*, the same rule as a mission. The dungeon groups them for progress display only. |
+| 37 | **`goldTopUpLog` does not carry into S2.** Gold top-ups are a casino invention: S2 challenges and several missions cost nothing to join, so there is no artificial inflation to correct. Chest payouts therefore need no money-in audit entry. |
 
 ### Decisions made while planning (flagging for confirmation)
 
@@ -75,6 +79,345 @@ that contradicts them.
   and the "no joining a dungeon" restriction needs server-side enforcement.
 - **Field Work's 500 GP is charged at enlist and refunded on stand-down**,
   matching casino ante semantics.
+
+---
+
+## Implementation status
+
+Updated 2026-10-05. Branch `s2/board-foundation`. Everything below is behind the
+`rpelago_s2` **draft** season — invisible to players, and inert for the live
+casino season, which renders no map.
+
+### Done — Phase 1 foundation
+
+| § | Scope | Notes |
+|---|-------|-------|
+| 1.1 | Per-season board geometry + season wiring | `src/lib/board.ts`; `SeasonProvider` publishes the board during render |
+| 1.2 / 1.2a | `TILE_TYPES` entries + theme tokens | Dungeon tuned in all 10 themes; Tower/Castle aliased once |
+| 1.3 | S2 generator wired in | `src/lib/tileGenS2.ts`; `initializeGrid` / `buildDefaultTileData` dispatch on the board |
+| 1.4 | Pass-through cascade | Fixpoint in both `computeRecalcUpdates` and generation |
+| 1.5 | Castle / Dungeon / Tower panels | `CastlePanel`, `DungeonSection`, `TowerSection` (replaces `BossSection` on S2) |
+| 1.6 | Orb sourcing | 9 elite drops; board-aware `defaultOrbConfig` and admin Orbs page |
+| 0.5 | Universal YAML-at-join | `joinChallenge` / `claimChallengeSlot` callables, `yaml/**` Storage tree, `yamlAt` marker, full config screening |
+| 1.7 | Districts — the Capital Ward | `src/components/districts/`; `districtView` in `App.tsx`; HUD mission chips re-pointed. **S2 is now playable end to end.** |
+| 1.8 | Shop collapse | One `seasons/{id}/shop`; `purchaseShopOrb` REMOVED; `purchaseShopItem` coord optional; board-aware admin tab. **Needs a functions deploy.** |
+| 1.9 | Casino district | `CasinoShell` takes an optional `onBack`; `App` returns it EARLY. No `CasinoLanding` extraction — see below. Frontend only. |
+| 1.10 | Feat retirement + Advisor | Picker, HUD badge, help section, `feats/$slot` rule and `selectFeat` all gone; `ADVISOR_LEVELS` + `advisorCountForLevel` landed empty. Display paths kept. |
+| 1.11 | Admin + help | Help sections made BOARD-AWARE (+ `SectionTower`, `SectionDistricts`); `seedInitialMissions` seeds S2's casino tables; MapPage needed nothing. **CLAUDE.md brought current.** |
+
+**To see it**: set `board: "s2"` on the `rpelago_s2` entry in `config/draftSeasons`,
+then preview that season.
+
+
+### Done — §0.6 / traits Phase A model
+
+| Scope | Notes |
+|-------|-------|
+| Leveled trait model | `src/lib/traits.ts` — 16 defs, `resolveTrait` with the ignored `_player` equipment seam, legacy `{value}` reader |
+| Reader migration | `TileDetails`, `lbHelpers`, `SectionTraits`, `MapGridPanel`, `agendaHelpers` all resolve through the model |
+| Multi-target rolls | `stunnedAdvIds` / `tauntedAdvIds` / `thiefAdvIds`; thief is system-rolled; clearing invariant single-sourced as `TILE_ROLL_FIELDS` |
+
+**Not yet authorable.** `TraitEditor` still writes `{ value }` (Phase C), which
+`traitLevel` tolerates as level 1 — the read path is ready, the write path is not.
+
+**S2 is playable end to end** as of §1.7. The Capital Ward below the map is the
+route to Guildmaster Missions on a board with no town tiles, so a draft-season
+player can now level, enlist, join a challenge with a config, and settle.
+
+Two doors in the ward are deliberately interim: the **Shop** waits on §1.8 (its
+data model is still keyed by town tile, and S2 has none), and the **Casino**
+waits on §1.9 (`CasinoLanding` extraction). Both are wired and routed — §1.8 and
+§1.9 each fill a body rather than build a door.
+
+### Revised after the casino-season audit (2026-09-29)
+
+**§3.3 was reversed** — interiors now live in the main `tiles` map, not a
+separate tree. The original rationale ("existing loops would see 108 extra
+tiles") turned out to be wrong on audit: nine of ten loops *want* them, `MapGrid`
+never iterates the map at all, and keeping them separate would have meant a third
+branch in five server systems — two of which (slot sync, adventurer-free) are
+load-bearing enough that interiors could never resolve without them. See §3.3 and
+decisions 34–37.
+### Folded in from the casino season (2026-10-17) — kicked / restricted claims
+
+Main added **`kickedPlayers`** and the claim-refusal policy: a player kicked off a
+world while it was in progress may not claim its open slots, and a **restricted**
+player may not claim anywhere (a claim is extra capacity, which restriction exists
+to curb). It enforces this on missions in `claimMissionSlot`, and on tiles in
+`database.rules.json` — because on main a tile claim is a CLIENT write.
+
+> **On S2 it is not.** §0.5.2 routed every tile claim through
+> `claimChallengeSlot`, and the Admin SDK bypasses every rule in that file — so the
+> guard main added would simply never have run. A kicked player could have reclaimed
+> the slot they abandoned, and a restricted player could have claimed freely.
+> **`claimChallengeSlot` now carries the check itself**, mirroring
+> `claimMissionSlot` down to the wording.
+
+The rules conflict resolved as S2's `.write` (no client CREATE) plus **main's full
+`.validate`**, which is a strict superset of S2's — it adds owner, advId,
+adventurer-exists and the claim guard, and every one of those short-circuits on an
+update or a delete, so nothing S2 does client-side is affected. Main's create
+branch is unreachable under that `.write` and is kept deliberately: it is the belt
+to the callable's braces if the `.write` is ever relaxed, and the rule is where the
+policy stays legible.
+
+**The test block says so out loud.** With client creation refused for everyone, the
+rule no longer tells a kicked claimant from an ordinary one — main's three refusal
+tests would still pass with the kicked/restricted terms deleted. The reframed block
+in `tests/rules/seasons.rules.test.ts` warns against reading it as proof the policy
+works, and points at the callable.
+
+Also in this merge, needing no S2 work: `roomGoalProgress` (counts open claimable
+slots as ungoaled, matching the ready-to-settle ✓), `liveCasinoStats` /
+`revertSeatGambitUpdates` (a gambit leaves with its seat), `mercCandidateBlockers`
+(client + server mirror both present), and a clean **append** to `AP_LISTS`
+(`mid-oct`) — no past era edited, as that registry requires.
+
+### Folded in from the casino season (2026-10-05)
+
+The `main` merge brought **mercenaries** and the **blanket-target config screen**.
+Neither needed an S2 design change, but two things had to be reconciled:
+
+- **`claimChallengeSlot` stamps `claimed: true`** on the slots it hands over. The
+  flag is what stops a claimant passing a live slot straight to a merc
+  (`mercHireBlockers`), and it arrived on the client claim path that §0.5.2
+  replaced with a callable — so the intent had to move server-side or be lost.
+- **The join form screens what the casino screens.** `checkBlanketTargets` (hard
+  block, no exception path) and `checkWorldCount` were missing from
+  `JoinChallengeForm`, which predates them. Since §0.5 makes that form the config
+  intake for *every* S2 challenge, it was the weakest point in the chain, and the
+  server cannot cover it — it verifies the object exists, never its contents.
+  The form also now fills the declared slots from the attached config.
+
+`mercLogic` is otherwise decoupled from S2's open questions: it takes `baseXp` /
+`baseGold` already feat-multiplied, so retiring feats (§1.10) touches its callers
+and not the split math. `resolveMercTarget` reads `tiles/{coord}` with no shape
+assumption, so interior compound coords (§3.3) work with no special case.
+
+### §1.11 — board-aware help, not an S2 rewrite
+
+The plan said to rewrite `SectionMap`, replace `SectionBoss` with `SectionTower`
+and update `SectionShop`. Rewriting would have made **S1's own documentation
+wrong** — the help modal is season-agnostic and an archived season is still fully
+readable — so the board-dependent facts read from the `BoardSpec` instead:
+
+- **`SectionMap`** takes its dimensions from `board.cols × board.rows`, and swaps
+  the Town row for Castle and the Boss row for Dungeon + Tower on `hasTowns` /
+  `hasBoss`. Tile icons are read from `TILE_TYPES` rather than retyped — the first
+  pass put the Castle's glyph on the Tower, and help that disagrees with the board
+  about what a tile looks like is worse than no entry.
+- **`SectionBoss` is KEPT and `SectionTower` added**; `HelpModal` offers one or the
+  other on `hasBoss`, and `SectionDistricts` only when `!hasTowns`. They are a pair,
+  never an addition. `SectionTower` reads its gates from `TOWER_FLOOR_ORBS` and
+  `SectionDistricts` its list from `DISTRICTS`, so neither can drift.
+- **`SectionShop`** branches on `hasShopTiles`, and on S2 lists only
+  `DEFAULT_S2_SHOP_ITEM_IDS` — showing the whole catalogue would advertise the four
+  retired passives as purchasable.
+- **`SectionYaml`'s "or a feat" clause** (deferred from §1.10) now follows the
+  PLAYER, not the season: naming feats to someone who has none describes a route
+  they cannot take, while dropping the word for someone who does would contradict
+  the highlighted numbers below it.
+
+**`seedInitialMissions` gained S2's casino tables.** Table seeding was
+casino-shell-only; S2 is a MAP season that runs tables in its Casino district, so
+the casino block no longer returns early and a map season falls through into the
+basic/patrol bootstrap as well. Keyed on `!activeBoard().hasTowns`, the same
+districts predicate `App` and `ShopsPage` use. The casino-shell path is behaviourally
+unchanged. (Field Work joins in Phase 2.)
+
+**MapPage needed nothing.** The plan listed board-driven dimensions, a tile-type
+editor gaining the new types, and an S1-only boss-trait editor. On inspection
+`MapGridPanel` already reads `activeBoard()` (§1.1), `typeKeyForCoord` is already
+board-aware (§1.3) and `TILE_TYPES` already carries the three new entries (§1.2) —
+and **neither a tile-type dropdown nor a boss-trait editor exists**: types are
+seed-derived, so there was never anything to extend or gate.
+
+**CLAUDE.md was brought current** in the same pass (it had drifted on three
+sections and omitted every S2 module): per-board geometry, per-board orb sourcing,
+the two shop models, feats-as-display-only plus the Advisor tripwire, the removed
+`purchaseShopOrb`, the new join callables, a Season 2 section covering the board /
+districts / universal config intake, and eleven missing file-map rows.
+
+### §1.10 — what retired, what stayed, and the Advisor tripwire
+
+**Retired** (nothing can select a feat again, in any season — S1 is archived and
+therefore read-only, and S2 replaces the mechanic with companions):
+the picker in `ProfileLightbox`, the `!` badge in `PlayerHUD`, `SectionFeats` and
+its help tab, `getAvailableFeatsForSlot`, `pendingFeatSlot`, the `feats/$slot`
+player `.write`, and `selectFeat` end to end (db → provider → context).
+
+**Kept, and the plan's `legacyFeats.ts` move DROPPED.** The surviving helpers —
+`calcFeatBonuses`, the two tooltip builders, `calcSeekerHintReduction`,
+`getPlayerFeatIds`, `getFeatWarnings`, `yamlLimitsForFeats` — are each keyed off the
+player record, so they no-op for an S2 player while an archived S1 panel still
+renders its historical multipliers. Decisively, **`yamlLimitsForFeats` is live in
+the casino table today**: a file called `legacyFeats.ts` holding it would be
+mislabelled. `ProfileLightbox` keeps the earned-feats DISPLAY for the same reason —
+retiring a mechanic should not erase the record of it.
+
+`SectionYaml` also kept its feat-driven values: it already reads the player's own
+feats, so it shows base caps and no bonus banner for anyone who has none. Its prose
+still says "or a feat", which is wrong for an S2 player — that is a **help-text fix
+for §1.11**, with the rest of the rewrite.
+
+> **The Advisor shipped as a shape, not a curve.** `ADVISOR_LEVELS` is `[]`, so
+> `advisorCountForLevel` returns 0 and `missionClaimCapacity` is provably still 1 —
+> but it now takes and uses the player record, which is the point: no call site
+> changes when the curve lands.
+>
+> **It was NOT mirrored server-side, deliberately.** `functions/src/index.ts` has no
+> level math at all — no `LEVEL_THRESHOLDS`, no `calcLevel` — so a true mirror meant
+> a third copy of the level curve for thresholds that are still TBD. Instead
+> `MISSION_CLAIM_CAPACITY` stays a flat 1 with a comment naming the hazard, and
+> **`tests/lib/advisor.test.ts` fails the moment `ADVISOR_LEVELS` gains an entry** —
+> because at that instant the UI would offer a second table that `enlistInMission`
+> and `claimMissionSlot` still refuse with `no-claims-free`. Fill the array only
+> together with the server.
+>
+> The same signal is also meant to grant a second adventurer;
+> `adventurerCountForLevel` carries a note so the two cannot drift.
+
+**One untested path surfaced:** nothing covered the old `feats/$slot` player write,
+so removing it broke no test. `feats` is now admin-only by inheritance and pinned,
+since live code still reads the field — a player who could write it could raise
+their own YAML caps.
+
+### §1.9 deviation — no `CasinoLanding` extraction
+
+The plan called for extracting `CasinoShell`'s body into a `CasinoLanding` with an
+optional `onBack`, rendered inside the map page in place of `MapGrid`. Two findings
+killed that shape, and decision 18's own wording ("**swaps the landing view** …
+like the S1.5 landing") endorses the simpler one:
+
+1. **`CasinoShell` is a full-page shell, not a panel.** It owns a brand bar, a gold
+   readout, the Lounge/Floor toggle, `SettingsPanel`, the ⚙ ADMIN link and the
+   Help / Login / Privacy modals. The map page renders every one of those, so
+   nesting it would double all six.
+2. **The casino palette is coupled to `body`.** All 19 theme blocks in
+   `casino/themes.css` are `body.casino-scope.theme-*`, and `SettingsPanel` puts
+   `theme-*` on `body` too — both classes must sit on the SAME element. Scoping the
+   tokens to a wrapper div means rewriting the live casino's entire palette; the
+   alternative, setting `body.casino-scope` beneath the map's header, repaints that
+   header in felt tones.
+
+So the district **returns early from `App`**, above its own chrome, and
+`CasinoShell` gained one prop. `onBack` is the district tell; the only things that
+vary with it are the back control, the brand kick ("Midseason" is untrue in a map
+season, so the district names its own via `season.label`), and the help filter (a
+casino season has only casino sections; the district sits in a map season, where all
+of them still apply). The casino season's own path is unchanged — no `onBack`, same
+copy, same `variant="casino"`.
+
+`showXp` needed no work: `CasinoTable` already derives it from the shell, so a map
+season shows the XP row on its own. The §1.7 `CasinoDistrict.tsx` placeholder and
+its CSS are deleted; the routing it held open is unchanged.
+
+**The cost, recorded deliberately:** in the casino district the player gets the
+casino's chrome rather than the map's `Header` / `PlayerHUD`. Accepted — it is the
+better-suited chrome, it is what S1.5 players already know, and the back control
+covers navigation. Keeping the map header instead means the selector rewrite in (2),
+which should wait until the casino season winds down.
+
+### §1.8 deviations — three places the plan said DELETE and the code says KEEP
+
+Each one would have been a silent regression for the ARCHIVED S1 season, which is
+read-only but still fully rendered.
+
+1. **`SHOP_ITEMS` keeps all eight entries.** The four passive items are no longer
+   STOCKED (that is what `DEFAULT_S2_SHOP_ITEM_IDS` controls), but the array is a
+   catalogue, not a stock list — `ProfileLightbox` and the admin `PlayerCard` look
+   an owned item up in it by id, so removing the entries would blank the inventory
+   of every S1 player who bought one. Deprecated means "not sold".
+2. **`traitEffect()` and `ITEM_TRAIT_REFS` stay where they are.** Both are keyed by
+   item, so they are already inert for an S2 player who owns none — exactly the
+   argument §1.10 makes for `calcFeatBonuses`. No `legacyItems.ts` was needed.
+3. **`TownLightbox.tsx` is NOT deleted.** It is the only renderer for town tiles
+   (`TileLightbox` dispatches to it on `town` / `town_center`), and S1 is archived
+   rather than deleted. Instead the buyable rows were extracted to
+   `components/shop/ShopItemList.tsx` and are now shared by it and `ShopPanel`, so
+   there is one implementation rather than two. Its orb slot became a **record**
+   (`CLAIMED` / `UNCLAIMED · price`) with no control, since the callable behind it
+   is gone and an archived season is read-only anyway.
+
+Also: the client `ORB_SHOP_COST` survives (the help text and that archived orb row
+quote it); only the server copy went, with `purchaseShopOrb`. The **help sections**
+still describe S1's four town shops and buying orbs — that rewrite is §1.11.
+
+The global shop node needs no rule of its own: `seasons/$seasonId` grants `.write`
+to the admin alone and every player write is a child carve-out, so `shop` is
+admin-only by inheritance. Pinned in `tests/rules/seasons.rules.test.ts` precisely
+because no rule names it.
+
+### Deviations from this plan, and why
+
+Recorded because each one is load-bearing and none is obvious from the code alone.
+
+1. **`activeBoard()` defaults to S1 rather than throwing** (§1.1). `tileGen` builds
+   its type grid at **module scope** in the main bundle, so a throwing accessor
+   broke app load for everyone — casino players included — before any season
+   resolved.
+2. **`BoardId` is declared in `types/index.ts`**, re-exported from `board.ts`.
+   The season types need to name it; declaring it in `board.ts` would have
+   pointed the dependency backwards.
+3. **Geometry helpers take an optional explicit `spec`.** `tileGen` pins itself to
+   `BOARD_SPECS.s1` through it, because the S1 generator must still emit a 5×7
+   grid while an S2 season is active (admin previewing the draft) — otherwise
+   `getAdjRC` returns row 5 and indexes off a 5-row array.
+4. **The S2 generator lives in its own module.** `tileGen` has S1-pinned
+   `ROWS`/`COLS` at module scope; putting S2 logic beside them would reintroduce
+   exactly the shadowing bug (3) removes.
+5. **`seededShuffle` extracted to `src/lib/seededRng.ts`.** `tileGen` imports
+   `tileGenS2` to dispatch, so a shared helper living in `tileGen` made the two
+   circular — across a module that does real work at import.
+6. **Tower and Castle CSS are aliases declared once** (§1.2a), not per-theme
+   copies. Custom properties resolve at *use* time, so they follow whatever the
+   active theme sets for boss/town and cannot drift.
+7. **Sealed-panel backgrounds use `color-mix`, not a fixed lightness.** A
+   hardcoded dark `L` renders as a near-black slab in the four light themes.
+8. **The Tower tile face shows a live orb countdown** ("2 orbs" / "Open") rather
+   than a static "Sealed" — its gate is real data today. The Dungeon stays
+   "Locked": its gate is its interior, which is Phase 3.
+9. **§1.6 was scoped to the data model + admin UI.** Retiring the
+   `purchaseShopOrb` callable moved to §1.8, where the shop actually collapses —
+   deleting a deployed function wants its own deploy, not a ride-along.
+
+> ⚠️ **`npx tsc --noEmit` type-checks NOTHING in this repo.** The root
+> `tsconfig.json` is `{"files": [], "references": [...]}`, so it exits 0
+> unconditionally. This was caught only when `npm run build` failed on a change
+> that `--noEmit` had passed. **The only real gate is `npm run build`** (`tsc -b`)
+> plus `npm run test:unit` and `npm run lint`. `CLAUDE.md` still lists
+> `npx tsc --noEmit` as the type-check command and is misleading on this point.
+
+### Remaining
+
+**Next up — §0.5 + §0.6 together.** They are mutually dependent (the join
+callable validates a Horde floor, which needs the trait resolver) and they gate
+the rest: §0.5 rewrites the join flow the challenge panels render, so building
+those first would be wasted work. This is also the first slice needing a
+**functions deploy**, which wants scheduling against the live casino season.
+
+| Scope | Status |
+|-------|--------|
+| §0.5 Universal YAML-at-join | ✅ **done** — §0.5.7 withdrawn; §0.5.9 marker shipped as `yamlAt`. One piece held: the YAML check on `enlistInMission` |
+| §0.6 / traits Phase A — data model + `resolveTrait` | ✅ **done** (model + readers + rolls; admin editor is Phase C) |
+| §1.7 Districts (ward + Town Hall / Shop / Barn panels) | ✅ **done** — Shop body deferred to §1.8, casino view to §1.9, sprites pending art |
+| §1.8 Shop collapse (+ retire `purchaseShopOrb`, `ORB_SHOP_COST`) | ✅ **done** — see the three deviations below; help text deferred to §1.11 |
+| §1.9 Casino district | ✅ **done** — as a landing SWAP, not an extraction (deviation below) |
+| §1.10 Feat retirement + Advisor | ✅ **done** — Advisor curve is an empty placeholder with a tripwire test; see below |
+| §1.11 Admin + help | ✅ **done** — board-aware rather than rewritten; see below |
+| Phase 2 — Companions | not started |
+| Phase 3 — Dungeons & Tower | not started |
+| Traits Phase B (generation) / C (UI) | blocked on open questions 1 and 2 |
+
+**PHASE 1 IS COMPLETE.** The remaining work is Phase 2 (Companions), Phase 3
+(Dungeons & the Tower) and traits Phase B/C.
+
+**Still blocked on design decisions** (traits plan §10): trait difficulty
+modifiers, the Sorcerer's loadout + orb interaction, and equipment↔traits. Traits
+B/C wait on the first two; nothing else does.
+
+**Hold until the casino season winds down**: the `decayHours` plumbing (§2.6),
+the YAML check on `enlistInMission` (§0.5), and the G2 reclaim fix (§2.7a).
 
 ---
 
@@ -228,29 +571,33 @@ atomic update** as the removal, in all three paths —
 
 | Path | Clears |
 |------|--------|
-| `adminKickAdventurer` (new callable, §0.5.7) | `tiles/{coord}/statusIncidents/{playerId}` |
+| `adminKickAdventurer` (stays a CLIENT write — §0.5.7 withdrawn) | `tiles/{coord}/statusIncidents/{playerId}` |
 | `adminKickMissionParticipant` (existing callable) | `missions/{missionId}/statusIncidents/{playerId}` |
-| `playerReset` (new callable, §0.5.7) | the entry on **every** container it removes the player from |
+| `playerReset` (stays a CLIENT write — §0.5.7 withdrawn) | the entry on **every** container it removes the player from |
 
-### 0.5.7 Kick and reset must become callables
+### 0.5.7 ~~Kick and reset must become callables~~ — WITHDRAWN
 
-Two admin paths that remove a player currently write RTDB **from the client**:
+**This section is struck. It contradicted §0.5.8 and would have been pure risk.**
 
-| Path | Today | Must become |
-|------|-------|-------------|
-| `adminKickAdventurer` ([db.ts:423](../src/firebase/db.ts#L423)) | client multi-path `update()` | **callable** |
-| `playerReset` ([db.ts:765](../src/firebase/db.ts#L765)) | client multi-path `update()`; also mints claimable slots for in-progress tiles ([db.ts:807](../src/firebase/db.ts#L807)) | **callable** |
+Its whole justification was that `yaml/**` is owner-scoped, so an admin cannot
+delete another player's config and the cleanup must run under the Admin SDK.
+But §0.5.8 — decided later — says kick and player-reset **RETAIN** the departed
+player's config, because it describes a world that is still in play and is the
+host's only record of what runs in that slot.
 
-The reason is the Storage rule, not the RTDB rule: `yaml/**` is owner-scoped
-(`fileName == request.auth.uid + '.yaml'`), so **an admin cannot touch another
-player's config file** — only the Admin SDK can. Any cleanup path where the
-actor is not the file's owner has to run server-side.
-`adminKickMissionParticipant` is already a callable and needs only the added
-YAML handling; these two need converting.
+Retain means there is nothing to delete, which means there is nothing that needs
+the Admin SDK. Everything else these two paths do is already admin-writable from
+the client: removing tile entries, minting claimable slots, writing warnings, and
+(new) clearing `statusIncidents`.
 
-Both must keep their current atomicity: the kick's auto-warning and the reset's
-whole archive/zero/trim/claimable-slot bundle are single multi-path updates
-today, and must stay single updates inside the callable.
+So **`adminKickAdventurer` and `playerReset` stay client writes.** The only
+change either needs is nulling `statusIncidents/{playerId}` on the container, in
+the same atomic `update()` they already make (decision 36's soft-counter rule).
+
+> Converting them would have meant reimplementing `playerReset`'s ~120 lines —
+> including the casino seat teardown with per-card pot fractions — inside a
+> callable, against a live casino season, to enable a deletion the design had
+> already decided not to do.
 
 ### 0.5.5 Deploy gate
 
@@ -263,6 +610,31 @@ slots, a denied config that was never resubmitted).
 `completeMission` pattern — return `{ warned, missingYamls }` without acting,
 let the caller confirm, then re-call. Not a hard block: an admin sometimes needs
 to deploy anyway.
+
+### 0.5.9 The host board needs a submitted-marker on the record
+
+The casino season landed `seatOwesConfig` / `seatsAwaitingConfig`
+([missionLogic.ts:180](../src/lib/missionLogic.ts#L180)), which drive the admin
+board's "who am I waiting on" roster. **Both assume casino**, and universal
+YAML-at-join breaks them in two ways:
+
+1. **`seatsAwaitingConfig` early-returns `[]` for any non-casino mission.** Once
+   Patrol, Basic Training and Field Work all collect configs, that gate is
+   simply wrong and must widen to every type.
+2. **`seatOwesConfig` keys "has submitted" off `played`** — a casino-only flag
+   set when a seat locks its hand. A non-casino participant never sets it, so
+   **every** such seat would read as owing a config forever.
+
+The fix is not to special-case per type. §0.5.2 has the join callable verify the
+Storage object exists — it must **also stamp a marker on the participant /
+adventurer record** in the same write (a `yamlAt` timestamp, say). Otherwise the
+host board would have to hit Storage once per seat just to render, and
+`seatOwesConfig` has nothing type-agnostic to test.
+
+With that marker, `seatOwesConfig` generalises cleanly: **denied → owes; marker
+present → doesn't owe; all-slots-`claimed` → doesn't owe** (the pure-claimant
+case, which §0.5.8 exempts from YAML entirely). `played` stops being load-bearing
+and stays a casino display detail.
 
 ### 0.5.6 Tests
 
@@ -329,7 +701,7 @@ trait loadout / orb interaction — catalogued in the traits plan §10.
 
 ## Phase 1 — Board, districts, shop, orbs
 
-### 1.1 Per-season board geometry
+### 1.1 Per-season board geometry ✅ DONE
 
 New module **`src/lib/board.ts`** (no dependencies — it is the bottom of the
 import graph):
@@ -354,7 +726,8 @@ export const BOARD_SPECS: Record<BoardId, BoardSpec> = { … };
 // Module state, mirroring src/firebase/season.ts's setCurrentSeason pattern:
 // callers don't thread the board through every signature.
 export function setActiveBoard(id: BoardId): void;
-export function activeBoard(): BoardSpec;   // throws if unset
+// DEFAULTS to the s1 spec when unset — it must NOT throw. See the note below.
+export function activeBoard(): BoardSpec;
 
 // Geometry helpers move here from constants.ts and read activeBoard():
 export function coordFromRC(r: number, c: number): string;
@@ -385,12 +758,28 @@ Changes:
   `ROWS`/`COLS`/`bossCoordFromSeed` copy for `onOrbAcquired`). Add this to the
   dual-copy list in `CLAUDE.md`.
 
+> **`activeBoard()` must NOT throw — unlike the season path helpers.** `sPath`
+> throws when no season is set because guessing a season would write to the wrong
+> data. A board is only a rendering concern, and the codebase evaluates geometry
+> at **module scope** in at least two places:
+>
+> - [tileGen.ts:153](../src/lib/tileGen.ts#L153) eagerly runs
+>   `buildTypeGrid(DEFAULT_SEED)` at import, and `tileGen` is imported by
+>   `Tile.tsx` — i.e. it is in the **main bundle**.
+> - [MapGridPanel.tsx:12-17](../src/components/admin/mapPage/MapGridPanel.tsx#L12-L17)
+>   builds `allCoords` in a module-scope loop over `COLS`/`ROWS`.
+>
+> A throwing accessor would therefore break app load for **every** user —
+> including live casino players — before any season resolves. Default to the
+> `s1` spec instead, and fix `MapGridPanel`'s module-scope loop to build lazily
+> during the migration.
+
 > **Invariant to preserve:** `initializeGrid(seed)` must be called before any
 > `getTypeKey` lookup. Now it also depends on the board, so `subscribeToGame`
 > must resolve the board first. Persisting `typeKey` on the tile (§1.3) makes
 > this progressively less load-bearing.
 
-### 1.2 S2 tile types
+### 1.2 S2 tile types ✅ DONE
 
 - **`TileTypeKey`** gains `'dungeon' | 'tower' | 'castle'`. `'town'`,
   `'town_center'`, `'boss'` stay in the union for the S1 archive.
@@ -410,7 +799,7 @@ Changes:
   `.tile-name` accents), plus `.lb-title.dungeon|tower|castle` and the
   `.ag-tile-name-*` / `.ag-tile-badge-*` agenda variants.
 
-### 1.2a Theme tokens — the color plan
+### 1.2a Theme tokens — the color plan ✅ DONE
 
 RPelago ships **ten themes**: `:root`, moonlit, verdant, aether (dark);
 parchment, sakura, mint, lapis (light); obsidian, tidepool (dark). Four are
@@ -486,7 +875,7 @@ themes (parchment, sakura, mint, lapis) for AA contrast on the `.tile-label` and
 and tidepool. The light-theme dungeon values above are deliberately dark
 (28–36% L) and are the most likely to need a nudge.
 
-### 1.3 S2 generator (`src/lib/tileGen.ts`)
+### 1.3 S2 generator ✅ DONE — shipped as `src/lib/tileGenS2.ts`
 
 Split the type-grid builder by board: `buildTypeGridS1` (today's function,
 unchanged) and **`buildTypeGridS2(seed)`**:
@@ -526,7 +915,7 @@ Also in `tileGen.ts`:
 - `getBossPosition` / `isInBossCornerRegion` / `getBossLiveStats` — S1-only.
 - `orbIdForEdgeTile` returns `null` on an S2 board.
 
-### 1.4 Availability cascade — dungeon/tower pass-through
+### 1.4 Availability cascade — dungeon/tower pass-through ✅ DONE
 
 `computeRecalcUpdates` in `src/lib/gameLogic.ts` currently derives `available`
 purely from neighbours of `complete` tiles. S2 adds: **a revealed dungeon or
@@ -551,7 +940,7 @@ layout changes.)
 
 The same rule applies in `buildDefaultTileData`'s initial reveal.
 
-### 1.5 Dungeon / Tower / Castle panels
+### 1.5 Dungeon / Tower / Castle panels ✅ DONE
 
 `src/components/TileLightbox.tsx` currently branches `isTown → TownLightbox`,
 `typeKey === 'boss' → BossSection`. New branches:
@@ -581,7 +970,7 @@ shows `{filled}/{required} ⚔` on ordinary tiles):
   the dungeon is fully `complete`.
 - **Tower** — **three floor pips**, lighting as each floor's terminal clears.
 
-### 1.6 Orbs
+### 1.6 Orbs ✅ DONE (callable retirement deferred to §1.8)
 
 - `OrbConfig` for S2: `eliteDrops: number[]` of length **9** — indices 0–2 are
   the three surface elites, 3–8 are the six dungeon elites (2 per dungeon, in
@@ -762,6 +1151,34 @@ the numbers come from the level, not the form.
 | Check Count % | Raises the global **2,000-check ceiling** *and* the **Agile** cap — level-resolved via `resolveTrait` (§0.6), so it scales against `[250, 220, 180, 140, 100]` rather than a fixed 250. Not Sturdy. Surfaced in `SectionYaml` and the trait display |
 | Battle/Puzzle XP % and GP % | Reward math in `awardTileRewards` (tiles) — elite counts as **battle**. Missions are untyped: no % effect, but pets still earn XP |
 
+> **The five allowance effects plug into an EXISTING seam — `yamlLimitsForFeats`.**
+> The casino season landed a full YAML-limits pipeline that the plan predates:
+> `BASE_YAML_LIMITS` (constants) → `yamlLimitsForFeats(featIds)` /
+> `yamlLimitsForPlayer(player)` (gameLogic) → `checkYamlLimits(text, limits)`
+> (apYaml), already consumed by the casino attach-time warning
+> (`CasinoTable.tsx`), the host download badge (`MissionsPage.tsx`) and the rules
+> text (`SectionYaml.tsx`).
+>
+> The companion allowances map **1:1 onto `YamlLimitKey`**, so companions extend
+> that one function rather than building a parallel path:
+>
+> | Companion effect | `YamlLimits` key | Companion |
+> |---|---|---|
+> | Priority Locations | `priorityLocations` | Rivlet |
+> | Excluded Locations | `excludeLocations` | Corvex |
+> | Hint Locations | `startLocationHints` | Inklet |
+> | Starting Hints | `startHints` | Guppin |
+> | Starting Inventory | `startInventory` | Wyrmkin |
+>
+> Since feats retire (decision 10), `yamlLimitsForFeats` becomes party-aware —
+> something like `yamlLimitsFor(player, party)`. Every existing consumer then
+> picks up companion bonuses for free, including the host's download badge. This
+> makes half of §2.3 a change to one function instead of new plumbing.
+>
+> ⚠️ **Check Count has no `YamlLimits` key** — it bounds *checks*, not a capped
+> setting, and `checkYamlLimits` screens only the five above. It stays a separate
+> concern applied against the global ceiling and the Agile cap.
+
 Reward formula: `Math.round(base * (1 + featBonus + companionPct))` — additive,
 per decision 15. With feats retired, `featBonus` is 0 in S2.
 
@@ -810,11 +1227,29 @@ stay reachable (§Economy notes).
 >
 > Fix: **stamp `decayHours` onto the mission record** in `gmFreshMission` /
 > `freshMission` (add it to `GMMission`, which doesn't carry it today) and have
-> both decay functions read `m.decayHours ?? 24`. Stamping beats looking the def
-> up because in-flight cohorts keep the decay they were created with when a def
-> is retuned mid-season, and it avoids adding another client/server mirrored
-> table. The two decay functions are already an undocumented dual copy — add
-> them to the `CLAUDE.md` mirror list while touching them.
+> both decay functions read it. Stamping beats looking the def up because
+> in-flight cohorts keep the decay they were created with when a def is retuned
+> mid-season, and it avoids adding another client/server mirrored table. The two
+> decay functions are already an undocumented dual copy — add them to the
+> `CLAUDE.md` mirror list while touching them.
+>
+> **Decay is per mission type, and casino stays 36h in S2:**
+>
+> | Type | `decayHours` |
+> |------|--------------|
+> | `casino` | **36** |
+> | `fields` | **30** |
+> | `basic` / `patrol` | **24** |
+>
+> ⚠️ **`MISSION_DEFS.casino.decayHours` currently says `24` and is wrong** — it
+> is dead code, and the live 36h comes from the hardcoded ternary. Correct the
+> def to **36** in the same change that starts reading it, or plumbing the field
+> will silently cut every casino table's decay by a third.
+>
+> ⚠️ **The legacy fallback must be type-aware, not a flat 24.** Missions created
+> before the field exists carry no `decayHours`, so read
+> `m.decayHours ?? (m.type === 'casino' ? 36 : 24)`. A flat `?? 24` would
+> accelerate decay on every casino table already in flight.
 
 - `GMMissionType` gains `'fields'`.
 - **YAML at enlist** per §0.5 — `enlistInMission` is already a callable, so this
@@ -911,6 +1346,19 @@ depended upon rather than incidental:
 (`if (!tile.link) return true;`) and the mission branch (`if (!m.link) return true;`)
 switch from `link` to `cheese` — and the tile branch must check `cheese2` as well
 when the tile is bifurcated, since room 2 syncs independently.
+
+**A `restricted` player is exempt from early reclaim — and it is now live code.**
+`playerStatus` / `releasesClaimsEarly`
+([gameLogic.ts:66](../src/lib/gameLogic.ts#L66)) landed with the casino season:
+a restricted player keeps holding their claim until the *world* resolves, rather
+than the moment their own slots go terminal. Every early-release site gates on
+`releasesClaimsEarly`, and `tickSlotStatuses` inlines the same check. The two
+gap fixes above must preserve that — in particular, moving the reclaim check
+above the `hasActiveSlots` bail must not let it bypass the restricted gate.
+
+Note the split of responsibilities for §0.5's join callables: **`disabled` blocks
+joining outright; `restricted` does not.** A restricted player enlists, plays and
+settles normally — the penalty is purely that the claim comes back late.
 
 **Capacity interaction.** With reclaim general, `MISSION_CLAIM_CAPACITY` 1 means
 "one *unfinished* mission at a time, plus any number settling" — a player starts
@@ -1048,50 +1496,79 @@ scale, S1 hand-authored 31 (16 battles + 9 puzzles + 5 elites + boss), so this
 is ~1.7× S1's authoring load — heavier per tile, since puzzles and elites carry
 more design thought than battles do.
 
-### 3.3 Data shape
+### 3.3 Data shape — interiors live in the MAIN `tiles` map
+
+> **This section was reversed.** It originally put interiors in a separate
+> `seasons/{id}/dungeons/…` tree, to stop existing loops seeing ~108 extra
+> tiles. That rationale did not survive contact with the server work the casino
+> season has since landed — see the audit below.
 
 ```
-seasons/{id}/dungeons/{surfaceCoord}/
+seasons/{id}/tiles/{coord}            // ALL challenges: surface AND interior
+seasons/{id}/dungeons/{surfaceCoord}  // container metadata only
   meta:   { seed, name, portal: "r_c", frozen: boolean }
-  tiles/{r_c}:   Tile              // identical shape to a surface tile
-  chests/{r_c}:  DungeonChest
-seasons/{id}/tower/{floor}/          // floor = 1 | 2 | 3
+  chests/{r_c}: DungeonChest
+seasons/{id}/tower/{floor}             // floor = 1 | 2 | 3
   meta:   { seed, name, portal: "r_c", stairs: "r_c", frozen: boolean }
-  tiles/{r_c}:   Tile
-  chests/{r_c}:  DungeonChest
+  chests/{r_c}: DungeonChest
 ```
 
-Keyed by `surfaceCoord` (not a dungeon slug) so the surface tile and its interior
-share an identity. Kept **out of** the top-level `tiles` map deliberately: every
-existing `Object.entries(gameState.tiles)` loop — status report, agenda, admin
-warn counts, `computeRecalcUpdates` — would otherwise start seeing 108 extra
-tiles. Consumers opt in explicitly.
+**Coord scheme.** An interior coord carries its world in the key, so one lookup
+tells you where a tile lives and nothing can collide with a surface coord
+(`A1`–`G6`, which never contain `:`):
 
-```ts
-interface DungeonChest {
-  pathId:      't1' | 't2';
-  pathTiles:   number;        // challenge cells on this treasure path (excl. portal & chest)
-  revealedAt:  number | null; // stamped when the preceding challenge completes
-  opensAt:     number | null; // revealedAt + 24h
-  isMimic:     boolean;
-  mimicRevealedAt?: number;   // when the disguise dropped and the Puzzle went live
-  settledAt?:  number;
-  payouts?:    Record<string, { tier: ChestTier; gold: number }>;
-}
-type ChestTier = 'high' | 'medium' | 'low' | 'none';
-```
+| World | Coord | Example |
+|-------|-------|---------|
+| Surface | `{col}{row}` | `D4` |
+| Dungeon interior | `{surfaceCoord}:{r}_{c}` | `G1:2_3` |
+| Tower interior | `T{floor}:{r}_{c}` | `T1:0_2` |
 
-Challenges inside behave **identically** to surface challenges (decision /
-Q4): adventurers from the same pool, slots, YAML, traits, claimable slots,
-Cheesetracker sync, status reports, companion parties (battle/puzzle typing
-applies normally; elite counts as battle).
+`:` and `_` are both legal RTDB key characters. One helper —
+`parseWorldCoord(coord)` → `{ world: 'surface' } | { world: 'dungeon', at, r, c }
+| { world: 'tower', floor, r, c }` — is the only place that scheme is decoded.
 
-Interior joins go through the same `joinChallenge` / `claimChallengeSlot`
-callables as the surface (§0.5.2), with the composite `containerId`
-(`G1__2_3`, `tower1__0_2`) selecting the Storage path. The callables need a
-`dungeonRef` argument so they can resolve the interior tile path; everything
-else — YAML verification, slot validation, capacity checks — is shared.
+**Why this reversed.** Nine of the ten loops over the tiles map *want* interiors;
+one needs scoping; none break. Audited:
 
+| Consumer | With interiors in the map |
+|---|---|
+| `tickSlotStatuses` (`sp(seasonId,'tiles')`) | ✅ **required** — interiors get Cheesetracker sync and adventurer auto-free |
+| `onTileComplete` (`tiles/{coord}/state`) | ✅ **required** — interior completions reach `profiles/` |
+| `roomProgress` sampling · `roomTelemetry/{season}/tiles/{id}` | ✅ works unchanged; the compound coord is just an id |
+| `statusReport` / Report tab | ✅ wanted — interiors are real rooms needing chasing |
+| `ChallengesPage`, `AdminDashboard`, `App` warn counts | ✅ wanted |
+| `OrbsPage` elite scan | ✅ **this is how dungeon-elite orbs get assigned** — no special case needed |
+| `agendaHelpers` | ✅ wanted — an adventurer inside a dungeon belongs on the agenda |
+| `getFeatWarnings` double-assignment scan | ✅ wanted |
+| `renameAdventurer` name propagation | ✅ wanted |
+| `computeRecalcUpdates` | ⚠️ **must be scoped** — see below |
+| `MapGrid` / `MapGridPanel` | ✅ unaffected — they iterate board geometry and look tiles up BY coord, never over the map |
+
+Keeping the separate tree would have meant adding a third branch to five
+independent server systems, each one a place to forget. Two of those — slot sync
+and adventurer-free — are not optional polish: without them an interior
+challenge can never resolve.
+
+**The one real cost: `computeRecalcUpdates` must be scoped to one world.** It
+iterates the whole tiles map and derives `available` from adjacency, and the
+three world kinds have *different* adjacency (surface = orthogonal with
+pass-through; interior = wall-aware). Callers pass only that world's tiles, and
+the matching `Adjacency` (§3.4). Mixing them would let a surface tile reveal
+through a dungeon wall.
+
+Challenges inside behave **identically** to surface challenges: adventurers from
+the same pool, slots, YAML, traits, claimable slots, Cheesetracker sync, status
+reports, companion parties (battle/puzzle typing applies normally; elite counts
+as battle). Interior joins go through the same `joinChallenge` /
+`claimChallengeSlot` callables (§0.5.2) — the compound coord IS the
+`containerId`, so no extra argument is needed and the Storage path falls out for
+free.
+
+**A dungeon is a container, not a world.** Each interior challenge is its own
+world for the admin board, the status report and settle purposes — *"every slot
+Goaled/Done"*, exactly like a mission (`missionSettleBlockers`). The dungeon
+groups them for **progress display only** (the two orb glyphs, the §3.6
+completion rule). Nothing treats a dungeon as a single settleable unit.
 ### 3.4 Wall-aware cascade
 
 `computeRecalcUpdates` (§1.4) takes a pluggable adjacency. Phase 3 adds a second
@@ -1205,6 +1682,39 @@ rock and chest cells reject adventurer writes.
   refused. Regenerating Tower Floor 1 invalidates Floors 2 and 3 (their portals
   derive from it) — the admin action must refuse or cascade explicitly.
 
+
+### 3.9 World-shaped infrastructure interiors plug into
+
+The casino season grew a body of code that assumes exactly **two** kinds of
+world — mission and tile. Interiors are a third, and §3.3 makes them tiles so
+most of it applies for free. What still needs doing, and what must NOT be
+rebuilt in parallel:
+
+**Extend, never duplicate — `WorldScope`.** `missionScope` / `tileScope` /
+`worldSlotReport` ([statusReport.ts](../src/lib/statusReport.ts)) build "the set
+of slots a world is judged over" once, shared by the report and the admin room
+peek. Its own header warns that a second construction differing *even slightly*
+silently changes verdicts — `allIdle60` and both last-player warnings compare a
+slot against every other slot in that list. Interiors are ordinary tiles under
+§3.3, so `tileScope` already covers them; do not add a fourth.
+
+**Room telemetry needs no new path.** `roomTelemetry/{seasonId}/tiles/{id}/{room}`
+takes the compound coord as `{id}` unchanged. `roomProgress` sampling likewise
+writes to `tiles/{coord}/roomProgress`. Both work the moment interiors are
+tiles — which is most of why they are.
+
+**Room health** (`roomHealth`, `worstRoomTier`) applies per interior challenge,
+not per dungeon (decision 36).
+
+**Bifurcated interiors.** `roomProgress2` and the room-2 telemetry branch exist
+for bifurcated tiles. Nothing stops an interior challenge carrying `bifurcated`,
+and it costs nothing to allow — but it doubles that cell's rooms inside a maze
+that is already 20-odd challenges. Worth deciding during authoring rather than
+in code; the machinery does not care either way.
+
+**APworld eras reset.** `sourcedGameLists` scopes to the active season, so every
+game reads `NEW` again on S2's first tables. Documented behaviour, not a bug —
+but it will look like one on launch day if the host is not expecting it.
 ---
 
 ## Testing
