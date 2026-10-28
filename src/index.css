@@ -3300,6 +3300,31 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   padding: 0.4rem 0.6rem; border-radius: 2px;
   background: var(--bg-card); border: 1px solid var(--border);
 }
+/* Card-popularity rows (admin Stats). The over/under tones run along the
+   GOLD↔MUTED axis rather than green↔red: over-picked is not "good" and
+   under-picked is not "bad", it is directional information, and a pass/fail
+   palette would editorialise. The rate is printed in its own column either way,
+   so hue never carries the meaning alone. */
+.dash-card-row.over td {
+  background: color-mix(in oklch, var(--gold) 9%, var(--bg-card));
+}
+.dash-card-row.over td:first-child {
+  box-shadow: inset 3px 0 0 var(--gold-dim); color: var(--gold);
+}
+.dash-card-row.under td {
+  color: var(--text-muted);
+}
+.dash-card-row.under td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--text-muted) 60%, var(--bg-card));
+}
+.dash-card-gap td {
+  text-align: center; padding: 0.5rem 0.4rem;
+  background: color-mix(in oklch, var(--text-muted) 7%, var(--bg-card));
+}
+.dash-stat-empty {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.85rem; color: var(--text-muted); padding: 0.8rem 0.2rem;
+}
 .dash-stat-fig-val {
   font-family: 'Cinzel', serif; font-size: 1.15rem; line-height: 1.1;
   color: var(--gold); font-variant-numeric: tabular-nums;

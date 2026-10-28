@@ -335,6 +335,22 @@ Eight shop items are defined in `SHOP_ITEMS` (`constants.ts`):
 
 > **Dual-copy item costs**: `SHOP_ITEMS` in `src/lib/constants.ts` defines costs for the UI. `ITEM_COSTS` in `functions/src/index.ts` is a separate hardcoded copy used by the `purchaseShopItem` Cloud Function to enforce the price server-side. **Both must be updated together** whenever a price changes.
 
+> **Starting gold is PER SHELL, and the two figures are separate constants.**
+> `createSeasonPlayer` branches: a `casino` shell player starts at
+> `CASINO_START_GOLD`, a `map` shell player at **`MAP_START_GOLD`**. Both are 500
+> today but answer different questions — a casino bankroll vs. enough for one S2
+> companion-capture mission before earning anything — so they are deliberately not
+> one shared constant. All three gold figures (`CASINO_START_GOLD`,
+> `CASINO_GOLD_FLOOR`, `MAP_START_GOLD`) are **dual-copied** between
+> `src/lib/constants.ts` and `functions/src/index.ts`.
+>
+> A map season created players at `gold: 0` through S1, which is why S1's records
+> show that; S2 charges for companion captures, hence the change. **It does not
+> migrate anyone** — existing S2 draft players keep whatever they were created
+> with (🪙 Adjust Gold on the admin Players card fixes one by hand). **S2 has no
+> weekly top-up**: its challenges are free to join, so there is no ante to fall
+> behind on.
+
 ### Feats system
 
 Players unlock one feat at each of levels 3, 5, and 7, stored in `player.feats` (`PlayerFeats` type). Feats are permanent and modify YAML submission limits and/or provide passive bonuses.

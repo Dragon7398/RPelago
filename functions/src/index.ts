@@ -23,10 +23,13 @@ import {
 } from './seasonPaths';
 import { normalizeGameName, gameKey, handleKey, apSlotKey } from './profileKeys';
 
-// Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR in
-// src/lib/constants.ts (dual-copy, like ITEM_COSTS and the casino engine).
+// Season gold economy — MUST mirror CASINO_START_GOLD / CASINO_GOLD_FLOOR /
+// MAP_START_GOLD in src/lib/constants.ts (dual-copy, like ITEM_COSTS and the
+// casino engine). See that file for why the map and casino figures are separate
+// constants rather than one shared 500.
 const CASINO_START_GOLD = 500;  // fresh casino player's starting balance
 const CASINO_GOLD_FLOOR = 250;  // weekly top-up brings anyone below this up to it
+const MAP_START_GOLD    = 500;  // fresh map-season (S2) player; no top-up exists there
 
 initializeApp();
 
@@ -88,7 +91,9 @@ async function createSeasonPlayer(
   await ref.set({
     ...base,
     xp:          0,
-    gold:        0,
+    // Was 0 through S1, where gold was purely earned. S2 charges for its
+    // companion-capture missions, so a new player starts able to run one.
+    gold:        MAP_START_GOLD,
     adventurers: { [advId]: { id: advId, firstName, lastName, cls, busy: false, busyTile: null } },
     inventory:   {},
   });

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
-import { CASINO_GAMES, CASINO_GAME_ORDER } from '../../lib/casinoData';
+import { CASINO_GAMES, CASINO_GAME_ORDER, CARD_TYPES, DECK_VARIANTS, DECK_VARIANT_ORDER } from '../../lib/casinoData';
+import { cardPopularity, type CardPopularityRow } from '../../lib/cardStats';
 import { normalizeSlots } from '../../lib/slotHelpers';
 import { playerStatus } from '../../lib/gameLogic';
 import type { AdvSlot, GMMission, TriState } from '../../types';
@@ -277,6 +278,93 @@ function StatTable({ headLabel, rows, foot, rankFrom }: {
   );
 }
 
+// How many rows each end of the popularity table shows. The middle is where the
+// index is closest to 1 and says least, so it collapses by default.
+const CARD_ENDS = 8;
+
+function CardRow({ r, rank }: { r: CardPopularityRow; rank: number }) {
+  // Tone by whether the card beat its availability, with the index printed beside
+  // it — hue is never the only carrier.
+  const tone = r.index == null ? '' : r.index > 1.15 ? ' over' : r.index < 0.85 ? ' under' : '';
+  return (
+    <tr className={`dash-card-row${tone}`}>
+      <td><span className="dash-stat-rank">{rank}</span> {r.name}</td>
+      <td>{CARD_TYPES[r.type]?.label ?? r.type}</td>
+      <td className="num">{r.observed}</td>
+      <td className="num">{r.availability}</td>
+      <td className="num">{r.index == null ? '—' : `${r.index.toFixed(2)}×`}</td>
+    </tr>
+  );
+}
+
+function CardPopularityPanel({ missions }: { missions: GMMission[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const rep = useMemo(() => cardPopularity(missions), [missions]);
+
+  if (rep.seats === 0) {
+    return <div className="dash-stat-empty">No seat has locked a hand yet, so there is nothing to weigh.</div>;
+  }
+
+  const rows = rep.rows;
+  const head = rows.slice(0, CARD_ENDS);
+  const tail = rows.slice(-CARD_ENDS);
+  const hidden = Math.max(0, rows.length - CARD_ENDS * 2);
+
+  return (
+    <>
+      <p className="dash-stat-note">
+        Picks measured against a theoretical deck pooling one <strong>Purist</strong>,
+        one <strong>Unconsoled</strong> and one <strong>Indie</strong> deck, so a card
+        with more copies is not credited for simply being dealt more often.
+        <strong>1.00×</strong> means a card was committed exactly as often as that deck
+        offers it; above is over-picked, below under-picked.
+      </p>
+      <div className="dash-stat-figures">
+        <Figure value={rep.seats} label="Seats counted" />
+        <Figure value={rep.cards} label="Cards committed" />
+        <Figure value={rep.claimedSkipped} label="Claimed (excluded)" />
+      </div>
+      <p className="dash-stat-note">
+        Deck choices behind those seats:{' '}
+        {DECK_VARIANT_ORDER.map(v => `${DECK_VARIANTS[v].label} ${rep.deckMix[v] ?? 0}`).join(' · ')}
+        {rep.deckUnknown > 0 && ` · unrecorded ${rep.deckUnknown}`}.
+        {' '}<strong>Read the two ends with this in mind:</strong> a seat on Indie never saw a
+        Franchise card and a seat on Unconsoled never saw a Platform one, so the more
+        those decks were chosen, the more those categories are under-counted here
+        rather than genuinely unpopular.
+      </p>
+      <table className="dash-stat-table">
+        <thead>
+          <tr>
+            <th scope="col">Card</th>
+            <th scope="col">Category</th>
+            <th scope="col" className="num">Picked</th>
+            <th scope="col" className="num">In pool</th>
+            <th scope="col" className="num">Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(showAll ? rows : head).map((r, i) => <CardRow key={r.name} r={r} rank={i + 1} />)}
+          {!showAll && hidden > 0 && (
+            <tr className="dash-card-gap">
+              <td colSpan={5}>
+                <button className="dash-btn" onClick={() => setShowAll(true)}>
+                  Show {hidden} more in the middle
+                </button>
+              </td>
+            </tr>
+          )}
+          {!showAll && hidden > 0 && tail.map((r, i) =>
+            <CardRow key={r.name} r={r} rank={rows.length - CARD_ENDS + i + 1} />)}
+        </tbody>
+      </table>
+      {showAll && (
+        <button className="dash-btn" onClick={() => setShowAll(false)}>Collapse the middle</button>
+      )}
+    </>
+  );
+}
+
 export default function StatsPage() {
   const { gameState } = useGameState();
   // Release/Collect and the chosen game titles all exist on every mission type, so
@@ -347,6 +435,11 @@ export default function StatsPage() {
       <section className="dash-section">
         <h3 className="dash-section-title">Casino Tables by Game Type</h3>
         <StatTable headLabel="Game Type" rows={gameRows} />
+      </section>
+
+      <section className="dash-section">
+        <h3 className="dash-section-title">Card Popularity · Most and Least Picked</h3>
+        <CardPopularityPanel missions={[...live, ...done]} />
       </section>
 
       <div className="dash-stat-scope">
