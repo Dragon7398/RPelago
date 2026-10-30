@@ -20,9 +20,21 @@ const GAME_ICON: Record<CasinoGame, string> = {
   seven_card_stud: '♠',
   holdem:          '♥',
   blackjack:       '♣',
+  finale:          '✦',
 };
 
+// ⚠️ The list below iterates CASINO_GAME_ORDER, which deliberately excludes the
+// finale — so this entry is not rendered yet. That is correct for now: the finale
+// is a one-off the host opens once, and advertising it permanently (including in a
+// season where it does not exist) would be wrong. Rendering it conditionally on the
+// table existing is WS-I's job.
 const GAME_BLURB: Record<CasinoGame, string> = {
+  finale:
+    'The season closer, run once and free to enter. Pull the arm for a board of 3 rows × 5 ' +
+    'reels, respin up to three reels once at no cost, then take ONE row and keep as many of its ' +
+    'five cards as you are willing to play. Each card is worth 1–5 stars set by how far the ' +
+    'season UNDER-picked it, and you are paid 50g plus 10g a star — so the games nobody chose ' +
+    'pay the most, and keeping one means playing it.',
   five_card_draw:
     'Dealt 5 cards. Mark any you would rather not play — reroll them once for a fresh draw, ' +
     'or simply leave them out. You commit up to 5, and you may discard as many as you like.',

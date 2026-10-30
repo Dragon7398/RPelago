@@ -5974,3 +5974,22 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-prob-player-head .sr-handled-btn { margin-left: auto; }
 .sr-excuse-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .sr-excuse-row .dash-action-btn { font-size: 0.6rem; padding: 0.2rem 0.5rem; }
+
+/* ── The Finale panel (admin Casino tab) ──
+   Layout only: the controls reuse .dash-select / .dash-number-input so the panel
+   matches every other admin editor and inherits their theme behaviour rather than
+   introducing a second input style. Colours here are tokens, never literals. */
+.dash-finale-form {
+  display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end;
+  padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 3px;
+  background: oklch(from var(--border) l c h / 0.14);
+}
+.dash-finale-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.dash-finale-field > span {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+/* The datetime control needs room for a full date and time; everything else about
+   it is .dash-number-input, including the focus ring. */
+.dash-finale-field .dash-number-input.when { width: auto; min-width: 12rem; text-align: left; }
+.dash-finale-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }

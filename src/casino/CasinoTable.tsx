@@ -57,6 +57,10 @@ const GAME_BLURB: Record<CasinoGame, string> = {
   seven_card_stud:
     'Seven cards, dealt at once. Commit up to five — at least two go unplayed, and you may drop ' +
     'more than two if you only want the cards you like.',
+  finale:
+    'One last Archipelago, on a slot machine. Pull the arm for a 3×5 board, respin up to three ' +
+    'reels once for free, then take a single row — and keep only the cards you are willing to ' +
+    'play. Stars run INVERSE to how often the season picked a card, so the overlooked pay most.',
   holdem:
     'Two hole cards now. Once every seat is in, five shared cards are revealed — then pay the ' +
     'play-on to commit up to five of your seven (dropping as many as you like), or fold and ' +

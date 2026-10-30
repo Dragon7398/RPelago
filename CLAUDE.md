@@ -9,8 +9,15 @@ npm run dev       # Vite dev server (localhost:5173)
 npm run build     # tsc -b then vite build → dist/
 npm run lint      # ESLint check
 npm run preview   # Preview production build
-npx tsc --noEmit  # Type-check only (no emit)
+npx tsc -b        # Type-check only (no emit) — see the warning below
 ```
+
+> ⚠️ **`npx tsc --noEmit` type-checks NOTHING here.** The root `tsconfig.json` is
+> `{ "files": [], "references": [...] }`, so that command resolves to an empty
+> program and exits 0 however broken the code is. Use **`npx tsc -b`** (add
+> `--force` to bypass the build cache), which is what `npm run build` runs. The
+> functions package is a normal tsconfig, so `cd functions && npx tsc --noEmit` is
+> correct there — **the two halves take different commands.**
 
 The build is a **multi-page Vite app** with two HTML entry points (configured in `vite.config.ts`):
 - `index.html` → main game app (`src/main.tsx`)
@@ -800,6 +807,32 @@ The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat
 
 The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
 
+> **`CasinoGame` includes `'finale'`, and `CASINO_GAME_ORDER` deliberately does NOT.**
+> The finale is the season closer (a one-off Slots table; see
+> [docs/casino-finale-slots-impl.md](docs/casino-finale-slots-impl.md)), so it is a
+> member of the type but not of the **rotation** — that array drives
+> `pickNextCasinoGame`, the per-game `casinoSeries` counters, `seedInitialMissions`
+> and `minCasinoAnte`, and adding the finale to it would put the closer in the
+> respawn rotation and **zero the minimum ante** (its ante is 0). So: anything
+> keyed `Record<CasinoGame, …>` now needs a `finale` entry, while anything that
+> means "the games we rotate through" must iterate `CASINO_GAME_ORDER`. Both halves
+> are pinned in `tests/lib/finaleTable.test.ts`. The predicate for every fork is
+> **`isFinale(m)`** (`casinoData.ts`, mirrored in `functions/src/casinoEngine.ts`) —
+> never the label, never the presence of `finaleClosesAt`. A finale's
+> `currentMaxSlots` is `Infinity` (no cap, no decay), its `shouldDeploy` is always
+> false (the `finaleClosesAt` deadline deploys it instead), and its `baseMax` is
+> **0 on purpose**: several seat-pip loops read `baseMax` directly as
+> `for (i = 0; i < baseMax; i++)`, and zero makes each of them draw only the seats
+> that exist instead of a wall of fake empty ones.
+
+> **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
+> Finale panel**, and that sharing is the point: the host reviews the card-popularity
+> table (with its Finale ★ column) and then opens the finale, which **freezes** those
+> star values onto the mission forever. Two separate derivations of "which missions
+> count" would let them review one table and freeze another. It excludes `forming`
+> tables — a table that has not run is still hypothetical, and its cards may yet be
+> re-picked via `resubmitCasinoYaml`.
+
 > **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus the server-only `CASINO_POT_CUT_PCT` constant. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
 
 > **Pot is variable, banked at creation.** Casino tables roll their opening pot in `rollTableSetup` (`4×seats² + randInt(0,150−R−C) + 2×(120−R−C)`) — there is no flat pot seed. Both table builders (`freshCasinoTable` client / `gmFreshCasinoTable` server) bank it as `casinoOpenPot` alongside `casinoOpenStats`, because the pot then grows via ante cuts and the opening amount is never logged. The admin pot-check and the season money-in audit diff against `casinoOpenPot`. Non-casino missions still route through `freshMission`/`gmFreshMission` (which honour an optional flat `def.potSeed`); casino never does.
@@ -879,6 +912,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
+| `src/lib/finaleStars.ts` | The casino finale's star tiers — `finaleStarTiers` (the snapshot frozen onto the mission), `finaleStarRanking`, `starTierSizes`, `compareForStars`, and the star→gold formula (`finaleOwnGold` / `finaleClaimedGold`). **Not yet mirrored server-side** — see the ⚠️ in the file and [docs/casino-finale-slots-impl.md](docs/casino-finale-slots-impl.md) |
 | `src/lib/apYaml.ts` | Player-config parsing + screening: `parseApYaml`, `checkWorldCount`, `checkProgressionBalancing` (can block), `checkBlanketTargets` (always blocks — `Everything` / `Everywhere` under any capped setting), `checkYamlLimits` / `summarizeLimitFindings` (advisory settings caps) |
 | `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`). Renders **one `PhasePanel` per table the player is seated at** (`myTables`) — pooled claims let a player hold several at once; **held (active) claims sort above freed (settling) ones**, and every table shows until it completes. Falls back to a single Ledger/empty panel when they hold none. |
 | `src/components/casino/PhasePanel.tsx` | Per-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger). One instance per seat; `mission=null` renders the Ledger (last settled) or empty prompt. |

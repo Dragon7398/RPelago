@@ -9,7 +9,7 @@ import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
+import { freshMission, freshCasinoTable, freshFinaleTable, findFinale, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type FinaleSetup, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 import { hasUnexcusedProblem, type SlotProgressSamples } from '../lib/statusReport';
 import { casinoMercCuts, flatMercCuts, mercTotals, mergeMercCuts, type MercCuts } from '../lib/mercLogic';
@@ -106,7 +106,11 @@ export async function seedInitialMissions(): Promise<SeedResult> {
     const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
     if (forming < target) {
       // Continue per-game cohort numbering from the persisted counters.
-      const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
+      // Partial, not a cast: `CasinoGame` includes the finale, which has no cohort
+      // counter and is never returned by `pickNextCasinoGame`. Only rotation keys
+      // are ever read or written below.
+      const series: Partial<Record<CasinoGame, number>> =
+        { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 };
       const seriesSnap = await get(sRef(d, 'casinoSeries'));
       if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
 
@@ -119,7 +123,7 @@ export async function seedInitialMissions(): Promise<SeedResult> {
         updates[sPath(`missions/${r.key}`)] = table;
         working[r.key!] = table;
       }
-      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
+      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g] ?? 0;
       created += target - forming;
     }
   }
@@ -1316,6 +1320,48 @@ export async function adminUpdateParticipantSlotActivity(
   await update(sRef(db!, `missions/${missionId}/participants/${playerId}/slots/${slotIndex}`), {
     lastChecked, lastActivity,
   });
+}
+
+/**
+ * Open the season's Finale table.
+ *
+ * A **client write**, like the other admin mission actions — `seedInitialMissions`
+ * creates casino tables the same way, and `seasons/$seasonId` already grants
+ * `.write` to `config/adminId`, so no callable (and no functions deploy ahead of
+ * the frontend) is involved.
+ *
+ * The star snapshot is computed in the ADMIN'S BROWSER and passed in rather than
+ * derived server-side. That is deliberate: `finaleStarTiers` sits on top of
+ * `cardStats`, and mirroring both into `functions/` to run a one-shot computation
+ * would double a large piece of pure logic for no benefit. More to the point, the
+ * host reviews that exact table on the Stats tab before opening the finale — so
+ * passing the reviewed snapshot means what they read is literally what gets
+ * frozen, which recomputing could not guarantee.
+ *
+ * Refuses a second finale: it runs ONCE, and `findFinale` looks through history
+ * too, so a settled one still blocks.
+ */
+export async function createFinaleTable(setup: FinaleSetup): Promise<string> {
+  assertDb();
+  const [live, past] = await Promise.all([
+    get(sRef(db!, 'missions')),
+    get(sRef(db!, 'missionsHistory')),
+  ]);
+  const existing = findFinale(
+    live.val() as Record<string, GMMission> | undefined,
+    past.val() as Record<string, GMMission> | undefined,
+  );
+  if (existing) throw new Error('This season already has a Finale table — it runs only once.');
+
+  if (!(setup.closesAt > Date.now())) throw new Error('The closing time must be in the future.');
+  if (Object.keys(setup.stars).length === 0) throw new Error('No star snapshot — nothing to price the cards with.');
+
+  const r  = push(sRef(db!, 'missions'));
+  const id = r.key!;
+  await update(ref(db!), {
+    [sPath(`missions/${id}`)]: { ...freshFinaleTable(setup, Date.now()), id },
+  });
+  return id;
 }
 
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {

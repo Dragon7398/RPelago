@@ -15,7 +15,7 @@ import {
   buildDeck, shuffle, makeDrawableDeck,
   handStake, applyGambit, rollCasinoOdds, cardsToSlots,
   makeGambitDeck, gambitOfferable, buildGambitDeck,
-  deckChoiceOf, applyDeckBoost,
+  deckChoiceOf, applyDeckBoost, isFinale,
 } from './casinoEngine';
 import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
@@ -745,6 +745,21 @@ interface GMMission {
   casinoGame?:     CasinoGame;                      // which game this table is pinned to
   community?:      DeckCard[];                       // Hold 'Em: shared PUBLIC community cards
   communityDrawnAt?: number;                        // Hold 'Em: phase-2 gate / draw timestamp
+  casinoShareUnits?:  number;                       // pot denominator, banked at deploy
+  casinoVoidedShare?: number;                       // pot weight released back by voids
+  // ── The finale (casinoGame === 'finale') ────────────────────────────────────
+  // Mirrors GMMission in src/types/index.ts.
+  // Star value per card NAME, FROZEN at creation and the only thing read at
+  // settle — computing live would let the finale shift its own tiers as it is
+  // played, and a payout could move between a player's spin and settlement.
+  finaleStars?:    Record<string, number>;
+  // Entry closes and the table deploys at this instant; stands in for
+  // gmShouldDeploy, which can never fire for a finale.
+  finaleClosesAt?: number;
+  // Per-player fold/played history. ⚠️ Held on the MISSION, not the seat: three
+  // paths delete a finale seat (stand-down, the startBy sweep, an admin removal)
+  // and a counter that left with the seat would hand back a free entry.
+  finalePlays?:    Record<string, { folds?: number; played?: boolean }>;
 }
 
 // ── Tile types (minimal, mirrors src/types/index.ts) ─────────────────────────
@@ -869,6 +884,11 @@ function gmDecayWindowMs(m: GMMission): number {
 }
 
 function gmCurrentMaxSlots(m: GMMission, now: number): number {
+  // ⚠️ The finale has NO SEAT CAP and does not decay — it is time-limited instead
+  // (`finaleClosesAt`). Infinity rather than a big number so every `filled >= max`
+  // gate is false by construction and no decay step can ever close it. Mirrors
+  // currentMaxSlots in src/lib/missionLogic.ts.
+  if (isFinale(m)) return Infinity;
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor((now - m.firstJoinAt) / gmDecayWindowMs(m));
   return Math.max(1, m.baseMax - steps);
@@ -903,6 +923,11 @@ function heldClaimCount(player: { activeMissions?: Record<string, true> | null }
 }
 
 function gmShouldDeploy(m: GMMission, now: number): boolean {
+  // ⚠️ NEVER true for the finale, and the explicit return is the documentation.
+  // This gate wants a full table with every seat locked in; the finale has no cap
+  // (so it is never full) and deliberately tolerates seats that never lock in. Its
+  // one trigger is the deadline — see gmFinaleDeadlinePassed.
+  if (isFinale(m)) return false;
   if (m.state !== 'forming') return false;
   if (gmFilledCount(m) === 0) return false;
   if (gmFilledCount(m) < gmCurrentMaxSlots(m, now)) return false;
@@ -912,6 +937,12 @@ function gmShouldDeploy(m: GMMission, now: number): boolean {
   }
   return true;
 }
+
+// The finale's deploy trigger (`finaleClosesAt`) is WS-F: the server mirror of
+// `finaleDeadlinePassed` lands with the `tickGuildmasterMissions` branch that calls
+// it, together with deployMission's two finale guards (no replacement cohort, no
+// rollCasinoOdds). Until then a created finale simply sits `forming` — which is the
+// safe half-built state, since gmShouldDeploy above can never fire for it.
 
 function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<GMMission, 'id'> {
   const def = MISSION_DEFS[type];
@@ -959,14 +990,17 @@ function gmPickNextCasinoGame(
   missions: Record<string, GMMission> | undefined,
   rng: () => number = Math.random,
 ): CasinoGame {
-  const counts: Record<CasinoGame, number> = {
-    five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
-  };
+  // Keyed off the ROTATION, not off `CasinoGame`, so a game outside it — the
+  // finale — can neither be counted here nor be returned as the next table to
+  // open. Built from CASINO_GAME_ORDER so the two can never drift.
+  const counts = new Map<CasinoGame, number>(CASINO_GAME_ORDER.map(g => [g, 0]));
   for (const m of Object.values(missions ?? {})) {
-    if (m.type === 'casino' && m.state === 'forming' && m.casinoGame) counts[m.casinoGame]++;
+    if (m.type !== 'casino' || m.state !== 'forming' || !m.casinoGame) continue;
+    const seen = counts.get(m.casinoGame);
+    if (seen !== undefined) counts.set(m.casinoGame, seen + 1);
   }
-  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts[g]));
-  const candidates = CASINO_GAME_ORDER.filter(g => counts[g] === min);
+  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts.get(g) ?? 0));
+  const candidates = CASINO_GAME_ORDER.filter(g => (counts.get(g) ?? 0) === min);
   return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
 }
 

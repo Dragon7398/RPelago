@@ -213,9 +213,51 @@ export const DECK_TOTAL = CARD_DEFS.reduce((n, d) => n + d.copies, 0);
 // pinned to exactly ONE of these four games. Costs here are FINAL and become
 // S2's casino baseline. Mirror any change in functions/src/casinoEngine.ts.
 
+// ⚠️ **The ROTATION, not the list of games.** This drives `pickNextCasinoGame`,
+// the per-game `casinoSeries` counters, `seedInitialMissions` and `minCasinoAnte`.
+// The finale is a one-off closer and is deliberately absent: adding it would put it
+// in the respawn rotation and zero the minimum ante. The Coat uses
+// `COAT_TABLE_TYPES` (this plus the finale) instead.
 export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
   'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
+
+/** The finale's `casinoGame` value — the one place this string literal lives. */
+export const FINALE_GAME = 'finale' as const;
+
+/**
+ * THE predicate for "is this the finale". Every fork keys off this one function so
+ * a grep for `isFinale` finds all of them, which is how the next person audits it.
+ *
+ * Deliberately NOT `m.label`, and NOT the presence of `finaleClosesAt` — a label is
+ * host-editable and a missing timestamp on a half-written mission would silently
+ * turn the finale back into an ordinary table mid-season. Mirrored in
+ * `functions/src/index.ts`.
+ */
+export function isFinale(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return m?.casinoGame === FINALE_GAME;
+}
+
+// ── The finale's board ────────────────────────────────────────────────────────
+// A slot machine: 3 rows × 5 reels. A REEL is a COLUMN, so rerolling one respins
+// all three of its cards. The board is stored ROW-MAJOR, which makes reel `r` the
+// indices r, r + FINALE_ROW_REELS, r + 2 × FINALE_ROW_REELS.
+
+export const FINALE_ROWS = 3;
+export const FINALE_ROW_REELS = 5;
+export const FINALE_BOARD_CARDS = FINALE_ROWS * FINALE_ROW_REELS;
+/** The one free reroll may respin at most this many reels. */
+export const FINALE_MAX_REROLL_REELS = 3;
+
+/** Board indices of one reel (column), row-major. */
+export function finaleReelIndices(reel: number): number[] {
+  return Array.from({ length: FINALE_ROWS }, (_, row) => row * FINALE_ROW_REELS + reel);
+}
+
+/** Board indices of one row, row-major. `row` is 1-based, as `finaleRow` is. */
+export function finaleRowIndices(row: number): number[] {
+  return Array.from({ length: FINALE_ROW_REELS }, (_, i) => (row - 1) * FINALE_ROW_REELS + i);
+}
 
 export interface CasinoGameDef {
   key:        CasinoGame;
@@ -266,6 +308,22 @@ export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
     sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
     reroll: false, ante: 150, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
+  },
+  // The season CLOSER, run once. A 3×5 board is spun from the seat's deck, one
+  // free reroll respins up to three REELS (columns), then the player takes one row
+  // and keeps 1–5 of its cards. Reward is star-based, not the cards' gold values
+  // — see src/lib/finaleStars.ts.
+  //
+  // ⚠️ Every cost here is 0 and that is correct: entry is free, the reroll is free,
+  // and there is no play-on. The ONE charge is the 50g rebuy after a fold, which is
+  // not a reroll and does not fit this shape — it lives in FINALE_REBUY_GOLD.
+  // ⚠️ Not in CASINO_GAME_ORDER. See the note on `CasinoGame`.
+  finale: {
+    key: 'finale', label: 'The Finale',
+    sittings: 1, hole: FINALE_BOARD_CARDS, community: 0,
+    maxDraw: FINALE_BOARD_CARDS, pickMax: FINALE_ROW_REELS,
+    reroll: true, ante: 0, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // keep any 1–5 of the chosen row.
   },
 };
 

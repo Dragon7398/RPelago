@@ -19,7 +19,31 @@ export type TriState = 'on' | 'off' | 'special';
 export type AdvClass = 'Warrior' | 'Mage' | 'Rogue' | 'Cleric' | 'Ranger' | 'Paladin' | 'Bard' | 'Druid';
 export type CasinoDeckChoice = 'purist' | 'unconsoled' | 'indie' | 'safety';
 // Which card game a casino table is pinned to (S1.5 multi-table model).
-export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack';
+// `finale` is the season CLOSER, not part of the table rotation.
+// ⚠️ It is deliberately absent from `CASINO_GAME_ORDER`, which drives respawn
+// (`pickNextCasinoGame`), the `casinoSeries` counters and `minCasinoAnte`. Adding it
+// there would put the finale in the rotation and zero the minimum ante. The Coat
+// reads `COAT_TABLE_TYPES` instead, which is that array plus this.
+export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack' | 'finale';
+
+/** A finale card's worth, 1–5. Set by inverse weighted popularity — see `finaleStars.ts`. */
+export type FinaleStars = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * One player's history at the finale, held on the MISSION rather than the seat.
+ *
+ * ⚠️ It has to live outside `participants/{uid}`, because three paths delete a
+ * finale seat — stand-down, the `startBy` sweep and an admin removal — and a
+ * counter that vanished with the seat would hand back a free entry
+ * (fold → stand down → re-enlist). `kickedPlayers` is the existing precedent for
+ * a record that outlives its seat.
+ */
+export interface FinalePlayRecord {
+  /** How many boards this player has folded. The first is free; each later board costs gold. */
+  folds:   number;
+  /** Set once they lock in. This is what enforces one play each. */
+  played?: true;
+}
 
 export interface ShopItem {
   id: string;
@@ -625,6 +649,11 @@ export interface GMParticipant {
    * submits anything. Read it through `seatOwesConfig`, never directly.
    */
   yamlAt?: number;
+  // ── The finale (casinoGame === 'finale') ────────────────────────────────────
+  /** Which of the three rows this seat took. The kept cards must all come from it. */
+  finaleRow?:      1 | 2 | 3;
+  /** Which reels (0–4) the one free reroll respun, kept for the audit. */
+  finaleRerolled?: number[];
 }
 
 export interface GMMission {
@@ -706,6 +735,19 @@ export interface GMMission {
   mercPayouts?: Record<string, MercPayout>;
   // Players kicked off this mission while it was in progress (see KickRecord).
   kickedPlayers?: Record<string, KickRecord>;
+  // ── The finale (casinoGame === 'finale') ────────────────────────────────────
+  // Star value per card NAME, FROZEN when the table is created and the only thing
+  // read at settle. Frozen for two reasons, both breaking: the finale's own hands
+  // are casino seats, so computing live would let it shift its own tiers as it is
+  // played; and a player's payout could then move between their spin and
+  // settlement. It is also the audit trail for "why was Sonic worth five".
+  finaleStars?:    Record<string, FinaleStars>;
+  // Entry closes at this instant and the table deploys — it stands in for
+  // `shouldDeploy`, which can never fire here (it wants a full table, and the
+  // finale has no seat cap). Also drives the player-facing countdown.
+  finaleClosesAt?: number;
+  // Per-player fold/played history that outlives seat deletion — see FinalePlayRecord.
+  finalePlays?:    Record<string, FinalePlayRecord>;
 }
 
 // A player kicked off a world while it was IN PROGRESS — the abandonment that

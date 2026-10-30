@@ -70,14 +70,52 @@ export const CASINO_POT_CUT_PCT     = 0.40;
 export const CASINO_START_STATS: CasinoStats = { release: 60, collect: 30, hint: 10, xp: 50 };
 
 // ── Casino game variants (canonical — carries to S2) ─────────────────────────
-// Mirror of CasinoGame / CASINO_GAMES in src/lib/casinoData.ts. Each S1.5 table
-// is pinned to exactly one of these four games; costs are FINAL. Keep in sync.
+// Mirror of CasinoGame / CASINO_GAMES in src/lib/casinoData.ts. Each table is
+// pinned to exactly one game; costs are FINAL. Keep in sync.
 
-export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack';
+export type CasinoGame = 'five_card_draw' | 'seven_card_stud' | 'holdem' | 'blackjack' | 'finale';
 
+// ⚠️ The ROTATION, not the list of games — drives gmPickNextCasinoGame, the
+// casinoSeries counters and minCasinoAnte. The finale is a one-off closer and is
+// deliberately absent: including it would put it in the respawn rotation and zero
+// the minimum ante. The Coat uses COAT_TABLE_TYPES instead.
 export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
   'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
+
+/** The finale's `casinoGame` value — the one place this literal lives server-side. */
+export const FINALE_GAME = 'finale' as const;
+
+/**
+ * THE predicate for "is this the finale". Mirror of `isFinale` in
+ * src/lib/casinoData.ts. Every fork keys off it so a grep finds all of them.
+ *
+ * Deliberately not the label and not the presence of `finaleClosesAt`: a label is
+ * host-editable, and a missing timestamp would silently demote the finale back to
+ * an ordinary table.
+ */
+export function isFinale(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return m?.casinoGame === FINALE_GAME;
+}
+
+// ── The finale's board ────────────────────────────────────────────────────────
+// 3 rows × 5 reels, stored ROW-MAJOR. A reel is a COLUMN, so rerolling reel `r`
+// respins indices r, r + 5, r + 10. Mirror of src/lib/casinoData.ts.
+
+export const FINALE_ROWS = 3;
+export const FINALE_ROW_REELS = 5;
+export const FINALE_BOARD_CARDS = FINALE_ROWS * FINALE_ROW_REELS;
+export const FINALE_MAX_REROLL_REELS = 3;
+
+/** Board indices of one reel (column), row-major. */
+export function finaleReelIndices(reel: number): number[] {
+  return Array.from({ length: FINALE_ROWS }, (_, row) => row * FINALE_ROW_REELS + reel);
+}
+
+/** Board indices of one row, row-major. `row` is 1-based, as `finaleRow` is. */
+export function finaleRowIndices(row: number): number[] {
+  return Array.from({ length: FINALE_ROW_REELS }, (_, i) => (row - 1) * FINALE_ROW_REELS + i);
+}
 
 export interface CasinoGameDef {
   key:        CasinoGame;
@@ -120,7 +158,60 @@ export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
     reroll: false, ante: 150, rerollCost: 0, playOn: 0,
     subsetSelect: true,
   },
+  // The season closer. Every cost is 0 and that is correct — entry and the reroll
+  // are both free. The one charge is the rebuy after a fold (FINALE_REBUY_GOLD),
+  // which is a re-entry, not a reroll, and so does not fit this shape.
+  finale: {
+    key: 'finale', label: 'The Finale',
+    sittings: 1, hole: FINALE_BOARD_CARDS, community: 0,
+    maxDraw: FINALE_BOARD_CARDS, pickMax: FINALE_ROW_REELS,
+    reroll: true, ante: 0, rerollCost: 0, playOn: 0,
+    subsetSelect: true,
+  },
 };
+
+// ── The finale's money (mirror of src/lib/finaleStars.ts) ─────────────────────
+// gold = (50 + 10 × Σ stars) × deck boost → 60–300 before the boost, so 330 on
+// Purist and 270 on Safety. A CLAIMED card pays its stars alone: no base (the
+// claimant never sat down and spun) and no deck boost (they never chose the deck).
+//
+// ⚠️ These are what `goldSwing` is computed from at four separate sites, and that
+// STORED number is what settlement pays — it is never re-derived from the slots.
+// So a drift from the client copy is not a display bug, it is the wrong payout.
+
+export const FINALE_BASE_GOLD = 50;
+export const FINALE_GOLD_PER_STAR = 10;
+
+/**
+ * What a fresh board costs after a fold; the first board is free.
+ *
+ * ⚠️ Anti-abuse, not revenue: a hand tops out at 330g, so a free respin would let
+ * a player fold in a loop until a 250g+ board appeared. The money goes to the
+ * HOUSE and is never routed through `potContribution` — the finale's pot stays 0,
+ * which is what keeps the whole weighted-pot pipeline dormant at settle.
+ */
+export const FINALE_REBUY_GOLD = 50;
+
+export function finaleBoardCost(play: { folds?: number } | undefined): number {
+  return (play?.folds ?? 0) > 0 ? FINALE_REBUY_GOLD : 0;
+}
+
+export function finaleOwnGold(stars: number, choice: CasinoDeckChoice): number {
+  return applyDeckBoost(FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR * stars, choice);
+}
+
+export function finaleClaimedGold(stars: number): number {
+  return FINALE_GOLD_PER_STAR * stars;
+}
+
+/** Σ stars over a set of cards, read from the mission's frozen snapshot. */
+export function sumStars(
+  cards: readonly { name?: string }[] | undefined,
+  stars: Record<string, number> | undefined,
+): number {
+  if (!cards || !stars) return 0;
+  return cards.reduce((s, c) => s + (c?.name ? stars[c.name] ?? 0 : 0), 0);
+}
 
 export function minCasinoAnte(): number {
   return Math.min(...CASINO_GAME_ORDER.map(g => CASINO_GAMES[g].ante));

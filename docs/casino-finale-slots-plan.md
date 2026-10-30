@@ -4,6 +4,14 @@
 implementation handoff. Visual reference (7 artboards, the whole player flow):
 <https://claude.ai/artifact/2wFKTJL4ff2mY1itkkSbDD>
 
+> **Read [casino-finale-slots-impl.md](casino-finale-slots-impl.md) alongside this.**
+> It is the build plan — workstreams, dependencies and blast radius — and its §0
+> **corrects six claims this document makes about the existing code** (the largest:
+> `lockCasinoResult` cannot be reached without a gambit, which §8's phase flow does
+> not account for). Its §5 carries nine further decisions the host made on
+> 2026-10-28, including no gambit phase and hand-picked room odds. Where the two
+> disagree about what the code does, the impl doc was written against the source.
+
 One last Archipelago for the casino season, dressed as a slot machine. A 3×5 board
 of cards is spun from the player's chosen deck; they get one free reroll of up to
 three **reels**, then take **one row**, keep as many of its five cards as they are
@@ -169,8 +177,12 @@ Each row is a gate that currently exists and must be bypassed or replaced.
 | `restricted` + claiming | `claimRefusal` refuses any claim | **Allowed**, one per player; kicked bar stands (§12). |
 | Settle trigger | `shouldDeploy` (full **and** `allSeatsPlayed`) | **`finaleClosesAt`** deadline (§11). |
 
-> ⚠️ **The rebuy counter cannot live on the participant.** `casinoFold` *deletes* the
-> seat, so a flag on `participants/{uid}` vanishes with it. Use a sibling record that
+> ⚠️ **The rebuy counter cannot live on the participant.** ~~`casinoFold` *deletes* the
+> seat~~ — **wrong; see impl §0.1.** `casinoFold` keeps the seat and only clears the
+> hand (`holdemFold` is the one that deletes it). The conclusion still holds for a
+> different reason: stand-down, the `startBy` sweep and admin removal each DO delete
+> the seat, so **fold → stand down → re-enlist** would reset a participant-held
+> counter and buy a second free spin. Use a sibling record that
 > survives removal — `kickedPlayers` is the existing precedent for exactly this
 > shape. Suggest **`mission.finalePlays/{uid}: { folds: number, played?: true }`**,
 > written on fold and on lock-in. It is also what enforces decision 7 (one play
@@ -428,3 +440,10 @@ export function claimRefusal(
 > later, `claimRefusal` and that server copy are the two places to change.
 
 **Nothing in this document is open.** Every decision is recorded in §1, §11 or here.
+
+Nine further decisions — raised by reading this against the source — are recorded as
+**D1–D9 in [casino-finale-slots-impl.md](casino-finale-slots-impl.md) §5**. Two of
+them change what is written above: there is **no gambit phase** and the room's
+Release / Collect / Hint are **hand-picked by the host at creation** (D1), and the
+**Wild card is deliberately pinned to 1★** because a free choice of game countermands
+the whole point of the star scale (D7).
