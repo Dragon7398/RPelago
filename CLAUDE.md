@@ -825,6 +825,32 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > `for (i = 0; i < baseMax; i++)`, and zero makes each of them draw only the seats
 > that exist instead of a wall of fake empty ones.
 
+> **Entering the finale consumes NO mission claim, and that has one non-obvious
+> consequence: `enlistInMission` must not write `players/{uid}/activeMissions/{id}`
+> for it.** Skipping that write is what makes every *reader* of the node no-op for
+> free — the two early-release syncs, `tickSlotStatuses`, and `completeMission`'s
+> idempotent null — so writing one "harmlessly" would silently cost the player a
+> claim they were promised they would keep. It also means a **`restricted` player
+> can enter**: restriction is enforced purely through claim release, so a table
+> that never borrows the claim never engages it. The claim-capacity gate is the
+> only one skipped — the seat cap and the gold gate are already inert
+> (`Infinity` and 0), and are deliberately left unguarded rather than given a
+> redundant `!isFinale`. One play each is enforced by **`mission.finalePlays`**,
+> which lives on the mission rather than the seat because stand-down, the `startBy`
+> sweep and an admin removal all delete a finale seat — a `played` flag that left
+> with the seat would buy a second free spin via fold → stand down → re-enlist.
+>
+> **Both directions matter, and the rule is `holdsMissionClaim(m)`** (`casinoData.ts`,
+> mirrored in `functions/src/casinoEngine.ts`). The finale opens at the same moment
+> new table creation stops, so ordinary tables are still gathering their last
+> players: existing tables must not bar the finale *and* a finale seat must not bar
+> those tables. Skipping the `activeMissions` write is what delivers the second
+> half. ⚠️ **`weeklyGoldTopUp` therefore excludes the finale from its live-seat
+> scan**: that scan reads a live seat as "not falling behind", which is true of a
+> table you anted into and false of a free, universal one that runs to the end of
+> the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
+> everyone who entered.
+
 > **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
 > Finale panel**, and that sharing is the point: the host reviews the card-popularity
 > table (with its Finale ★ column) and then opens the finale, which **freezes** those

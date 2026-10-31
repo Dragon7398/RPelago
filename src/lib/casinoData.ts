@@ -238,6 +238,26 @@ export function isFinale(m: { casinoGame?: CasinoGame } | null | undefined): boo
   return m?.casinoGame === FINALE_GAME;
 }
 
+/**
+ * Does holding a seat at this mission consume one of the player's mission claims?
+ *
+ * **False for the finale, and this is the rule that keeps the two directions
+ * independent.** The finale is free and universal, so it must neither be barred by
+ * a player's existing tables NOR bar them from the tables still gathering final
+ * players. The first half is the claim-capacity gate being skipped; the second half
+ * is this: `enlistInMission` writes no `players/{uid}/activeMissions/{id}` entry
+ * for a finale, so a finale seat is invisible to every claim count in the app
+ * (both card callers derive theirs from that node).
+ *
+ * Named rather than written inline as `!isFinale(...)` so the invariant is
+ * greppable: anything that adds a seat to a mission has to answer this question,
+ * and a future enlist path that forgot would silently charge a claim the player
+ * was promised they would keep.
+ */
+export function holdsMissionClaim(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return !isFinale(m);
+}
+
 // ── The finale's board ────────────────────────────────────────────────────────
 // A slot machine: 3 rows × 5 reels. A REEL is a COLUMN, so rerolling one respins
 // all three of its cards. The board is stored ROW-MAJOR, which makes reel `r` the

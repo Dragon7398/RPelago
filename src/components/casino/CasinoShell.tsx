@@ -13,7 +13,7 @@ import { seatGames, type SeatGame } from './seatGames';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { DeckPreview } from '../../casino/DeckPreview';
-import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
+import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, isFinale, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
 import { awaitingRoom, roomGoalProgress, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
@@ -664,7 +664,13 @@ export default function CasinoShell({ onBack }: Props = {}) {
     const all = Object.values(gameState?.missions ?? {});
     return all
       .filter(m => m.type === 'casino' && m.state === 'forming')
-      .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
+      // The finale leads. It is the season's closer, it runs once, and entry is
+      // time-limited — so burying it alphabetically mid-list (between Blackjack
+      // and Five Card Draw, as it happens) is the one ordering that loses it.
+      .sort((a, b) =>
+        (Number(isFinale(b)) - Number(isFinale(a)))
+        || (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '')
+        || a.series - b.series);
   }, [gameState?.missions]);
 
   // Every table the player holds a seat at right now — pooled claims mean this can
@@ -733,12 +739,29 @@ export default function CasinoShell({ onBack }: Props = {}) {
   // A RESTRICTED player never gets a claim back early — it is held until the table
   // itself settles, not the moment their own games are done. Without this the lock
   // just looks broken: they finished their slots and the seat button stayed shut.
-  const lockNote  = me?.restricted === true && locked
-    ? 'Your account is restricted — a claim comes back when the whole table settles, not when your own games are done.'
+  //
+  // The finale is the exception, so the note has to say so: it costs no claim, so
+  // a player at capacity can still enter it — and a flat "all claims in use" above
+  // a finale card that IS enterable reads as a bug.
+  const finaleOpen = tables.some(isFinale);
+  const lockNote   = locked && (me?.restricted === true || finaleOpen)
+    ? [
+        me?.restricted === true
+          ? 'Your account is restricted — a claim comes back when the whole table settles, not when your own games are done.'
+          : 'All your claims are in use, so the tables below are closed to you for now.',
+        finaleOpen
+          ? 'The Finale is open to you regardless: it costs no claim, so you can enter it however many tables you are holding.'
+          : '',
+      ].filter(Boolean).join(' ')
     : null;
 
   const sit = (m: GMMission) => {
-    const label = `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`;
+    const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
+    // The finale runs once, so it has no cohort number to show — "The Finale ·
+    // Cohort I" implies a second one is coming.
+    const label = isFinale(m)
+      ? CASINO_GAMES[game].label
+      : `${CASINO_GAMES[game].label} · Cohort ${toRoman(m.series)}`;
     setSitFlash(label);
     window.setTimeout(() => setSitFlash(null), 2200);
     void enlistInMission(m.id, label);
@@ -852,10 +875,15 @@ export default function CasinoShell({ onBack }: Props = {}) {
           : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
               {tables.map(m => {
                 const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                // ⚠️ The finale consumes NO claim, so the all-claims-in-use lock
+                // must not close it. Without this a player holding a table would
+                // see the one table they are guaranteed entry to shut against
+                // them — and the server would have let them in.
+                const barred = locked && !isFinale(m);
                 return (
                   <TableCard key={m.id} m={m} now={now}
                     seatedHere={myTableIds.has(m.id)}
-                    locked={locked} lockLabel={lockLabel}
+                    locked={barred} lockLabel={lockLabel}
                     buyIn={buyIn} canAfford={gold >= buyIn}
                     onSit={sit} />
                 );

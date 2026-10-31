@@ -370,10 +370,48 @@ and the 37 frozen stars are readable in the RTDB.
 
 ---
 
-### WS-C — Entry and the seat lifecycle
+### WS-C — Entry and the seat lifecycle — ✅ DONE
 
 **Depends on:** B. **First stream that touches live code** — `enlistInMission` is
 on the path of every table running tonight.
+
+> **Shipped:** the `enlistInMission` fork, the `computeMissionCard` mirror, the
+> landing's claim-lock carve-out, and `tests/lib/finaleEntry.test.ts` (21 tests) —
+> a third of which are *regression* tests asserting the four live games still
+> refuse on claims, gold, seats and the restricted wording.
+>
+> **The fork was far smaller than this sketch assumed: ONE skipped gate, not four.**
+> WS-B had already made two of them inert — `gmCurrentMaxSlots` returns `Infinity`,
+> so a finale is never full, and every cost in `CASINO_GAMES.finale` is 0, so the
+> gold gate requires nothing. Both are left **unguarded on purpose**: a redundant
+> `!isFinale` on the seat-cap check would imply the cap means something. So the
+> server changes are exactly: skip the claim-capacity gate, skip the
+> `activeMissions` write, and add the `finalePlays[uid].played` refusal.
+>
+> **Two things verified rather than changed**, which is the better outcome:
+> `standDownFromMission` needs no fork (it deletes the seat and leaves
+> `finalePlays` behind — which is precisely what stops fold → stand down →
+> re-enlist), and `revertSeatGambitUpdates` returns early on `!seat.gambitPlayed`,
+> so with no gambit phase it is already a no-op for every finale seat.
+>
+> **Four things the sketch did not anticipate:**
+> 1. **`clearSeatSecrets` gained `board`.** Its whole job is leaving no orphan, and
+>    an orphaned finale board would make `mustCasinoSeat` report *"finish or fold
+>    your current hand first"* and lock the player out of re-entry — the exact
+>    failure its existing comment warns about for `hand`.
+> 2. **`GMMissionCard.countdownLabel`.** The card's countdown chip hardcoded
+>    "SLOT DECAYS IN". The finale does not decay, and that same chip now counts
+>    down to entry closing, so the label had to become data. A chip saying *slot
+>    decays in* over an entry deadline is worse than no chip.
+> 3. **`missionDisplayLabel` drops the cohort number for a finale.** "The Finale ·
+>    Cohort I" reads as a promise of a second one.
+> 4. **The landing needed three changes, not none.** `TableCard` is passed
+>    `locked && !isFinale(m)` (otherwise the one table a player is guaranteed
+>    entry to is the one shown shut against them); the restricted `lockNote` now
+>    names the exception, since "all claims in use" printed above an enterable
+>    finale card reads as a bug; and the finale **sorts first** among forming
+>    tables — alphabetically `'finale'` lands between Blackjack and Five Card
+>    Draw, which is the one ordering that buries the season's closer.
 
 1. `enlistInMission` — an `isFinale` fork **above** the existing gates:
    - skip `heldClaimCount >= MISSION_CLAIM_CAPACITY` entirely, and **do not write
@@ -687,6 +725,33 @@ Knock-on effects, all of them simplifications:
 - `casinoOpenStats` equals `casinoStats` forever, so `OddsTrio`'s drift display
   shows no drift. Correct — nothing can move them.
 - `revertSeatGambitUpdates` on stand-down finds no gambit entries and no-ops.
+
+### D1a — The finale and the final ordinary tables must not block each other
+
+The host opens the finale at the **same moment new table creation stops**, so a
+handful of ordinary tables will still be gathering their last players. Both
+directions have to stay open:
+
+- **Existing tables must not bar the finale** — the claim-capacity gate is skipped
+  (D1, WS-C).
+- **A finale seat must not bar those last tables.** This is `holdsMissionClaim(m)`
+  (`casinoData.ts`, mirrored server-side): false for the finale, so
+  `enlistInMission` writes no `players/{uid}/activeMissions/{id}` entry and a
+  finale seat is **invisible to every claim count in the app**. Both mission-card
+  callers derive their held count from that node, so nothing further is needed.
+
+Claiming a vacated slot on a final table was already safe: casino claims consume no
+claim, and the casino shell's `OpenSlots` rations them **per table** (`alreadyClaimed`
++ `claimRefusal`) with no capacity check at all.
+
+> ⚠️ **One real hole this opened, now fixed: `weeklyGoldTopUp`.** It skips any
+> player seated at an in-progress casino table, reading a live seat as evidence they
+> are doing well enough not to need the floor. That is sound for a table you paid an
+> ante to sit at — and false for the finale, which is free, costs no claim, invites
+> everyone, and **runs to the end of the season**. Left alone it would have struck
+> the 250g floor from every player who entered the finale, permanently, hitting
+> hardest exactly the busted players the finale exists to welcome. The seat scan now
+> excludes it.
 
 ### D2 — A finale seat keeps the one-hour clock (Q2 option **a**)
 

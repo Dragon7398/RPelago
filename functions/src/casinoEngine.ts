@@ -98,6 +98,20 @@ export function isFinale(m: { casinoGame?: CasinoGame } | null | undefined): boo
   return m?.casinoGame === FINALE_GAME;
 }
 
+/**
+ * Does holding a seat at this mission consume one of the player's mission claims?
+ * Mirror of `holdsMissionClaim` in src/lib/casinoData.ts.
+ *
+ * **False for the finale**, which is what keeps the two directions independent: a
+ * player's existing tables must not bar them from the finale, and a finale seat
+ * must not bar them from the tables still gathering final players. `enlistInMission`
+ * therefore writes no `activeMissions` entry for it, so a finale seat is invisible
+ * to every claim count.
+ */
+export function holdsMissionClaim(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return !isFinale(m);
+}
+
 // ── The finale's board ────────────────────────────────────────────────────────
 // 3 rows × 5 reels, stored ROW-MAJOR. A reel is a COLUMN, so rerolling reel `r`
 // respins indices r, r + 5, r + 10. Mirror of src/lib/casinoData.ts.

@@ -101,7 +101,10 @@ function Countdown({ card }: { card: GMMissionCard }) {
   }
   return (
     <div className="gm-cd-chip">
-      <span>SLOT DECAYS IN</span>
+      {/* Not hardcoded: the finale does not decay, and this same chip counts down
+          to its ENTRY CLOSING instead. A label saying "slot decays in" over an
+          entry deadline would be worse than showing no countdown at all. */}
+      <span>{card.countdownLabel}</span>
       <span className="gm-cd-clock">{fmtClock(sec)}</span>
     </div>
   );

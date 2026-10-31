@@ -15,7 +15,7 @@ import {
   buildDeck, shuffle, makeDrawableDeck,
   handStake, applyGambit, rollCasinoOdds, cardsToSlots,
   makeGambitDeck, gambitOfferable, buildGambitDeck,
-  deckChoiceOf, applyDeckBoost, isFinale,
+  deckChoiceOf, applyDeckBoost, isFinale, holdsMissionClaim,
 } from './casinoEngine';
 import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
@@ -1144,6 +1144,10 @@ function clearSeatSecrets(seasonId: string, missionId: string, uid: string): Rec
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hand`)]: null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]: null,
     [secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)]: null,
+    // The finale's 3×5 board. Listed here for the same reason as the others: an
+    // orphaned board left by a removed seat would make `mustCasinoSeat` report
+    // "finish or fold your current hand first" and lock the player out of re-entry.
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/board`)]: null,
   };
 }
 
@@ -1265,21 +1269,47 @@ export const enlistInMission = onCall(async (request) => {
   const player  = playerSnap.val() as { displayName: string; gold: number; avatarHash?: string | null; activeMissions?: Record<string, true> | null; basicTrainingDone?: boolean; disabled?: boolean };
   const mission = missionSnap.val() as GMMission;
 
+  // The finale's entry rules differ from every other table's, but only in ONE
+  // gate and one write — see the notes on each below. The rest of this function is
+  // already correct for it by construction, which is why there is no second code
+  // path here to keep in step.
+  const finaleEntry = isFinale(mission);
+
   if (player.disabled) throw new HttpsError('permission-denied', 'Account restricted.');
   // Pooled claims: block only when every claim is in use. Settling tables (slots
   // done, claim reclaimed) are absent from activeMissions and free a slot here.
-  if (heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
+  //
+  // ⚠️ THE FINALE CONSUMES NO CLAIM and is not rationed by capacity. It is the
+  // celebration nobody is excluded from, so a player may enter it however many
+  // tables they are already holding — which also means a RESTRICTED player (whose
+  // claim is held to world completion, so who is usually at capacity) can enter.
+  // Nothing else needs doing for that: restriction is enforced entirely through
+  // claim release, and the finale never borrows the claim.
+  if (!finaleEntry && heldClaimCount(player) >= MISSION_CLAIM_CAPACITY)
     throw new HttpsError('failed-precondition', 'no-claims-free');
   if (mission.state !== 'forming') throw new HttpsError('failed-precondition', 'Mission is not forming.');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
+  // Already inert for the finale: gmCurrentMaxSlots returns Infinity, so a finale
+  // is never full however many players enter. Left unguarded deliberately — a
+  // redundant `!finaleEntry` here would imply the cap means something.
   if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
     throw new HttpsError('failed-precondition', 'Mission is full.');
   // Gate on the table's FULL finish cost — ante + play-on for Hold 'Em — so a seat
   // can never lock in and then be unable to complete it (and be forced to fold).
+  // Also inert for the finale: every cost in CASINO_GAMES.finale is 0, so entry is
+  // free and no balance is required. (The 50g rebuy after a fold is charged at the
+  // deal, not here — a player who cannot afford it simply keeps the board they have.)
   if (mission.type === 'casino' && mission.casinoGame
       && (player.gold ?? 0) < seatSpend(mission.casinoGame, { playedOn: true }))
     throw new HttpsError('failed-precondition', 'not-enough-gold');
+  // ONE PLAY EACH (decision 7). `finalePlays` lives on the mission rather than the
+  // seat precisely for this: three paths delete a finale seat — stand-down, the
+  // startBy sweep, an admin removal — and a `played` flag that left with the seat
+  // would hand back a second free spin. A player swept for idling may re-enter,
+  // but their fold count survives too, so the rebuy still applies to them.
+  if (finaleEntry && mission.finalePlays?.[uid]?.played)
+    throw new HttpsError('failed-precondition', 'finale-already-played');
 
   const participant: GMParticipant = {
     playerId:   uid,
@@ -1291,7 +1321,15 @@ export const enlistInMission = onCall(async (request) => {
 
   const updates: Record<string, unknown> = {
     [sp(seasonId, `missions/${missionId}/participants/${uid}`)]:     participant,
-    [sp(seasonId, `players/${uid}/activeMissions/${missionId}`)]:    true,
+    // ⚠️ The finale writes NO `activeMissions` entry — it holds no claim (see
+    // `holdsMissionClaim`). Every reader of that node then no-ops for it for free:
+    // the early-release syncs, the scheduled tick, and completeMission's idempotent
+    // null. Writing one "harmlessly" would silently cost the player a claim they
+    // were promised they would keep — and would bar them from the ordinary tables
+    // still gathering their final players, which is the whole point of not writing it.
+    ...(holdsMissionClaim(mission)
+      ? { [sp(seasonId, `players/${uid}/activeMissions/${missionId}`)]: true }
+      : {}),
     // A fresh seat starts with no dealt hand — clears any orphan from a prior sit.
     ...clearSeatSecrets(seasonId, missionId, uid),
   };
@@ -3737,7 +3775,15 @@ export const weeklyGoldTopUp = onSchedule(
       const onLiveTable = new Set<string>();
       if (missionsSnap.exists()) {
         for (const m of Object.values(missionsSnap.val() as Record<string, GMMission>)) {
-          if (m.type === 'casino' && m.state === 'inprogress') {
+          // ⚠️ THE FINALE DOES NOT COUNT. This exclusion reads a live seat as
+          // evidence the player is doing well enough not to need the floor — which
+          // is sound for a table they paid an ante to sit at and spent a claim on.
+          // The finale is free, costs no claim, and every player is invited, so a
+          // seat there is evidence of nothing. It also runs to the end of the
+          // season, so counting it would strike the floor from everyone who
+          // entered, permanently — and hit hardest exactly the busted players the
+          // finale exists to welcome back.
+          if (m.type === 'casino' && m.state === 'inprogress' && !isFinale(m)) {
             for (const uid of Object.keys(m.participants ?? {})) onLiveTable.add(uid);
           }
         }

@@ -23,6 +23,8 @@ export interface GMMissionCard {
   decaySteps:      number;
   decayPct:        number;
   liveSec:         number;
+  /** Text for the countdown chip: decay for an ordinary cohort, entry closing for the finale. */
+  countdownLabel:  string;
   youIn:           boolean;
   seriesLabel:     string;
   takeable:        boolean;
@@ -522,6 +524,9 @@ export function missionSettledAt(m: GMMission): number {
 }
 
 export function missionDisplayLabel(m: GMMission): string {
+  // The finale runs ONCE, so it has no cohort to number — "The Finale · Cohort I"
+  // reads as a promise of a second one.
+  if (isFinale(m)) return m.label;
   const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
 }
@@ -565,15 +570,31 @@ export function computeMissionCard(
   const windowMs = decayWindowMs(m);
   const windowHours = windowMs / 3600_000;
 
-  const decaySteps = m.state === 'forming' && m.firstJoinAt != null
+  // The finale does not decay, so every decay-derived display value would be
+  // nonsense. The card's countdown is reused for the one clock it DOES have —
+  // entry closing — which is why `countdownLabel` exists: a chip reading
+  // "SLOT DECAYS IN" over an entry deadline would be worse than no chip at all.
+  const isFin = isFinale(m);
+  const msToClose = isFin && m.finaleClosesAt != null
+    ? Math.max(0, m.finaleClosesAt - now)
+    : 0;
+
+  const decaySteps = !isFin && m.state === 'forming' && m.firstJoinAt != null
     ? Math.floor(Math.max(0, now - m.firstJoinAt) / windowMs)
     : 0;
 
   const elapsedMs = m.firstJoinAt != null ? Math.max(0, now - m.firstJoinAt) : 0;
   const hoursIntoWindow = (elapsedMs % windowMs) / 3600_000;
 
-  const decayPct = status === 'filling' ? hoursIntoWindow / windowHours : (status === 'open' ? 0 : 1);
-  const liveSec = (windowHours - hoursIntoWindow) * 3600;
+  const decayPct = isFin
+    // How far through the entry window we are needs the window's LENGTH, which is
+    // only knowable from when the table was created — there is no fixed window.
+    ? (m.finaleClosesAt != null && m.finaleClosesAt > m.createdAt
+        ? Math.min(1, Math.max(0, (now - m.createdAt) / (m.finaleClosesAt - m.createdAt)))
+        : 0)
+    : status === 'filling' ? hoursIntoWindow / windowHours : (status === 'open' ? 0 : 1);
+  const liveSec = isFin ? msToClose / 1000 : (windowHours - hoursIntoWindow) * 3600;
+  const countdownLabel = isFin ? 'ENTRY CLOSES IN' : 'SLOT DECAYS IN';
 
   const roman = toRoman(m.series);
   const seriesLabel = `COHORT ${roman}`;
@@ -584,7 +605,30 @@ export function computeMissionCard(
   let insufficientGold = false;
 
   if (m.state === 'inprogress') {
-    disabledReason = 'This cohort has already deployed. A fresh cohort is forming below.';
+    disabledReason = isFin
+      ? 'Entry has closed and the finale room is being built.'
+      : 'This cohort has already deployed. A fresh cohort is forming below.';
+  } else if (isFin) {
+    // ⚠️ HOISTED ABOVE THE CLAIM GATE, and that is the whole point of this branch.
+    // The gate below would tell a player who already holds a table that they
+    // cannot enter — which is precisely the restriction the finale exists without.
+    // It costs no claim, has no seat cap and no entry fee, so none of the gates
+    // after this one apply and the only thing that can bar a player is having
+    // already played it.
+    //
+    // A RESTRICTED player reaches `takeable` here, deliberately: their claim is
+    // held to world completion so they are usually at capacity, and the finale is
+    // the celebration nobody is excluded from.
+    if (youIn) {
+      doneLabel = 'YOU ARE IN';
+    } else if (uid != null && m.finalePlays?.[uid]?.played) {
+      doneLabel = 'ALREADY PLAYED';
+      disabledReason = 'You have already played the finale — it runs once, and once each.';
+    } else if (m.finaleClosesAt != null && now >= m.finaleClosesAt) {
+      disabledReason = 'Entry to the finale has closed.';
+    } else {
+      takeable = true;
+    }
   } else if (def.special && basicTrainingDone && !youIn) {
     doneLabel = 'ALREADY COMPLETED';
     disabledReason = 'You have already completed Basic Training — it can be undertaken only once per guildmaster.';
@@ -623,6 +667,7 @@ export function computeMissionCard(
     decaySteps,
     decayPct,
     liveSec,
+    countdownLabel,
     youIn,
     seriesLabel,
     takeable,
