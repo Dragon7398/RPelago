@@ -160,7 +160,7 @@ export const CENTER_COORD = 'D3';  // r=2, c=3 — always fixed
 // mission manifest reminder). The sheet gets re-published under a new id from
 // time to time — update it HERE only, so every surface stays in sync.
 export const DRAGOS_LIST_URL =
-  'https://docs.google.com/spreadsheets/d/1bu5EBAZsNacwZ8wQJy2EtdVm2o1wwefeSHL21MSdrms';
+  'https://docs.google.com/spreadsheets/d/1S-rR6GVDNXj-J4UiBCX6TNltUFb958Jfq1cVuhw5JwY';
 
 // ── Boss orb-reactive traits ───────────────────────────────────────────────────
 // Elemental orb → trait IDs applied to the boss while that orb is ungathered
