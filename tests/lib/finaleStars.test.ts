@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   FINALE_GAME, WILD_STARS, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR,
   starTierSizes, compareForStars, baselineMissions,
-  finaleStarRanking, finaleStarTiers, finaleOwnGold, finaleClaimedGold, sumStars,
+  finaleStarRanking, finaleStarTiers, finaleOwnGold, finaleClaimedGold, finaleSeatGold, sumStars,
   type FinaleStars,
 } from '../../src/lib/finaleStars';
 import { baselineDeckWeights } from '../../src/lib/cardStats';
@@ -322,6 +322,58 @@ describe('payout', () => {
 
   it('matches the design’s worked hand: 5★+5★+2★ on Purist pays 187', () => {
     expect(finaleOwnGold(5 + 5 + 2, 'purist')).toBe(187);
+  });
+});
+
+// ── A whole seat's payout, including the claimant rule ────────────────────────
+
+describe('finaleSeatGold', () => {
+  const stars: Record<string, FinaleStars> = { Sonic: 5, Zelda: 2, Cozy: 5, Wild: 1 };
+  const c = (name: string) => ({ name });
+
+  it('pays an own hand the base plus its stars, boosted', () => {
+    // 50 + 10 × (5 + 5 + 2) = 170, ×1.1 on Purist = 187.
+    expect(finaleSeatGold(stars, [c('Sonic'), c('Cozy'), c('Zelda')], [], 'purist')).toBe(187);
+    expect(finaleSeatGold(stars, [c('Sonic'), c('Cozy'), c('Zelda')], [], 'unconsoled')).toBe(170);
+  });
+
+  it('pays a PURE CLAIMANT its stars alone — no base, no boost', () => {
+    // ⚠️ The case the whole guard exists for. A claimant never sat down, spun or
+    // chose a row, so the 50g sitting fee is not theirs — and they never chose the
+    // deck, so the boost is not either. A 5★ card is worth exactly 50g to them,
+    // which is what the player who abandoned it forfeits.
+    expect(finaleSeatGold(stars, [], [c('Sonic')], 'purist')).toBe(50);
+    expect(finaleSeatGold(stars, [], [c('Zelda')], 'purist')).toBe(20);
+    // Even on Purist, which would otherwise add 10%.
+    expect(finaleSeatGold(stars, [], [c('Sonic')], 'safety')).toBe(50);
+  });
+
+  it('keeps the base for a seat that holds one own card AND a claimed one', () => {
+    // Own: 50 + 10 = 60 on a flat deck. Claimed 5★: +50. The base survives because
+    // the seat still played — it is the sitting fee, not a per-card bonus.
+    expect(finaleSeatGold(stars, [c('Wild')], [c('Sonic')], 'unconsoled')).toBe(110);
+    // Purist boosts ONLY the own half: round(60 × 1.1) = 66, + 50 flat.
+    expect(finaleSeatGold(stars, [c('Wild')], [c('Sonic')], 'purist')).toBe(116);
+  });
+
+  it('drops to the claimed cards alone once the last own card is removed', () => {
+    // The void/kick path recomputes from the REMAINING cards, so a seat stripped of
+    // its own hand must stop collecting the base.
+    const before = finaleSeatGold(stars, [c('Wild')], [c('Sonic')], 'purist');
+    const after  = finaleSeatGold(stars, [],          [c('Sonic')], 'purist');
+    expect(before).toBeGreaterThan(after);
+    expect(after).toBe(50);
+  });
+
+  it('pays nothing to a seat with no cards at all', () => {
+    expect(finaleSeatGold(stars, [], [], 'purist')).toBe(0);
+  });
+
+  it('scores an unknown card 0 rather than throwing', () => {
+    // A card absent from the frozen snapshot contributes nothing, but the seat
+    // still collects the base it earned by sitting down.
+    expect(finaleSeatGold(stars, [c('Nonesuch')], [], 'unconsoled')).toBe(50);
+    expect(finaleSeatGold(stars, [], [c('Nonesuch')], 'unconsoled')).toBe(0);
   });
 });
 

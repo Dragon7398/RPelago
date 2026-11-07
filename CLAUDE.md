@@ -851,6 +851,31 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
 > everyone who entered.
 
+> **Every writer of a finale seat's `goldSwing` goes through `seatGoldSwingFor`**
+> (`functions/src/index.ts`), which delegates to the mirrored pure `finaleSeatGold`
+> (`src/lib/finaleStars.ts` ↔ `functions/src/casinoEngine.ts`). There are **four**
+> writers — `lockFinaleResult`, `claimMissionSlot`, `resubmitCasinoYaml`,
+> `adminRemoveCasinoSlot` — and `goldSwing` is a **stored** number that settlement
+> pays verbatim, never re-derived from the slots. So a site that computes it the
+> ordinary way for a finale seat does not display something wrong, it *pays*
+> something wrong. The finale prices stars: own cards `(50 + 10 × Σ stars) × deck
+> boost`, a claimed card `10 × stars` flat. ⚠️ The `own.length > 0` guard inside is
+> load-bearing — the +50 is the fee for sitting down and spinning, so it survives
+> while the seat holds one own card and is **absent for a pure claimant**; drop it
+> and a claimant collects 50g for a table they never played.
+>
+> **Settlement needs no finale branch**, and the reason is worth keeping: a finale's
+> `pot` is 0, and `casinoPotShares` short-circuits on `pot <= 0`, so the entire
+> weighted-split pipeline runs and pays nothing even though `casinoShareUnits` *is*
+> banked at deploy. That makes `pot: 0` load-bearing rather than cosmetic — routing
+> the 50g rebuy through `potContribution` would switch the split back on for real.
+> Pinned both ways in `tests/lib/finaleTable.test.ts`.
+>
+> **A finale slot's `details` reads `"Sonic · 5★"`, not a gold figure** (its worth
+> is stars), via `cardsToSlots`' optional formatter. That does **not** match
+> `handStakeFromSlots`' `· Ng` regex — safe only because that function is always a
+> fallback behind `p.goldSwing ?? …`.
+
 > **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
 > Finale panel**, and that sharing is the point: the host reviews the card-popularity
 > table (with its Finale ★ column) and then opens the finale, which **freezes** those

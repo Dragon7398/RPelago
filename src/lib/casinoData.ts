@@ -279,6 +279,31 @@ export function finaleRowIndices(row: number): number[] {
   return Array.from({ length: FINALE_ROW_REELS }, (_, i) => (row - 1) * FINALE_ROW_REELS + i);
 }
 
+/**
+ * The board with the chosen reels respun — every card of those COLUMNS replaced,
+ * in reel order, from `fresh`.
+ *
+ * Pure and extracted because this is the one piece of the spin with a real
+ * off-by-one in it: a row-major board makes "replace a reel" a strided write, and
+ * getting the stride wrong respins a ROW instead — which would quietly destroy the
+ * one mechanic the reroll exists for. `fresh` must hold
+ * `reels.length × FINALE_ROWS` cards. Mirrored in functions/src/casinoEngine.ts.
+ */
+export function applyReelRespin(
+  board: readonly DeckCard[],
+  reels: readonly number[],
+  fresh: readonly DeckCard[],
+): DeckCard[] {
+  const next = board.slice();
+  // Reel order, not tap order, so the mapping from `fresh` into the board is the
+  // same on both sides however the player selected them.
+  const indices = [...reels].sort((a, b) => a - b).flatMap(finaleReelIndices);
+  indices.forEach((boardIndex, i) => {
+    if (fresh[i]) next[boardIndex] = fresh[i];
+  });
+  return next;
+}
+
 export interface CasinoGameDef {
   key:        CasinoGame;
   label:      string;

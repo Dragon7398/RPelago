@@ -16,6 +16,9 @@ import {
   handStake, applyGambit, rollCasinoOdds, cardsToSlots,
   makeGambitDeck, gambitOfferable, buildGambitDeck,
   deckChoiceOf, applyDeckBoost, isFinale, holdsMissionClaim,
+  FINALE_BOARD_CARDS, FINALE_ROW_REELS, FINALE_MAX_REROLL_REELS, FINALE_REBUY_GOLD,
+  FINALE_ROWS, applyReelRespin, finaleBoardCost, finaleRowIndices, finaleSlotDetails,
+  finaleOwnGold, finaleSeatGold, sumStars,
 } from './casinoEngine';
 import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
@@ -707,6 +710,13 @@ interface GMParticipant {
   // Cards held at lock — the fixed denominator for every pot fraction carved off
   // this seat, so repeated voids/kicks each take a consistent 1/lockedCount.
   lockedCount?: number;
+  // ── The Finale (mirrors GMParticipant in src/types/index.ts) ────────────────
+  /** Which of the three rows this seat took; the kept cards all come from it. */
+  finaleRow?:      1 | 2 | 3;
+  /** Reels (0–4) the one free reroll respun. Per BOARD — cleared on a rebuy. */
+  finaleRerolled?: number[];
+  /** The 3×5 board, row-major. A secret, spliced on like `hand`/`hole`. */
+  board?:          DeckCard[];
 }
 
 interface GMMission {
@@ -1184,6 +1194,38 @@ function splitSeatCards(seat: GMParticipant): { own: SeatCard[]; claimed: SeatCa
 function seatGoldSwing(seat: GMParticipant, own: SeatCard[], claimed: SeatCard[]): number {
   const boosted = applyDeckBoost(handStake(own.map(p => p.card)), deckChoiceOf(seat));
   return boosted + handStake(claimed.map(p => p.card));
+}
+
+/**
+ * Reward for a seat at ANY table — the one entry point every writer of `goldSwing`
+ * must use.
+ *
+ * ⚠️ `goldSwing` is a STORED number and settlement pays it verbatim; it is never
+ * re-derived from the slots. So a site that computes it the ordinary way for a
+ * finale seat does not render something wrong, it pays something wrong. There are
+ * four such sites (`lockFinaleResult`, `claimMissionSlot`, `resubmitCasinoYaml`,
+ * `adminRemoveCasinoSlot`) and this exists so none of them carries the formula.
+ *
+ * The finale prices stars, not card gold:
+ *   own cards   → (50 + 10 × Σ stars) × deck boost
+ *   claimed card → 10 × stars, flat
+ *
+ * The `own.length > 0` test is what makes §4a's two rules one expression: the +50
+ * is the fee for sitting down and spinning, so it survives while the seat holds a
+ * single own card and is absent for a PURE CLAIMANT, who never sat down at all.
+ * Simplify it to an unconditional base and a claimant collects 50g for a table
+ * they never played.
+ */
+function seatGoldSwingFor(
+  m: GMMission, seat: GMParticipant, own: SeatCard[], claimed: SeatCard[],
+): number {
+  if (!isFinale(m)) return seatGoldSwing(seat, own, claimed);
+  return finaleSeatGold(
+    m.finaleStars,
+    own.map(p => p.card),
+    claimed.map(p => p.card),
+    deckChoiceOf(seat),
+  );
 }
 
 /**
@@ -1793,7 +1835,7 @@ export const claimMissionSlot = onCall(async (request) => {
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]      = nextSlots;
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = nextCards;
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]  =
-      seatGoldSwing(nextSeat, split.own, split.claimed);
+      seatGoldSwingFor(mission, nextSeat, split.own, split.claimed);
 
     const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
       uid, playerName: base.playerName, event: 'claim',
@@ -2153,6 +2195,306 @@ export const casinoFold = onCall(async (request) => {
   return { startBy: now + 3_600_000 };
 });
 
+// ── The Finale: the spin ──────────────────────────────────────────────────────
+//
+// Three NEW callables rather than forks of dealCasinoHand / casinoDraw /
+// casinoFold. A bug in those breaks every table running tonight; a bug in these
+// breaks a table nobody has sat at yet. They reuse the same helpers
+// (mustCasinoSeat, casinoLogWrite, makeDrawableDeck) so the duplication is
+// orchestration, not logic.
+
+/** Shared guard: the caller is seated at a FORMING finale and has not locked in. */
+async function mustFinaleSeat(
+  db: ReturnType<typeof getDatabase>,
+  seasonId: string,
+  missionId: string,
+  uid: string,
+): Promise<{ mission: GMMission; seat: GMParticipant; board: DeckCard[]; deck: DeckCard[] }> {
+  const [snap, boardSnap, deckSnap] = await Promise.all([
+    db.ref(sp(seasonId, `missions/${missionId}`)).get(),
+    db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/board`)).get(),
+    db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)).get(),
+  ]);
+  if (!snap.exists()) throw new HttpsError('not-found', 'Mission not found.');
+  const mission = snap.val() as GMMission;
+  if (!isFinale(mission)) throw new HttpsError('failed-precondition', 'Not the finale.');
+  if (mission.state !== 'forming')
+    throw new HttpsError('failed-precondition', 'The finale has closed.');
+  const seat = mission.participants?.[uid];
+  if (!seat) throw new HttpsError('permission-denied', 'You have not entered the finale.');
+  if (seat.played) throw new HttpsError('failed-precondition', 'You have already locked in.');
+  return {
+    mission, seat,
+    board: boardSnap.exists() ? (boardSnap.val() as DeckCard[]) : [],
+    deck:  deckSnap.exists()  ? (deckSnap.val()  as DeckCard[]) : [],
+  };
+}
+
+/**
+ * Pull the arm: deal this seat its 3×5 board.
+ *
+ * Free the first time; `FINALE_REBUY_GOLD` for every board after a fold. The deck
+ * choice is LOCKED by this call — it decides the reel contents and `dealt` below is
+ * what the client renders.
+ */
+export const dealFinaleBoard = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { mission, seat, board } = await mustFinaleSeat(db, seasonId, missionId, uid);
+
+  // Entry closes on the deadline even before the tick flips the state — otherwise
+  // a player sitting on the page could pull the arm minutes after it closed.
+  if (mission.finaleClosesAt != null && Date.now() >= mission.finaleClosesAt)
+    throw new HttpsError('failed-precondition', 'Entry to the finale has closed.');
+  if (board.length > 0)
+    throw new HttpsError('failed-precondition', 'You already have a board. Take a row from it, or fold.');
+
+  const cost = finaleBoardCost(mission.finalePlays?.[uid]);
+
+  // Charge BEFORE dealing, in a transaction, so two tabs cannot both get a board
+  // for one payment. Same read-then-fallback shape as dealCasinoHand — the Admin
+  // SDK hands the transaction callback null on its first invocation regardless of
+  // whether data exists, so the pre-read is what lets it return a committed value.
+  if (cost > 0) {
+    const playerSnap = await db.ref(sp(seasonId, `players/${uid}`)).get();
+    if (!playerSnap.exists()) throw new HttpsError('not-found', 'Player not found.');
+    const snapData = playerSnap.val() as { gold?: number; disabled?: boolean };
+    let abortReason = 'Gold deduction failed.';
+    const { committed } = await db.ref(sp(seasonId, `players/${uid}`)).transaction(
+      (current: { gold?: number; disabled?: boolean } | null) => {
+        const data = current ?? snapData;
+        if (data.disabled) { abortReason = 'Account restricted.'; return undefined; }
+        const gold = data.gold ?? 0;
+        if (gold < cost) { abortReason = 'not-enough-gold-rebuy'; return undefined; }
+        return { ...data, gold: gold - cost };
+      },
+    );
+    if (!committed) throw new HttpsError('failed-precondition', abortReason);
+  }
+
+  // ⚠️ ONE DrawableDeck, built once and persisted. `DeckCard.uid` is a per-deck
+  // index from 0, so a second buildDeck() would collide with this one — the exact
+  // bug COMMUNITY_UID_BASE exists to paper over for Hold 'Em. uid is both the
+  // selection protocol and the React key, so a collision silently drops cards and
+  // double-counts taps. Rerolls draw from the stored remainder, never a fresh build.
+  const choice   = deckChoiceOf(seat);
+  const drawable = makeDrawableDeck(shuffle(buildDeck(DECK_VARIANTS[choice].excludeTypes)));
+  const dealt    = drawable.draw(FINALE_BOARD_CARDS);
+  if (dealt.length < FINALE_BOARD_CARDS)
+    throw new HttpsError('internal', 'The deck could not fill a board.');
+
+  const updates: Record<string, unknown> = {
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/board`)]: dealt,
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:  drawable.toArray(),
+    // The reroll is per BOARD, not per seat: a rebought board gets its own.
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRerolled`)]: null,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRow`)]:     null,
+    // They have started, so the idle sweep no longer applies (see the startBy note
+    // on the enlist path) — mirrors dealCasinoHand.
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: null,
+  };
+  // ⚠️ NO pot contribution. The rebuy goes to the HOUSE: a nonzero pot would
+  // reactivate the whole weighted-split pipeline at settle, and the 50g is a drag
+  // against respinning for a windfall, not a stake to be handed back.
+  if (cost > 0) {
+    const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+      uid, playerName: seat.playerName, event: 'deal', game: mission.casinoGame, amount: cost,
+    });
+    updates[logPath] = logEntry;
+  }
+
+  await db.ref().update(updates);
+  return { board: dealt, charged: cost };
+});
+
+/**
+ * The one free reroll: respin up to three REELS.
+ *
+ * A reel is a COLUMN, so each one respins all three of its cards. One reroll per
+ * board, enforced by `finaleRerolled` — which `dealFinaleBoard` clears, so a
+ * rebought board gets a fresh one.
+ */
+export const rerollFinaleReels = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, reels, seasonId: reqSeason } = request.data as {
+    missionId?: string; reels?: number[]; seasonId?: string;
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { mission, seat, board, deck } = await mustFinaleSeat(db, seasonId, missionId, uid);
+
+  if (board.length < FINALE_BOARD_CARDS)
+    throw new HttpsError('failed-precondition', 'No board to reroll — pull the arm first.');
+  if (seat.finaleRerolled) throw new HttpsError('failed-precondition', 'You have already used your reroll.');
+
+  // Distinct, in range, and at most three. Deduped rather than rejected on repeats:
+  // a double-tap should not cost the reroll.
+  const picked = [...new Set(Array.isArray(reels) ? reels : [])]
+    .filter(r => Number.isInteger(r) && r >= 0 && r < FINALE_ROW_REELS);
+  if (picked.length === 0) throw new HttpsError('invalid-argument', 'Pick at least one reel to respin.');
+  if (picked.length > FINALE_MAX_REROLL_REELS)
+    throw new HttpsError('invalid-argument', `At most ${FINALE_MAX_REROLL_REELS} reels.`);
+
+  const needed = picked.length * FINALE_ROWS;
+  if (deck.length < needed)
+    throw new HttpsError('failed-precondition', 'Not enough cards left in the deck.');
+
+  const drawable = makeDrawableDeck(deck);
+  const fresh    = drawable.draw(needed);
+  // A reel is a COLUMN, so this is a strided write — see applyReelRespin.
+  const next     = applyReelRespin(board, picked, fresh);
+
+  const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+    uid, playerName: seat.playerName, event: 'reroll', game: mission.casinoGame, amount: 0,
+  });
+
+  await db.ref().update({
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/board`)]: next,
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:  drawable.toArray(),
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRerolled`)]: picked.sort((a, b) => a - b),
+    [logPath]: logEntry,
+  });
+  return { board: next, reels: picked };
+});
+
+/**
+ * Fold this board. Keeps the SEAT (so the player can rebuy) and records the fold.
+ *
+ * The fold count lives on the mission (`finalePlays`), not the seat, because three
+ * paths delete a finale seat — a counter that left with it would hand back a free
+ * board via fold → stand down → re-enlist.
+ */
+export const foldFinaleBoard = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, seasonId: reqSeason } = request.data as { missionId?: string; seasonId?: string };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db  = getDatabase();
+  const now = Date.now();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { mission, seat, board } = await mustFinaleSeat(db, seasonId, missionId, uid);
+  if (board.length === 0) throw new HttpsError('failed-precondition', 'No board to fold.');
+
+  const folds = (mission.finalePlays?.[uid]?.folds ?? 0) + 1;
+  const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+    uid, playerName: seat.playerName, event: 'fold', game: mission.casinoGame,
+  });
+
+  await db.ref().update({
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/board`)]: null,
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:  null,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRerolled`)]: null,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRow`)]:     null,
+    [sp(seasonId, `missions/${missionId}/finalePlays/${uid}/folds`)]:          folds,
+    // Back on the idle clock: they hold a seat with no board again, exactly as
+    // they did before pulling the arm (mirrors casinoFold).
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: now + 3_600_000,
+    [logPath]: logEntry,
+  });
+  return { folds, rebuy: FINALE_REBUY_GOLD };
+});
+
+/**
+ * Lock in: commit the kept cards of ONE row as this seat's Archipelago slots.
+ *
+ * The finale's counterpart to `lockCasinoResult`, and a separate callable rather
+ * than a fork of it for three reasons: there is **no gambit gate** to skip (the
+ * host sets the room's odds), the reward is priced in stars rather than card gold,
+ * and the selection is bounded by the chosen ROW rather than by the whole pool.
+ */
+export const lockFinaleResult = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Not signed in.');
+  const uid = request.auth.uid;
+  const { missionId, row, keepUids, manifest, seasonId: reqSeason } = request.data as {
+    missionId?: string;
+    row?: number;                 // which of the three rows this seat took
+    keepUids?: number[];          // which of that row's five cards to commit
+    manifest?: Record<string, { game?: string; name?: string }>;
+    seasonId?: string;
+  };
+  if (!missionId) throw new HttpsError('invalid-argument', 'Missing missionId.');
+
+  const db = getDatabase();
+  const { seasonId } = await resolveWriteSeason(uid, reqSeason, db);
+  const { mission, seat, board } = await mustFinaleSeat(db, seasonId, missionId, uid);
+
+  // ⚠️ NO deadline check here, deliberately. `dealFinaleBoard` has one — you may
+  // not START a board after entry closes — but a player who already holds one must
+  // be able to finish it in the window before the tick deploys the table. The whole
+  // straggler workflow (plan §11) is about seats that have not locked in yet, and
+  // locking in is what clears them.
+
+  if (board.length < FINALE_BOARD_CARDS)
+    throw new HttpsError('failed-precondition', 'No board to commit — pull the arm first.');
+  if (row !== 1 && row !== 2 && row !== 3)
+    throw new HttpsError('invalid-argument', 'Pick one of the three rows.');
+
+  // The selection is bounded by the ROW, not the board. A client that sent cards
+  // from two rows would otherwise commit a hand nobody was ever offered —
+  // `selectCommitted`'s "not in your hand" check does the work once the pool is
+  // narrowed to the row the player actually took.
+  const rowCards = finaleRowIndices(row).map(i => board[i]).filter(Boolean);
+  const sel = selectCommitted(rowCards, keepUids ?? null, FINALE_ROW_REELS, 1);
+  if (!sel.ok) throw new HttpsError('invalid-argument', sel.reason);
+  const hand = sel.committed;
+
+  // The config is the submission, exactly as at every other table.
+  const yamlPath = `casino/${seasonId}/${missionId}/${uid}.yaml`;
+  const [yamlExists] = await casinoBucket().file(yamlPath).exists();
+  if (!yamlExists)
+    throw new HttpsError('failed-precondition', 'Attach your Archipelago config (.yaml) before you can lock in.');
+
+  const choice = deckChoiceOf(seat);
+  const stars  = mission.finaleStars ?? {};
+  const starsOf = (c: { name?: string }) => (c.name ? stars[c.name] ?? 0 : 0);
+  const goldSwing = finaleOwnGold(sumStars(hand, stars), choice);
+  // Stars, not gold — see finaleSlotDetails.
+  const slots = cardsToSlots(hand, c => finaleSlotDetails(c, starsOf(c)));
+
+  const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  hand.forEach((card, i) => {
+    const m    = manifest?.[String(card.uid)];
+    const game = clip(m?.game, 120);
+    const name = clip(m?.name, 80);
+    if (!game) throw new HttpsError('failed-precondition', 'Every kept card needs a game before you can lock in.');
+    slots[i].game = game;
+    if (name) slots[i].name = name;
+  });
+
+  const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
+    uid, playerName: seat.playerName, event: 'lock', game: mission.casinoGame, goldSwing, deckChoice: choice,
+  });
+
+  await db.ref().update({
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/played`)]:      true,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]:   goldSwing,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/slots`)]:       slots,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)]: hand,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCount`)]: hand.length,
+    [sp(seasonId, `missions/${missionId}/participants/${uid}/finaleRow`)]:   row,
+    // ONE PLAY EACH. This is the flag `enlistInMission` refuses a second entry on,
+    // and it has to live on the mission because every path that removes a finale
+    // seat would otherwise take it along.
+    [sp(seasonId, `missions/${missionId}/finalePlays/${uid}/played`)]:       true,
+    // Clear the draw deck; KEEP the board. The board is the re-selection pool for a
+    // forming self-resubmit or a host deny (D4), exactly as `hand` is at the other
+    // tables — and `deployMission` clears only `deck`, so it survives the deadline.
+    [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:    null,
+    [logPath]: logEntry,
+  });
+
+  return { goldSwing, slots };
+});
+
 // Deal this seat its gambit offer from the mission's SHARED, depleting deck.
 // The deck is server-only (seasonSecrets) so its order can't be read ahead; the
 // offer this returns is the ONLY set playCasinoGambit will accept. Idempotent per
@@ -2457,7 +2799,19 @@ export const resubmitCasinoYaml = onCall(async (request) => {
       throw new HttpsError('failed-precondition', 'Cards can only be changed while the table is still forming.');
 
     let rawHand: DeckCard[];
-    if (mission.casinoGame === 'holdem') {
+    if (isFinale(mission)) {
+      // ⚠️ The finale's pool is the ROW the seat took, not its whole board. The row
+      // choice is NOT re-pickable (D4) — a re-pick means "keep a different subset
+      // of the row you took", so offering the other ten cards would let a denied
+      // player quietly trade up to a better row. `finaleRow` is stamped at lock, so
+      // a seat somehow missing it has nothing safe to re-select from and is refused
+      // by the empty-pool check below.
+      const boardSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/board`)).get();
+      const board = (boardSnap.val() as DeckCard[] | null) ?? [];
+      rawHand = seat.finaleRow && board.length >= FINALE_BOARD_CARDS
+        ? finaleRowIndices(seat.finaleRow).map(i => board[i]).filter(Boolean)
+        : [];
+    } else if (mission.casinoGame === 'holdem') {
       const holeSnap = await db.ref(secret(seasonId, `missions/${missionId}/participants/${uid}/hole`)).get();
       const hole = (holeSnap.val() as DeckCard[] | null) ?? [];
       rawHand = holdemPool(hole, mission.community ?? []);
@@ -2475,7 +2829,13 @@ export const resubmitCasinoYaml = onCall(async (request) => {
     const committed = sel.committed;
 
     const choice = deckChoiceOf(seat);
-    const slots  = cardsToSlots(committed);
+    // A finale slot's details line reads in STARS, so rebuilding it with the
+    // default formatter would quietly swap every line to a gold figure that has
+    // nothing to do with what the slot pays.
+    const finStars = mission.finaleStars ?? {};
+    const slots    = isFinale(mission)
+      ? cardsToSlots(committed, c => finaleSlotDetails(c, c.name ? finStars[c.name] ?? 0 : 0))
+      : cardsToSlots(committed);
     // A merc stays with its CARD. The rebuild starts from fresh slots, so carry
     // each own card's merc across by uid (claimed cards are a different uid space
     // and are carried whole below). A card the player drops takes its merc with it
@@ -2506,7 +2866,7 @@ export const resubmitCasinoYaml = onCall(async (request) => {
     const nextCards  = [...committed, ...carried.map(c => c.card)];
     const nextSeat: GMParticipant = { ...seat, slots: nextSlots, lockedCards: nextCards };
     const split      = splitSeatCards(nextSeat);
-    const goldSwing  = seatGoldSwing(nextSeat, split.own, split.claimed);
+    const goldSwing  = seatGoldSwingFor(mission, nextSeat, split.own, split.claimed);
 
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/lockedCards`)] = nextCards;
     updates[sp(seasonId, `missions/${missionId}/participants/${uid}/goldSwing`)]   = goldSwing;
@@ -3057,7 +3417,7 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
 
   const nextSeat: GMParticipant = { ...seat, lockedCards: nextCards, slots: nextSlots };
   const split     = splitSeatCards(nextSeat);
-  const goldSwing = seatGoldSwing(nextSeat, split.own, split.claimed);
+  const goldSwing = seatGoldSwingFor(mission, nextSeat, split.own, split.claimed);
 
   const [logPath, logEntry] = casinoLogWrite(db, seasonId, missionId, {
     uid: playerId, playerName: seat.playerName, event: kick ? 'adminkick' : 'adminvoid',

@@ -19,6 +19,22 @@ export function casinoSlotDetails(card: CasinoCard): string {
   return `${card.name} · ${card.value}g`;
 }
 
+/**
+ * The Finale's details line: "Sonic · 5★".
+ *
+ * A finale card's worth is its STARS, not its gold value, so printing the card's
+ * `value` here would show a number that has nothing to do with what the slot pays.
+ *
+ * ⚠️ This deliberately does not match `handStakeFromSlots`' regex, and that is
+ * safe: that function is only ever a fallback behind `p.goldSwing ?? …` (three
+ * sites), and a finale seat always carries a `goldSwing`. Writing a fake gold
+ * figure just to keep the regex happy would make this the only lying number in
+ * the record.
+ */
+export function finaleSlotDetails(card: CasinoCard, stars: number): string {
+  return `${card.name} · ${stars}★`;
+}
+
 // The total gold a seat is "playing for" — sum of all locked card values
 export function handStake(hand: readonly CasinoCard[]): number {
   return hand.reduce((sum, c) => sum + (c.value ?? 0), 0);
@@ -47,11 +63,16 @@ export function handStakeFromSlots(slots: readonly AdvSlot[] | undefined): numbe
 // Convert a locked casino hand into the AdvSlots written to the mission participant.
 // name and game are intentionally blank — the player fills them in later through
 // the normal slot-editing flow, the same way every other mission slot is filled.
-export function cardsToSlots(hand: readonly CasinoCard[]): AdvSlot[] {
-  return hand.map((card) => ({
+// `details` overrides the line stamped on each slot — the Finale passes
+// `finaleSlotDetails` so its slots read in stars rather than gold.
+export function cardsToSlots(
+  hand: readonly CasinoCard[],
+  details: (card: CasinoCard, index: number) => string = casinoSlotDetails,
+): AdvSlot[] {
+  return hand.map((card, i) => ({
     name:    '',
     game:    '',
-    details: casinoSlotDetails(card),
+    details: details(card, i),
     status:  'Unstarted' as const,
   }));
 }

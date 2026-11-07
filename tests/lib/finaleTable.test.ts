@@ -2,17 +2,22 @@ import { describe, it, expect } from 'vitest';
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, FINALE_GAME, isFinale, minCasinoAnte,
   FINALE_ROWS, FINALE_ROW_REELS, FINALE_BOARD_CARDS, FINALE_MAX_REROLL_REELS,
-  finaleReelIndices, finaleRowIndices, seatSpend,
+  finaleReelIndices, finaleRowIndices, applyReelRespin, seatSpend,
 } from '../../src/lib/casinoData';
 import {
   currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleDeadlinePassed,
   casinoEntryCosts, freshFinaleTable, findFinale, cardStatsCorpus, pickNextCasinoGame,
-  FINALE_BASE_MAX, type FinaleSetup,
+  FINALE_BASE_MAX, casinoTableSettlement, casinoShareDenominator, type FinaleSetup,
 } from '../../src/lib/missionLogic';
 import { FINALE_REBUY_GOLD, finaleBoardCost } from '../../src/lib/finaleStars';
+import { cardsToSlots, finaleSlotDetails, handStakeFromSlots } from '../../src/lib/casinoSlots';
 import type { GMMission } from '../../src/types';
 
 const HOUR = 3_600_000;
+
+/** A minimal DeckCard, enough for the board-index assertions. */
+const card = (name: string, uid: number) =>
+  ({ name, type: 'broad', count: 1, value: 30, copies: 1, uid, copyIndex: 0 }) as never;
 
 const setup = (over: Partial<FinaleSetup> = {}): FinaleSetup => ({
   closesAt: 5_000_000,
@@ -196,6 +201,45 @@ describe('the board', () => {
     expect(byReel).toEqual(all);
   });
 
+  it('respins a COLUMN, leaving every other card where it was', () => {
+    // The off-by-one that matters: a row-major board makes "replace a reel" a
+    // strided write, and the wrong stride respins a ROW — which would destroy the
+    // one mechanic the reroll exists for while still looking plausible on screen.
+    const board = Array.from({ length: FINALE_BOARD_CARDS }, (_, i) => card(`old${i}`, i));
+    const fresh = [card('newA', 90), card('newB', 91), card('newC', 92)];
+    const next  = applyReelRespin(board, [1], fresh);
+
+    expect(next.map(c => c.name).filter(n => n.startsWith('new'))).toEqual(['newA', 'newB', 'newC']);
+    // Column 1 is indices 1, 6, 11 — one per row, never 1, 2, 3.
+    expect([next[1].name, next[6].name, next[11].name]).toEqual(['newA', 'newB', 'newC']);
+    expect([next[2].name, next[3].name]).toEqual(['old2', 'old3']);
+    // Everything outside the reel is untouched, and the board keeps its length.
+    expect(next).toHaveLength(FINALE_BOARD_CARDS);
+    for (const i of [0, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14]) {
+      expect(next[i].name, `index ${i}`).toBe(`old${i}`);
+    }
+  });
+
+  it('fills several reels in REEL order, not tap order', () => {
+    // Both client and server must map `fresh` into the board the same way, however
+    // the player happened to tap the reels.
+    const board = Array.from({ length: FINALE_BOARD_CARDS }, (_, i) => card(`old${i}`, i));
+    const fresh = Array.from({ length: 6 }, (_, i) => card(`n${i}`, 50 + i));
+    const tapped  = applyReelRespin(board, [4, 0], fresh);
+    const ordered = applyReelRespin(board, [0, 4], fresh);
+    expect(tapped).toEqual(ordered);
+    // Reel 0 takes the first three, reel 4 the next three.
+    expect([tapped[0].name, tapped[5].name, tapped[10].name]).toEqual(['n0', 'n1', 'n2']);
+    expect([tapped[4].name, tapped[9].name, tapped[14].name]).toEqual(['n3', 'n4', 'n5']);
+  });
+
+  it('never grows the board when handed too few replacements', () => {
+    const board = Array.from({ length: FINALE_BOARD_CARDS }, (_, i) => card(`old${i}`, i));
+    const next  = applyReelRespin(board, [0], []);
+    expect(next).toHaveLength(FINALE_BOARD_CARDS);
+    expect(next.map(c => c.name)).toEqual(board.map(c => c.name));
+  });
+
   it('leaves the deck big enough for a full reroll', () => {
     // Worst case: 15 dealt plus 3 reels × 3 cards respun = 24, against the
     // smallest deck variant (Safety).
@@ -265,6 +309,83 @@ describe('freshFinaleTable', () => {
     expect(m.series).toBe(1);        // it runs once; there is no Cohort II
     expect(m.state).toBe('forming');
     expect(m.participants).toEqual({});
+  });
+});
+
+// ── Settlement needs no fork ──────────────────────────────────────────────────
+
+describe('settlement', () => {
+  const seat = (over: Record<string, unknown> = {}) => ({
+    playerId: 'p', playerName: 'P', joinedAt: 0, played: true,
+    lockedCards: [card('Sonic', 0), card('Zelda', 1)],
+    slots: [{ name: 's0', game: 'g0' }, { name: 's1', game: 'g1' }],
+    lockedCount: 2, goldSwing: 187,
+    ...over,
+  });
+
+  it('pays nothing from the pot, because the finale has none', () => {
+    // ⚠️ This is why completeMission needs NO finale branch: casinoPotShares
+    // short-circuits on `pot <= 0`, so the whole weighted-split pipeline runs and
+    // pays zero. The seat's stored goldSwing is the entire payout.
+    const m = finale({ participants: { p: seat() } as never, state: 'complete' });
+    const { seat: shares, merc } = casinoTableSettlement(m, () => 0);
+    expect(shares.get('p')).toBe(0);
+    expect([...merc.values()]).toEqual([]);
+  });
+
+  it('pays nothing even with seats banked and weight on the table', () => {
+    // The denominator IS banked at deploy for a finale, like any casino table —
+    // it is the zero pot alone that keeps the split inert. So this is the
+    // assertion that matters: banking does no harm.
+    const m = finale({
+      participants: { p: seat(), q: { ...seat(), playerId: 'q' } } as never,
+      casinoShareUnits: 2, casinoVoidedShare: 0, state: 'complete',
+    });
+    expect(casinoShareDenominator(m)).toBe(2);
+    for (const g of casinoTableSettlement(m, () => 0).seat.values()) expect(g).toBe(0);
+  });
+
+  it('would pay out if the pot ever became non-zero — so it must stay 0', () => {
+    // The inverse, stated so the risk is legible: nothing about a finale makes the
+    // split refuse. Routing the 50g rebuy through potContribution would really
+    // divide it among the seats.
+    const m = finale({
+      participants: { p: seat() } as never,
+      pot: 200, casinoShareUnits: 1, casinoVoidedShare: 0, state: 'complete',
+    });
+    expect(casinoTableSettlement(m, () => 0).seat.get('p')).toBe(200);
+  });
+});
+
+// ── The slot details line ─────────────────────────────────────────────────────
+
+describe('slot details', () => {
+  it('reads in stars, not gold', () => {
+    expect(finaleSlotDetails({ name: 'Sonic', value: 68 }, 5)).toBe('Sonic · 5★');
+  });
+
+  it('is what cardsToSlots stamps when the formatter is passed', () => {
+    const slots = cardsToSlots(
+      [card('Sonic', 0), card('Zelda', 1)],
+      (c, i) => finaleSlotDetails(c, i === 0 ? 5 : 2),
+    );
+    expect(slots.map(s => s.details)).toEqual(['Sonic · 5★', 'Zelda · 2★']);
+    expect(slots.every(s => s.game === '' && s.status === 'Unstarted')).toBe(true);
+  });
+
+  it('leaves the ordinary gold line untouched by default', () => {
+    // The regression half: every other table still stamps "Name · Ng".
+    expect(cardsToSlots([card('Sonic', 0)])[0].details).toBe('Sonic · 30g');
+  });
+
+  it('reads back as 0 gold, which is why goldSwing must be stored', () => {
+    // handStakeFromSlots parses "· Ng" out of the details line and finds nothing
+    // here. That is safe ONLY because it is always a fallback behind
+    // `p.goldSwing ?? …` — a finale seat that somehow lost its goldSwing would
+    // display as 0 rather than guess.
+    const slots = cardsToSlots([card('Sonic', 0)], c => finaleSlotDetails(c, 5));
+    expect(handStakeFromSlots(slots)).toBe(0);
+    expect(handStakeFromSlots(cardsToSlots([card('Sonic', 0)]))).toBe(30);
   });
 });
 

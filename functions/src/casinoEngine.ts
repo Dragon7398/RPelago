@@ -131,6 +131,27 @@ export function finaleRowIndices(row: number): number[] {
   return Array.from({ length: FINALE_ROW_REELS }, (_, i) => (row - 1) * FINALE_ROW_REELS + i);
 }
 
+/**
+ * The board with the chosen reels respun — every card of those COLUMNS replaced,
+ * in reel order, from `fresh`. Mirror of `applyReelRespin` in src/lib/casinoData.ts.
+ *
+ * Extracted because a row-major board makes "replace a reel" a strided write, and
+ * the wrong stride respins a ROW instead — silently destroying the one mechanic
+ * the reroll exists for.
+ */
+export function applyReelRespin(
+  board: readonly DeckCard[],
+  reels: readonly number[],
+  fresh: readonly DeckCard[],
+): DeckCard[] {
+  const next = board.slice();
+  const indices = [...reels].sort((a, b) => a - b).flatMap(finaleReelIndices);
+  indices.forEach((boardIndex, i) => {
+    if (fresh[i]) next[boardIndex] = fresh[i];
+  });
+  return next;
+}
+
 export interface CasinoGameDef {
   key:        CasinoGame;
   label:      string;
@@ -216,6 +237,25 @@ export function finaleOwnGold(stars: number, choice: CasinoDeckChoice): number {
 
 export function finaleClaimedGold(stars: number): number {
   return FINALE_GOLD_PER_STAR * stars;
+}
+
+/**
+ * What a whole finale seat is paid — its own hand plus anything it claimed.
+ * Mirror of `finaleSeatGold` in src/lib/finaleStars.ts, where it is unit-tested.
+ *
+ * ⚠️ The `own.length > 0` test is load-bearing: the +50 is the fee for sitting
+ * down and spinning, so it survives while the seat keeps one own card and is
+ * ABSENT for a pure claimant, who never sat down. Drop the guard and a claimant
+ * collects 50g for a table they never played.
+ */
+export function finaleSeatGold(
+  stars:   Record<string, number> | undefined,
+  own:     readonly { name?: string }[],
+  claimed: readonly { name?: string }[],
+  choice:  CasinoDeckChoice,
+): number {
+  const base = own.length > 0 ? finaleOwnGold(sumStars(own, stars), choice) : 0;
+  return base + claimed.reduce((g, c) => g + finaleClaimedGold(sumStars([c], stars)), 0);
 }
 
 /** Σ stars over a set of cards, read from the mission's frozen snapshot. */
@@ -739,11 +779,28 @@ export function holdemPool(
 
 // ── Slot conversion ──────────────────────────────────────────────────────────
 
-export function cardsToSlots(hand: readonly DeckCard[]): Array<{ name: string; game: string; details: string; status: 'Unstarted' }> {
-  return hand.map(card => ({
+/**
+ * The Finale's details line: "Sonic · 5★". A finale card's worth is its STARS, so
+ * printing `value` would show a figure unrelated to what the slot pays.
+ *
+ * ⚠️ It deliberately does not match `handStakeFromSlots`' regex. That is safe —
+ * the function is only ever a fallback behind `p.goldSwing ?? …`, and a finale seat
+ * always carries a goldSwing. Mirror of src/lib/casinoSlots.ts.
+ */
+export function finaleSlotDetails(card: { name: string }, stars: number): string {
+  return `${card.name} · ${stars}★`;
+}
+
+// `details` overrides the line stamped on each slot — the Finale passes a
+// star-based formatter. Mirror of src/lib/casinoSlots.ts.
+export function cardsToSlots(
+  hand: readonly DeckCard[],
+  details: (card: DeckCard, index: number) => string = c => `${c.name} · ${c.value}g`,
+): Array<{ name: string; game: string; details: string; status: 'Unstarted' }> {
+  return hand.map((card, i) => ({
     name:    '',
     game:    '',
-    details: `${card.name} · ${card.value}g`,
+    details: details(card, i),
     status:  'Unstarted' as const,
   }));
 }

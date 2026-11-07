@@ -3,15 +3,18 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
-import { setCurrentSeason, sRef, ownHandPath, ownHolePath } from '../firebase/season';
+import { setCurrentSeason, sRef, ownHandPath, ownHolePath, ownBoardPath } from '../firebase/season';
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
   DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
+  FINALE_BOARD_CARDS, finaleRowIndices,
 } from '../lib/casinoData';
 import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
 import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
+import { finaleBoardCost } from '../lib/finaleStars';
+import FinaleBoard from './FinaleBoard';
 import {
   parseApYaml, checkWorldCount, checkProgressionBalancing, checkBlanketTargets,
   checkYamlLimits, summarizeLimitFindings, type PbFinding,
@@ -43,12 +46,26 @@ type Phase =
   | 'gambit'
   | 'manifest'  // name the game you'll play for each committed card (Slot Fill)
   | 'locked'
-  | 'deployed';
+  | 'deployed'
+  // ── The Finale (casinoGame === 'finale') ──────────────────────────────────
+  | 'armed'     // deck locked in, the arm is there to pull
+  | 'spinning'  // reels settling one at a time, left to right (presentation only)
+  | 'reroll'    // the one free reroll: up to three REELS (columns)
+  | 'rowpick'   // take exactly one row, or fold
+  | 'keep';     // drop any of that row's five, floor of one
 
 // Phases owned by local interaction. The Firebase-derived effect must not yank
 // the player out of one of these mid-hand. `holdwait` is deliberately NOT here:
 // it exists precisely to be pushed forward by the server's community reveal.
-const LOCAL_PHASES: Phase[] = ['deckselect', 'play', 'holdplay', 'folded', 'gambit', 'manifest'];
+//
+// All four finale phases ARE local: the server deals the whole board up front, so
+// the spin, the reroll choice, the row choice and the keep set are interaction on
+// data that has already landed. A mission tick must not throw the player out of
+// any of them.
+const LOCAL_PHASES: Phase[] = [
+  'deckselect', 'play', 'holdplay', 'folded', 'gambit', 'manifest',
+  'spinning', 'reroll', 'rowpick', 'keep',
+];
 
 const GAME_BLURB: Record<CasinoGame, string> = {
   five_card_draw:
@@ -166,6 +183,9 @@ export function CasinoTable() {
   // Read from seasonSecrets/, never from the mission — see the subscription below.
   const [secretHand, setSecretHand]   = useState<DeckCard[] | null>(null);
   const [secretHole, setSecretHole]   = useState<DeckCard[] | null>(null);
+  const [secretBoard, setSecretBoard] = useState<DeckCard[] | null>(null);
+  // Which row the finale seat took. Local until lock-in writes it (WS-E).
+  const [finaleRow, setFinaleRow]     = useState<1 | 2 | 3 | null>(null);
   // Live name-color per seated player (subscribed by uid), so a mid-mission change
   // is reflected on the table just like on the landing.
   const [nameColors, setNameColors]   = useState<Record<string, string | null>>({});
@@ -324,6 +344,16 @@ export function CasinoTable() {
     });
   }, [uid, missionId, seasonReady]);
 
+  // The Finale only: this seat's 3×5 board, row-major. A secret for the same
+  // reason as `hand` — the season tree is world-readable, and a board on the
+  // mission would show every player everyone else's spin.
+  useEffect(() => {
+    if (!db || !uid || !missionId || !seasonReady) return;
+    return onValue(ref(db, ownBoardPath(missionId, uid)), snap => {
+      setSecretBoard(snap.exists() ? (snap.val() as DeckCard[]) : null);
+    });
+  }, [uid, missionId, seasonReady]);
+
   // Live name-color for each seated player (narrow per-uid subs, so a gold/pot tick
   // doesn't re-fire them). Re-subscribes when the set of seated players changes.
   const seatUidsKey = useMemo(
@@ -405,6 +435,20 @@ export function CasinoTable() {
 
     if (LOCAL_PHASES.includes(phase)) return;
 
+    // ── The Finale ──────────────────────────────────────────────────────────
+    // It has NO gambit phase, so the recovery immediately below does not apply to
+    // it and must not be allowed to run. A board already dealt resumes at the
+    // reroll — or straight at the row pick when the reroll is spent, since
+    // `finaleRerolled` is per BOARD and a rebuy clears it.
+    if (game === 'finale') {
+      if (secretBoard?.length) {
+        setPhase(seat?.finaleRerolled?.length ? 'rowpick' : 'reroll');
+      } else {
+        setPhase(seat?.deckChoice == null ? 'deckselect' : 'armed');
+      }
+      return;
+    }
+
     // Recovery: the gambit was already played but the seat isn't locked (a reload
     // after the gambit committed) — resume at the Slot Fill step, where Submit
     // skips the already-played gambit and locks.
@@ -467,7 +511,7 @@ export function CasinoTable() {
     // guards above read them, so the effect must see their current values when a
     // mission tick fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, mission, secretHand, secretHole, game, cfg, resubmitting, rePicking]);
+  }, [uid, mission, secretHand, secretHole, secretBoard, game, cfg, resubmitting, rePicking]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Callables. The resolved seasonId is injected into every payload so the
@@ -715,6 +759,64 @@ export function CasinoTable() {
     setPhase(gambitPlayed ? 'manifest' : 'gambit');
   };
 
+  // ── The Finale ──────────────────────────────────────────────────────────────
+  //
+  // Each handler COMMITS to the server, then sets the phase, and does nothing in
+  // between. That is the rule the Hold 'Em play-on learned the hard way: anything
+  // that can throw between a committed call and the phase advance strands the
+  // player on a screen whose only remaining action the server now refuses.
+
+  /** The seat's star snapshot and fold history, both frozen on the mission. */
+  const finaleStarMap = useMemo(() => mission?.finaleStars ?? {}, [mission?.finaleStars]);
+  const finaleFolds   = uid ? mission?.finalePlays?.[uid]?.folds ?? 0 : 0;
+  const finaleRebuy   = finaleBoardCost({ folds: finaleFolds });
+  const finaleRerolled = uid ? mission?.participants?.[uid]?.finaleRerolled ?? null : null;
+
+  const doFinaleArm = () => run(async () => {
+    await call<object, { board: DeckCard[] }>('dealFinaleBoard')({ missionId });
+    setPhase('spinning');
+  }, 'Could not spin the reels.');
+
+  // The board is already dealt and stored when the animation ends, so this is
+  // pure presentation handing over to the next decision. After a REROLL the same
+  // settle runs again, and `finaleRerolled` is what tells the two apart.
+  const doFinaleSpinDone = () => setPhase(finaleRerolled?.length ? 'rowpick' : 'reroll');
+
+  const doFinaleReroll = (reels: number[]) => run(async () => {
+    await call<object, { board: DeckCard[] }>('rerollFinaleReels')({ missionId, reels });
+    // Re-run the settle on the new cards; `finaleRerolled` is now set, so when it
+    // finishes the player lands on the row pick rather than back here.
+    setPhase('spinning');
+  }, 'Could not reroll those reels.');
+
+  const doFinaleFold = () => run(async () => {
+    await call<object, { folds: number }>('foldFinaleBoard')({ missionId });
+    // Back to the arm, which now shows the rebuy price.
+    setPhase('armed');
+  }, 'Could not fold the board.');
+
+  /**
+   * Hand the kept cards to the manifest step, which every other table already
+   * uses: `committedCards` is `hand` filtered by `keep`, so seeding both is what
+   * makes the finale's chosen row look like any other committed hand.
+   *
+   * ⚠️ The LOCK itself is WS-E (`lockFinaleResult`) — the manifest's submit still
+   * calls `lockCasinoResult`, which would reject a finale seat (no gambit) and
+   * would price it off card gold rather than stars. The flow is not end to end
+   * until that lands.
+   */
+  const doFinaleCommit = (row: 1 | 2 | 3, keepUids: number[]) => {
+    const board = secretBoard ?? [];
+    const chosen = keepUids
+      .map(u => board.find(c => c.uid === u))
+      .filter((c): c is DeckCard => !!c);
+    if (chosen.length === 0) return;
+    setFinaleRow(row);
+    setHand(chosen);
+    setKeep(new Set(chosen.map(c => c.uid)));
+    setPhase('manifest');
+  };
+
   // Folding after a Hold 'Em reveal EMPTIES the seat for good — it isn't the
   // single-sitting fold, which leaves you seated and free to redeal.
   const doHoldemFold = () => run(async () => {
@@ -905,13 +1007,28 @@ export function CasinoTable() {
   // like Seven Card Stud). It is only ever a RE-selection: the draw deck is cleared
   // at deploy, so there is no reroll/hit/redraw, and the gambit is never re-openable.
   // The pool survives until the table settles, when onMissionComplete purges it.
-  const resubmitPool: DeckCard[] = game === 'holdem'
-    ? holdemPool(secretHole ?? [], mission?.community ?? [])
-    : (secretHand ?? []);
+  // The finale re-selects from the ROW it took — NOT the whole board. The row
+  // choice is not re-pickable: a re-pick means "keep a different subset of the row
+  // you took", so offering the other ten cards would let a denied player quietly
+  // trade up to a better row. `finaleRow` is stamped on the seat at lock, which is
+  // what makes this pool recoverable after a reload.
+  const finaleRowPool: DeckCard[] = useMemo(() => {
+    const board = secretBoard ?? [];
+    const row   = mySeat?.finaleRow;
+    if (!row || board.length < FINALE_BOARD_CARDS) return [];
+    return finaleRowIndices(row).map(i => board[i]).filter(Boolean);
+  }, [secretBoard, mySeat?.finaleRow]);
+
+  const resubmitPool: DeckCard[] = game === 'finale'
+    ? finaleRowPool
+    : game === 'holdem'
+      ? holdemPool(secretHole ?? [], mission?.community ?? [])
+      : (secretHand ?? []);
   const canChangeCards = !!mySeat?.played
     && (mission?.state === 'forming' || (mission?.state === 'inprogress' && yamlDenied))
-    && (game === 'holdem' ? (secretHole?.length ?? 0) > 0 && (mission?.community?.length ?? 0) > 0
-                          : (secretHand?.length ?? 0) > 0);
+    && (game === 'finale' ? finaleRowPool.length > 0
+        : game === 'holdem' ? (secretHole?.length ?? 0) > 0 && (mission?.community?.length ?? 0) > 0
+                            : (secretHand?.length ?? 0) > 0);
 
   // Hold 'Em re-pick: a seat that has played on may still swap which five of its
   // seven it commits, free, right up until it locks in — after which the resubmit
@@ -966,7 +1083,11 @@ export function CasinoTable() {
     [yamlText, yamlLimits],
   );
   const canSubmit = manifestReady === committedCards.length && (yamlText != null || !attachRequired)
-    && !countErr && pbBlock.length === 0 && blanketBlock.length === 0;
+    && !countErr && pbBlock.length === 0 && blanketBlock.length === 0
+    // A finale lock is scoped by the row the seat took, so a missing row is
+    // unsubmittable. Only reachable by reloading mid-manifest — which sends the
+    // player back to the row pick anyway — so this is the belt, not the mechanism.
+    && (game !== 'finale' || finaleRow != null);
 
   // Submit: store the YAML (owner-scoped), then either lock (initial) or resubmit
   // (already-locked). The per-card manifest is keyed by card uid, so reordering the
@@ -988,6 +1109,17 @@ export function CasinoTable() {
       setResubmitting(false);
       doFlash('Config resubmitted to your host.');
       setPhase(mission?.state === 'forming' ? 'locked' : 'deployed');
+      return;
+    }
+
+    // The finale has its own lock: no gambit to resolve first, the reward is priced
+    // in stars rather than card gold, and the selection is bounded by the row the
+    // seat took. `lockCasinoResult` would refuse it outright (it requires a gambit).
+    if (game === 'finale') {
+      await call<object, { goldSwing: number }>('lockFinaleResult')({
+        missionId, row: finaleRow, keepUids: committedCards.map(c => c.uid), manifest: manifestPayload,
+      });
+      setPhase('locked');
       return;
     }
 
@@ -1022,6 +1154,9 @@ export function CasinoTable() {
     // No re-drawing on a resubmit — the hand is fixed, only the commit is re-picked.
     // stood=true so Blackjack shows its commit button (its draw phase is over).
     setStood(true);
+    // Restore the row from the SEAT record — the local copy is gone after a reload,
+    // and both `lockFinaleResult` and the re-pick pool are scoped by it.
+    setFinaleRow(mySeat?.finaleRow ?? null);
     const seeded: Record<number, ManifestVal> = {};
     cards.forEach((c, i) => { seeded[c.uid] = { name: slots[i]?.name ?? '', game: slots[i]?.game ?? '' }; });
     setManifest(seeded);
@@ -1236,6 +1371,32 @@ export function CasinoTable() {
                 {cfg.reroll   && ` One reroll available for ${cfg.rerollCost}g.`}
                 {cfg.playOn > 0 && ` Playing on after the reveal costs a further ${cfg.playOn}g.`}
               </div>
+              <div className="cz-flash">{flash}</div>
+            </>
+          )}
+
+          {/* THE FINALE — arm, spin, reroll, take a row, keep what you will play.
+              One component for all five phases: they share the machine, and
+              splitting them would mean five copies of the 3×5 grid. */}
+          {(phase === 'armed' || phase === 'spinning' || phase === 'reroll'
+            || phase === 'rowpick' || phase === 'keep') && (
+            <>
+              <FinaleBoard
+                phase={phase}
+                board={secretBoard ?? []}
+                stars={finaleStarMap}
+                deckChoice={effectiveDeckChoice}
+                rebuyCost={finaleRebuy}
+                busy={busy}
+                onArm={doFinaleArm}
+                onSpinDone={doFinaleSpinDone}
+                onReroll={doFinaleReroll}
+                onSkipReroll={() => setPhase('rowpick')}
+                onPickRow={() => setPhase('keep')}
+                onBackToRows={() => setPhase('rowpick')}
+                onFold={doFinaleFold}
+                onCommit={doFinaleCommit}
+              />
               <div className="cz-flash">{flash}</div>
             </>
           )}
@@ -1502,8 +1663,12 @@ export function CasinoTable() {
             <>
               {!resubmitting && (
                 <div className="sf-steps">
-                  <span className="done">✓ Cards</span><span className="dot" />
-                  <span className="done">✓ Gambit</span><span className="dot" />
+                  {/* The finale has no gambit step (its odds are set by the host),
+                      so showing a ticked "Gambit" would claim a step that never
+                      happened. Its first step is the row it took. */}
+                  <span className="done">✓ {game === 'finale' ? `Row ${finaleRow ?? '—'}` : 'Cards'}</span>
+                  <span className="dot" />
+                  {game !== 'finale' && <><span className="done">✓ Gambit</span><span className="dot" /></>}
                   <span className="now">Fill your slots</span><span className="dot" />
                   <span>Submit</span>
                 </div>
@@ -1658,7 +1823,12 @@ export function CasinoTable() {
                 <div className="sf-foot-acts">
                   {resubmitting ? (
                     <>
-                      {canChangeCards && <button className="cz-btn" disabled={busy} onClick={() => setPhase('play')}>← Change cards</button>}
+                      {canChangeCards && (
+                        <button className="cz-btn" disabled={busy}
+                          onClick={() => setPhase(game === 'finale' ? 'keep' : 'play')}>
+                          ← Change cards
+                        </button>
+                      )}
                       <button className="cz-btn" disabled={busy} onClick={cancelResubmit}>Cancel</button>
                     </>
                   ) : (

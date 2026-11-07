@@ -225,6 +225,33 @@ export function finaleStarTiers(
   return out;
 }
 
+/**
+ * What a whole finale seat is paid — its own hand plus anything it claimed.
+ *
+ * This is the composition §4a describes, in one testable place:
+ *   own cards    → (50 + 10 × Σ stars) × deck boost
+ *   claimed card → 10 × stars, flat
+ *
+ * ⚠️ The `own.length > 0` test is the load-bearing part. The +50 is the fee for
+ * sitting down and spinning, so it survives as long as the seat keeps one own card
+ * — and is ABSENT for a pure claimant, who never sat down at all. Drop the guard
+ * and a claimant collects 50g for a table they never played.
+ *
+ * Mirrored in `functions/src/casinoEngine.ts`, which is where `goldSwing` is
+ * actually written. That stored number is what settlement pays, verbatim — it is
+ * never re-derived from the slots — so a drift between the copies is not a display
+ * bug, it is the wrong payout.
+ */
+export function finaleSeatGold(
+  stars:   Record<string, FinaleStars> | undefined,
+  own:     readonly { name?: string }[],
+  claimed: readonly { name?: string }[],
+  choice:  CasinoDeckChoice,
+): number {
+  const base = own.length > 0 ? finaleOwnGold(sumStars(own, stars), choice) : 0;
+  return base + claimed.reduce((g, c) => g + finaleClaimedGold(sumStars([c], stars)), 0);
+}
+
 /** Σ stars over a set of cards, reading the frozen snapshot. Unknown names score 0. */
 export function sumStars(
   cards: readonly { name?: string }[] | undefined,

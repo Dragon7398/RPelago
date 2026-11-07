@@ -1,0 +1,174 @@
+/* ── The Finale: the slot machine ──────────────────────────────────────────────
+   Every colour here is a themes.css token, so the board follows the casino's
+   palette across all eight themes (including the four light ones and the
+   colour-blind-safe pair). Nothing is a literal.
+
+   The one new idea is `--fin-sel`, the "you have selected this" accent. It is
+   --gold, because gold is already what this table's chrome uses for a live
+   control — and selection is doubled with a border style and a text tag, never
+   carried by hue alone. */
+
+.fin-wrap {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  --fin-sel: var(--gold);
+}
+
+.fin-head { display: flex; flex-direction: column; gap: 0.3rem; }
+.fin-title {
+  font-family: 'Cinzel', serif; font-size: 1.35rem; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--gold); margin: 0;
+}
+.fin-sub {
+  font-family: 'Crimson Pro', Georgia, serif; font-style: italic;
+  font-size: 0.95rem; line-height: 1.4; color: var(--ink-soft); margin: 0;
+}
+.fin-sub strong { font-style: normal; color: var(--parchment); }
+
+.fin-note, .fin-floor, .fin-used {
+  font-family: 'Crimson Pro', Georgia, serif; font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+.fin-note {
+  padding: 0.5rem 0.7rem; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border);
+}
+.fin-note strong { color: var(--parchment); }
+.fin-floor { color: var(--caution); font-style: italic; }
+
+/* ── The machine ── */
+.fin-machine {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem; padding: 0.8rem;
+  background: var(--felt); border: 1px solid var(--border); border-radius: 10px;
+}
+.fin-idle { opacity: 0.72; }
+
+.fin-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+  padding: 0.35rem; border-radius: 8px;
+  background: transparent; border: 2px solid transparent;
+  font: inherit; color: inherit;
+}
+button.fin-cell { cursor: pointer; }
+button.fin-cell:disabled { cursor: default; }
+button.fin-cell:focus-visible { outline: 2px solid var(--border-glow); outline-offset: 2px; }
+
+.fin-reel-on      { border-color: var(--fin-sel); background: oklch(from var(--fin-sel) l c h / 0.12); }
+.fin-reel-blocked { opacity: 0.45; cursor: not-allowed; }
+.fin-dim          { opacity: 0.4; }
+/* A dropped card keeps its position so the row does not reflow as you tap. */
+.fin-dropped      { opacity: 0.52; border-style: dashed; border-color: var(--border); }
+
+/* The settle. Each reel gets its own `.fin-rolling` until its timer fires, so the
+   board resolves left to right rather than all at once. */
+.fin-rolling { animation: fin-roll 240ms linear infinite; }
+.fin-stopped { animation: fin-land 220ms ease-out 1; }
+
+@keyframes fin-roll {
+  0%   { transform: translateY(-6%); filter: blur(0.6px); }
+  100% { transform: translateY(6%);  filter: blur(0.6px); }
+}
+@keyframes fin-land {
+  0%   { transform: translateY(-9%); }
+  60%  { transform: translateY(2%); }
+  100% { transform: translateY(0); }
+}
+
+/* Reduced motion: the board is dealt server-side before any of this runs, so
+   there is nothing to lose by showing it outright. */
+@media (prefers-reduced-motion: reduce) {
+  .fin-rolling, .fin-stopped { animation: none; filter: none; transform: none; }
+}
+
+/* ── Stars ── */
+.fin-stars { display: flex; gap: 1px; line-height: 1; }
+.fin-star {
+  font-size: 0.78rem; color: var(--border);
+}
+.fin-star.on { color: var(--gold); }
+
+.fin-tag {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.1em;
+  padding: 0.1rem 0.35rem; border-radius: 3px;
+  color: var(--ink-soft); background: oklch(from var(--border) l c h / 0.4);
+}
+.fin-tag.on { color: var(--gold); background: oklch(from var(--gold) l c h / 0.16); }
+
+/* ── Row buttons ── */
+.fin-rowbtns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.fin-rowbtn {
+  flex: 1 1 10rem; display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.55rem 0.8rem; border-radius: 6px; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.06em;
+  background: var(--bg-mid); border: 1px solid var(--border); color: var(--parchment);
+}
+.fin-rowbtn:hover:not(:disabled) { border-color: var(--fin-sel); }
+.fin-rowbtn small {
+  font-family: 'Crimson Pro', Georgia, serif; font-size: 0.78rem;
+  letter-spacing: 0; color: var(--gold-dim);
+}
+
+/* ── The running total ── */
+.fin-tally {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+  padding: 0.7rem 0.8rem; border-radius: 8px;
+  background: var(--bg-mid); border: 1px solid var(--border);
+}
+.fin-tally-fig { display: flex; flex-direction: column; gap: 0.1rem; }
+.fin-tally-lbl {
+  font-family: 'Cinzel', serif; font-size: 0.52rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--gold-dim);
+}
+.fin-tally-fig strong {
+  font-family: 'Cinzel', serif; font-size: 1rem; color: var(--parchment);
+}
+.fin-sum {
+  flex: 1 1 14rem; font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 0.95rem; color: var(--ink-soft);
+}
+.fin-sum strong { color: var(--gold); font-size: 1.05rem; }
+
+/* ── Actions ── */
+.fin-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+
+.fin-arm, .fin-primary, .fin-ghost, .fin-danger {
+  font-family: 'Cinzel', serif; letter-spacing: 0.08em; cursor: pointer;
+  border-radius: 6px; padding: 0.6rem 1rem; font-size: 0.75rem;
+}
+.fin-arm, .fin-primary {
+  background: var(--gold); border: 1px solid var(--gold);
+  color: var(--bg-deep); font-weight: 600;
+}
+.fin-arm { padding: 0.8rem 1.6rem; font-size: 0.88rem; }
+.fin-ghost {
+  background: transparent; border: 1px solid var(--border); color: var(--ink-soft);
+}
+.fin-ghost:hover:not(:disabled) { border-color: var(--border-glow); color: var(--parchment); }
+.fin-danger {
+  background: oklch(from var(--neg) l c h / 0.16);
+  border: 1px solid var(--neg); color: var(--neg); font-weight: 600;
+}
+.fin-arm:disabled, .fin-primary:disabled, .fin-ghost:disabled, .fin-danger:disabled {
+  opacity: 0.5; cursor: default;
+}
+
+/* ── The fold warning ── */
+.fin-fold-warn {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.8rem 0.9rem; border-radius: 8px;
+  background: oklch(from var(--caution) l c h / 0.1);
+  border: 1px solid oklch(from var(--caution) l c h / 0.45);
+}
+.fin-fold-warn p {
+  margin: 0; font-family: 'Crimson Pro', Georgia, serif;
+  font-size: 0.95rem; line-height: 1.45; color: var(--parchment);
+}
+.fin-fold-warn strong { color: var(--caution); }
+.fin-fold-why { font-style: italic; color: var(--ink-soft) !important; }
+
+/* ── Narrow screens ── */
+@media (max-width: 720px) {
+  .fin-machine { gap: 0.35rem; padding: 0.5rem; }
+  .fin-cell { padding: 0.15rem; }
+  .fin-title { font-size: 1.1rem; }
+}

@@ -441,10 +441,58 @@ can enlist in the finale, and a player who has locked in cannot enlist twice.
 
 ---
 
-### WS-D — The spin
+### WS-D — The spin — ✅ DONE (except the hand-off to lock-in)
 
 **Depends on:** B. **Largest stream, and almost entirely new code** — which is why
 it is also the lowest-risk one.
+
+> **Shipped:** three new server callables (`dealFinaleBoard`, `rerollFinaleReels`,
+> `foldFinaleBoard`) behind a shared `mustFinaleSeat` guard; the `board` secret and
+> its rule; `src/casino/FinaleBoard.tsx` + `finale.css` for all five phases; the
+> `CasinoTable` phase machine, subscription and handlers. 628 tests pass and
+> `vite build` is clean.
+>
+> ⚠️ **The flow is NOT yet end to end.** `onCommit` seeds the existing `manifest`
+> phase with the kept cards and stops there — the manifest's submit still calls
+> `lockCasinoResult`, which would reject a finale seat (it requires a gambit) and
+> would price it off card gold rather than stars. **WS-E closes that**; until it
+> lands the finale is playable up to "name your games" and no further. Nothing is
+> committed or payable in the meantime, and the table cannot exist in a live season
+> until a host opens it.
+>
+> **Deliberate departures and things worth knowing:**
+>
+> 1. **A separate component, not more of `CasinoTable`.** That file was already
+>    ~1750 lines; the board, the reroll selection, the row pick and the keep set are
+>    one visual object (the 3×5 machine) across five phases, so they are one
+>    component with the phase as a prop. `CasinoTable` keeps the phase machine, the
+>    subscription and every server call.
+> 2. **`applyReelRespin` is extracted and tested** (`casinoData.ts`, mirrored
+>    server-side). A row-major board makes "replace a reel" a **strided** write, and
+>    the wrong stride respins a *row* — which would destroy the one mechanic the
+>    reroll exists for while still looking plausible on screen. It also sorts the
+>    reels so client and server map replacements identically however the player
+>    tapped. Three tests pin the stride, the ordering and the length.
+> 3. **`finaleRerolled` is per BOARD, not per seat.** `dealFinaleBoard` clears it,
+>    so a rebought board gets a fresh reroll — otherwise folding would silently cost
+>    the reroll as well as the 50g. It is also what `onSpinDone` reads to tell the
+>    opening spin (→ reroll) from the post-reroll spin (→ row pick), so one settle
+>    animation serves both.
+> 4. **The deadline is re-checked in `dealFinaleBoard`.** A player sitting on the
+>    page could otherwise pull the arm minutes after entry closed, in the window
+>    before the tick flips the state.
+> 5. **The rebuy is charged in a transaction *before* dealing**, so two tabs cannot
+>    both get a board for one payment — and it is deliberately **not** routed through
+>    `potContribution` (D5).
+> 6. **Two React-rules fixes worth noting for the next component.** Resetting the
+>    settle counter and clearing selections both had to move out of effects into the
+>    render-time prop-derived-state pattern (as `Countdown` already uses), because
+>    `react-hooks/set-state-in-effect` rejects the effect form — and doing it in an
+>    effect would genuinely render one frame with the previous spin's state. The
+>    board comparison is keyed on **card uids, not array identity**, since `board`
+>    is a fresh `[]` whenever the secret has not loaded. A re-entrancy ref also had
+>    to go: `react-hooks/refs` forbids writing one during render, and the effect
+>    cleanup already makes a double hand-over impossible.
 
 **Server (new callables, P1):**
 
@@ -502,9 +550,51 @@ row and keep two cards — and a hard reload at every step lands somewhere coher
 
 ---
 
-### WS-E — Lock-in and money
+### WS-E — Lock-in and money — ✅ DONE
 
 **Depends on:** B, D. **Touches the money path.**
+
+> **Shipped:** `lockFinaleResult`; `seatGoldSwingFor` replacing `seatGoldSwing` at
+> all three remaining writers; the star-based details line; the `resubmitCasinoYaml`
+> fork; the client's manifest hand-off. 641 tests pass. **The finale is now playable
+> end to end** — arm → spin → reroll → row → keep → name games → lock in.
+>
+> 1. **The payout composition is extracted and tested** as `finaleSeatGold`
+>    (`finaleStars.ts`, mirrored in `casinoEngine.ts`, which is where `goldSwing` is
+>    written). The plan's own risk register called this the thing that "pays the
+>    wrong number and nothing complains", so leaving the arithmetic server-only
+>    would have left the highest-risk line in the feature untestable. Six tests pin
+>    it, including the two §4a cases that are easy to get wrong: a **pure claimant**
+>    gets stars only (no base, no boost — a 5★ card is worth exactly the 50g its
+>    abandoner forfeits), and a seat **keeps the base while it holds one own card**
+>    and loses it when the last one is removed.
+> 2. **Settlement confirmed to need no fork, and the inverse is now a test.**
+>    `casinoPotShares` short-circuits on `pot <= 0`, so the whole weighted-split
+>    pipeline runs and pays zero even with `casinoShareUnits` banked. A third test
+>    asserts that a finale with a **non-zero** pot really would be divided — so the
+>    reason `pot` must stay 0 is legible rather than folklore.
+> 3. **`cardsToSlots` gained an optional details formatter** (both halves) rather
+>    than having the finale overwrite lines afterwards. Its slots read `"Sonic ·
+>    5★"`. That deliberately does not match `handStakeFromSlots`' regex, which is
+>    safe because that function is only ever a fallback behind `p.goldSwing ?? …` —
+>    and there is a test showing it reads 0 from a finale slot, so the reason is
+>    recorded instead of discovered.
+> 4. **`resubmitCasinoYaml`'s re-pick is scoped to `finaleRow`, not the board.** The
+>    row is *not* re-pickable (D4): offering the other ten cards would let a denied
+>    player quietly trade up to a better row. The same scoping went into the
+>    client's `resubmitPool` / `canChangeCards`, and `startResubmit` restores the row
+>    from the **seat record** — the local copy is gone after a reload.
+> 5. **`lockFinaleResult` deliberately has NO deadline check.** `dealFinaleBoard`
+>    has one — you may not *start* a board after entry closes — but a player holding
+>    a board must be able to finish it in the window before the tick deploys the
+>    table. Locking in is exactly what clears a straggler.
+>
+> **Known rough edge:** reloading the page *during* the manifest step drops the
+> player back to the row pick, because the row and keep set are local until
+> lock-in. Nothing is half-written server-side (the config uploads at submit), so
+> they simply re-pick. Stamping the row at pick-time via a small `pickFinaleRow`
+> call would preserve the work; it is deliberately not built, since the plan
+> preferred carrying the row on the lock and the loss is seconds.
 
 1. `lockFinaleResult` — new callable, mirroring `lockCasinoResult`'s contract:
    validate the kept subset against the chosen row (not against the whole board —
