@@ -323,6 +323,8 @@ invisible until the host makes one).
 >    Until then a created finale just sits `forming` — the safe half-built state,
 >    since `gmShouldDeploy` can never fire for it. The client
 >    `finaleDeadlinePassed` is in and used by the admin panel.
+>    (Both have since been RENAMED to `finaleEntryClosed` / `gmFinaleEntryClosed`,
+>    because the deadline turned out not to be the deploy trigger — see WS-F.)
 >
 > **Also found and fixed:** `npx tsc --noEmit` type-checks *nothing* in this repo
 > (the root tsconfig is `files: []` with references), so it silently passed on
@@ -589,12 +591,30 @@ row and keep two cards — and a hard reload at every step lands somewhere coher
 >    a board must be able to finish it in the window before the tick deploys the
 >    table. Locking in is exactly what clears a straggler.
 >
-> **Known rough edge:** reloading the page *during* the manifest step drops the
-> player back to the row pick, because the row and keep set are local until
-> lock-in. Nothing is half-written server-side (the config uploads at submit), so
-> they simply re-pick. Stamping the row at pick-time via a small `pickFinaleRow`
-> call would preserve the work; it is deliberately not built, since the plan
-> preferred carrying the row on the lock and the loss is seconds.
+> **Known rough edge, and a DECIDED one:** reloading the page *during* the manifest
+> step drops the player back to the row pick, because the row and keep set are
+> local until lock-in. Nothing is half-written server-side (the config uploads at
+> submit), so they simply re-pick.
+>
+> A small `pickFinaleRow` callable would stamp the row at pick-time and preserve
+> the work. **It was raised and declined (D10): a new server callable is a poor
+> trade for a nicety on a table that runs exactly once.** The cost is seconds of
+> re-picking, against a permanent addition to the API surface, the rules and the
+> mirror burden.
+>
+> It was also raised as a way to tell a seat that *spun and wandered off* apart
+> from one that *has its games chosen and is stuck on its config* — the two are
+> identical on the wire, since `lockFinaleResult` is the single write that records
+> anything after the deal. Declined for the same reason plus a better one: the host
+> treats them the same way regardless (one `NOT SUBMITTED` row per seat on the
+> existing config roster, named by Discord handle, chased in Discord), exactly as
+> on an ordinary table. There is no action the distinction would change.
+>
+> ⚠️ **The three-phase close made this cheaper, not dearer.** Under the original
+> deadline-deploys design a reload cost the player their row *against a clock* —
+> redo it too slowly and the table deployed without them. With the table now
+> holding open until its last seat locks in, a reloaded player has as long as they
+> need. The one argument for building it went away with the phase that created it.
 
 1. `lockFinaleResult` — new callable, mirroring `lockCasinoResult`'s contract:
    validate the kept subset against the chosen row (not against the whole board —
@@ -628,13 +648,134 @@ row and keep two cards — and a hard reload at every step lands somewhere coher
 
 ---
 
-### WS-F — The deadline, the room, and the stragglers
+> **D10 / D11 (settled during the WS-F review).**
+>
+> - **D10 — no `pickFinaleRow`.** The row and keep set stay local until lock-in. A
+>   new callable is not worth it for a one-off table; see the rough-edge note in
+>   WS-D for the full reasoning.
+> - **D11 — a straggler holds the closed table open INDEFINITELY.** No grace window,
+>   no timed force-deploy. Nobody loses a completed spin to a clock; the host clears
+>   it by chasing the player or ⊘ voiding the seat, with `adminForceDeploy` as the
+>   override. This is what the three-phase close below implements.
+
+### WS-F — The deadline, the room, and the stragglers — ✅ DONE
 
 **Depends on:** C.
 
-1. `tickGuildmasterMissions` — a finale branch: when
+> **⚠️ REVISED after review — the deadline does not deploy the table.** The first
+> shipped shape of WS-F took step 1 of this section literally: *deadline passed →
+> call `deployMission`*. Reviewing it against the intended player experience found
+> that wrong, and wrong in the way that costs a player their spin:
+>
+> **`lockFinaleResult` requires a `forming` table** (via `mustFinaleSeat`). Deploying
+> at the deadline therefore slammed the door on everyone still mid-manifest — a
+> player who had spun, chosen a row and was attaching their YAML got *"The finale
+> has closed"* and could never submit, leaving the host no option but to ⊘ void a
+> seat that had done everything but the last click. The window to finish was
+> whatever was left of the 15-minute tick interval.
+>
+> The finale has **three phases**, not two:
+>
+> | Phase | State | Seat cap | What happens |
+> |---|---|---|---|
+> | **1 — open** | `forming` | `Infinity` | Anyone may enter and spin. Nothing deploys. |
+> | **2 — closed** | `forming` | **seated count** | No new entries. The seats that spun finish choosing a row and submitting a config. A straggler holds the table here. |
+> | **3 — deployed** | `inprogress` | — | Every seat locked in (or the stragglers voided). The room is generable. |
+>
+> **The whole of phase 2 is one line**: `currentMaxSlots` returns the seated count
+> once `finaleEntryClosed`, instead of `Infinity` forever. Closing the cap makes the
+> table read as FULL, and four pieces of existing machinery then do the rest with no
+> finale branch at all —
+>
+> - `enlistInMission`'s existing `filled >= max` gate refuses a late entrant, so the
+>   deadline is enforced **server-side** with no second copy of it. (Before this it
+>   was enforced only by `computeMissionCard` — a client-side gate, which seated
+>   anyone who called the callable directly and then left them a seat
+>   `dealFinaleBoard` would refuse a board.)
+> - `shouldDeploy` becomes reachable and already says the right thing: full **and**
+>   `allSeatsPlayed`. So its unconditional `isFinale → false` came back out.
+> - `outstandingConfigsBlockRoom` flips the host's config roster amber → **red at
+>   the close**, which is exactly when chasing those players starts to matter.
+>   Previously it could not go red while forming at all (`filled >= Infinity`).
+> - `missionPendingAction` reaches its forming `configs` / `deploy` arms — the ones
+>   §WS-F's first pass had to build an in-progress twin of.
+>
+> **A straggler holds the table open indefinitely**, and that is the decision, not a
+> gap: nobody loses a completed spin to a timer. It clears when the player locks in,
+> when the host ⊘ voids the seat (a whole-seat removal in the forming shape — no
+> claimable slot), or via `adminForceDeploy`.
+>
+> Three knock-on changes fell out of it:
+>
+> 1. **`finaleDeadlinePassed` → `finaleEntryClosed`**, and it no longer tests
+>    `state`. The old name asserted a deploy that no longer happens, and a
+>    `state === 'forming'` term would now be invisible (phase 2 *is* forming) while
+>    breaking the admin panel's wording once the table goes live.
+> 2. **The tick lost its finale arm.** `gmShouldDeploy` covers the finale now, so
+>    the deploy pass is back to one condition.
+> 3. **`lockFinaleResult` re-reads and calls `gmShouldDeploy`**, like
+>    `lockCasinoResult` does. It matters more here: a closed finale is waiting on
+>    precisely these writes, so leaving it to the scheduled tick would sit the
+>    entire table on its last player for up to 15 minutes.
+>
+> **Also checked, needs nothing:** folding during phase 2 is self-healing.
+> `dealFinaleBoard` refuses a rebuy past the deadline, so the seat would sit
+> boardless and hold the table — but `foldFinaleBoard` re-arms `startBy`, handing
+> it to the idle sweep, which runs before the deploy pass in the same tick. Folding
+> after close forfeits the entry and tidies itself up within the hour.
+>
+> ---
+>
+> **Shipped.** `gmFinaleEntryClosed` (the server mirror, now that it has a
+> consumer and a different job), the three-phase close above, `deployMission`'s two
+> finale guards, and the gap step 3's verification turned up. 659 tests, 24 files.
+
+> **The verification found a real hole, and it is step 3's whole point.**
+> `missionPendingAction`'s `configs` arm lives in the **forming** branch, behind
+> `filled >= currentMaxSlots` — which for a finale is `>= Infinity` and therefore
+> never true. So a finale that deployed with a straggler aboard fell through the
+> in-progress branch to **`generate`**: the card told the host to go build the room,
+> which is the one thing they cannot do until that seat is resolved. The fix is the
+> in-progress twin of the arm that already exists, placed exactly where `denied`
+> sits and for the identical reason the code gives there — *a seat with no config
+> cannot be in the room, so generating now would just have to be done again.*
+>
+> It is **scoped to `m.type === 'casino'`**, mirroring the `denied` arm above it.
+> That is not caution for its own sake: `seatOwesConfig` judges a non-casino seat on
+> `yamlAt`, and every participant predating that marker carries none — so an
+> unscoped arm would relabel every older in-progress Patrol as `configs` and bury
+> the `generate` those cards actually need. Pinned as its own test.
+>
+> The finale is the **first** table that can reach `inprogress` holding a seat that
+> never locked in (`gmShouldDeploy` demands `allSeatsPlayed`, so an ordinary cohort
+> gets there only by force-deploy), which is why nothing had hit this before.
+
+> **Three departures from the sketch below:**
+>
+> 1. **`hint` and `xp` are still written at deploy for a finale; only the odds roll
+>    is skipped.** Both already hold the host's values from creation, so the write
+>    is a no-op — and leaving the two lines unforked keeps the diff to the one
+>    thing that was actually wrong (`rollCasinoOdds` re-deciding a hand-picked
+>    Release/Collect). `liveCasinoStats` above it is likewise left alone: with no
+>    gambit log it replays `casinoOpenStats` to an identical value.
+> 2. **`casinoShareUnits` is still banked at deploy for the finale.** It looks like
+>    dead bookkeeping with no pot, and it is — but it is the *documented* dead
+>    bookkeeping that §0.4 depends on, and `tests/lib/finaleTable.test.ts` pins
+>    both directions of it. Skipping the bank would make the zero-pot
+>    short-circuit the only thing holding settlement together, instead of the
+>    second of two.
+> 3. **Flipping the season to `closing` was verified safe, not just advised.**
+>    `tickableSeasons` includes `closing`, so the tick keeps running and the finale
+>    still deploys on its deadline — while `gmSpawnAllowed` stops replacements. Had
+>    that list been `active`-only, the operational belt in step 2 would have
+>    *disabled* the deadline it was meant to protect. Worth stating, because it is
+>    the kind of interaction that is only ever discovered the night it matters.
+
+1. ~~`tickGuildmasterMissions` — a finale branch: when
    `state === 'forming' && now >= finaleClosesAt`, call `deployMission`. It stands
-   in for `gmShouldDeploy`, which can never fire (WS-B).
+   in for `gmShouldDeploy`, which can never fire (WS-B).~~ **Superseded — see the
+   revision note above.** The deadline closes the seat cap instead, and
+   `gmShouldDeploy` deploys the table once its last seat locks in.
    Order matters inside the tick: the startBy sweep runs first, so whatever §0.2
    decides is applied before the deadline close sees the roster.
 2. `deployMission` — two finale guards. **Do not spawn a replacement** cohort
@@ -657,9 +798,54 @@ the room generable.
 
 ---
 
-### WS-G — Claims, kicks and mercs
+### WS-G — Claims, kicks and mercs — ✅ DONE
 
 **Depends on:** C.
+
+> **Shipped.** Both copies of the `claimRefusal` carve-out, the `finale` merc
+> blocker in both halves, and `MercControl` hiding the affordance. 7 new tests
+> (666 total, 24 files).
+>
+> **The two-lines-two-files trap was real and both lines are in.** `claimRefusal`
+> (`src/lib/slotHelpers.ts`) and the inlined copy in `claimMissionSlot` each gained
+> the carve-out, both **below** the kicked check so only the `restricted` arm
+> lifts. Each site carries a comment naming the other, and the test block says
+> which half it covers — the failure mode is silent in both directions (client only
+> ⇒ a button the server refuses; server only ⇒ a claim the UI never offers).
+>
+> `claimRefusal` uses **`isFinale(world)`**, not the `casinoGame === 'finale'`
+> literal the plan sketched — the one named predicate is a CLAUDE.md invariant and
+> what makes a grep find every fork. `casinoData.ts` imports only types, so there
+> is no cycle. A tile has no `casinoGame`, so tiles are false for free with no
+> world-type test.
+>
+> **Verified, not built:** all three claim surfaces (`PhasePanel`'s casino
+> `OpenSlots`, `GuildmasterMissions`, the tile `InProgressState`) already pass the
+> whole world object, so the carve-out reaches the casino panel with no plumbing.
+> The one-per-player cap needed nothing (`claimedWeight(seat) > 0`), and all four
+> `goldSwing` writers were already on `seatGoldSwingFor` from WS-E.
+>
+> **Three departures:**
+>
+> 1. **`mercHireBlockers` takes a 4th OPTIONAL `finale` parameter** rather than
+>    reshaping `casino: boolean` into a game. Optional is the point: every
+>    existing call site and all eight existing tests keep their exact behaviour
+>    untouched, which is P1 applied to a function the live tables call. Pinned by
+>    a test that the default is off.
+> 2. **`MercControl` reads the finale off `gameState`**, not from a new prop. It
+>    already derived `world` further down for the candidate limits, so hoisting
+>    that keeps the rule out of all five surfaces that render the control. `finale`
+>    joins `claimed` as a PERMANENT blocker — the owner is shown no button at all
+>    rather than one that can only fail — while the admin still sees it with the
+>    reason, which is D3's soft-for-the-host behaviour.
+> 3. **`adminRemoveCasinoSlot` KEEPS its `casinoVoidedShare` increment for a
+>    finale** — the sketch below says to skip it "for clarity". With a zero pot it
+>    pays nothing either way, so skipping buys no behaviour; and because
+>    `deployMission` banks `casinoShareUnits` for a finale *unforked*, suppressing
+>    only the releases would leave units counted and their returns not. If anything
+>    ever gives the finale a pot — §0.4's named risk — a consistent-but-inert
+>    denominator still divides correctly where a half-kept one silently overpays.
+>    Both or neither; this is both, and the reasoning is at the call site.
 
 1. `claimRefusal` (`src/lib/slotHelpers.ts`) — the finale carve-out from plan §12,
    placed **after** the kicked check so only the restricted arm is lifted.
@@ -762,7 +948,7 @@ Functions before frontend, always (CLAUDE.md). Beyond that:
 |---|---|
 | **Now, season live** | WS-A, WS-B, WS-H. Invisible to players; H is strictly generous. |
 | **Next** | WS-C, then D and E in parallel. |
-| **Before the finale opens** | WS-F, G, I. |
+| **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, I. |
 | **Before the host touches it** | WS-J's rehearsal, in a draft season. |
 | **Before the deadline fires** | season → `closing`, so no replacement cohort spawns (§0.7). |
 

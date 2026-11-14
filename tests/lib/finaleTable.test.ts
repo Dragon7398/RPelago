@@ -5,9 +5,11 @@ import {
   finaleReelIndices, finaleRowIndices, applyReelRespin, seatSpend,
 } from '../../src/lib/casinoData';
 import {
-  currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleDeadlinePassed,
+  currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleEntryClosed, allSeatsPlayed,
   casinoEntryCosts, freshFinaleTable, findFinale, cardStatsCorpus, pickNextCasinoGame,
   FINALE_BASE_MAX, casinoTableSettlement, casinoShareDenominator, type FinaleSetup,
+  missionPendingAction, outstandingConfigsBlockRoom, seatOwesConfig, seatsMissingConfig,
+  seatsAwaitingConfig,
 } from '../../src/lib/missionLogic';
 import { FINALE_REBUY_GOLD, finaleBoardCost } from '../../src/lib/finaleStars';
 import { cardsToSlots, finaleSlotDetails, handStakeFromSlots } from '../../src/lib/casinoSlots';
@@ -100,10 +102,13 @@ describe('isFinale', () => {
 // ── Seats and decay ───────────────────────────────────────────────────────────
 
 describe('seats and decay', () => {
-  it('has no cap, however long it has been open', () => {
-    const m = finale({ firstJoinAt: 0, participants: seats(30) });
+  it('has no cap, however long entry stays open', () => {
+    // ⚠️ The cap is uncapped only WHILE ENTRY IS OPEN — the deadline closes it to
+    // the seated count (see `entry closing`). So this pins the no-decay half: a
+    // table open for weeks still has no cap, which is what keeps every
+    // `filled >= max` gate false by construction for as long as players may enter.
+    const m = finale({ firstJoinAt: 0, finaleClosesAt: 9e12, participants: seats(30) });
     expect(currentMaxSlots(m, 400 * HOUR)).toBe(Infinity);
-    // Which is what makes every `filled >= max` gate false by construction.
     expect(30 >= currentMaxSlots(m, 400 * HOUR)).toBe(false);
   });
 
@@ -141,32 +146,102 @@ describe('seats and decay', () => {
 
 // ── Deploy ────────────────────────────────────────────────────────────────────
 
-describe('deploy', () => {
-  it('is never deployed by shouldDeploy', () => {
-    // It wants a full table with every seat locked in. The finale has no cap, so
-    // it is never full, and it deliberately tolerates seats that never lock in.
-    const m = finale({ firstJoinAt: 0, participants: seats(8) });
-    expect(shouldDeploy(m, 500 * HOUR)).toBe(false);
+// ── Entry closing, and the closing phase it opens ────────────────────────────
+//
+// THE THREE PHASES. The deadline does NOT deploy the table — it closes the seat
+// cap, and the ordinary `shouldDeploy` rule then deploys once every seat has
+// locked in. So:
+//
+//   1. entry open    — cap Infinity, anyone may enter, nothing deploys
+//   2. entry closed  — cap = seated count, table reads FULL, the seats that spun
+//                      finish their row + config; a straggler holds it here
+//   3. all locked in — shouldDeploy fires, the room is generable
+//
+// Deploying AT the deadline (the first shape of this) stranded every player still
+// mid-manifest, because locking in requires a `forming` table.
+
+describe('entry closing', () => {
+  const closing = { finaleClosesAt: 1_000 } as Partial<GMMission>;
+
+  it('is the deadline, and nothing else', () => {
+    const m = finale(closing);
+    expect(finaleEntryClosed(m, 999)).toBe(false);
+    expect(finaleEntryClosed(m, 1_000)).toBe(true);
+    expect(finaleEntryClosed(m, 5_000)).toBe(true);
   });
 
-  it('deploys on the deadline instead', () => {
-    const m = finale({ finaleClosesAt: 1_000 });
-    expect(finaleDeadlinePassed(m, 999)).toBe(false);
-    expect(finaleDeadlinePassed(m, 1_000)).toBe(true);
-    expect(finaleDeadlinePassed(m, 5_000)).toBe(true);
+  it('stays open forever when the deadline is missing', () => {
+    // A half-written mission should stall visibly, not shut its own doors.
+    expect(finaleEntryClosed(finale({ finaleClosesAt: undefined }), 9e12)).toBe(false);
   });
 
-  it('stalls rather than closing itself when the deadline is missing', () => {
-    // A half-written mission should be visibly stuck, not deploy immediately.
-    expect(finaleDeadlinePassed(finale({ finaleClosesAt: undefined }), 9e12)).toBe(false);
+  it('does not test state — a closed finale is closed whatever it is doing', () => {
+    // ⚠️ Deliberate, and the reverse of the old predicate. A finale stays `forming`
+    // through its whole closing phase, so a `state === 'forming'` term here would
+    // have been invisible; but it also must keep answering once deployed, since
+    // the admin panel words itself from this.
+    expect(finaleEntryClosed(finale({ ...closing, state: 'inprogress' }), 9e12)).toBe(true);
   });
 
-  it('does not fire again once deployed', () => {
-    expect(finaleDeadlinePassed(finale({ finaleClosesAt: 1, state: 'inprogress' }), 9e12)).toBe(false);
+  it('never claims an ordinary table has closed', () => {
+    expect(finaleEntryClosed(table({ finaleClosesAt: 1 }), 9e12)).toBe(false);
   });
 
-  it('never claims an ordinary table has passed a finale deadline', () => {
-    expect(finaleDeadlinePassed(table({ finaleClosesAt: 1 }), 9e12)).toBe(false);
+  it('closes the seat cap, which is what makes the table read as full', () => {
+    // THE load-bearing line of the whole closing phase. One change to the cap is
+    // what reaches enlist's `filled >= max` gate, shouldDeploy, the config roster's
+    // severity and the admin board's triage — none of which needed a finale branch.
+    const m = finale({ ...closing, participants: seats(4) });
+    expect(currentMaxSlots(m, 999)).toBe(Infinity);
+    expect(currentMaxSlots(m, 1_000)).toBe(4);
+  });
+
+  it('closes an EMPTY finale to a cap of 0 without deploying or complaining', () => {
+    // 0 >= 0 refuses a late entrant, while the `filled === 0` guards keep it from
+    // deploying an empty table or reporting work to the host.
+    const m = finale({ ...closing, participants: {} });
+    expect(currentMaxSlots(m, 9e12)).toBe(0);
+    expect(shouldDeploy(m, 9e12)).toBe(false);
+  });
+});
+
+describe('the three phases', () => {
+  // A seat that spun and locked in, and one that spun and did not.
+  const done    = { playerId: 'd', playerName: 'D', joinedAt: 0, played: true } as never;
+  const pending = { playerId: 'p', playerName: 'P', joinedAt: 0 } as never;
+  const at = (over: Partial<GMMission>) => finale({ finaleClosesAt: 1_000, ...over });
+
+  it('1 — never deploys while entry is open, however full or finished it looks', () => {
+    // The cap is Infinity, so `filled >= max` is false by construction. Even a
+    // table where every seat has already locked in keeps taking players.
+    const m = at({ firstJoinAt: 0, participants: { d: done } });
+    expect(allSeatsPlayed(m)).toBe(true);
+    expect(shouldDeploy(m, 999)).toBe(false);
+  });
+
+  it('2 — holds a closed table open for a seat that never locked in', () => {
+    // ⚠️ THE decision this phase exists for: a straggler holds the table here
+    // indefinitely rather than being stranded by a timer. Locking in or a host ⊘
+    // void is what clears it.
+    const m = at({ participants: { d: done, p: pending } });
+    expect(currentMaxSlots(m, 9e12)).toBe(2);   // reads as full
+    expect(allSeatsPlayed(m)).toBe(false);      // but not finished
+    expect(shouldDeploy(m, 9e12)).toBe(false);
+    expect(shouldDeploy(m, 9e12 + 500 * HOUR)).toBe(false);  // and no timer saves it
+  });
+
+  it('3 — deploys the moment the last seat locks in', () => {
+    expect(shouldDeploy(at({ participants: { d: done, p: { ...pending, played: true } as never } }), 9e12))
+      .toBe(true);
+  });
+
+  it('3 — or the moment the host voids the last straggler', () => {
+    // Voiding deletes the seat, so the same predicate fires without the player.
+    expect(shouldDeploy(at({ participants: { d: done } }), 9e12)).toBe(true);
+  });
+
+  it('does not deploy twice', () => {
+    expect(shouldDeploy(at({ state: 'inprogress', participants: { d: done } }), 9e12)).toBe(false);
   });
 });
 
@@ -430,5 +505,92 @@ describe('cardStatsCorpus', () => {
     const done = table({ id: 'x', state: 'complete' });
     const corpus = cardStatsCorpus({ x: done }, { x: done });
     expect(corpus.filter(m => m.id === 'x')).toHaveLength(1);
+  });
+});
+
+// ── The deadline close, and the stragglers it leaves ─────────────────────────
+//
+// The finale is the FIRST table that can reach `inprogress` holding a seat that
+// never locked in: gmShouldDeploy demands allSeatsPlayed, so an ordinary cohort
+// cannot (only a force-deploy can). Everything below is the host's view of that
+// population — the machinery WS-F verified rather than built, pinned so a later
+// change to the triage helpers cannot quietly drop the finale out of them.
+
+describe('stragglers at the close', () => {
+  // A player who spun and walked away: no `played`, no `yamlAt`, no slots.
+  const straggler = { playerId: 's', playerName: 'S', joinedAt: 0, finaleRow: 1 } as never;
+  // A seat that finished properly.
+  const lockedIn  = { playerId: 'd', playerName: 'D', joinedAt: 0, played: true,
+                      slots: [{ name: 'n', game: 'g', status: 'In-Progress' }] } as never;
+  // A pure claimant, who never owed a config at all.
+  const claimant  = { playerId: 'c', playerName: 'C', joinedAt: 0,
+                      slots: [{ name: 'n', game: 'g', claimed: true }] } as never;
+
+  it('counts the spun-and-vanished seat, and only that one', () => {
+    expect(seatOwesConfig(straggler)).toBe(true);
+    expect(seatOwesConfig(lockedIn)).toBe(false);
+    // ⚠️ A claimant's `played` stays unset forever — testing it alone would
+    // accuse every player who took over a voided card.
+    expect(seatOwesConfig(claimant)).toBe(false);
+    const m = finale({ participants: { s: straggler, d: lockedIn, c: claimant } });
+    expect(seatsMissingConfig(m)).toBe(1);
+  });
+
+  it('is only a heads-up while entry is still open', () => {
+    // The room could not be generated today regardless, so a config that is merely
+    // late costs the host nothing yet — the table is still taking players.
+    const m = finale({ finaleClosesAt: 1_000, participants: { s: straggler, d: lockedIn } });
+    expect(outstandingConfigsBlockRoom(m, 0)).toBe(false);
+  });
+
+  it('turns red the moment ENTRY CLOSES, not when the table deploys', () => {
+    // This is the whole reason the cap closes. These rows are now the only thing
+    // between the host and a room, and the table cannot deploy until they clear —
+    // so red is the honest colour, and it has to arrive while the table is still
+    // `forming`. Under the old deadline-deploys design it stayed amber right up to
+    // the moment the table went live, with the note telling the host there was
+    // nothing to chase.
+    const m = finale({ finaleClosesAt: 1_000, participants: { s: straggler, d: lockedIn } });
+    expect(outstandingConfigsBlockRoom(m, 9e12)).toBe(true);
+  });
+
+  it('names the straggler for the host to chase, while still forming', () => {
+    const m = finale({ finaleClosesAt: 1_000, participants: { s: straggler, d: lockedIn } });
+    // The roster the admin card renders — one row per seat, by Discord handle.
+    expect(seatsAwaitingConfig(m).map(r => r.playerId)).toEqual(['s']);
+    expect(seatsAwaitingConfig(m)[0].reason).toBe('unsubmitted');
+    // And the board tells them it is configs they are waiting on, not a room.
+    const act = missionPendingAction(m, 9e12);
+    expect(act?.code).toBe('configs');
+    expect(act?.label).toBe('1 config');
+  });
+
+  it('still catches a straggler on a table that was force-deployed', () => {
+    // adminForceDeploy is the one way a seat owing a config reaches `inprogress`.
+    const m = finale({ state: 'inprogress', participants: { s: straggler, d: lockedIn } });
+    expect(outstandingConfigsBlockRoom(m, 0)).toBe(true);
+    expect(missionPendingAction(m, 0)?.code).toBe('configs');
+  });
+
+  it('goes quiet once every straggler has been voided (force-deployed table)', () => {
+    // Voiding is a whole-seat removal in the forming shape — no claimable slot,
+    // since minting one with no config behind it blocks the room with something
+    // nobody can play. With the seat gone the host can generate.
+    const m = finale({ state: 'inprogress', participants: { d: lockedIn } });
+    expect(seatsMissingConfig(m)).toBe(0);
+    expect(outstandingConfigsBlockRoom(m, 0)).toBe(false);
+    expect(missionPendingAction(m, 0)?.code).toBe('generate');
+  });
+
+  it('says nothing while entry is open — there is nothing to do yet', () => {
+    // An OPEN finale is never 'full', so it never reaches the forming triage arms.
+    // That is correct: the host's job starts when entry closes.
+    const m = finale({ finaleClosesAt: 9e12, participants: { s: straggler, d: lockedIn } });
+    expect(missionPendingAction(m, 0)).toBeNull();
+  });
+
+  it('reports ready-to-deploy once the last config lands', () => {
+    const m = finale({ finaleClosesAt: 1_000, participants: { d: lockedIn } });
+    expect(missionPendingAction(m, 9e12)?.code).toBe('deploy');
   });
 });

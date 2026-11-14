@@ -428,7 +428,7 @@ The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **d
 
 **`kickedPlayers/{uid}: KickRecord`** (`{ at, name? }`) on the mission or tile records a player kicked off a world **while it was in progress** — the abandonment that reopens their slots. It is never cleared, and is written by every live kick path: `adminKickMissionParticipant` (in-progress only), `adminRemoveCasinoSlot` `mode:'kick'` (the player keeps the rest of their seat but is still recorded — the kicked card is abandoned work), `adminKickAdventurer` with `convertToClaimableSlot`, and `playerReset` for in-progress tiles and missions. A forming removal writes none.
 
-- **Claims** (`claimRefusal` in `slotHelpers.ts` — `kicked` | `restricted`): a player kicked off a world may not claim its open slots, and a **restricted** player may not claim any (a claim is extra capacity, which restriction exists to curb). Missions: `claimMissionSlot` refuses both. Tiles are a client write, so the **database rules** enforce it — the `$advId` `.validate` for joining an in-progress tile and both `claimableSlots/$slotKey` delete rules (tile and mission — the latter so a client delete can't grief) require the claimant not be in `kickedPlayers` and not `restricted`. Every claim surface (casino `OpenSlots`, map-mission `ClaimableSlots`, tile `ClaimableSlots`) shows `CLAIM_REFUSAL_TEXT` instead of a button that can only fail.
+- **Claims** (`claimRefusal` in `slotHelpers.ts` — `kicked` | `restricted`): a player kicked off a world may not claim its open slots, and a **restricted** player may not claim any (a claim is extra capacity, which restriction exists to curb). **The casino finale is the one exception — a restricted player may claim there; see the finale block below, and note the rule is duplicated in `claimMissionSlot`.** Missions: `claimMissionSlot` refuses both. Tiles are a client write, so the **database rules** enforce it — the `$advId` `.validate` for joining an in-progress tile and both `claimableSlots/$slotKey` delete rules (tile and mission — the latter so a client delete can't grief) require the claimant not be in `kickedPlayers` and not `restricted`. Every claim surface (casino `OpenSlots`, map-mission `ClaimableSlots`, tile `ClaimableSlots`) shows `CLAIM_REFUSAL_TEXT` instead of a button that can only fail.
 - **Mercs**: see `mercCandidateBlockers` under Mercenaries.
 - Open slots created before `kickedPlayers` existed have no record, so a kick that predates it isn't caught.
 
@@ -819,11 +819,109 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > are pinned in `tests/lib/finaleTable.test.ts`. The predicate for every fork is
 > **`isFinale(m)`** (`casinoData.ts`, mirrored in `functions/src/casinoEngine.ts`) —
 > never the label, never the presence of `finaleClosesAt`. A finale's
-> `currentMaxSlots` is `Infinity` (no cap, no decay), its `shouldDeploy` is always
-> false (the `finaleClosesAt` deadline deploys it instead), and its `baseMax` is
+> `currentMaxSlots` is `Infinity` **while entry is open** (no cap, no decay) and the
+> seated count once it closes — see the three-phase block below, which is the one
+> thing to read before changing any of this — and its `baseMax` is
 > **0 on purpose**: several seat-pip loops read `baseMax` directly as
 > `for (i = 0; i < baseMax; i++)`, and zero makes each of them draw only the seats
 > that exist instead of a wall of fake empty ones.
+
+> **The finale has THREE phases, and the deadline does NOT deploy it.** This is the
+> correction worth reading before touching any of it, because the obvious reading
+> (deadline → deploy) strands players: `lockFinaleResult` requires a `forming`
+> table, so deploying at the deadline tells everyone still mid-manifest *"the
+> finale has closed"* and leaves the host voiding seats that had done everything
+> but the last click.
+>
+> | Phase | State | Seat cap | What happens |
+> |---|---|---|---|
+> | **open** | `forming` | `Infinity` | Anyone may enter and spin. Nothing deploys. |
+> | **closed** | `forming` | **seated count** | No new entries; the seats that spun finish their row and config. A straggler holds it here. |
+> | **deployed** | `inprogress` | — | Every seat locked in, or the stragglers voided. Room generable. |
+>
+> **The entire middle phase is one line**: `currentMaxSlots` returns
+> `finaleEntryClosed(m, now) ? filledCount(m) : Infinity`. Closing the cap makes the
+> table read as FULL, and four existing mechanisms then behave correctly with **no
+> finale branch of their own** — which is the reason to do it this way rather than
+> forking each one:
+>
+> - **`enlistInMission`** refuses a late entrant on its own `filled >= max` gate, so
+>   the entry deadline is enforced server-side with no second copy of it. Only the
+>   error wording forks ("full" is a lie about a table with no cap). ⚠️ Do not add a
+>   `finaleClosesAt` test there — that is the duplicate this design exists to avoid.
+> - **`shouldDeploy` / `gmShouldDeploy`** need no finale arm: full **and**
+>   `allSeatsPlayed` already *is* the finale's rule. Their old unconditional
+>   `isFinale → false` is gone, and so is the tick's second deploy arm.
+> - **`outstandingConfigsBlockRoom`** flips the host's config roster amber → red at
+>   the close, exactly when chasing those players starts to matter.
+> - **`missionPendingAction`** reaches its forming `configs` / `deploy` arms.
+>
+> **A straggler holds the table open indefinitely — that is the decision, not a
+> gap.** Nobody loses a completed spin to a timer. It clears when the player locks
+> in, when the host ⊘ voids the seat, or via `adminForceDeploy`. The host sees them
+> on the card's existing config roster (`seatsAwaitingConfig`, one row per seat by
+> Discord handle) — no finale-specific surface was needed.
+>
+> **`finaleEntryClosed` deliberately does not test `state`** (nor does
+> `gmFinaleEntryClosed`): the closed phase *is* `forming`, so a state term would be
+> invisible where it matters and would break the admin panel's wording once the
+> table goes live. It was called `finaleDeadlinePassed` while it was a deploy
+> trigger; the rename is the point.
+>
+> **`lockFinaleResult` re-reads the mission and calls `gmShouldDeploy`**, like
+> `lockCasinoResult`. It matters more here — a closed finale is waiting on exactly
+> these writes, so leaving it to the tick would sit the whole table on its last
+> player for up to 15 minutes.
+>
+> **Folding during the closed phase is self-healing, which is why it has no guard.**
+> `dealFinaleBoard` refuses a rebuy past the deadline, so the seat would otherwise
+> sit boardless and `played`-less forever, holding the table. `foldFinaleBoard`
+> re-arms `startBy`, handing it to the idle sweep — which runs *before* the deploy
+> pass in the same tick and mutates its own copy of the roster, so one tick can both
+> remove the seat and deploy the table. Folding after close forfeits the entry and
+> cleans itself up inside the hour.
+>
+> The tick's internal order stays load-bearing for the same reason it always was:
+> the `startBy` sweep runs and writes first, so a player who enlisted and never
+> pulled the arm is gone inside the hour and never reaches the close. That is why
+> the only seats that can hold a closed finale open are players who **actually
+> spun** — and why the host's straggler list is short.
+>
+> `deployMission` still takes two finale guards. **No replacement cohort** — the
+> season's closer must not spawn a fresh Five Card Draw table as it deploys, and it
+> deploys on a timer, which is exactly when nobody is watching to delete one.
+> (Flipping the season to `closing` beforehand is the operational belt;
+> `gmSpawnAllowed` already refuses there. The guard is the braces.) And **no
+> `rollCasinoOdds`** — the host hand-picked Release / Collect, so there is nothing
+> to roll; the stats hold chances of 100/0 precisely so the roll would reproduce
+> the pick if it ever ran, which makes the skip tidiness rather than the guarantee.
+> `hint`, `xp` and `casinoShareUnits` are still written: the first two re-write the
+> values creation already set, and the third is the banked denominator §0.4 of the
+> impl doc depends on being present-but-inert.
+>
+> ⚠️ **`tickableSeasons` includes `closing`.** That is what makes the operational
+> advice above safe — the tick keeps running in a closing season, so the finale
+> still deploys on its deadline. An `active`-only list would have had the wind-down
+> step silently disable the deadline it was meant to protect.
+
+> **The finale is the first table that can reach `inprogress` with a seat that
+> never locked in**, and that broke the admin board's advice. `gmShouldDeploy`
+> demands `allSeatsPlayed`, so an ordinary cohort gets there only by force-deploy —
+> which is why `missionPendingAction`'s `configs` arm lived only in the **forming**
+> branch, behind `filled >= currentMaxSlots`. For a finale that is `>= Infinity`
+> and never fires, so a straggler-bearing finale fell through to **`generate`**:
+> the card told the host to build the room, the one thing they cannot do until that
+> seat is chased or ⊘ voided. There is now an in-progress `configs` arm, sitting
+> where `denied` sits and ranked the same way (a seat with no config cannot be in
+> the room, so generating first is wasted work). **It is scoped to
+> `m.type === 'casino'`, mirroring `denied`** — `seatOwesConfig` judges a
+> non-casino seat on `yamlAt`, which participants predating that marker do not
+> carry, so an unscoped arm would relabel every older in-progress Patrol and bury
+> the `generate` those cards really need.
+>
+> `outstandingConfigsBlockRoom` needed no change and is worth reading once: a
+> forming finale can never be "full", so the roster correctly stays an amber
+> heads-up while entry is open and turns red the instant the deadline deploys it.
 
 > **Entering the finale consumes NO mission claim, and that has one non-obvious
 > consequence: `enlistInMission` must not write `players/{uid}/activeMissions/{id}`
@@ -850,6 +948,34 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > table you anted into and false of a free, universal one that runs to the end of
 > the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
 > everyone who entered.
+
+> **The finale lifts the `restricted` claim bar — in TWO files, and doing one is
+> the bug.** A restricted player may claim an abandoned finale card: restriction
+> exists to stop a player overextending, and the finale is free, consumes no claim
+> and runs to the end of the season, so there is no extension to curb. The
+> carve-out lives in **`claimRefusal`** (`src/lib/slotHelpers.ts`, via `isFinale` —
+> never the label) **and** in the copy `claimMissionSlot` inlines, the way it
+> inlines `deriveStatus`. Client only ⇒ a restricted player is offered a button the
+> server refuses; server only ⇒ they are refused a claim the server would allow.
+> Tiles are enforced by the database rules instead, but the finale is a mission, so
+> rules never see it.
+>
+> ⚠️ **The carve-out sits BELOW the kicked check in both copies.** Whether you
+> abandoned this very card is a different question from whether you are
+> overextended — lifting both arms would let a player reclaim the card they walked
+> away from. The one-per-player cap still applies to them like everyone else
+> (`claimedWeight(seat) > 0`), and needed no change.
+
+> **A finale slot cannot be merced** (`mercHireBlockers`' `finale` blocker, client
+> `src/lib/mercLogic.ts` + the server mirror — change both). The reward is priced
+> in the stars of the cards you personally spun for, so handing 60% of it to
+> someone who never pulled the arm reads as selling your spin. It is a blocker
+> rather than an absolute bar, so it inherits the house behaviour: **hard for
+> players, soft for the admin** (`details.mercWarnings` + *Hire anyway*). The
+> parameter is **optional and defaults to false**, so no existing caller changed;
+> `MercControl` derives it from `gameState` rather than taking a prop, and treats
+> it like `claimed` — a permanent blocker, so the owner sees no button instead of
+> one that can only fail.
 
 > **Every writer of a finale seat's `goldSwing` goes through `seatGoldSwingFor`**
 > (`functions/src/index.ts`), which delegates to the mirrored pure `finaleSeatGold`

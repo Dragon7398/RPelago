@@ -6,6 +6,7 @@ import { useIsAdmin } from '../contexts/SeasonContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { MERC_BLOCKER_TEXT, MERC_SHARE_PCT, mercCandidateBlockers, mercHireBlockers, playersByHandle } from '../lib/mercLogic';
+import { isFinale } from '../lib/casinoData';
 
 /**
  * The merc tag and hire/remove affordance for ONE slot, used on every surface
@@ -50,12 +51,27 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
   const merc     = slot.merc;
   const p        = variant === 'casino' ? 'mp-merc' : 'merc';
   const isOwner  = !!uid && uid === ownerId;
-  const blockers = mercHireBlockers(slot, ownerSlots, casino);
+  // The world this slot belongs to. Read from gameState rather than passed in —
+  // it was already derived below for the candidate limits, and hoisting it keeps
+  // the finale rule out of the five call sites that render this control.
+  const world = target.kind === 'mission'
+    ? gameState?.missions?.[target.missionId]
+    : gameState?.tiles?.[target.coord];
+  // A tile is never the finale, so the predicate is only asked of a mission —
+  // which also keeps `isFinale` from being handed a Tile, with which it shares no
+  // field. Same statement the server makes when it builds its MercTarget.
+  const onFinale = target.kind === 'mission'
+    && isFinale(gameState?.missions?.[target.missionId]);
+  const blockers = mercHireBlockers(slot, ownerSlots, casino, onFinale);
   const reasons  = blockers.map(b => MERC_BLOCKER_TEXT[b]);
-  // A claimed slot can never be merced by its owner, so a player isn't shown a
-  // button for it at all. The count limits can lift (the admin removes another
-  // merc), so those leave the button visible but disabled, with the reason.
-  const canHire  = live && (isAdmin || (isOwner && !merc && !blockers.includes('claimed')));
+  // Two of these are PERMANENT for the slot, so a player is shown no button at
+  // all rather than one that can only fail: a claimed slot was never theirs to
+  // pass on, and a finale slot is the spin they personally pulled. The count
+  // limits can lift (the admin removes another merc), so those leave the button
+  // visible but disabled with the reason. The admin still sees it in every case —
+  // hard for players, soft for the host (D3).
+  const canHire  = live && (isAdmin || (isOwner && !merc
+    && !blockers.includes('claimed') && !blockers.includes('finale')));
   const blocked  = !isAdmin && blockers.length > 0;
   const canClear = live && isAdmin && !!merc;
 
@@ -80,10 +96,8 @@ export default function MercControl({ target, slot, ownerSlots, casino, ownerId,
     : null;
 
   // Limits on WHO is being hired: restricted, or kicked off this world. Like the
-  // slot limits, a refusal for the owner and a warning for the admin.
-  const world = target.kind === 'mission'
-    ? gameState?.missions?.[target.missionId]
-    : gameState?.tiles?.[target.coord];
+  // slot limits, a refusal for the owner and a warning for the admin. (`world` is
+  // derived above, where the finale rule needs it too.)
   const candBlockers = match && !problem ? mercCandidateBlockers(match, world) : [];
   const candProblem  = !isAdmin && candBlockers.length ? MERC_BLOCKER_TEXT[candBlockers[0]] : null;
   // Everything the admin is warned about, and hires past with "Hire anyway".

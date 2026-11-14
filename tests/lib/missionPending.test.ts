@@ -262,6 +262,37 @@ describe('missionPendingAction — in progress', () => {
     const p = missionPendingAction(live({ participants: seats(seated('a', { yamlDenied: true })) }), 0);
     expect(p?.code).toBe('denied');
   });
+
+  // Added for the finale (WS-F), the first table that can deploy holding a seat
+  // that never locked in — gmShouldDeploy demands allSeatsPlayed, so an ordinary
+  // cohort reaches this state only via a force-deploy. Same reasoning as the
+  // denial above: a seat with no config cannot be in the room.
+  it('reports an outstanding config ahead of the missing room too', () => {
+    const m = live({ participants: seats(seated('a'), seated('b', { played: false })) });
+    const p = missionPendingAction(m, 0);
+    expect(p?.code).toBe('configs');
+    expect(p?.label).toBe('1 config');
+  });
+
+  it('still puts a DENIAL first — that seat has to act before the host can', () => {
+    // A denied seat is counted by seatsMissingConfig as well, so the order of the
+    // two arms is what decides which one the card reports.
+    const m = live({ participants: seats(seated('a', { yamlDenied: true }), seated('b', { played: false })) });
+    expect(missionPendingAction(m, 0)?.code).toBe('denied');
+  });
+
+  it('is casino-only — a non-casino seat is judged on yamlAt, which legacy seats lack', () => {
+    // ⚠️ The scoping guard. `seatOwesConfig` reads `yamlAt`, and participants that
+    // predate that marker carry none — so an unscoped arm would relabel every
+    // older in-progress Patrol as 'configs' and bury the room it actually needs.
+    const m = live({ type: 'patrol', participants: seats(seated('a', { played: false })) });
+    expect(seatsMissingConfig(m)).toBe(1);
+    expect(missionPendingAction(m, 0)?.code).toBe('generate');
+  });
+
+  it('does not fire once every config is in', () => {
+    expect(missionPendingAction(live({ participants: seats(seated('a')) }), 0)?.code).toBe('generate');
+  });
 });
 
 describe('missionClockOrigin', () => {

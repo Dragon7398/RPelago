@@ -895,10 +895,15 @@ function gmDecayWindowMs(m: GMMission): number {
 
 function gmCurrentMaxSlots(m: GMMission, now: number): number {
   // ⚠️ The finale has NO SEAT CAP and does not decay — it is time-limited instead
-  // (`finaleClosesAt`). Infinity rather than a big number so every `filled >= max`
-  // gate is false by construction and no decay step can ever close it. Mirrors
-  // currentMaxSlots in src/lib/missionLogic.ts.
-  if (isFinale(m)) return Infinity;
+  // (`finaleClosesAt`), and the deadline CLOSES THE CAP rather than deploying the
+  // table. Infinity while entry is open (rather than a big number) so every
+  // `filled >= max` gate is false by construction and no decay step can ever close
+  // it; the seated count once entry closes, which is what makes the table read as
+  // FULL and is the single change that gives the closing phase its behaviour —
+  // `enlistInMission` refuses a late entrant on its own `filled >= max` gate, and
+  // gmShouldDeploy becomes reachable but fires only once every seat has locked in.
+  // Mirrors currentMaxSlots in src/lib/missionLogic.ts.
+  if (isFinale(m)) return gmFinaleEntryClosed(m, now) ? gmFilledCount(m) : Infinity;
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor((now - m.firstJoinAt) / gmDecayWindowMs(m));
   return Math.max(1, m.baseMax - steps);
@@ -933,11 +938,14 @@ function heldClaimCount(player: { activeMissions?: Record<string, true> | null }
 }
 
 function gmShouldDeploy(m: GMMission, now: number): boolean {
-  // ⚠️ NEVER true for the finale, and the explicit return is the documentation.
-  // This gate wants a full table with every seat locked in; the finale has no cap
-  // (so it is never full) and deliberately tolerates seats that never lock in. Its
-  // one trigger is the deadline — see gmFinaleDeadlinePassed.
-  if (isFinale(m)) return false;
+  // The finale takes this ordinary path and needs no branch of its own — that is
+  // the point of closing the cap in gmCurrentMaxSlots instead of special-casing the
+  // deploy. Before its deadline the cap is Infinity, so this is false by
+  // construction; after it, the tests below read exactly the finale's rule: entry
+  // has closed (`filled >= max`) AND every seat has locked in. A seat that spun and
+  // never locked in HOLDS THE TABLE OPEN indefinitely, deliberately — nobody loses
+  // a completed spin to a timer. The player locking in or the host ⊘ voiding the
+  // seat clears it; adminForceDeploy is the override.
   if (m.state !== 'forming') return false;
   if (gmFilledCount(m) === 0) return false;
   if (gmFilledCount(m) < gmCurrentMaxSlots(m, now)) return false;
@@ -948,11 +956,26 @@ function gmShouldDeploy(m: GMMission, now: number): boolean {
   return true;
 }
 
-// The finale's deploy trigger (`finaleClosesAt`) is WS-F: the server mirror of
-// `finaleDeadlinePassed` lands with the `tickGuildmasterMissions` branch that calls
-// it, together with deployMission's two finale guards (no replacement cohort, no
-// rollCasinoOdds). Until then a created finale simply sits `forming` — which is the
-// safe half-built state, since gmShouldDeploy above can never fire for it.
+// Has the finale's entry window closed? Mirrors the client `finaleEntryClosed`
+// (src/lib/missionLogic.ts).
+//
+// ⚠️ NOT a deploy trigger. That was its first shape and the old name said so, which
+// was wrong: closing entry and deploying are two moments with the table's closing
+// phase in between. Entry shuts, the seats that already spun finish choosing a row
+// and submitting a config, and only when the last one has locked in does
+// gmShouldDeploy fire. Deploying AT the deadline stranded everyone still
+// mid-manifest, because mustFinaleSeat requires a `forming` table.
+//
+// Read by gmCurrentMaxSlots, where it closes the seat cap. It deliberately does not
+// test `state`, so it answers the question it is named for at any point in the
+// table's life; gmShouldDeploy adds its own state test.
+//
+// A finale with no `finaleClosesAt` never closes, rather than closing at once: a
+// half-written mission must stall visibly instead of shutting its own doors the
+// moment the tick first notices it.
+function gmFinaleEntryClosed(m: GMMission, now: number): boolean {
+  return isFinale(m) && m.finaleClosesAt != null && now >= m.finaleClosesAt;
+}
 
 function gmFreshMission(type: GMMissionType, series: number, now: number): Omit<GMMission, 'id'> {
   const def = MISSION_DEFS[type];
@@ -1073,7 +1096,14 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
   // Spawn a replacement cohort on deploy — unless the season is winding down
   // (closing/archived). A casino table spawns a min-count replacement table
   // (holding the open-table count); other mission types spawn a same-type cohort.
-  if (await gmSpawnAllowed(db, seasonId)) {
+  //
+  // ⚠️ NEVER behind the finale. It is the season's closer, so spawning a fresh Five
+  // Card Draw table as it deploys would reopen the casino in the same instant it
+  // shut — and the finale deploys on a TIMER, which is precisely when nobody is
+  // watching to delete it. Flipping the season to `closing` beforehand is the
+  // operational belt; this guard is the braces, and it is the one that holds at
+  // 03:00.
+  if (!isFinale(m) && await gmSpawnAllowed(db, seasonId)) {
     const newRef = db.ref(sp(seasonId, 'missions')).push();
     const newId  = newRef.key!;
     if (m.type === 'casino') {
@@ -1100,9 +1130,15 @@ async function deployMission(seasonId: string, missionId: string, m: GMMission, 
       m.casinoStats = live;
       updates[sp(seasonId, `missions/${missionId}/casinoStats`)] = live;
     }
-    const { releaseOn, collectOn } = rollCasinoOdds(m.casinoStats);
-    updates[sp(seasonId, `missions/${missionId}/release`)] = releaseOn ? 'on' : 'off';
-    updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
+    // The finale's Release / Collect were CHOSEN by the host at creation (D1) and are
+    // already final on the mission, so there is nothing left to roll. Its stats hold
+    // chances of 100/0 precisely so that `rollCasinoOdds` would reproduce the pick if
+    // it ran — this skip is the tidiness, not the guarantee.
+    if (!isFinale(m)) {
+      const { releaseOn, collectOn } = rollCasinoOdds(m.casinoStats);
+      updates[sp(seasonId, `missions/${missionId}/release`)] = releaseOn ? 'on' : 'off';
+      updates[sp(seasonId, `missions/${missionId}/collect`)] = collectOn ? 'on' : 'off';
+    }
     updates[sp(seasonId, `missions/${missionId}/hint`)]    = m.casinoStats.hint;
     updates[sp(seasonId, `missions/${missionId}/xp`)]      = m.casinoStats.xp;
     // Bank the pot denominator. Every share at settle is measured in these units,
@@ -1332,11 +1368,15 @@ export const enlistInMission = onCall(async (request) => {
   if (mission.state !== 'forming') throw new HttpsError('failed-precondition', 'Mission is not forming.');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
-  // Already inert for the finale: gmCurrentMaxSlots returns Infinity, so a finale
-  // is never full however many players enter. Left unguarded deliberately — a
-  // redundant `!finaleEntry` here would imply the cap means something.
+  // This gate now carries the finale's ENTRY DEADLINE, and carries it server-side
+  // without a guard of its own: gmCurrentMaxSlots returns Infinity while entry is
+  // open (so a finale is never full, however many players enter) and the seated
+  // count once it closes (so the next caller is refused). That is why there is no
+  // `finaleClosesAt` test here — adding one would be a second copy of the deadline.
+  // Only the wording forks, because "full" is a lie about a table with no cap.
   if (gmFilledCount(mission) >= gmCurrentMaxSlots(mission, now))
-    throw new HttpsError('failed-precondition', 'Mission is full.');
+    throw new HttpsError('failed-precondition',
+      finaleEntry ? 'Entry to the finale has closed.' : 'Mission is full.');
   // Gate on the table's FULL finish cost — ante + play-on for Hold 'Em — so a seat
   // can never lock in and then be unable to complete it (and be forced to fold).
   // Also inert for the finale: every cost in CASINO_GAMES.finale is 0, so entry is
@@ -1541,16 +1581,18 @@ interface MercTarget {
   live:       boolean;              // the world is in progress
   ownerSlots: GMSlot[];             // everything the owner holds on this world (for the limits)
   casino:     boolean;
+  finale:     boolean;                      // the season's closer — see mercHireBlockers
   kicked?:    Record<string, KickRecord>;   // the world's kickedPlayers
 }
 
 // Mirrors MercBlocker / MERC_BLOCKER_TEXT / mercHireBlockers in src/lib/mercLogic.ts
 // — a change to one must be made in both. HARD for players, SOFT for the admin.
-type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots' | 'mercRestricted' | 'mercKicked';
+type MercBlocker = 'claimed' | 'casinoLimit' | 'allSlots' | 'finale' | 'mercRestricted' | 'mercKicked';
 const MERC_BLOCKER_TEXT: Record<MercBlocker, string> = {
   claimed:     'This slot was claimed from another player — it can’t be passed on to a merc.',
   casinoLimit: 'Only one slot per casino table can be merced, and another one already is.',
   allSlots:    'At least one of the owner’s slots on this world must stay un-merced.',
+  finale:      'The finale is played by the person who spun for it — its slots can’t be merced.',
   mercRestricted: 'That player is restricted and can’t take merc work.',
   mercKicked:     'That player was removed from this world, so they can’t merc on it.',
 };
@@ -1563,11 +1605,17 @@ function mercCandidateBlockers(
   if (kicked?.[candidateId])         out.push('mercKicked');
   return out;
 }
-function mercHireBlockers(target: GMSlot, ownerSlots: GMSlot[], casino: boolean): MercBlocker[] {
+// `finale` is the one blocker here that is about the WORLD rather than the
+// arithmetic: the finale's reward is priced in the stars of the cards you
+// personally spun for, so handing 60% of it to someone who never pulled the arm
+// reads as selling your spin. HARD for players, SOFT for the admin like the rest
+// (D3 — the host keeps the right to hire one if something genuinely comes up).
+function mercHireBlockers(target: GMSlot, ownerSlots: GMSlot[], casino: boolean, finale = false): MercBlocker[] {
   const live   = ownerSlots.filter(Boolean);
   const others = live.filter(s => !!s.merc).length - (target.merc ? 1 : 0);
   const out: MercBlocker[] = [];
   if (target.claimed)            out.push('claimed');
+  if (finale)                    out.push('finale');
   if (casino && others >= 1)     out.push('casinoLimit');
   if (others + 1 >= live.length) out.push('allSlots');
   return out;
@@ -1614,6 +1662,7 @@ async function resolveMercTarget(
       live:       mission.state === 'inprogress',
       ownerSlots: slotList(seat.slots),
       casino:     mission.type === 'casino',
+      finale:     isFinale(mission),
       kicked:     mission.kickedPlayers,
     };
   }
@@ -1641,6 +1690,7 @@ async function resolveMercTarget(
       live:       tile.state === 'inprogress',
       ownerSlots: ownerSlots as GMSlot[],
       casino:     false,
+      finale:     false,          // a tile is never the finale
       kicked:     tile.kickedPlayers,
     };
   }
@@ -1714,7 +1764,7 @@ export const setSlotMerc = onCall(async (request) => {
   // player, a warning the admin must confirm past; `details.mercWarnings` is how
   // the client tells the two apart.
   const blockers = [
-    ...mercHireBlockers(target.slot, target.ownerSlots, target.casino),
+    ...mercHireBlockers(target.slot, target.ownerSlots, target.casino, target.finale),
     ...mercCandidateBlockers(mercId, merc, target.kicked),
   ];
   if (blockers.length && (!isAdmin || data.confirm !== true)) {
@@ -1764,9 +1814,17 @@ export const claimMissionSlot = onCall(async (request) => {
   // Mirrors claimRefusal in src/lib/slotHelpers.ts. A kicked player may not claim
   // their way back into the world they abandoned; a restricted one may not take on
   // the extra capacity a claim is — restriction exists to stop exactly that.
+  //
+  // ⚠️ THE FINALE LIFTS THE RESTRICTED BAR, and the kicked bar stands. This is one
+  // of two copies of that carve-out — the other is `claimRefusal` itself, which is
+  // what the UI reads for *why* a claim is refused. Doing one and not the other is
+  // the specific failure to watch for: with only the client changed a restricted
+  // player is offered a button this function refuses, and with only this changed
+  // they are refused a claim the server would have allowed. Tiles are enforced by
+  // the database rules instead, but the finale is a mission, so rules never see it.
   if (mission.kickedPlayers?.[uid])
     throw new HttpsError('failed-precondition', 'You were removed from this world, so you can’t claim its open slots.');
-  if (player.restricted === true)
+  if (!isFinale(mission) && player.restricted === true)
     throw new HttpsError('failed-precondition', 'Your account is restricted, so you can’t claim open slots right now.');
   if (mission.type === 'basic' && player.basicTrainingDone)
     throw new HttpsError('failed-precondition', 'basic-training-used');
@@ -2397,6 +2455,17 @@ export const foldFinaleBoard = onCall(async (request) => {
     [sp(seasonId, `missions/${missionId}/finalePlays/${uid}/folds`)]:          folds,
     // Back on the idle clock: they hold a seat with no board again, exactly as
     // they did before pulling the arm (mirrors casinoFold).
+    //
+    // ⚠️ This line is what makes a fold during the CLOSING phase self-healing, and
+    // it is the reason that case needs no guard of its own. After entry closes a
+    // fold cannot be re-bought — `dealFinaleBoard` refuses a new board past the
+    // deadline — so the seat would otherwise sit boardless and `played`-less
+    // forever, holding the whole table open (gmShouldDeploy wants every seat
+    // locked in). Re-arming the clock hands it to the idle sweep instead, which
+    // deletes it within the hour; the sweep runs BEFORE the deploy pass in the
+    // same tick and mutates its own copy of the roster, so the very tick that
+    // removes the seat can also deploy the table. Folding after close is therefore
+    // forfeiting your entry, tidied up automatically — not a trap for the host.
     [sp(seasonId, `missions/${missionId}/participants/${uid}/startBy`)]: now + 3_600_000,
     [logPath]: logEntry,
   });
@@ -2491,6 +2560,18 @@ export const lockFinaleResult = onCall(async (request) => {
     [secret(seasonId, `missions/${missionId}/participants/${uid}/deck`)]:    null,
     [logPath]: logEntry,
   });
+
+  // Once entry has closed, THIS is what deploys the finale: the last seat locking
+  // in. Mirrors lockCasinoResult's own check, and matters more here — a closed
+  // finale is waiting on exactly these writes, so leaving it to the scheduled tick
+  // would sit the whole table on its last player for up to 15 minutes. Re-read
+  // rather than reasoned about, because the deciding fact is whether EVERY OTHER
+  // seat has locked in, which this call does not otherwise look at.
+  const afterSnap = await db.ref(sp(seasonId, `missions/${missionId}`)).get();
+  const after = afterSnap.val() as GMMission | null;
+  if (after && gmShouldDeploy(after, Date.now())) {
+    await deployMission(seasonId, missionId, after, Date.now());
+  }
 
   return { goldSwing, slots };
 });
@@ -3450,6 +3531,16 @@ export const adminRemoveCasinoSlot = onCall(async (request) => {
     // Released: shrinks the settle denominator, raising every survivor's share.
     // Pre-deploy there is no denominator yet (casinoShareUnits is banked at deploy
     // from the seats still present), so a forming void needs no bookkeeping.
+    //
+    // ⚠️ Deliberately NOT forked for the finale, against WS-G's sketch. With a zero
+    // pot the increment pays nothing either way (casinoPotShares short-circuits on
+    // `pot <= 0`), so skipping it would buy no behaviour — and it would make the
+    // bookkeeping INCONSISTENT: deployMission banks casinoShareUnits for a finale
+    // unforked, so suppressing only the releases would leave units counted and
+    // their returns not. If anything ever does give the finale a pot — the exact
+    // risk §0.4 of the impl doc names — a consistent-but-inert denominator divides
+    // correctly, while a half-kept one silently overpays. Both or neither; this is
+    // both.
     updates[sp(seasonId, `missions/${missionId}/casinoVoidedShare`)] = ServerValue.increment(fraction);
   }
 
@@ -4091,7 +4182,17 @@ export const tickGuildmasterMissions = onSchedule('every 15 minutes', async () =
       }
     }
 
-    // Deploy pass: check all mission types.
+    // Deploy pass: check all mission types — the finale included, with no arm of
+    // its own. Its deadline closes the seat cap (gmCurrentMaxSlots), which makes
+    // the table read as full, and gmShouldDeploy then deploys it once every seat
+    // has locked in. So the finale deploys when its last player finishes, NOT when
+    // its clock runs out, and a straggler holds it open until the host acts.
+    //
+    // Order still matters: the startBy sweep above has already run and written, so
+    // the roster this closes on is the SWEPT one. A player who enlisted and never
+    // pulled the arm is gone inside the hour (D2 keeps that clock running for the
+    // finale), which is why the only seats that can hold a closed finale open are
+    // players who actually spun.
     for (const [id, m] of Object.entries(missions)) {
       if (gmShouldDeploy(m, now)) {
         await deployMission(seasonId, id, m, now);

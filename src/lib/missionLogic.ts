@@ -39,11 +39,29 @@ function decayWindowMs(m: GMMission): number {
 
 export function currentMaxSlots(m: GMMission, now: number): number {
   // ⚠️ The finale has NO SEAT CAP and does not decay — it is time-limited instead
-  // (`finaleClosesAt`). Infinity rather than a large number so every `filled >= max`
-  // gate is false by construction, and so a stray decay step can never close it.
+  // (`finaleClosesAt`), and the deadline CLOSES THE CAP rather than deploying the
+  // table. While entry is open the cap is Infinity (rather than a large number) so
+  // every `filled >= max` gate is false by construction and a stray decay step can
+  // never close it. The instant entry closes it becomes the seated count, which is
+  // what makes the table read as FULL — and that one change is what lights up the
+  // ordinary machinery for the finale's closing phase:
+  //
+  //   · `enlistInMission` refuses a late entrant on its existing `filled >= max`
+  //     gate, so the server enforces the deadline without a guard of its own;
+  //   · `shouldDeploy` becomes reachable, and deploys only once every seat has
+  //     locked in (its casino arm demands `allSeatsPlayed`);
+  //   · `outstandingConfigsBlockRoom` turns the host's config roster from an amber
+  //     heads-up into a red block, at exactly the moment chasing those players
+  //     starts to matter;
+  //   · `missionPendingAction` reaches its forming `configs` / `deploy` arms.
+  //
+  // A seated count of 0 is safe at every one of those: `filled >= max` refuses a
+  // late entrant into an empty closed finale, while the `filled === 0` guards in
+  // `shouldDeploy` and the two triage helpers keep it from deploying or complaining.
+  //
   // `baseMax` is still written on the mission (the field is required) and is never
   // read for a finale; `seatTally` has its own branch because Infinity does not render.
-  if (isFinale(m)) return Infinity;
+  if (isFinale(m)) return finaleEntryClosed(m, now) ? filledCount(m) : Infinity;
   if (m.state === 'inprogress') return filledCount(m);
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / decayWindowMs(m));
@@ -146,11 +164,15 @@ export function allSeatsPlayed(m: GMMission): boolean {
 }
 
 export function shouldDeploy(m: GMMission, now: number): boolean {
-  // ⚠️ NEVER true for the finale, and the explicit return is the documentation.
-  // It wants a full table and every seat locked in; the finale has no cap (so it is
-  // never full) and deliberately tolerates seats that never lock in. Its one
-  // trigger is the `finaleClosesAt` deadline — see `finaleDeadlinePassed`.
-  if (isFinale(m)) return false;
+  // The finale takes this ordinary path, and needs no branch of its own — which is
+  // the point of closing the cap in `currentMaxSlots` rather than special-casing
+  // the deploy. Before its deadline the cap is Infinity so this is false by
+  // construction; after it, the two tests below read exactly the finale's rule:
+  // entry has closed (`filled >= max`) AND every seat has locked in
+  // (`allSeatsPlayed`). A seat that spun and never locked in therefore HOLDS THE
+  // TABLE OPEN indefinitely — deliberately, so nobody loses a completed spin to a
+  // timer. It is cleared by the player locking in or by the host ⊘ voiding the
+  // seat, and `adminForceDeploy` is the override.
   if (m.state !== 'forming') return false;
   if (filledCount(m) === 0) return false;
   if (filledCount(m) < currentMaxSlots(m, now)) return false;
@@ -159,15 +181,26 @@ export function shouldDeploy(m: GMMission, now: number): boolean {
 }
 
 /**
- * The finale's one deploy trigger: entry has closed. Stands in for `shouldDeploy`,
- * which can never fire here.
+ * Has the finale's entry window closed?
  *
- * A finale with no `finaleClosesAt` never deploys rather than deploying
- * immediately — a half-written mission should stall visibly, not close itself.
+ * This is NOT a deploy trigger — that was its first shape and the name said so,
+ * which was wrong. Closing entry and deploying are two different moments with the
+ * table's whole closing phase in between: entry shuts, the seats already spun
+ * finish choosing their row and submitting their configs, and only when the last
+ * of them has locked in does `shouldDeploy` fire. Deploying AT the deadline would
+ * strand every player still mid-manifest, because `lockFinaleResult` requires a
+ * `forming` table.
+ *
+ * Read by `currentMaxSlots` (where it closes the cap) and by the admin panel's
+ * wording. It deliberately does NOT test `state`, so it answers the question it
+ * is named for at any point in the table's life; callers that care add their own
+ * state test, as `shouldDeploy` already does.
+ *
+ * A finale with no `finaleClosesAt` never closes, rather than closing at once — a
+ * half-written mission should stall visibly instead of shutting its own doors.
  */
-export function finaleDeadlinePassed(m: GMMission, now: number): boolean {
-  return isFinale(m) && m.state === 'forming'
-    && m.finaleClosesAt != null && now >= m.finaleClosesAt;
+export function finaleEntryClosed(m: GMMission, now: number): boolean {
+  return isFinale(m) && m.finaleClosesAt != null && now >= m.finaleClosesAt;
 }
 
 // ── Admin triage: what is this mission WAITING ON the host for? ───────────────
@@ -425,6 +458,22 @@ export function missionPendingAction(m: GMMission, now: number): MissionPendingA
       label: `${denied} resubmit${denied === 1 ? '' : 's'}`,
       title: `${denied} seat${denied === 1 ? ' is' : 's are'} waiting to resubmit a denied config.`,
     };
+    // Outstanding configs also outrank the missing room, and for the same reason:
+    // a seat with no config cannot be in the room, so generating now would just
+    // have to be done again. Casino-only, mirroring the `denied` arm above — a
+    // non-casino seat is judged on `yamlAt`, which participants predating that
+    // marker simply do not carry.
+    //
+    // ⚠️ This arm exists FOR THE FINALE, which is the first table that can reach
+    // `inprogress` with a seat that never locked in: gmShouldDeploy demands
+    // allSeatsPlayed, so an ordinary table cannot (only a force-deploy can). The
+    // host's move is to chase the straggler or ⊘ void the seat — not to generate.
+    const owed = m.type === 'casino' ? seatsMissingConfig(m) : 0;
+    if (owed > 0) return {
+      code: 'configs', icon: '⛔',
+      label: `${owed} config${owed === 1 ? '' : 's'}`,
+      title: `${owed} seat${owed === 1 ? ' is' : 's are'} live with no usable config — chase ${owed === 1 ? 'the player' : 'those players'} or void the seat${owed === 1 ? '' : 's'} before generating the room.`,
+    };
     if (awaitingRoom(m)) return {
       code: 'generate', icon: '⚠',
       label: 'needs room',
@@ -624,7 +673,12 @@ export function computeMissionCard(
     } else if (uid != null && m.finalePlays?.[uid]?.played) {
       doneLabel = 'ALREADY PLAYED';
       disabledReason = 'You have already played the finale — it runs once, and once each.';
-    } else if (m.finaleClosesAt != null && now >= m.finaleClosesAt) {
+    } else if (finaleEntryClosed(m, now)) {
+      // The table is still `forming` at this point and will be until its last
+      // seat locks in — but it is closed to NEW players, so this is the one gate
+      // that survives the hoist above. The server agrees without a guard of its
+      // own: `currentMaxSlots` is now the seated count, so enlist's `filled >=
+      // max` check refuses them too.
       disabledReason = 'Entry to the finale has closed.';
     } else {
       takeable = true;

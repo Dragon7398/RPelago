@@ -4,8 +4,9 @@ import { useToast } from '../../contexts/ToastContext';
 import RoomPeek from './statusReportPage/RoomPeek';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
+import { isFinale } from '../../lib/casinoData';
 import { useSeason } from '../../contexts/SeasonContext';
-import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleDeadlinePassed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
+import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleEntryClosed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
 import { finaleStarTiers } from '../../lib/finaleStars';
@@ -535,7 +536,11 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
                   </span></>
               : <>⚠ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} not in yet
                   <span className="casino-yaml-list-note">
-                    {' '}· nothing to chase until the table fills
+                    {/* A finale never fills — it has no cap. It CLOSES, and that
+                        is the moment these rows start to matter, so the amber
+                        note has to name the right event or it reads as a wait
+                        for something that will never happen. */}
+                    {' '}· nothing to chase until {isFinale(mission) ? 'entry closes' : 'the table fills'}
                   </span></>}
           </div>
           {awaiting.map(({ playerId, participant, reason }) => (
@@ -1337,14 +1342,14 @@ function FinalePanel({ now }: { now: number }) {
   if (existing) {
     const seated   = Object.keys(existing.participants ?? {}).length;
     const closesAt = existing.finaleClosesAt;
-    const closed   = finaleDeadlinePassed(existing, now);
+    const closed   = finaleEntryClosed(existing, now);
     const banked   = Object.keys(existing.finaleStars ?? {}).length;
     return (
       <div className="dash-section">
         <h3 className="dash-section-title">✦ The Finale</h3>
         <div className="dash-stat-note">
           <strong>{missionDisplayLabel(existing)}</strong> is {existing.state === 'forming'
-            ? (closed ? 'past its deadline and awaiting deploy' : 'open for entry')
+            ? (closed ? 'closed — waiting on the last seats to lock in' : 'open for entry')
             : existing.state === 'inprogress' ? 'in progress' : 'settled'}
           {' · '}<strong>{seated}</strong> seated (no limit)
           {closesAt != null && <> · entry {closed ? 'closed' : 'closes'} {fmtDayClock(closesAt)}</>}
