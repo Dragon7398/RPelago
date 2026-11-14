@@ -795,6 +795,24 @@ weight = ownRemainingCards / lockedCount  +  Σ claimed slots' claimedFraction
 
 **Claimed slots.** A claim is only ever offered from an **in-progress** table, so the Archipelago room already exists and the claimant adopts a *live* slot — no ante, no deal, no config to submit, and `claimMissionSlot` charges nothing and does **not** consume a mission claim. Limits: one claimed slot per player per table (a player already seated there may take one extra). The claimed slot is appended to both `slots` and `lockedCards` so every existing consumer keeps working, and is marked on the slot itself with `claimed` / `claimedFraction` / `claimedFrom`. **The fraction lives on the slot, not on the participant** — it was carved off a *different* seat with a different `lockedCount`, so a seat-level total could not say which slot contributed what.
 
+> **The Coat of Many Colors takes ANY 4 of 5 table types, not all four games.**
+> `COAT_TABLE_TYPES` (`casinoData.ts`) is the rotation **plus** the finale and
+> `COAT_TYPES_REQUIRED` is 4, so there are two routes: all four games, or three of
+> them plus the finale. ⚠️ It is a **separate array from `CASINO_GAME_ORDER` and
+> must stay one** — merging them puts the closer in the respawn rotation and zeroes
+> `minCasinoAnte`; `tests/lib/finaleTable.test.ts` pins both halves. The change is
+> strictly more generous, so no existing holder can lose the Coat (anyone with all
+> four games still clears four of five) — which is what made it safe to ship
+> mid-season. The grant stays gated on `participant.played`, or four claims would
+> buy the Coat without playing a hand.
+>
+> **Only Coat surfaces read that array.** The Games modal and the help games list
+> answer *what can I play tonight*, so they keep iterating the rotation — the
+> finale renders there conditionally on the table existing, never permanently.
+> `StatsPage` needs neither: `buildRows`' `extra` pass already grows a finale row
+> once one exists, and now labels it through the caller's labeller rather than
+> printing the raw key.
+
 > **A claimed card pays FLAT — no deck boost.** `seatGoldSwing` boosts only the seat's own hand; the claimant never chose the deck. Anything that rebuilds `slots`/`lockedCards` must preserve claimed slots and re-derive `goldSwing` through it — `resubmitCasinoYaml` does both (its card re-pick re-appends them, and its config-only path skips them, since a claimed card came from another player's deck and is absent from this player's manifest). `completeMission` also gates the **Coat of Many Colors** credit on `played`, or four claims would buy the Coat without ever playing a hand.
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.

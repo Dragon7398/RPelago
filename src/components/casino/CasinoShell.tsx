@@ -13,7 +13,7 @@ import { seatGames, type SeatGame } from './seatGames';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { DeckPreview } from '../../casino/DeckPreview';
-import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, isFinale, seatSpend, type CasinoGame } from '../../lib/casinoData';
+import { CASINO_GAMES, CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, isFinale, seatSpend, type CasinoGame } from '../../lib/casinoData';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
 import { awaitingRoom, roomGoalProgress, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
@@ -428,7 +428,9 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
   const { gold, net, tablesPlayed, biggestWin, history } = stats;
   const hasCoat  = (player?.inventory?.['coat_of_many_colors'] ?? 0) > 0;
   const done     = player?.casinoGamesCompleted ?? {};
-  const doneCount = CASINO_GAME_ORDER.filter(g => done[g]).length;
+  // Counted over COAT_TABLE_TYPES (the rotation plus the finale), not the
+  // rotation — the finale is a route to the Coat like any other table type.
+  const doneCount = COAT_TABLE_TYPES.filter(g => done[g]).length;
 
   return (
     <Modal title={name || 'Your Profile'} tag="At the Casino" onClose={onClose}>
@@ -461,15 +463,21 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
         ) : (
           <div className="rl-prof-coat">
             <p className="rl-muted" style={{ margin: 0 }}>
-              Complete a table of all four games to earn the <b>Coat of Many Colors</b> and unlock name colors.
+              Complete a table of <b>any {COAT_TYPES_REQUIRED} of the {COAT_TABLE_TYPES.length} table types</b> to earn
+              the <b>Coat of Many Colors</b> and unlock name colors.
             </p>
             <div className="rl-prof-coatprog">
-              {CASINO_GAME_ORDER.map(g => (
+              {/* One pip per TYPE — five of them — against a requirement of four, so
+                  a player can see they have a spare route. The count is clamped
+                  because a player who plays all five would otherwise read 5/4. */}
+              {COAT_TABLE_TYPES.map(g => (
                 <span key={g} className={`rl-prof-coatpip${done[g] ? ' on' : ''}`} title={CASINO_GAMES[g].label}>
                   {done[g] ? '✓' : '·'}
                 </span>
               ))}
-              <span className="rl-mini-lbl" style={{ marginLeft: '0.4rem' }}>{doneCount}/4</span>
+              <span className="rl-mini-lbl" style={{ marginLeft: '0.4rem' }}>
+                {Math.min(doneCount, COAT_TYPES_REQUIRED)}/{COAT_TYPES_REQUIRED}
+              </span>
             </div>
           </div>
         )}

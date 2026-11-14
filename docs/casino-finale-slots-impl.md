@@ -872,11 +872,53 @@ exactly `10 × stars × deckBoost` while keeping the 50 base.
 
 ---
 
-### WS-H — The Coat and its display sites
+### WS-H — The Coat and its display sites — ✅ DONE
 
 **Depends on:** B's type widening only. **Independent of everything else, and safe
 during the live season** — it is strictly more generous and no current holder can
 lose it (plan §6).
+
+> **Shipped.** `COAT_TABLE_TYPES` / `COAT_TYPES_REQUIRED`, the grant, the
+> player-facing rail, the help copy, and the Stats row label. 6 new tests (672
+> total, 24 files).
+>
+> **Two of the five listed sites were deliberately NOT changed, and one that was
+> not listed was.** The table below conflates two different questions — *what
+> counts toward the Coat* and *what can I play tonight* — and only the first is
+> WS-H's:
+>
+> | Site | Verdict |
+> |---|---|
+> | `db.ts` the grant | **changed** — `COAT_TABLE_TYPES.filter(...).length >= COAT_TYPES_REQUIRED` |
+> | `CasinoShell.tsx:431` `doneCount` + the pip rail | **changed** — five pips against a requirement of four |
+> | `help/SectionCasino.tsx` the Coat sentence | **changed** (not in the table) — it still said *"all four games"* |
+> | `CasinoShell.tsx:307` the Games modal | **unchanged** — see below |
+> | `help/SectionCasino.tsx` the games list | **unchanged** — see below |
+> | `admin/StatsPage.tsx` | **label fix, not the array** — see below |
+>
+> The Games modal (*"Tonight's Tables"*) and the help games list both advertise
+> **what a player can sit down at**, not what counts for the Coat. Putting the
+> finale in either permanently would advertise a one-off table in every season,
+> including seasons where it does not exist — and `SectionCasino`'s own WS-B
+> comment already says it should render **conditionally on the table existing**,
+> which is WS-I's job. So they keep iterating the rotation.
+>
+> **StatsPage needed no new array, only a label.** `buildRows` already has an
+> `extra` pass that appends any key present in the counts but absent from the
+> order — so *"Casino Tables by Game Type"* was always going to grow a finale row
+> on its own, once a finale table exists. The only defect was that the extras pass
+> ignored the caller's labeller and printed the raw key, so the row read `finale`
+> instead of **The Finale**. It now asks the labeller first and falls back to the
+> key (the signature returns `string | undefined` to make that honest, which also
+> covers a retired value in the two tri-state tables). Giving it
+> `COAT_TABLE_TYPES` as its order would have been worse: an empty **Slots** row
+> drawn all season, where the extras pass grows one exactly when there is
+> something to count.
+>
+> **The rail shows five pips against `{min(done, 4)}/4`.** Five routes and four
+> needed means a player can have a spare, and an unclamped count would render
+> `5/4`. The copy on both surfaces now reads *"any 4 of the 5 table types"* with
+> the numbers interpolated from the constants, so it cannot drift from the rule.
 
 ```ts
 export const COAT_TABLE_TYPES = [...CASINO_GAME_ORDER, 'finale'] as const;
@@ -948,7 +990,7 @@ Functions before frontend, always (CLAUDE.md). Beyond that:
 |---|---|
 | **Now, season live** | WS-A, WS-B, WS-H. Invisible to players; H is strictly generous. |
 | **Next** | WS-C, then D and E in parallel. |
-| **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, I. |
+| **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, I. (~~H~~ ✅ — shippable any time.) |
 | **Before the host touches it** | WS-J's rehearsal, in a draft season. |
 | **Before the deadline fires** | season → `closing`, so no replacement cohort spawns (§0.7). |
 

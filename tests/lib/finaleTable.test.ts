@@ -3,6 +3,7 @@ import {
   CASINO_GAMES, CASINO_GAME_ORDER, FINALE_GAME, isFinale, minCasinoAnte,
   FINALE_ROWS, FINALE_ROW_REELS, FINALE_BOARD_CARDS, FINALE_MAX_REROLL_REELS,
   finaleReelIndices, finaleRowIndices, applyReelRespin, seatSpend,
+  COAT_TABLE_TYPES, COAT_TYPES_REQUIRED,
 } from '../../src/lib/casinoData';
 import {
   currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleEntryClosed, allSeatsPlayed,
@@ -592,5 +593,61 @@ describe('stragglers at the close', () => {
   it('reports ready-to-deploy once the last config lands', () => {
     const m = finale({ finaleClosesAt: 1_000, participants: { d: lockedIn } });
     expect(missionPendingAction(m, 9e12)?.code).toBe('deploy');
+  });
+});
+
+// ── The Coat of Many Colors ──────────────────────────────────────────────────
+//
+// The finale adds a FIFTH route to a requirement of four. The whole point of the
+// change is that it is strictly more generous, so the regression (an existing
+// holder keeps it) matters more than the new path.
+
+describe('the Coat counts the finale as a table type', () => {
+  // The grant in `completeMission` is a client write over the player record, so
+  // this is the rule it applies, expressed the same way.
+  const earns = (...types: string[]) => {
+    const completed: Record<string, boolean> = {};
+    for (const t of types) completed[t] = true;
+    return COAT_TABLE_TYPES.filter(g => completed[g]).length >= COAT_TYPES_REQUIRED;
+  };
+
+  it('is five routes against a requirement of four', () => {
+    expect(COAT_TABLE_TYPES).toEqual([...CASINO_GAME_ORDER, FINALE_GAME]);
+    expect(COAT_TABLE_TYPES).toHaveLength(5);
+    expect(COAT_TYPES_REQUIRED).toBe(4);
+    // ⚠️ The tripwire that matters: this list may grow the finale, the ROTATION
+    // may not. If someone ever 'simplifies' these into one array, the finale
+    // enters the respawn rotation and zeroes minCasinoAnte.
+    expect(CASINO_GAME_ORDER).not.toContain(FINALE_GAME);
+  });
+
+  it('still grants the Coat for all four games — no existing holder can lose it', () => {
+    // THE regression. The old rule was `CASINO_GAME_ORDER.every(...)`; everyone
+    // who satisfied it has four types and so still clears four of five.
+    expect(earns(...CASINO_GAME_ORDER)).toBe(true);
+  });
+
+  it('grants it for three games plus the finale — the route this adds', () => {
+    expect(earns('five_card_draw', 'seven_card_stud', 'holdem', FINALE_GAME)).toBe(true);
+    expect(earns('blackjack', 'holdem', 'seven_card_stud', FINALE_GAME)).toBe(true);
+  });
+
+  it('grants it for all five, and does not require them', () => {
+    expect(earns(...COAT_TABLE_TYPES)).toBe(true);
+  });
+
+  it('still refuses three types, with or without the finale', () => {
+    // The finale is one route among five, not a shortcut: it replaces a game, it
+    // does not reduce the count.
+    expect(earns('five_card_draw', 'seven_card_stud', 'holdem')).toBe(false);
+    expect(earns('five_card_draw', 'seven_card_stud', FINALE_GAME)).toBe(false);
+    expect(earns(FINALE_GAME)).toBe(false);
+    expect(earns()).toBe(false);
+  });
+
+  it('counts each type once, however many tables of it a player ran', () => {
+    // `casinoGamesCompleted` is a set of booleans, so this is structural — but it
+    // is the thing a reader assumes and worth pinning.
+    expect(earns('blackjack', 'blackjack', 'blackjack', 'blackjack')).toBe(false);
   });
 });

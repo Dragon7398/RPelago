@@ -1,5 +1,6 @@
 import {
-  CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor,
+  CASINO_GAMES, CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor,
   type CasinoGame,
 } from '../../lib/casinoData';
 
@@ -170,7 +171,7 @@ export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | '
         <span className="help-callout-icon">🧥</span>
         <span>
           {casino
-            ? <>Successfully complete a table of <strong>all four games</strong> to earn the <strong>Coat of Many Colors</strong> and unlock your name colour.</>
+            ? <>Successfully complete a table of <strong>any {COAT_TYPES_REQUIRED} of the {COAT_TABLE_TYPES.length} table types</strong> — the four games, or three of them plus the season finale — to earn the <strong>Coat of Many Colors</strong> and unlock your name colour.</>
             : <>Casino tables pay best when you can commit <strong>2 or more cards</strong>. If you only play a few specific games, a standard Patrol is likely the safer choice.</>}
         </span>
       </div>

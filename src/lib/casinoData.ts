@@ -225,6 +225,21 @@ export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
 /** The finale's `casinoGame` value — the one place this string literal lives. */
 export const FINALE_GAME = 'finale' as const;
 
+// ── The Coat of Many Colors ───────────────────────────────────────────────────
+//
+// Every table type that counts toward the Coat: the rotation PLUS the finale. A
+// separate list from CASINO_GAME_ORDER precisely because the finale must not join
+// the rotation (see the note above it), and a separate CONSTANT for the
+// requirement because the two numbers now differ — five routes, four needed.
+//
+// The rule is `>= COAT_TYPES_REQUIRED distinct types`, which is **strictly more
+// generous than the old `CASINO_GAME_ORDER.every(...)`**: anyone who already holds
+// the Coat satisfied all four games and so still satisfies four of five. It only
+// ADDS a route — three games plus the finale — so this is safe to ship mid-season
+// and no existing holder can lose it.
+export const COAT_TABLE_TYPES: readonly CasinoGame[] = [...CASINO_GAME_ORDER, FINALE_GAME];
+export const COAT_TYPES_REQUIRED = 4;
+
 /**
  * THE predicate for "is this the finale". Every fork keys off this one function so
  * a grep for `isFinale` finds all of them, which is how the next person audits it.

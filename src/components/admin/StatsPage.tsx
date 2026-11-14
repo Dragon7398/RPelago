@@ -40,12 +40,21 @@ function tallyBy(live: GMMission[], done: GMMission[], key: (m: GMMission) => st
 function buildRows(
   counts: Record<string, Tally>,
   order: readonly string[],
-  label: (k: string) => string,
+  label: (k: string) => string | undefined,
 ): Rows {
-  const rows: Rows = order.map(k => ({ key: k, label: label(k), tally: counts[k] ?? { live: 0, done: 0 } }));
+  const rows: Rows = order.map(k => ({ key: k, label: label(k) ?? k, tally: counts[k] ?? { live: 0, done: 0 } }));
   const extra = Object.keys(counts).filter(k => !order.includes(k));
   for (const k of extra) {
-    rows.push({ key: k, label: k === UNSET ? 'Unset' : k, tally: counts[k] });
+    // An extra row is a key the order does not name — a retired value, or the
+    // FINALE, which is deliberately absent from CASINO_GAME_ORDER. Ask the
+    // caller's labeller first so the finale reads "The Finale" rather than the raw
+    // key, and fall back to the key when it has no name for it.
+    //
+    // This is why the order stays the ROTATION here rather than becoming
+    // COAT_TABLE_TYPES: an order containing the finale would draw an empty Slots
+    // row for the whole season, where the extras pass grows one only once a finale
+    // table actually exists.
+    rows.push({ key: k, label: k === UNSET ? 'Unset' : (label(k) ?? k), tally: counts[k] });
   }
   return rows;
 }

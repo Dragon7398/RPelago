@@ -7,7 +7,7 @@ import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } f
 import { ALL_ORBS, CASINO_OPEN_TABLES, DEFAULT_S2_SHOP_ITEM_IDS } from '../lib/constants';
 import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
-import { CASINO_GAME_ORDER } from '../lib/casinoData';
+import { CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
 import { freshMission, freshCasinoTable, freshFinaleTable, findFinale, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type FinaleSetup, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
@@ -1648,9 +1648,13 @@ export async function completeMission(
     if (out.gold > 0) mercOut.set(pid, out.gold);
     mergeMercCuts(mercIn, cuts);
 
-    // Casino Coat earn path: mark this game type completed; grant the Coat once
-    // the player has successfully completed a table of all four game types. Works
-    // in either season — the tracking is the same.
+    // Casino Coat earn path: mark this game type completed; grant the Coat once the
+    // player has completed a table of at least COAT_TYPES_REQUIRED of the five
+    // types (the four rotation games plus the finale). Works in either season —
+    // the tracking is the same.
+    //
+    // ⚠️ `COAT_TABLE_TYPES`, never `CASINO_GAME_ORDER`: the latter is the respawn
+    // rotation and excludes the finale by design.
     //
     // Gated on `played`: the Coat is earned by SITTING a table of each game, and a
     // pure claimant never played the game at all — they took over an abandoned slot
@@ -1660,9 +1664,9 @@ export async function completeMission(
     if (isCasino && mission.casinoGame && participant.played) {
       updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
       const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
-      const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
-      const hasCoat    = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
-      if (hasAllFour && !hasCoat) {
+      const typesDone = COAT_TABLE_TYPES.filter(g => completed[g]).length;
+      const hasCoat   = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
+      if (typesDone >= COAT_TYPES_REQUIRED && !hasCoat) {
         updates[sPath(`players/${pid}/inventory/coat_of_many_colors`)] = 1;
       }
     }
