@@ -942,9 +942,79 @@ and a player with all four games still is.
 
 ---
 
-### WS-I — Landing and admin surfaces
+### WS-I — Landing and admin surfaces — ✅ DONE
 
 **Depends on:** B, C.
+
+> **Shipped.** The landing's finale card and seat panel, the frozen star
+> snapshot on the admin panel, and the help section — plus the two surfaces WS-H
+> deliberately deferred here (the Games modal and the help games list), both now
+> rendering the finale **conditionally on `findFinale`**. 8 new tests (678 total,
+> 24 files).
+>
+> **Most of the card was already right, and the reason is worth keeping.**
+> `seatTally` has a finale branch (`"N seated"`, no `over` state), `msToNextDecay`
+> returns null, `SeatPips` draws nothing off `baseMax: 0`, and `casinoEntryCosts`
+> already returns `Entry · Rebuy after fold` — so the **rebuy was already stated
+> before the player opens the table**, which is one of the three things this
+> workstream asked for. What was left was the handful of places where an ordinary
+> table's instrument is not merely redundant but *says something false*:
+>
+> | Surface | Was | Now |
+> |---|---|---|
+> | the pot figure | `0g pot · ≈0g ea` | `50g + 10g a ★ · 60–300g a board` |
+> | the cohort line | `Cohort I` | `The season closer · free · once · no claim` |
+> | the full badge | `Table full` | `Entry closed` |
+> | the odds | `OddsTrio` → `Release 100%` | `RollFlags` → `Release On` |
+> | the ante mini | `Ante 0g` | `Entry Free` |
+> | `SeatPips` + `DecayNote` | an empty rail, no note | `FinaleEntryNote` — a live countdown |
+> | the seat button | `Take a seat` | `Enter the finale` / `Entry closed` / *You've played the finale* |
+> | `DeployBar` (seat panel) | green **Ready to deploy** | `FinaleWait` while entry is open |
+> | `seatStanding` (seat panel) | `Hand in progress` | `No row taken yet` / `Row locked` |
+> | the leave warning | *"the pot keeps it"* | one play each; nothing was paid in |
+>
+> **Three of those were bugs, not wording.**
+>
+> 1. **`Release 100%`.** `freshFinaleTable` pins the chances to 100/0 so the roll
+>    would reproduce the host's pick if it ever ran — which means `OddsTrio`
+>    advertised a *100% chance* of something already decided. `RollFlags` (the
+>    in-progress card's component) reads `m.release`/`m.collect` directly and was
+>    already the right instrument.
+> 2. **`DeployBar` turning green.** Its `filled >= max` is trivially true for a
+>    table whose cap *is* its fill count, so the bar read **Ready to deploy** the
+>    moment the currently-seated players had all played — while the table was
+>    waiting on a deadline days off and on players who had not entered. Scoped to
+>    the OPEN phase, not to the finale: once entry closes the bar is truthful
+>    again (every seat that will ever exist is in) and takes over.
+> 3. **A button that could only fail.** `enlistInMission` refuses
+>    `finale-already-played`, and *nothing else on the card can tell* — the seat is
+>    gone, the table is free, and no claim is held. Hence `TableCard`'s `spent`
+>    prop, read off `mission.finalePlays`.
+>
+> **Departures from the three bullets:**
+>
+> - **The admin card needed nothing** — the config roster (`seatsAwaitingConfig`)
+>   and the seated count were already there from WS-F, and the ⚠→⛔ severity flip
+>   at the close was already wired. What was missing was the **stars snapshot**,
+>   which is now a toggle on the Finale panel, grouped by tier with each tier's
+>   gold and card count. It also reports **how many cards the live recompute has
+>   already drifted on**, because that is the actual trap in the audit trail: the
+>   Stats tab's ★ column keeps moving as tables settle, so a host answering *"why
+>   was Sonic worth five"* from that column will eventually answer it wrong.
+> - **`fmtDur` moved** from `CasinoShell` into `missionLogic`, beside `fmtDayClock`.
+>   `PhasePanel` needs it for the countdown and is imported *by* the landing, so
+>   exporting it from there would be a cycle. Pinned by tests so the move changed
+>   nothing — including that a passed deadline renders `0m`, never a negative.
+> - **`FINALE_MIN_GOLD` / `FINALE_MAX_GOLD`** are new, derived, display-only
+>   constants in `finaleStars.ts`. Three surfaces advertise the 60–300 range and a
+>   hand-typed figure in any of them is a promise the formula stops keeping the
+>   moment a constant moves. Tested against `finaleOwnGold` at both ends, plus the
+>   330 Purist / 270 Safety figures §WS-J asks for.
+> - **Two stale comments fixed**: `GMMission.finaleClosesAt`'s doc still said the
+>   deadline deploys the table and stands in for `shouldDeploy` (the pre-WS-F
+>   model), and `SectionCasino`'s WS-B note still said the finale "is not rendered
+>   yet". Both now describe what the code does. `FinaleBoard`'s fold warning also
+>   had a hardcoded `50` beside the constant it was meant to read.
 
 1. The landing's finale card: no seat pips, a seated **count**, a live countdown to
    `finaleClosesAt`, "free · once · no claim used", and the fold rebuy stated
@@ -990,7 +1060,7 @@ Functions before frontend, always (CLAUDE.md). Beyond that:
 |---|---|
 | **Now, season live** | WS-A, WS-B, WS-H. Invisible to players; H is strictly generous. |
 | **Next** | WS-C, then D and E in parallel. |
-| **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, I. (~~H~~ ✅ — shippable any time.) |
+| **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, ~~I~~ ✅. (~~H~~ ✅ — shippable any time.) **All code is in; WS-J's rehearsal is what is left.** |
 | **Before the host touches it** | WS-J's rehearsal, in a draft season. |
 | **Before the deadline fires** | season → `closing`, so no replacement cohort spawns (§0.7). |
 

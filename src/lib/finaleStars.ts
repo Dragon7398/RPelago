@@ -11,7 +11,7 @@
 // pooling one Purist + Unconsoled + Indie deck). This module only RANKS and CUTS
 // that report into tiers, and prices them.
 
-import { CARD_DEFS, FINALE_GAME, isFinale, type CardDef, type CardTypeKey } from './casinoData';
+import { CARD_DEFS, FINALE_GAME, FINALE_ROW_REELS, isFinale, type CardDef, type CardTypeKey } from './casinoData';
 import { applyDeckBoost } from './casinoSlots';
 import { BASELINE_VARIANTS, cardPopularity, type CardPopularityRow } from './cardStats';
 import type { CasinoDeckChoice, FinaleStars, GMMission } from '../types';
@@ -39,6 +39,18 @@ export const WILD_STARS: FinaleStars = 1;
 
 export const FINALE_BASE_GOLD = 50;
 export const FINALE_GOLD_PER_STAR = 10;
+
+// What one board can pay BEFORE the deck boost: the floor is one 1★ card (the hand
+// floor is one card — see FinaleBoard), the ceiling a full row of 5★. Derived rather
+// than written as 60–300 because three surfaces advertise the range — the landing
+// card, the Games modal and the help section — and a hand-typed figure in any of
+// them is a promise the formula above stops keeping the moment a constant moves.
+//
+// ⚠️ Unlike everything else in this block these are DISPLAY-ONLY and need no server
+// mirror: nothing pays from them, and `functions/src/casinoEngine.ts` has no
+// surface that advertises a range.
+export const FINALE_MIN_GOLD = FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR;
+export const FINALE_MAX_GOLD = FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR * FINALE_ROW_REELS * 5;
 
 /**
  * What a fresh board costs after a fold. The first board is free.

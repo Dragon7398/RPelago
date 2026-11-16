@@ -1,14 +1,24 @@
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED,
-  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, FINALE_GAME,
+  FINALE_ROWS, FINALE_ROW_REELS, FINALE_MAX_REROLL_REELS,
   type CasinoGame,
 } from '../../lib/casinoData';
+import {
+  FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_MIN_GOLD, FINALE_MAX_GOLD,
+  FINALE_REBUY_GOLD,
+} from '../../lib/finaleStars';
+import { findFinale } from '../../lib/missionLogic';
+import { useGameState } from '../../contexts/GameStateContext';
 
 // Costs and deck variants are read from the engine rather than retyped, so this
 // page can never drift from what the table actually charges or deals. Adding a
 // deck variant lands here automatically — do not re-enumerate them in prose.
 function costLine(g: CasinoGame): string {
   const c = CASINO_GAMES[g];
+  // The finale's ante, reroll and play-on are all 0 — it is free — so the generic
+  // line would read "0g ante" and say nothing. Its one charge is the fold rebuy.
+  if (g === FINALE_GAME) return `free · ${FINALE_REBUY_GOLD}g rebuy after a fold`;
   return [
     `${c.ante}g ante`,
     c.reroll ? `${c.rerollCost}g reroll` : '',
@@ -24,11 +34,12 @@ const GAME_ICON: Record<CasinoGame, string> = {
   finale:          '✦',
 };
 
-// ⚠️ The list below iterates CASINO_GAME_ORDER, which deliberately excludes the
-// finale — so this entry is not rendered yet. That is correct for now: the finale
-// is a one-off the host opens once, and advertising it permanently (including in a
-// season where it does not exist) would be wrong. Rendering it conditionally on the
-// table existing is WS-I's job.
+// ⚠️ The list below iterates CASINO_GAME_ORDER — the ROTATION, which deliberately
+// excludes the finale — and appends the finale only when the host has actually
+// opened it. Do NOT add the finale to that array to get it listed: it drives
+// respawn, the per-game series counters and `minCasinoAnte`. The list answers
+// *what can I sit down at*, so a permanent entry would advertise a one-off table
+// in every season, including seasons where it does not exist.
 const GAME_BLURB: Record<CasinoGame, string> = {
   finale:
     'The season closer, run once and free to enter. Pull the arm for a board of 3 rows × 5 ' +
@@ -55,6 +66,12 @@ const GAME_BLURB: Record<CasinoGame, string> = {
 
 export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | 'casino' }) {
   const casino = variant === 'casino';
+  // The finale is described only once it exists. Both HelpModal call sites (the map
+  // App and CasinoShell) sit inside GameStateProvider, which is what makes reading
+  // the season here safe — the same thing SectionYaml does for feat-raised caps.
+  const { gameState } = useGameState();
+  const finale = !!findFinale(gameState?.missions, gameState?.missionsHistory);
+  const games  = finale ? [...CASINO_GAME_ORDER, FINALE_GAME] : CASINO_GAME_ORDER;
 
   return (
     <div className="help-section">
@@ -75,7 +92,7 @@ export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | '
 
       <h4>The Games</h4>
       <div className="help-tile-list">
-        {CASINO_GAME_ORDER.map(g => (
+        {games.map(g => (
           <div className="help-tile-row" key={g}>
             <span className="help-tile-icon">{GAME_ICON[g]}</span>
             <div>
@@ -166,6 +183,50 @@ export default function SectionCasino({ variant = 'map' }: { variant?: 'map' | '
           <div><strong>Narrow</strong> — A tight sub-genre (e.g. Metroidvania, Tactical RPG). Highest value, fewest copies in the deck.</div>
         </div>
       </div>
+
+      {finale && (
+        <>
+          <h4>The Finale</h4>
+          <p>
+            The season's closing table, and it plays like nothing else on the floor. It is{' '}
+            <strong>free</strong>, you may play it <strong>once</strong>, and it{' '}
+            <strong>costs you no claim</strong> — so you can enter it however many other tables
+            you are already holding, and a restricted account can enter too.
+          </p>
+          <p>
+            It is <strong>time-limited rather than seat-limited</strong>: there is no cap on how
+            many players sit down, and nothing decays. Instead entry closes at a deadline. The
+            table does <em>not</em> start then — everyone who already pulled the arm still gets
+            to finish choosing their row and attaching their config, however long that takes.
+            The room is generated once the last of them has locked in.
+          </p>
+          <p>
+            Pull the arm for a board of <strong>{FINALE_ROWS} rows × {FINALE_ROW_REELS} reels</strong>.
+            You may respin up to <strong>{FINALE_MAX_REROLL_REELS} reels</strong> once, free. Then
+            take <strong>one row</strong> and keep as many of its {FINALE_ROW_REELS} cards as you are
+            willing to play — keeping a card means playing it, and you must keep at least one. If
+            nothing on the board is worth it you can <strong>fold</strong>, but a fresh board then
+            costs <strong>{FINALE_REBUY_GOLD}g</strong>.
+          </p>
+          <div className="help-callout">
+            <span className="help-callout-icon">✦</span>
+            <span>
+              <strong>Card values run backwards here.</strong> Every card is worth{' '}
+              <strong>1–5 ★</strong> set <em>inverse</em> to how often this season actually picked
+              it: the games the floor passed over all season are the ones worth the most, and the
+              crowd favourites are worth the least. You are paid{' '}
+              <strong>{FINALE_BASE_GOLD}g</strong> for sitting down plus{' '}
+              <strong>{FINALE_GOLD_PER_STAR}g a ★</strong> across the cards you keep — so{' '}
+              {FINALE_MIN_GOLD}g for a single 1★ card up to {FINALE_MAX_GOLD}g for a full row of
+              5★, before your deck's boost. There is no pot and no gambit.
+            </span>
+          </div>
+          <p>
+            The star values are <strong>frozen when the host opens the table</strong> and never
+            recomputed, so they do not drift while the finale is being played.
+          </p>
+        </>
+      )}
 
       <div className="help-callout">
         <span className="help-callout-icon">🧥</span>

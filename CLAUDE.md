@@ -967,6 +967,55 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
 > everyone who entered.
 
+> **A finale card must not borrow an ordinary table's instrument — three of them
+> state something FALSE about it, not merely redundant.** The landing's
+> `TableCard` / `SeatedView` therefore fork on `isFinale`, and these are the forks
+> that are about correctness rather than wording:
+>
+> - **`OddsTrio` → `RollFlags`.** `freshFinaleTable` pins `casinoStats` to 100/0
+>   so `rollCasinoOdds` would reproduce the host's pick if it ever ran — so the
+>   drift display advertised a *100% chance* of something already decided. The
+>   finale stores FINAL values (`release: 'on' | 'off'`), which is exactly what
+>   `RollFlags` reads.
+> - **`DeployBar` → `FinaleWait`, scoped to the OPEN phase.** The bar's
+>   `filled >= max` is trivially true for a table whose cap *is* its fill count,
+>   so it turned green and read **Ready to deploy** as soon as the seated players
+>   had all played — while the table was waiting on a deadline days off and on
+>   players who had not entered. Once entry closes the bar is truthful again and
+>   takes back over, so the fork is on the phase, never on the finale.
+> - **`TableCard.spent`.** `enlistInMission` refuses `finale-already-played`, and
+>   nothing else on the card can tell: the seat is gone, the table is free and no
+>   claim is held. Read off `mission.finalePlays`, it replaces a button that could
+>   only fail with *"You've played the finale"*.
+>
+> The rest is wording that would mislead — `0g pot`, `Cohort I`, `Table full`,
+> `Ante 0g`, *"the pot keeps it"* on the leave warning. **`full` itself needs no
+> fork**: `currentMaxSlots` already makes it false while entry is open and true
+> after, which is the whole point of closing the cap. And a good deal needed
+> nothing at all — `seatTally`, `msToNextDecay`, `SeatPips` (off `baseMax: 0`) and
+> `casinoEntryCosts` were already finale-aware, which is why the rebuy reaches the
+> player before they ever open the table.
+
+> **The inverse star scale is said out loud on every surface that offers the
+> table** (the card, the Games modal, the help section) — it is the one mechanic
+> nobody guesses. All three read `FINALE_BASE_GOLD` / `FINALE_GOLD_PER_STAR` /
+> `FINALE_MIN_GOLD` / `FINALE_MAX_GOLD` rather than printing 60–300, so what a
+> player is promised and what `finaleOwnGold` pays cannot drift; the last two are
+> **derived and display-only, and need no server mirror** despite living in
+> `finaleStars.ts`. **Every one of those surfaces renders conditionally on
+> `findFinale`** — the finale is a one-off, so advertising it permanently would
+> advertise it in seasons where it does not exist. That is also why they take a
+> flag instead of iterating a longer array: `CASINO_GAME_ORDER` must not gain the
+> finale (see the Coat block).
+
+> **The admin's frozen star snapshot is the audit trail, and the Stats tab is
+> NOT.** The Finale panel lists `mission.finaleStars` by tier and reports how many
+> cards the live recompute has already drifted on, because `StatsPage`'s ★ column
+> is recomputed from the CURRENT corpus and keeps moving as tables settle — a host
+> answering *"why was Sonic worth five"* from that column will eventually answer
+> it wrong. `cardStatsCorpus` being shared is what guarantees the host froze what
+> they reviewed; this panel is what lets them read it back afterwards.
+
 > **The finale lifts the `restricted` claim bar — in TWO files, and doing one is
 > the bug.** A restricted player may claim an abandoned finale card: restriction
 > exists to stop a player overextending, and the finale is free, consumes no claim
@@ -1064,7 +1113,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `functions/src/yamlPaths.ts` / `traits.ts` | Server mirrors of the Storage path and the Horde floor. **Change with their client copies** |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity`, `playerStatus`/`releasesClaimsEarly` (the active/restricted/disabled tri-state and the early-claim-release gate), `yamlLimitsForFeats`/`yamlLimitsForPlayer` |
-| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), `roomGoalProgress` (the casino landing's "X / Y goaled" meter — seats **plus open claimable slots**, on the same `goaled` predicate as the ready-to-settle ✓), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `fmtDur` (forward countdowns — shared by the landing and its phase panel, which the landing imports), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), `roomGoalProgress` (the casino landing's "X / Y goaled" meter — seats **plus open claimable slots**, on the same `goaled` predicate as the ready-to-settle ✓), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
 | `src/lib/mercLogic.ts` | Mercenary split math (`flatMercCuts`, `casinoMercCuts`, `mercTotals`) + handle matching (`normalizeHandle`, `playersByHandle`) |
 | `src/components/MercControl.tsx` | The `⚔` merc tag + hire/change/remove control, shared by every slot surface |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |

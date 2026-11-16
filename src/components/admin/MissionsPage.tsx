@@ -6,10 +6,11 @@ import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, Tri
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
 import { isFinale } from '../../lib/casinoData';
 import { useSeason } from '../../contexts/SeasonContext';
-import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleEntryClosed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
+import { SLOT_CAUTION_HOURS } from '../../lib/statusReport';
+import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleEntryClosed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, configsBlockedSince, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
-import { finaleStarTiers } from '../../lib/finaleStars';
+import { finaleStarTiers, FINALE_GOLD_PER_STAR, FINALE_BASE_GOLD, FINALE_REBUY_GOLD, type FinaleStars } from '../../lib/finaleStars';
 import { createFinaleTable, seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
@@ -518,6 +519,12 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
   // today either way. Once nothing else stands in the way, the same rows become
   // the thing making the room late.
   const blocking = outstandingConfigsBlockRoom(mission, now);
+  // How long the full table has stood waiting on them — the figure the host
+  // chases on, rather than any one seat's own clock. Emphasised past
+  // SLOT_CAUTION_HOURS (the landing's 48h caution badge).
+  const blockedSince = configsBlockedSince(mission, now);
+  const blockedMs = blockedSince != null ? now - blockedSince : null;
+  const blockedLong = blockedMs != null && blockedMs >= SLOT_CAUTION_HOURS * 3_600_000;
 
   // With the download hidden and no seat owing a config there is nothing left to
   // draw — and an empty block would still spend its margin on the card.
@@ -533,7 +540,15 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
               ? <>⛔ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} outstanding
                   <span className="casino-yaml-list-note">
                     {' '}· all that is holding the room up
-                  </span></>
+                  </span>
+                  {blockedMs != null && (
+                    <span className={`casino-yaml-missing-when${blockedLong ? ' long' : ''}`}
+                          title={isFinale(mission)
+                            ? 'Time since finale entry closed (or the last seat was taken)'
+                            : 'Time since the table filled — the last seat taken, or decay closing the cap to the seats already taken'}>
+                      {' '}· waiting {fmtDayClock(blockedMs / 1000)}
+                    </span>
+                  )}</>
               : <>⚠ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} not in yet
                   <span className="casino-yaml-list-note">
                     {/* A finale never fills — it has no cap. It CLOSES, and that
@@ -1315,6 +1330,7 @@ function FinalePanel({ now }: { now: number }) {
   const [open, setOpen]       = useState(false);
   const [busy, setBusy]       = useState(false);
   const [closes, setCloses]   = useState('');
+  const [showStars, setShowStars] = useState(false);
   const [release, setRelease] = useState(true);
   const [collect, setCollect] = useState(true);
   const [hint, setHint]       = useState(7);
@@ -1343,7 +1359,15 @@ function FinalePanel({ now }: { now: number }) {
     const seated   = Object.keys(existing.participants ?? {}).length;
     const closesAt = existing.finaleClosesAt;
     const closed   = finaleEntryClosed(existing, now);
-    const banked   = Object.keys(existing.finaleStars ?? {}).length;
+    const frozen   = existing.finaleStars ?? {};
+    const banked   = Object.keys(frozen).length;
+    // How far the live recompute has already drifted from what this table pays.
+    // This is the whole reason the snapshot is readable here rather than on the
+    // Stats tab: that tab's ★ column is recomputed from the CURRENT corpus and so
+    // keeps moving as tables settle, while the finale pays the values below and
+    // nothing else. A host who answers "why was Sonic worth five" from the Stats
+    // column will eventually answer it wrong.
+    const drifted = Object.keys(frozen).filter(k => stars[k] != null && stars[k] !== frozen[k]).length;
     return (
       <div className="dash-section">
         <h3 className="dash-section-title">✦ The Finale</h3>
@@ -1359,8 +1383,40 @@ function FinalePanel({ now }: { now: number }) {
         <p className="dash-stat-note">
           It runs once, so there is no second one to open. The frozen star values are
           what every payout is computed from — they are deliberately not recomputed,
-          even if more tables settle after this point.
+          even if more tables settle after this point. A card pays{' '}
+          <strong>{FINALE_GOLD_PER_STAR}g a ★</strong> over a <strong>{FINALE_BASE_GOLD}g</strong> base
+          for the seat's own row, or {FINALE_GOLD_PER_STAR}g a ★ flat for a claimed card; a board
+          after a fold costs <strong>{FINALE_REBUY_GOLD}g</strong>.
         </p>
+        <button className="dash-btn" onClick={() => setShowStars(v => !v)} aria-expanded={showStars}>
+          {showStars ? '▾' : '▸'} Frozen star values ({banked})
+        </button>
+        {showStars && (
+          <div className="dash-finale-stars">
+            {drifted > 0 && (
+              <p className="dash-stat-note warn">
+                ⚠ <strong>{drifted}</strong> of these {banked} cards would be valued differently if
+                recomputed today — more tables have settled since the snapshot. That is expected and
+                changes nothing: <strong>the values below are what this table pays</strong>, and the
+                Stats tab's ★ column is now a different number. Answer any question about a payout
+                from here.
+              </p>
+            )}
+            {([5, 4, 3, 2, 1] as FinaleStars[]).map(tier => {
+              const names = Object.keys(frozen).filter(k => frozen[k] === tier).sort();
+              if (names.length === 0) return null;
+              return (
+                <div className="dash-finale-tier" key={tier}>
+                  <span className="dash-finale-tier-lbl">
+                    {'★'.repeat(tier)}
+                    <small>{FINALE_GOLD_PER_STAR * tier}g · {names.length}</small>
+                  </span>
+                  <span className="dash-finale-tier-names">{names.join(' · ')}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

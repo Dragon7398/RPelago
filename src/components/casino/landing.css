@@ -145,6 +145,29 @@ body.casino-scope #root { width: 100%; }
 .rl-decay { font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; color: oklch(from var(--neg) l c h / 0.85); }
 .rl-decay.closed { color: var(--gold-dim); }
 
+/* The finale's entry clock, standing in for the pips AND the decay line (it has
+   no seat cap and nothing decays). Deliberately NOT --neg like .rl-decay: a
+   closing seat is a loss, whereas entry being open is the best news on the card,
+   so the default tier is gold. --caution (orange in every theme, never amber,
+   which here reads as decoration) marks the last day, and a closed window drops
+   to --gold-dim like .rl-decay.closed — it is a settled fact, not an alarm. */
+.rl-fin-clock {
+  display: block; font-family:'Cinzel',serif; font-size: 0.64rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--gold);
+}
+.rl-fin-clock.soon   { color: var(--caution); }
+.rl-fin-clock.closed { color: var(--gold-dim); text-transform: none; letter-spacing: 0.02em; font-family:'Crimson Pro',serif; font-style: italic; font-size: 0.76rem; }
+
+/* The finale's rules paragraph on its table card. Longer than anything else a
+   card carries, because the inverse star scale is the one mechanic nobody
+   guesses and plan §2 asks for it on every surface that offers the table. */
+.rl-fin-note {
+  font-family:'Crimson Pro',serif; font-size: 0.78rem; line-height: 1.45;
+  color: var(--ink-soft); margin: 0.1rem 0 0;
+  border-left: 2px solid oklch(from var(--gold) l c h / 0.4); padding-left: 0.55rem;
+}
+.rl-fin-note b { color: var(--parchment); font-weight: 600; }
+
 /* ══ Table card grid — identical cards in both views; Floor just runs tighter ══ */
 .rl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.1rem; }
 .rl-grid.rl-grid-tight { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 0.9rem; }
@@ -367,6 +390,24 @@ body.casino-scope #root { width: 100%; }
 .rl-deploy-filled { position: absolute; inset: 0 auto 0 0; background: oklch(from var(--gold) l c h / 0.25); }
 .rl-deploy-played { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, oklch(from var(--gold) calc(l - 0.1) c h), var(--gold)); }
 .rl-deploy.ready .rl-deploy-played { background: linear-gradient(90deg, oklch(from var(--pos) calc(l - 0.14) c h), var(--pos)); }
+
+/* What stands in for the deploy bar on a finale seat while entry is open. Keeps
+   the bar's head row (so the two read as one instrument swapping out) and drops
+   the track, because there is nothing to fill: the finale is waiting on a clock,
+   not on seats. --gold throughout rather than --pos; nothing here is complete. */
+.rl-fin-wait { display: flex; flex-direction: column; gap: 0.3rem; }
+.rl-fin-wait-head {
+  display: flex; justify-content: space-between; gap: 0.6rem;
+  font-family:'Cinzel',serif; font-size: 0.56rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--gold-dim);
+}
+.rl-fin-wait-head b { color: var(--parchment); font-weight: 700; }
+.rl-fin-wait-txt {
+  font-family:'Crimson Pro',serif; font-size: 0.78rem; line-height: 1.45;
+  color: var(--ink-soft); margin: 0;
+  border-left: 2px solid oklch(from var(--gold) l c h / 0.4); padding-left: 0.55rem;
+}
+.rl-fin-wait-txt b { color: var(--gold); font-weight: 600; }
 
 /* Board — Archipelago room + Cheesetracker links (in progress) */
 .rl-chlinks { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0; }

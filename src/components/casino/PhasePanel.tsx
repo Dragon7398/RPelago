@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
-import { CASINO_GAMES, CARD_TYPES } from '../../lib/casinoData';
+import { CASINO_GAMES, CARD_TYPES, isFinale } from '../../lib/casinoData';
 import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { seatGames, type SeatGame } from './seatGames';
@@ -30,7 +30,7 @@ function PlayerCtx({ colorOf, handleOf, children }: {
     </NameColorCtx.Provider>
   );
 }
-import { awaitingRoom, roomGoalProgress, casinoSeatPaid, fmtDayClock, missionDisplayLabel, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, roomGoalProgress, casinoSeatPaid, fmtDayClock, fmtDur, missionDisplayLabel, seatTally, finaleEntryClosed } from '../../lib/missionLogic';
 import { claimEntries, claimRefusal, CLAIM_REFUSAL_TEXT } from '../../lib/slotHelpers';
 import { slotIdleTier, type SlotIdle } from '../../lib/statusReport';
 import { useSeason } from '../../contexts/SeasonContext';
@@ -145,6 +145,16 @@ function Panel({ kick, name, sub, children }: { kick: string; name: string; sub?
  */
 function seatStanding(m: GMMission, seat: GMParticipant): { badge: string; take: number | null; note: string } {
   const game = tableGame(m);
+  // The finale deals no hand: the player pulls an arm for a 3×5 board and takes
+  // one row of it. Checked BEFORE `played`, because both halves of the generic
+  // wording are wrong for it — and the unplayed half is worse than cosmetic, since
+  // "Hand in progress" is what a straggler holding the whole table open would be
+  // told, when the truth is that they have not spun at all.
+  if (isFinale(m)) {
+    return seat.played
+      ? { badge: 'Row locked', take: seat.goldSwing ?? 0, note: 'Your take is paid out when the table settles.' }
+      : { badge: 'No row taken yet', take: null, note: 'Head to the table and pull the arm — then take one row and keep the cards you are willing to play.' };
+  }
   if (seat.played) {
     return { badge: 'Hand locked', take: seat.goldSwing ?? 0, note: 'Your take is paid out when the table settles.' };
   }
@@ -163,6 +173,38 @@ function seatRoster(s: GMParticipant): { cls: string; rail: string; full: string
   if (s.played)     return { cls: 'played', rail: `${s.goldSwing ?? 0}g`, full: `${s.goldSwing ?? 0}g locked` };
   if (s.holeLocked) return { cls: 'ante',   rail: 'ante paid',           full: 'ante paid' };
   return { cls: 'wait', rail: 'to play', full: 'seated · to play' };
+}
+
+/**
+ * What a finale seat sees in place of the deploy bar WHILE ENTRY IS OPEN.
+ *
+ * ⚠️ The bar is actively misleading here, in both directions. Its `filled >= max`
+ * is trivially true for a table whose cap *is* its fill count, so it turns green
+ * and says "Ready to deploy" the moment the players currently seated have all
+ * played — while the table is in fact waiting on a deadline that may be days off,
+ * and on players who have not entered yet. Once entry closes the bar becomes
+ * truthful (every seat that will ever exist is now in, and all that is left is for
+ * them to lock in) and takes over again, which is why this is scoped to the open
+ * phase rather than to the finale.
+ */
+function FinaleWait({ m, now }: { m: GMMission; now: number }) {
+  const at      = m.finaleClosesAt;
+  const entered = Object.keys(m.participants ?? {}).length;
+  return (
+    <div className="rl-fin-wait">
+      <div className="rl-fin-wait-head">
+        <span>Entry open</span>
+        <span><b>{entered}</b> entered · no seat limit</span>
+      </div>
+      <p className="rl-fin-wait-txt">
+        {at != null
+          ? <>Entry closes in <b>{fmtDur(at - now)}</b> — and nothing deploys then. The seats
+              already in finish taking a row and attaching a config, and the room is generated
+              once the last of them has locked in.</>
+          : <>No closing time has been set yet, so entry stays open.</>}
+      </p>
+    </div>
+  );
 }
 
 // Deploy-progress bar: seats filled (soft) over seats played (bright); turns
@@ -289,7 +331,11 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
   const game     = tableGame(m);
   const standing = seatStanding(m, seat);
   const seats    = Object.values(m.participants ?? {});
-  const ready    = seats.length > 0 && seats.length >= max && seats.every(s => s.played);
+  // A finale whose entry is still open is NOT ready to deploy however many of the
+  // current seats have played — more players may still enter, and the deadline has
+  // to pass first. See FinaleWait.
+  const entryOpen = isFinale(m) && !finaleEntryClosed(m, now);
+  const ready    = !entryOpen && seats.length > 0 && seats.length >= max && seats.every(s => s.played);
 
   const head = (
     <div>
@@ -322,7 +368,9 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
         {hand}
         {seat.played && <Stake amount={seat.goldSwing ?? 0} label={stakeLabel(game)} />}
         {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
-        <DeployBar m={m} max={max} over={tally.over} title={tally.title} />
+        {entryOpen
+          ? <FinaleWait m={m} now={now} />
+          : <DeployBar m={m} max={max} over={tally.over} title={tally.title} />}
         <RosterChips m={m} uid={uid} max={max} />
         <div className="rl-ct-acts">{actions}</div>
       </div>
@@ -346,7 +394,9 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
         </div>
         <div className="rl-ct-col">
           {m.casinoStats && <div><div className="rl-ct-cell-lbl">Odds rolled</div><OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} /></div>}
-          <DeployBar m={m} max={max} over={tally.over} title={tally.title} />
+          {entryOpen
+            ? <FinaleWait m={m} now={now} />
+            : <DeployBar m={m} max={max} over={tally.over} title={tally.title} />}
         </div>
       </div>
       <div className="rl-ct-acts">{actions}</div>
@@ -1107,11 +1157,20 @@ export default function PhasePanel({ mission, settled, uid, now, view, onLeave, 
               <div className="rl-modal-name">Leave the table?</div>
               <div className="rl-modal-tag">{missionDisplayLabel(mission)}</div>
               <p className="rl-muted">
-                {played
-                  // Standing down is allowed right up until the table deals in, so a
-                  // locked seat CAN walk — it just walks away from everything it paid.
-                  ? 'You have already locked your hand. Leaving forfeits your take and everything you have paid in — the pot keeps it.'
-                  : 'Anything you have paid in so far stays with the table. You can take another seat afterwards.'}
+                {isFinale(mission)
+                  // Nothing was paid in and there is no pot to keep it, so the generic
+                  // copy is wrong twice over. What this really costs is irreversible and
+                  // worse: the finale is one play each, so a locked row cannot be
+                  // re-entered for. An unlocked seat may come back (its fold count
+                  // survives, so the rebuy follows it — see `finalePlays`).
+                  ? (played
+                      ? 'You have already locked your row, and the finale is one play each — leaving forfeits your take and you cannot enter again.'
+                      : 'Your board is thrown away. You may enter again before the deadline, but a board after a fold still costs the rebuy.')
+                  : played
+                    // Standing down is allowed right up until the table deals in, so a
+                    // locked seat CAN walk — it just walks away from everything it paid.
+                    ? 'You have already locked your hand. Leaving forfeits your take and everything you have paid in — the pot keeps it.'
+                    : 'Anything you have paid in so far stays with the table. You can take another seat afterwards.'}
               </p>
               <div className="rl-phase-acts">
                 <button className="rl-btn" onClick={() => setConfirmLeave(false)}>Stay seated</button>

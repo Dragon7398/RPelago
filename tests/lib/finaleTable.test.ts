@@ -6,13 +6,16 @@ import {
   COAT_TABLE_TYPES, COAT_TYPES_REQUIRED,
 } from '../../src/lib/casinoData';
 import {
-  currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleEntryClosed, allSeatsPlayed,
+  currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleEntryClosed, allSeatsPlayed, fmtDur,
   casinoEntryCosts, freshFinaleTable, findFinale, cardStatsCorpus, pickNextCasinoGame,
   FINALE_BASE_MAX, casinoTableSettlement, casinoShareDenominator, type FinaleSetup,
   missionPendingAction, outstandingConfigsBlockRoom, seatOwesConfig, seatsMissingConfig,
   seatsAwaitingConfig,
 } from '../../src/lib/missionLogic';
-import { FINALE_REBUY_GOLD, finaleBoardCost } from '../../src/lib/finaleStars';
+import {
+  FINALE_REBUY_GOLD, finaleBoardCost, finaleOwnGold, finaleClaimedGold,
+  FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_MIN_GOLD, FINALE_MAX_GOLD,
+} from '../../src/lib/finaleStars';
 import { cardsToSlots, finaleSlotDetails, handStakeFromSlots } from '../../src/lib/casinoSlots';
 import type { GMMission } from '../../src/types';
 
@@ -649,5 +652,64 @@ describe('the Coat counts the finale as a table type', () => {
     // `casinoGamesCompleted` is a set of booleans, so this is structural — but it
     // is the thing a reader assumes and worth pinning.
     expect(earns('blackjack', 'blackjack', 'blackjack', 'blackjack')).toBe(false);
+  });
+});
+
+// ── What the player is told a board is worth ─────────────────────────────────
+//
+// Three surfaces advertise this range — the landing card, the Games modal and the
+// help section — and each reads the constants rather than printing 60–300, so what
+// a player is PROMISED and what `finaleOwnGold` PAYS cannot drift. These tests are
+// the join between the two.
+
+describe('the advertised payout range', () => {
+  it('matches the formula at both ends, before any deck boost', () => {
+    // Floor: the hand floor is one card (FinaleBoard refuses to drop the last),
+    // and the cheapest card is 1★. Ceiling: a full row of five 5★ cards.
+    expect(FINALE_MIN_GOLD).toBe(finaleOwnGold(1, 'unconsoled'));
+    expect(FINALE_MAX_GOLD).toBe(finaleOwnGold(FINALE_ROW_REELS * 5, 'unconsoled'));
+    expect([FINALE_MIN_GOLD, FINALE_MAX_GOLD]).toEqual([60, 300]);
+  });
+
+  it('is derived, so it tracks the base and per-star constants', () => {
+    expect(FINALE_MIN_GOLD).toBe(FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR);
+    expect(FINALE_MAX_GOLD).toBe(FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR * FINALE_ROW_REELS * 5);
+  });
+
+  it('tops out at 330 on Purist and 270 on Safety', () => {
+    // The two figures the impl doc names. Deck boost is applied to the whole
+    // reward, base included — which is why these are not 300 ± 25.
+    expect(finaleOwnGold(FINALE_ROW_REELS * 5, 'purist')).toBe(330);
+    expect(finaleOwnGold(FINALE_ROW_REELS * 5, 'safety')).toBe(270);
+  });
+
+  it('pays a claimed card stars only — no base, no boost', () => {
+    // ⚠️ The +50 is the fee for sitting down and spinning, so a claimant never
+    // collects it. The range above is therefore an OWN-hand range and the
+    // surfaces that print it are all offering a seat, not a claim.
+    expect(finaleClaimedGold(5)).toBe(FINALE_GOLD_PER_STAR * 5);
+    expect(finaleClaimedGold(5)).toBeLessThan(FINALE_MIN_GOLD + FINALE_GOLD_PER_STAR * 4);
+  });
+});
+
+// ── fmtDur ───────────────────────────────────────────────────────────────────
+//
+// Moved out of CasinoShell into missionLogic so the landing card and the phase
+// panel can read one copy (the panel is imported BY the landing, so exporting it
+// from there would be a cycle). Pinned because the move must not change it: it is
+// what the finale's entry countdown is rendered with.
+
+describe('fmtDur', () => {
+  it('renders a forward duration at the coarsest useful unit', () => {
+    expect(fmtDur(40 * 60_000)).toBe('40m');
+    expect(fmtDur(5 * HOUR + 20 * 60_000)).toBe('5h 20m');
+    expect(fmtDur(28 * HOUR)).toBe('1d 4h');
+  });
+
+  it('never renders a negative duration', () => {
+    // A deadline a second in the past must not read as '-1m'. The callers test
+    // `finaleEntryClosed` first, so this is belt-and-braces.
+    expect(fmtDur(-1)).toBe('0m');
+    expect(fmtDur(-5 * HOUR)).toBe('0m');
   });
 });

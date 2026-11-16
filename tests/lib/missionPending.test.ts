@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   missionPendingAction, missionReadyToComplete, tileReadyToComplete, missionSettleBlockers,
   seatsMissingConfig, seatsAwaitingConfig,
-  seatOwesConfig, outstandingConfigsBlockRoom, missionClockOrigin, compareMissionsForAdmin,
+  seatOwesConfig, outstandingConfigsBlockRoom, configsBlockedSince, missionClockOrigin, compareMissionsForAdmin,
   holdPinned, hasUnfinishedSlots, roomGoalProgress,
 } from '../../src/lib/missionLogic';
 import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant, Tile } from '../../src/types';
@@ -134,6 +134,39 @@ describe('outstandingConfigsBlockRoom — warning vs error', () => {
 
   it('is false when nothing is outstanding at all', () => {
     expect(outstandingConfigsBlockRoom(mission({ baseMax: 1, participants: seats(seated('a')) }), 0)).toBe(false);
+  });
+});
+
+describe('configsBlockedSince — the table-wide chase clock', () => {
+  it('is null while the configs are not yet blocking', () => {
+    const m = mission({ baseMax: 3, participants: seats(seated('a'), seated('b', { played: false })) });
+    expect(configsBlockedSince(m, 10 * HOUR)).toBeNull();
+  });
+
+  it('counts from the last seat taken when a join filled the table', () => {
+    const m = mission({ baseMax: 2, firstJoinAt: 0, participants: seats(
+      seated('a', { played: false, joinedAt: 1 * HOUR }),
+      seated('b', { joinedAt: 5 * HOUR }),
+    ) });
+    // Seat a has owed its config since hour 1, but the room was only held up from hour 5.
+    expect(configsBlockedSince(m, 50 * HOUR)).toBe(5 * HOUR);
+  });
+
+  it('counts from the decay step when decay closed the cap onto the seated count', () => {
+    // Two of three seats taken by hour 2; one 36h casino step closes the third.
+    const m = mission({ baseMax: 3, firstJoinAt: 0, participants: seats(
+      seated('a', { joinedAt: 0 }), seated('b', { played: false, joinedAt: 2 * HOUR }),
+    ) });
+    expect(configsBlockedSince(m, 40 * HOUR)).toBe(36 * HOUR);
+  });
+
+  it('on a live table, never runs later than deploy — a later claimant does not reset it', () => {
+    const m = mission({ state: 'inprogress', baseMax: 3, firstJoinAt: 0, deployedAt: 10 * HOUR, link: 'r',
+      participants: seats(
+        seated('a', { yamlDenied: true, joinedAt: 0 }),
+        ['c', { playerId: 'c', playerName: 'C', joinedAt: 30 * HOUR, slots: [{ ...slot('In-Progress'), claimed: true }] }],
+      ) });
+    expect(configsBlockedSince(m, 40 * HOUR)).toBe(10 * HOUR);
   });
 });
 

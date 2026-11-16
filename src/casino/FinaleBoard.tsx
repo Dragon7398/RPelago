@@ -4,7 +4,7 @@ import type { DeckCard } from '../lib/casinoData';
 import {
   FINALE_ROWS, FINALE_ROW_REELS, FINALE_MAX_REROLL_REELS, finaleRowIndices,
 } from '../lib/casinoData';
-import { finaleOwnGold, sumStars, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR } from '../lib/finaleStars';
+import { finaleOwnGold, sumStars, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_REBUY_GOLD } from '../lib/finaleStars';
 import { CardFace, CardBack } from './CardFace';
 import './finale.css';
 
@@ -319,7 +319,7 @@ export default function FinaleBoard({
         <div className="fin-fold-warn" role="alertdialog" aria-label="Fold this board">
           <p>
             Folding throws this whole board away. A fresh one costs{' '}
-            <strong>{rebuyCost > 0 ? rebuyCost : 50}g</strong> — and the finale can only be
+            <strong>{rebuyCost > 0 ? rebuyCost : FINALE_REBUY_GOLD}g</strong> — and the finale can only be
             <strong> played once</strong>, so this is the last board you will pay for rather than
             a way to shop around.
           </p>

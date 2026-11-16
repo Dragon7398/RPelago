@@ -742,9 +742,14 @@ export interface GMMission {
   // played; and a player's payout could then move between their spin and
   // settlement. It is also the audit trail for "why was Sonic worth five".
   finaleStars?:    Record<string, FinaleStars>;
-  // Entry closes at this instant and the table deploys — it stands in for
-  // `shouldDeploy`, which can never fire here (it wants a full table, and the
-  // finale has no seat cap). Also drives the player-facing countdown.
+  // When entry closes. ⚠️ This is NOT when the table deploys — closing entry and
+  // deploying are two moments with the whole closing phase in between. All it does
+  // is shut the cap: `currentMaxSlots` returns Infinity before this instant and the
+  // seated count after it, which makes the table read as full and lets the ordinary
+  // `shouldDeploy` / enlist / triage machinery handle the rest unforked. The seats
+  // already in then finish choosing a row and submitting configs, and the table
+  // deploys when the last of them locks in — see `finaleEntryClosed`. Also drives
+  // the player-facing countdown.
   finaleClosesAt?: number;
   // Per-player fold/played history that outlives seat deletion — see FinalePlayRecord.
   finalePlays?:    Record<string, FinalePlayRecord>;

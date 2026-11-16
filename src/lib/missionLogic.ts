@@ -313,6 +313,41 @@ export function outstandingConfigsBlockRoom(m: GMMission, now: number): boolean 
 }
 
 /**
+ * Since when have the outstanding configs been holding the room up? — the epoch ms
+ * the table became FULL, or null when `outstandingConfigsBlockRoom` is false.
+ *
+ * This is the clock the host chases on. Nothing is late while seats are open, so
+ * how long a player has sat on an unsubmitted config says nothing; how long the
+ * table has stood full waiting on them does. No fill moment is stored, so it is
+ * derived: a table goes full when the last seat is taken OR when the cap comes down
+ * to meet the seats already taken, whichever is LATER —
+ *
+ *   · the newest `joinedAt` on the roster (filled by a join; also correct after a
+ *     stand-down and re-fill, since only the current roster counts);
+ *   · the decay step at which the cap reached the seated count (filled by decay),
+ *     or `finaleClosesAt` for the finale, whose cap closes at the deadline instead.
+ *
+ * On a live table it is additionally capped at `deployedAt`: a force-deployed
+ * table was "full" from the moment it went live, and a claimant who joins later
+ * (who never owes a config) must not push the clock forward.
+ */
+export function configsBlockedSince(m: GMMission, now: number): number | null {
+  if (!outstandingConfigsBlockRoom(m, now)) return null;
+  const parts = Object.values(m.participants ?? {});
+  const filled = parts.length;
+  const lastJoin = parts.reduce((t, p) => Math.max(t, p.joinedAt ?? 0), 0);
+  let capMet = 0;
+  if (isFinale(m)) {
+    capMet = m.finaleClosesAt ?? 0;
+  } else if (m.firstJoinAt != null && filled < m.baseMax) {
+    capMet = m.firstJoinAt + (m.baseMax - filled) * decayWindowMs(m);
+  }
+  let since = Math.max(lastJoin, capMet);
+  if (m.state === 'inprogress' && m.deployedAt != null) since = Math.min(since, m.deployedAt);
+  return since > 0 ? Math.min(since, now) : null;
+}
+
+/**
  * Every seat has slots and all of them are terminal — the cohort is finished and
  * only the host's Complete press is left.
  *
@@ -1151,6 +1186,25 @@ export function fmtDayClock(totalSec: number): string {
   const m   = Math.floor((s % 3600) / 60);
   const pad = (n: number) => String(n).padStart(2, '0');
   return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`;
+}
+
+/**
+ * Compact FORWARD duration — "1d 4h", "5h 20m", "40m" — for a countdown to
+ * something that has not happened yet (the next decay step, the finale's entry
+ * deadline). Distinct from `fmtDayClock`, which renders a clock that has been
+ * RUNNING: this one rounds to the coarsest useful unit, because nobody reads
+ * seconds off a deadline two days out.
+ *
+ * Lives here rather than in a shell so the casino landing and its phase panel can
+ * both read one copy — the panel is imported BY the landing, so a helper exported
+ * from the landing would be a cycle.
+ */
+export function fmtDur(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 60000));
+  const d = Math.floor(total / 1440), h = Math.floor((total % 1440) / 60), min = total % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${min}m`;
+  return `${min}m`;
 }
 
 // ── Game titles the host has already had to source ────────────────────────────
