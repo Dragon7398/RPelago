@@ -185,8 +185,26 @@ export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
 export const DECK_VARIANT_ORDER: CasinoDeckChoice[] = ['purist', 'unconsoled', 'indie', 'safety'];
 
 // Participant records predate this feature — treat a missing value as Purist.
-export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
-  return seat.deckChoice ?? 'purist';
+/**
+ * Which deck this seat is PRICED off.
+ *
+ * ⚠️ `finaleDeck` wins when present, and that is the whole point: it is stamped by
+ * `dealFinaleBoard` with the variant the board in front of the player was actually
+ * built from. `setCasinoDeckChoice` refuses to move once a board exists, but that
+ * refusal is a read and a write in two steps — a client firing both calls together
+ * can have the deck change land after the deal has already read it, and then lock
+ * the very same cards in at the other variant's boost (Safety deals the small deck
+ * at −10%, Purist pays +10%). Reading the stamp makes that race unwinnable instead
+ * of merely unlikely.
+ *
+ * Ordinary tables never write `finaleDeck`, so this is exactly `deckChoice` for
+ * them — their deck is frozen by the `hand` guard instead. A fold nulls the stamp,
+ * because the board it described is gone and the player may pick again.
+ */
+export function deckChoiceOf(
+  seat: { deckChoice?: CasinoDeckChoice; finaleDeck?: CasinoDeckChoice },
+): CasinoDeckChoice {
+  return seat.finaleDeck ?? seat.deckChoice ?? 'purist';
 }
 
 // How many cards a given deck variant plays with — for the picker's "N of M" line
@@ -213,9 +231,111 @@ export const DECK_TOTAL = CARD_DEFS.reduce((n, d) => n + d.copies, 0);
 // pinned to exactly ONE of these four games. Costs here are FINAL and become
 // S2's casino baseline. Mirror any change in functions/src/casinoEngine.ts.
 
+// ⚠️ **The ROTATION, not the list of games.** This drives `pickNextCasinoGame`,
+// the per-game `casinoSeries` counters, `seedInitialMissions` and `minCasinoAnte`.
+// The finale is a one-off closer and is deliberately absent: adding it would put it
+// in the respawn rotation and zero the minimum ante. The Coat uses
+// `COAT_TABLE_TYPES` (this plus the finale) instead.
 export const CASINO_GAME_ORDER: readonly CasinoGame[] = [
   'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
+
+/** The finale's `casinoGame` value — the one place this string literal lives. */
+export const FINALE_GAME = 'finale' as const;
+
+// ── The Coat of Many Colors ───────────────────────────────────────────────────
+//
+// Every table type that counts toward the Coat: the rotation PLUS the finale. A
+// separate list from CASINO_GAME_ORDER precisely because the finale must not join
+// the rotation (see the note above it), and a separate CONSTANT for the
+// requirement because the two numbers now differ — five routes, four needed.
+//
+// The rule is `>= COAT_TYPES_REQUIRED distinct types`, which is **strictly more
+// generous than the old `CASINO_GAME_ORDER.every(...)`**: anyone who already holds
+// the Coat satisfied all four games and so still satisfies four of five. It only
+// ADDS a route — three games plus the finale — so this is safe to ship mid-season
+// and no existing holder can lose it.
+export const COAT_TABLE_TYPES: readonly CasinoGame[] = [...CASINO_GAME_ORDER, FINALE_GAME];
+export const COAT_TYPES_REQUIRED = 4;
+
+/**
+ * THE predicate for "is this the finale". Every fork keys off this one function so
+ * a grep for `isFinale` finds all of them, which is how the next person audits it.
+ *
+ * Deliberately NOT `m.label`, and NOT the presence of `finaleClosesAt` — a label is
+ * host-editable and a missing timestamp on a half-written mission would silently
+ * turn the finale back into an ordinary table mid-season. Mirrored in
+ * `functions/src/index.ts`.
+ */
+export function isFinale(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return m?.casinoGame === FINALE_GAME;
+}
+
+/**
+ * Does holding a seat at this mission consume one of the player's mission claims?
+ *
+ * **False for the finale, and this is the rule that keeps the two directions
+ * independent.** The finale is free and universal, so it must neither be barred by
+ * a player's existing tables NOR bar them from the tables still gathering final
+ * players. The first half is the claim-capacity gate being skipped; the second half
+ * is this: `enlistInMission` writes no `players/{uid}/activeMissions/{id}` entry
+ * for a finale, so a finale seat is invisible to every claim count in the app
+ * (both card callers derive theirs from that node).
+ *
+ * Named rather than written inline as `!isFinale(...)` so the invariant is
+ * greppable: anything that adds a seat to a mission has to answer this question,
+ * and a future enlist path that forgot would silently charge a claim the player
+ * was promised they would keep.
+ */
+export function holdsMissionClaim(m: { casinoGame?: CasinoGame } | null | undefined): boolean {
+  return !isFinale(m);
+}
+
+// ── The finale's board ────────────────────────────────────────────────────────
+// A slot machine: 3 rows × 5 reels. A REEL is a COLUMN, so rerolling one respins
+// all three of its cards. The board is stored ROW-MAJOR, which makes reel `r` the
+// indices r, r + FINALE_ROW_REELS, r + 2 × FINALE_ROW_REELS.
+
+export const FINALE_ROWS = 3;
+export const FINALE_ROW_REELS = 5;
+export const FINALE_BOARD_CARDS = FINALE_ROWS * FINALE_ROW_REELS;
+/** The one free reroll may respin at most this many reels. */
+export const FINALE_MAX_REROLL_REELS = 3;
+
+/** Board indices of one reel (column), row-major. */
+export function finaleReelIndices(reel: number): number[] {
+  return Array.from({ length: FINALE_ROWS }, (_, row) => row * FINALE_ROW_REELS + reel);
+}
+
+/** Board indices of one row, row-major. `row` is 1-based, as `finaleRow` is. */
+export function finaleRowIndices(row: number): number[] {
+  return Array.from({ length: FINALE_ROW_REELS }, (_, i) => (row - 1) * FINALE_ROW_REELS + i);
+}
+
+/**
+ * The board with the chosen reels respun — every card of those COLUMNS replaced,
+ * in reel order, from `fresh`.
+ *
+ * Pure and extracted because this is the one piece of the spin with a real
+ * off-by-one in it: a row-major board makes "replace a reel" a strided write, and
+ * getting the stride wrong respins a ROW instead — which would quietly destroy the
+ * one mechanic the reroll exists for. `fresh` must hold
+ * `reels.length × FINALE_ROWS` cards. Mirrored in functions/src/casinoEngine.ts.
+ */
+export function applyReelRespin(
+  board: readonly DeckCard[],
+  reels: readonly number[],
+  fresh: readonly DeckCard[],
+): DeckCard[] {
+  const next = board.slice();
+  // Reel order, not tap order, so the mapping from `fresh` into the board is the
+  // same on both sides however the player selected them.
+  const indices = [...reels].sort((a, b) => a - b).flatMap(finaleReelIndices);
+  indices.forEach((boardIndex, i) => {
+    if (fresh[i]) next[boardIndex] = fresh[i];
+  });
+  return next;
+}
 
 export interface CasinoGameDef {
   key:        CasinoGame;
@@ -266,6 +386,22 @@ export const CASINO_GAMES: Readonly<Record<CasinoGame, CasinoGameDef>> = {
     sittings: 1, hole: 0, community: 0, maxDraw: 6, pickMax: 5,
     reroll: false, ante: 150, rerollCost: 0, playOn: 0,
     subsetSelect: true,    // push-your-luck pool; drop to the best 5 at 6.
+  },
+  // The season CLOSER, run once. A 3×5 board is spun from the seat's deck, one
+  // free reroll respins up to three REELS (columns), then the player takes one row
+  // and keeps 1–5 of its cards. Reward is star-based, not the cards' gold values
+  // — see src/lib/finaleStars.ts.
+  //
+  // ⚠️ Every cost here is 0 and that is correct: entry is free, the reroll is free,
+  // and there is no play-on. The ONE charge is the 50g rebuy after a fold, which is
+  // not a reroll and does not fit this shape — it lives in FINALE_REBUY_GOLD.
+  // ⚠️ Not in CASINO_GAME_ORDER. See the note on `CasinoGame`.
+  finale: {
+    key: 'finale', label: 'The Finale',
+    sittings: 1, hole: FINALE_BOARD_CARDS, community: 0,
+    maxDraw: FINALE_BOARD_CARDS, pickMax: FINALE_ROW_REELS,
+    reroll: true, ante: 0, rerollCost: 0, playOn: 0,
+    subsetSelect: true,    // keep any 1–5 of the chosen row.
   },
 };
 

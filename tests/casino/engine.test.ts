@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Client (canonical) casino modules.
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend, buildDeck,
-  DECK_VARIANTS, DECK_VARIANT_ORDER,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckChoiceOf as clientDeckChoiceOf, CARD_DEFS,
   type CasinoGame,
 } from '../../src/lib/casinoData';
 import {
@@ -14,7 +14,8 @@ import {
   CASINO_XP_FLOOR, CASINO_POT_CUT_PCT,
   type DeckCard,
 } from '../../src/lib/casinoEngine';
-import { handStake as clientHandStake } from '../../src/lib/casinoSlots';
+import { handStake as clientHandStake, repickPool, repickLockedCount } from '../../src/lib/casinoSlots';
+import { finaleBoardRefusal, cardKey, starsFor, finaleStarsToWire, finaleStarTiers } from '../../src/lib/finaleStars';
 import { applyDeckBoost as clientApplyDeckBoost } from '../../src/lib/casinoSlots';
 import {
   GAMBIT_DEFS, makeGambitDeck, gambitOfferable, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
@@ -804,6 +805,75 @@ describe('client and server casino engines stay in sync', () => {
     }
     for (const fee of [30, 40, 45, 60, 75, 80, 90]) {
       expect(server.potContribution(fee)).toBe(potContribution(fee));
+    }
+  });
+
+  // Both of these were added to fix a walk-around, and both are read on BOTH
+  // sides — the callable and the screen it drives. A client copy that drifted
+  // would offer a button the server refuses, which is exactly the failure the
+  // rules were extracted to prevent.
+  it('finaleBoardRefusal agrees across the close, the rebuy and a missing deadline', () => {
+    for (const folds of [0, 1, 3]) {
+      for (const closes of [null, undefined, 1_000, 9_999, 20_000]) {
+        for (const now of [0, 999, 1_000, 9_999, 50_000]) {
+          expect(server.finaleBoardRefusal({ folds }, closes, now))
+            .toBe(finaleBoardRefusal({ folds }, closes, now));
+        }
+      }
+    }
+    expect(server.finaleBoardRefusal(undefined, 1_000, 9_999))
+      .toBe(finaleBoardRefusal(undefined, 1_000, 9_999));
+  });
+
+  it('cardKey and starsFor agree — the snapshot both sides price from', () => {
+    // The server writes goldSwing off this map and the client quotes the player
+    // from it, so a drift in the KEYING is not a display nit: one side reads a
+    // card's stars and the other reads nothing and scores it 0.
+    for (const d of CARD_DEFS) {
+      expect(server.cardKey(d.name)).toBe(cardKey(d.name));
+    }
+    const wire = finaleStarsToWire(finaleStarTiers([]));
+    for (const d of CARD_DEFS) {
+      expect(server.starsFor(wire, d.name)).toBe(starsFor(wire, d.name));
+    }
+    expect(server.starsFor(undefined, 'x')).toBe(starsFor(undefined, 'x'));
+    expect(server.starsFor(wire, undefined)).toBe(starsFor(wire, undefined));
+  });
+
+  it('repickLockedCount agrees across state and strike count', () => {
+    for (const state of ['forming', 'inprogress', 'complete', undefined]) {
+      for (const committed of [1, 3, 5]) {
+        for (const seat of [undefined, {}, { removedCardUids: [] },
+                            { removedCardUids: [2] }, { removedCardUids: [0, 1, 4] }]) {
+          expect(server.repickLockedCount(state, committed, seat))
+            .toBe(repickLockedCount(state, committed, seat));
+        }
+      }
+    }
+  });
+
+  it('deckChoiceOf agrees, stamped board and standing pick alike', () => {
+    // Mirrored because it is a PRICING accessor: the server writes goldSwing from
+    // it and the client quotes the player from it, so a drift is two different
+    // numbers for one board rather than a display nit.
+    for (const deckChoice of [undefined, 'purist', 'unconsoled', 'indie', 'safety'] as const) {
+      for (const finaleDeck of [undefined, 'purist', 'safety'] as const) {
+        const seat = { ...(deckChoice ? { deckChoice } : {}), ...(finaleDeck ? { finaleDeck } : {}) };
+        expect(server.deckChoiceOf(seat)).toBe(clientDeckChoiceOf(seat));
+      }
+    }
+  });
+
+  it('repickPool agrees, struck cards and empty seats alike', () => {
+    const pool = [
+      { uid: 0, name: 'Sonic', value: 30 },
+      { uid: 1, name: 'Zelda', value: 20 },
+      { uid: 2, name: 'Metroid', value: 10 },
+    ];
+    for (const seat of [undefined, {}, { removedCardUids: [] }, { removedCardUids: [1] },
+                        { removedCardUids: [0, 2] }, { removedCardUids: [99] },
+                        { removedCardUids: [0, 1, 2] }]) {
+      expect(server.repickPool(pool, seat)).toEqual(repickPool(pool, seat));
     }
   });
 

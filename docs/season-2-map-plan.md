@@ -412,6 +412,32 @@ those first would be wasted work. This is also the first slice needing a
 **PHASE 1 IS COMPLETE.** The remaining work is Phase 2 (Companions), Phase 3
 (Dungeons & the Tower) and traits Phase B/C.
 
+> **DECIDED (2026-10-25) — S2 starts a player at 500 gold.** `createSeasonPlayer`
+> created map-shell players at `gold: 0` (S1, where gold was purely earned); S2
+> charges for its companion-capture missions, so a new player now starts able to run
+> one immediately rather than having to play something else first.
+> **`MAP_START_GOLD`** is its own constant beside `CASINO_START_GOLD` — both 500
+> today, but a casino bankroll and a companion-mission seed are different questions
+> and will drift. Dual-copied into `functions/src/index.ts` like the other two.
+>
+> **Not a migration.** Existing `rpelago_s2` draft players stay at whatever they
+> were created with; 🪙 Adjust Gold fixes one by hand.
+>
+> **DECIDED — a returning casino player seeding BELOW 500 is intended, not a gap.**
+> `constants.ts` carries `S2 seed = max(final S1.5 balance, CASINO_GOLD_FLOOR)`
+> (still unimplemented; migration was deferred). So a player who finishes S1.5 at
+> the 250 floor starts S2 under a newcomer's 500 — and that is the point:
+> **it is the only way a player can actually LOSE at the casino.** The wager has to
+> carry a real downside or the table is free money, and the weekly floor is the
+> guarantee that the downside stops at 250 rather than 0.
+>
+> Two things keep it from being punishing: a player can still have earned their
+> **Coat of Many Colors** on the way down, and in practice it lands on people who
+> dabbled a few hands rather than on anyone who played the season out.
+>
+> So do **not** 'fix' this by seeding returning players at `max(balance, 500)`.
+> Gold is hand-adjustable (🪙 Adjust Gold) if an individual case ever warrants it.
+
 **Still blocked on design decisions** (traits plan §10): trait difficulty
 modifiers, the Sorcerer's loadout + orb interaction, and equipment↔traits. Traits
 B/C wait on the first two; nothing else does.

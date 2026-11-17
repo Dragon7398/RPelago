@@ -419,11 +419,29 @@ export const CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 }
 // through: Hold 'Em needs 200 (80 ante + 120 play-on), Blackjack 150, Five Card
 // Draw 180, Seven Card Stud 210. The server and computeMissionCard both gate on it.
 
-// Casino-season gold economy. Mirrored in functions/src/index.ts — keep in sync.
-// A fresh casino player starts at START_GOLD; the weekly top-up brings anyone
-// below GOLD_FLOOR up to it; S2 seed = max(final S1.5 balance, GOLD_FLOOR).
+// Gold economy. ALL THREE are mirrored in functions/src/index.ts — keep in sync.
+//
+// CASINO (a `casino` shell): a fresh player starts at CASINO_START_GOLD, and the
+// weekly top-up brings anyone below CASINO_GOLD_FLOOR back up to it. The floor is
+// what stops a run of bad luck leaving a player far under the balance they joined
+// with — see weeklyGoldTopUp.
 export const CASINO_START_GOLD = 500;
 export const CASINO_GOLD_FLOOR = 250;
+
+// MAP (a `map` shell, i.e. S2): a fresh player starts at MAP_START_GOLD. It is a
+// SEPARATE constant from the casino's, deliberately, even though both are 500
+// today — they answer different questions (a casino bankroll vs. enough to afford
+// one companion mission before earning anything) and will drift.
+//
+// S2 has NO weekly top-up: challenges are free to join, so there is no ante to
+// fall behind on and no need for artificial inflation. This balance exists so a
+// new player can run one companion-capture mission immediately rather than having
+// to play something else first.
+//
+// ⚠️ A map season used to create players at `gold: 0`, which is why S1's records
+// show that. Changing this does not migrate anyone — existing S2 draft players sit
+// at whatever they were created with (use 🪙 Adjust Gold on the admin Players card).
+export const MAP_START_GOLD = 500;
 
 // How many casino tables are open (forming) at once in a casino season. A
 // per-season override lives at config/seasonList/{seasonId}/casinoOpenTables;

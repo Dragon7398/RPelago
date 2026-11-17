@@ -7,9 +7,10 @@ import { buildDefaultTileData, initializeGrid, randomAdvClass, randomAdvName } f
 import { ALL_ORBS, CASINO_OPEN_TABLES, DEFAULT_S2_SHOP_ITEM_IDS } from '../lib/constants';
 import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
-import { CASINO_GAME_ORDER } from '../lib/casinoData';
+import { CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
-import { freshMission, freshCasinoTable, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type SettleBlockers } from '../lib/missionLogic';
+import { finaleStarsToWire } from '../lib/finaleStars';
+import { freshMission, freshCasinoTable, freshFinaleTable, findFinale, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type FinaleSetup, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 import { hasUnexcusedProblem, type SlotProgressSamples } from '../lib/statusReport';
 import { casinoMercCuts, flatMercCuts, mercTotals, mergeMercCuts, type MercCuts } from '../lib/mercLogic';
@@ -106,7 +107,11 @@ export async function seedInitialMissions(): Promise<SeedResult> {
     const forming = active.filter(m => m.type === 'casino' && m.state === 'forming').length;
     if (forming < target) {
       // Continue per-game cohort numbering from the persisted counters.
-      const series = { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 } as Record<CasinoGame, number>;
+      // Partial, not a cast: `CasinoGame` includes the finale, which has no cohort
+      // counter and is never returned by `pickNextCasinoGame`. Only rotation keys
+      // are ever read or written below.
+      const series: Partial<Record<CasinoGame, number>> =
+        { five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0 };
       const seriesSnap = await get(sRef(d, 'casinoSeries'));
       if (seriesSnap.exists()) Object.assign(series, seriesSnap.val());
 
@@ -119,7 +124,7 @@ export async function seedInitialMissions(): Promise<SeedResult> {
         updates[sPath(`missions/${r.key}`)] = table;
         working[r.key!] = table;
       }
-      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g];
+      for (const g of CASINO_GAME_ORDER) updates[sPath(`casinoSeries/${g}`)] = series[g] ?? 0;
       created += target - forming;
     }
   }
@@ -1318,6 +1323,57 @@ export async function adminUpdateParticipantSlotActivity(
   });
 }
 
+/**
+ * Open the season's Finale table.
+ *
+ * A **client write**, like the other admin mission actions — `seedInitialMissions`
+ * creates casino tables the same way, and `seasons/$seasonId` already grants
+ * `.write` to `config/adminId`, so no callable (and no functions deploy ahead of
+ * the frontend) is involved.
+ *
+ * The star snapshot is computed in the ADMIN'S BROWSER and passed in rather than
+ * derived server-side. That is deliberate: `finaleStarTiers` sits on top of
+ * `cardStats`, and mirroring both into `functions/` to run a one-shot computation
+ * would double a large piece of pure logic for no benefit. More to the point, the
+ * host reviews that exact table on the Stats tab before opening the finale — so
+ * passing the reviewed snapshot means what they read is literally what gets
+ * frozen, which recomputing could not guarantee.
+ *
+ * Refuses a second finale: it runs ONCE, and `findFinale` looks through history
+ * too, so a settled one still blocks.
+ */
+export async function createFinaleTable(setup: FinaleSetup): Promise<string> {
+  assertDb();
+  const [live, past] = await Promise.all([
+    get(sRef(db!, 'missions')),
+    get(sRef(db!, 'missionsHistory')),
+  ]);
+  const existing = findFinale(
+    live.val() as Record<string, GMMission> | undefined,
+    past.val() as Record<string, GMMission> | undefined,
+  );
+  if (existing) throw new Error('This season already has a Finale table — it runs only once.');
+
+  if (!(setup.closesAt > Date.now())) throw new Error('The closing time must be in the future.');
+  if (Object.keys(setup.stars).length === 0) throw new Error('No star snapshot — nothing to price the cards with.');
+
+  const r  = push(sRef(db!, 'missions'));
+  const id = r.key!;
+  await update(ref(db!), {
+    // ⚠️ `finaleStars` is keyed by CARD NAME, and a third of the deck carries a `/`
+    // — which RTDB rejects as a key, failing this whole update. The snapshot the
+    // host reviewed stays raw (that is what `FinaleSetup.stars` is); it is keyed
+    // for storage HERE, at the only place it is written. Read it back through
+    // `starsFor`, never by indexing with a card name.
+    [sPath(`missions/${id}`)]: {
+      ...freshFinaleTable(setup, Date.now()),
+      finaleStars: finaleStarsToWire(setup.stars),
+      id,
+    },
+  });
+  return id;
+}
+
 export async function adminSetMissionLink(missionId: string, link: string): Promise<void> {
   assertDb();
   // `linkedAt` is the Elapsed clock's origin. Stamp it the first time a link goes
@@ -1602,9 +1658,13 @@ export async function completeMission(
     if (out.gold > 0) mercOut.set(pid, out.gold);
     mergeMercCuts(mercIn, cuts);
 
-    // Casino Coat earn path: mark this game type completed; grant the Coat once
-    // the player has successfully completed a table of all four game types. Works
-    // in either season — the tracking is the same.
+    // Casino Coat earn path: mark this game type completed; grant the Coat once the
+    // player has completed a table of at least COAT_TYPES_REQUIRED of the five
+    // types (the four rotation games plus the finale). Works in either season —
+    // the tracking is the same.
+    //
+    // ⚠️ `COAT_TABLE_TYPES`, never `CASINO_GAME_ORDER`: the latter is the respawn
+    // rotation and excludes the finale by design.
     //
     // Gated on `played`: the Coat is earned by SITTING a table of each game, and a
     // pure claimant never played the game at all — they took over an abandoned slot
@@ -1614,9 +1674,9 @@ export async function completeMission(
     if (isCasino && mission.casinoGame && participant.played) {
       updates[sPath(`players/${pid}/casinoGamesCompleted/${mission.casinoGame}`)] = true;
       const completed  = { ...(player.casinoGamesCompleted ?? {}), [mission.casinoGame]: true };
-      const hasAllFour = CASINO_GAME_ORDER.every(g => completed[g]);
-      const hasCoat    = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
-      if (hasAllFour && !hasCoat) {
+      const typesDone = COAT_TABLE_TYPES.filter(g => completed[g]).length;
+      const hasCoat   = (player.inventory?.['coat_of_many_colors'] ?? 0) > 0;
+      if (typesDone >= COAT_TYPES_REQUIRED && !hasCoat) {
         updates[sPath(`players/${pid}/inventory/coat_of_many_colors`)] = 1;
       }
     }

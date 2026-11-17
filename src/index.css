@@ -1609,6 +1609,10 @@ header p {
   color: var(--miss-fg); border: 1px solid var(--miss-border);
 }
 .casino-yaml-missing-when { font-size: 0.62rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* The header's "waiting Nd Nh" once the full table has stood 48h+. Takes the
+   block's own fg (already theme-aware via --pend-*) plus weight, so it escalates
+   within the block's severity and stays legible in light / colour-blind themes. */
+.casino-yaml-missing-when.long { color: var(--miss-fg); font-weight: 600; }
 .casino-yaml-missing-why {
   font-family: 'Crimson Pro', serif; font-size: 0.72rem; color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; max-width: 22rem;
@@ -3299,6 +3303,31 @@ body.admin-active { overflow-x: auto; align-items: flex-start; }
   flex: 1 1 6rem; min-width: 5.5rem;
   padding: 0.4rem 0.6rem; border-radius: 2px;
   background: var(--bg-card); border: 1px solid var(--border);
+}
+/* Card-popularity rows (admin Stats). The over/under tones run along the
+   GOLD↔MUTED axis rather than green↔red: over-picked is not "good" and
+   under-picked is not "bad", it is directional information, and a pass/fail
+   palette would editorialise. The rate is printed in its own column either way,
+   so hue never carries the meaning alone. */
+.dash-card-row.over td {
+  background: color-mix(in oklch, var(--gold) 9%, var(--bg-card));
+}
+.dash-card-row.over td:first-child {
+  box-shadow: inset 3px 0 0 var(--gold-dim); color: var(--gold);
+}
+.dash-card-row.under td {
+  color: var(--text-muted);
+}
+.dash-card-row.under td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--text-muted) 60%, var(--bg-card));
+}
+.dash-card-gap td {
+  text-align: center; padding: 0.5rem 0.4rem;
+  background: color-mix(in oklch, var(--text-muted) 7%, var(--bg-card));
+}
+.dash-stat-empty {
+  font-family: 'Crimson Pro', serif; font-style: italic;
+  font-size: 0.85rem; color: var(--text-muted); padding: 0.8rem 0.2rem;
 }
 .dash-stat-fig-val {
   font-family: 'Cinzel', serif; font-size: 1.15rem; line-height: 1.1;
@@ -5949,3 +5978,38 @@ body.theme-lapis     .ag-tile-room-badge { color: oklch(32% 0.14 220); border-co
 .sr-prob-player-head .sr-handled-btn { margin-left: auto; }
 .sr-excuse-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .sr-excuse-row .dash-action-btn { font-size: 0.6rem; padding: 0.2rem 0.5rem; }
+
+/* ── The Finale panel (admin Casino tab) ──
+   Layout only: the controls reuse .dash-select / .dash-number-input so the panel
+   matches every other admin editor and inherits their theme behaviour rather than
+   introducing a second input style. Colours here are tokens, never literals. */
+.dash-finale-form {
+  display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end;
+  padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 3px;
+  background: oklch(from var(--border) l c h / 0.14);
+}
+.dash-finale-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.dash-finale-field > span {
+  font-family: 'Cinzel', serif; font-size: 0.56rem; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+/* The datetime control needs room for a full date and time; everything else about
+   it is .dash-number-input, including the focus ring. */
+.dash-finale-field .dash-number-input.when { width: auto; min-width: 12rem; text-align: left; }
+.dash-finale-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+
+/* The frozen star snapshot — the audit trail for "why was Sonic worth five".
+   One row per tier, the tier's own gold and card count in the label, so a host
+   reading a settled payout can check it against the table that produced it. */
+.dash-finale-stars { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.6rem; }
+.dash-finale-tier {
+  display: grid; grid-template-columns: 7.5rem 1fr; gap: 0.6rem; align-items: baseline;
+  padding: 0.35rem 0; border-top: 1px solid var(--border);
+}
+.dash-finale-tier-lbl { display: flex; flex-direction: column; color: var(--gold); font-size: 0.82rem; letter-spacing: 0.08em; }
+.dash-finale-tier-lbl small { font-size: 0.62rem; letter-spacing: 0.04em; color: var(--gold-dim); }
+.dash-finale-tier-names { font-size: 0.78rem; line-height: 1.5; color: var(--text-muted); }
+/* The drift note. --void-fg is the admin's existing caution tone (and has a
+   light-theme override), so it carries the same weight as the ⊘ controls. */
+.dash-stat-note.warn { color: var(--void-fg); font-style: normal; }
+.dash-stat-note.warn strong { color: var(--void-fg-hi); }

@@ -1,7 +1,8 @@
-import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame, Tile } from '../types';
+import type { GMMission, GMMissionType, GMParticipant, AdvSlot, CasinoGame, FinaleStars, Tile } from '../types';
 import { MISSION_DEFS, CASINO_START_STATS, toRoman } from './constants';
-import { CASINO_GAMES, CASINO_GAME_ORDER, seatSpend } from './casinoData';
-import { rollTableSetup } from './casinoEngine';
+import { CASINO_GAMES, CASINO_GAME_ORDER, FINALE_GAME, isFinale, seatSpend } from './casinoData';
+import { FINALE_REBUY_GOLD } from './finaleStars';
+import { CASINO_XP_FLOOR, rollTableSetup } from './casinoEngine';
 import { countUnfinishedSets, normalizeSlots, claimEntries } from './slotHelpers';
 import { parseApYaml } from './apYaml';
 import { AP_LISTS, apListIndexAt, isCurrentApList, type ApList } from './apLists';
@@ -22,6 +23,8 @@ export interface GMMissionCard {
   decaySteps:      number;
   decayPct:        number;
   liveSec:         number;
+  /** Text for the countdown chip: decay for an ordinary cohort, entry closing for the finale. */
+  countdownLabel:  string;
   youIn:           boolean;
   seriesLabel:     string;
   takeable:        boolean;
@@ -35,6 +38,30 @@ function decayWindowMs(m: GMMission): number {
 }
 
 export function currentMaxSlots(m: GMMission, now: number): number {
+  // ⚠️ The finale has NO SEAT CAP and does not decay — it is time-limited instead
+  // (`finaleClosesAt`), and the deadline CLOSES THE CAP rather than deploying the
+  // table. While entry is open the cap is Infinity (rather than a large number) so
+  // every `filled >= max` gate is false by construction and a stray decay step can
+  // never close it. The instant entry closes it becomes the seated count, which is
+  // what makes the table read as FULL — and that one change is what lights up the
+  // ordinary machinery for the finale's closing phase:
+  //
+  //   · `enlistInMission` refuses a late entrant on its existing `filled >= max`
+  //     gate, so the server enforces the deadline without a guard of its own;
+  //   · `shouldDeploy` becomes reachable, and deploys only once every seat has
+  //     locked in (its casino arm demands `allSeatsPlayed`);
+  //   · `outstandingConfigsBlockRoom` turns the host's config roster from an amber
+  //     heads-up into a red block, at exactly the moment chasing those players
+  //     starts to matter;
+  //   · `missionPendingAction` reaches its forming `configs` / `deploy` arms.
+  //
+  // A seated count of 0 is safe at every one of those: `filled >= max` refuses a
+  // late entrant into an empty closed finale, while the `filled === 0` guards in
+  // `shouldDeploy` and the two triage helpers keep it from deploying or complaining.
+  //
+  // `baseMax` is still written on the mission (the field is required) and is never
+  // read for a finale; `seatTally` has its own branch because Infinity does not render.
+  if (isFinale(m)) return finaleEntryClosed(m, now) ? filledCount(m) : Infinity;
   if (m.state === 'inprogress') return filledCount(m);
   if (m.firstJoinAt == null) return m.baseMax;
   const steps = Math.floor(Math.max(0, now - m.firstJoinAt) / decayWindowMs(m));
@@ -45,6 +72,10 @@ export function currentMaxSlots(m: GMMission, now: number): number {
 // decay hasn't started (no first join yet) or the floor of 1 seat is reached.
 // Keeps the decay-window constant in one place for any UI that shows a countdown.
 export function msToNextDecay(m: GMMission, now: number): number | null {
+  // The finale never decays, so there is no next seat to close. Must be checked
+  // explicitly: `currentMaxSlots` returns Infinity, which passes the `<= 1` test
+  // below and would otherwise render a countdown to nothing.
+  if (isFinale(m)) return null;
   if (m.firstJoinAt == null || m.state !== 'forming') return null;
   if (currentMaxSlots(m, now) <= 1) return null;
   const w = decayWindowMs(m);
@@ -97,6 +128,21 @@ export interface SeatTally {
 
 export function seatTally(m: GMMission, now: number): SeatTally {
   const filled = filledCount(m);
+  // The finale has no cap to show, so there is no "x of y" to render and no `over`
+  // state to flag — the pips and rails that index off `max` must draw exactly the
+  // seats that exist. Everything reads the tally rather than `currentMaxSlots`
+  // precisely so this one branch covers all of them.
+  if (isFinale(m)) {
+    return {
+      filled,
+      max:   filled,
+      over:  false,
+      label: `${filled} seated`,
+      title: filled === 1
+        ? `1 player has entered the finale. There is no seat limit — entry closes on the deadline.`
+        : `${filled} players have entered the finale. There is no seat limit — entry closes on the deadline.`,
+    };
+  }
   const cap    = currentMaxSlots(m, now);
   const over   = filled > cap;
   const max    = Math.max(cap, filled);
@@ -118,11 +164,43 @@ export function allSeatsPlayed(m: GMMission): boolean {
 }
 
 export function shouldDeploy(m: GMMission, now: number): boolean {
+  // The finale takes this ordinary path, and needs no branch of its own — which is
+  // the point of closing the cap in `currentMaxSlots` rather than special-casing
+  // the deploy. Before its deadline the cap is Infinity so this is false by
+  // construction; after it, the two tests below read exactly the finale's rule:
+  // entry has closed (`filled >= max`) AND every seat has locked in
+  // (`allSeatsPlayed`). A seat that spun and never locked in therefore HOLDS THE
+  // TABLE OPEN indefinitely — deliberately, so nobody loses a completed spin to a
+  // timer. It is cleared by the player locking in or by the host ⊘ voiding the
+  // seat, and `adminForceDeploy` is the override.
   if (m.state !== 'forming') return false;
   if (filledCount(m) === 0) return false;
   if (filledCount(m) < currentMaxSlots(m, now)) return false;
   if (m.type === 'casino' && !allSeatsPlayed(m)) return false;
   return true;
+}
+
+/**
+ * Has the finale's entry window closed?
+ *
+ * This is NOT a deploy trigger — that was its first shape and the name said so,
+ * which was wrong. Closing entry and deploying are two different moments with the
+ * table's whole closing phase in between: entry shuts, the seats already spun
+ * finish choosing their row and submitting their configs, and only when the last
+ * of them has locked in does `shouldDeploy` fire. Deploying AT the deadline would
+ * strand every player still mid-manifest, because `lockFinaleResult` requires a
+ * `forming` table.
+ *
+ * Read by `currentMaxSlots` (where it closes the cap) and by the admin panel's
+ * wording. It deliberately does NOT test `state`, so it answers the question it
+ * is named for at any point in the table's life; callers that care add their own
+ * state test, as `shouldDeploy` already does.
+ *
+ * A finale with no `finaleClosesAt` never closes, rather than closing at once — a
+ * half-written mission should stall visibly instead of shutting its own doors.
+ */
+export function finaleEntryClosed(m: GMMission, now: number): boolean {
+  return isFinale(m) && m.finaleClosesAt != null && now >= m.finaleClosesAt;
 }
 
 // ── Admin triage: what is this mission WAITING ON the host for? ───────────────
@@ -232,6 +310,41 @@ export function outstandingConfigsBlockRoom(m: GMMission, now: number): boolean 
   if (m.state !== 'forming') return false;
   const filled = filledCount(m);
   return filled > 0 && filled >= currentMaxSlots(m, now);
+}
+
+/**
+ * Since when have the outstanding configs been holding the room up? — the epoch ms
+ * the table became FULL, or null when `outstandingConfigsBlockRoom` is false.
+ *
+ * This is the clock the host chases on. Nothing is late while seats are open, so
+ * how long a player has sat on an unsubmitted config says nothing; how long the
+ * table has stood full waiting on them does. No fill moment is stored, so it is
+ * derived: a table goes full when the last seat is taken OR when the cap comes down
+ * to meet the seats already taken, whichever is LATER —
+ *
+ *   · the newest `joinedAt` on the roster (filled by a join; also correct after a
+ *     stand-down and re-fill, since only the current roster counts);
+ *   · the decay step at which the cap reached the seated count (filled by decay),
+ *     or `finaleClosesAt` for the finale, whose cap closes at the deadline instead.
+ *
+ * On a live table it is additionally capped at `deployedAt`: a force-deployed
+ * table was "full" from the moment it went live, and a claimant who joins later
+ * (who never owes a config) must not push the clock forward.
+ */
+export function configsBlockedSince(m: GMMission, now: number): number | null {
+  if (!outstandingConfigsBlockRoom(m, now)) return null;
+  const parts = Object.values(m.participants ?? {});
+  const filled = parts.length;
+  const lastJoin = parts.reduce((t, p) => Math.max(t, p.joinedAt ?? 0), 0);
+  let capMet = 0;
+  if (isFinale(m)) {
+    capMet = m.finaleClosesAt ?? 0;
+  } else if (m.firstJoinAt != null && filled < m.baseMax) {
+    capMet = m.firstJoinAt + (m.baseMax - filled) * decayWindowMs(m);
+  }
+  let since = Math.max(lastJoin, capMet);
+  if (m.state === 'inprogress' && m.deployedAt != null) since = Math.min(since, m.deployedAt);
+  return since > 0 ? Math.min(since, now) : null;
 }
 
 /**
@@ -380,6 +493,22 @@ export function missionPendingAction(m: GMMission, now: number): MissionPendingA
       label: `${denied} resubmit${denied === 1 ? '' : 's'}`,
       title: `${denied} seat${denied === 1 ? ' is' : 's are'} waiting to resubmit a denied config.`,
     };
+    // Outstanding configs also outrank the missing room, and for the same reason:
+    // a seat with no config cannot be in the room, so generating now would just
+    // have to be done again. Casino-only, mirroring the `denied` arm above — a
+    // non-casino seat is judged on `yamlAt`, which participants predating that
+    // marker simply do not carry.
+    //
+    // ⚠️ This arm exists FOR THE FINALE, which is the first table that can reach
+    // `inprogress` with a seat that never locked in: gmShouldDeploy demands
+    // allSeatsPlayed, so an ordinary table cannot (only a force-deploy can). The
+    // host's move is to chase the straggler or ⊘ void the seat — not to generate.
+    const owed = m.type === 'casino' ? seatsMissingConfig(m) : 0;
+    if (owed > 0) return {
+      code: 'configs', icon: '⛔',
+      label: `${owed} config${owed === 1 ? '' : 's'}`,
+      title: `${owed} seat${owed === 1 ? ' is' : 's are'} live with no usable config — chase ${owed === 1 ? 'the player' : 'those players'} or void the seat${owed === 1 ? '' : 's'} before generating the room.`,
+    };
     if (awaitingRoom(m)) return {
       code: 'generate', icon: '⚠',
       label: 'needs room',
@@ -479,6 +608,9 @@ export function missionSettledAt(m: GMMission): number {
 }
 
 export function missionDisplayLabel(m: GMMission): string {
+  // The finale runs ONCE, so it has no cohort to number — "The Finale · Cohort I"
+  // reads as a promise of a second one.
+  if (isFinale(m)) return m.label;
   const roman = toRoman(m.series);
   return `${m.label} · Cohort ${roman}`;
 }
@@ -522,15 +654,31 @@ export function computeMissionCard(
   const windowMs = decayWindowMs(m);
   const windowHours = windowMs / 3600_000;
 
-  const decaySteps = m.state === 'forming' && m.firstJoinAt != null
+  // The finale does not decay, so every decay-derived display value would be
+  // nonsense. The card's countdown is reused for the one clock it DOES have —
+  // entry closing — which is why `countdownLabel` exists: a chip reading
+  // "SLOT DECAYS IN" over an entry deadline would be worse than no chip at all.
+  const isFin = isFinale(m);
+  const msToClose = isFin && m.finaleClosesAt != null
+    ? Math.max(0, m.finaleClosesAt - now)
+    : 0;
+
+  const decaySteps = !isFin && m.state === 'forming' && m.firstJoinAt != null
     ? Math.floor(Math.max(0, now - m.firstJoinAt) / windowMs)
     : 0;
 
   const elapsedMs = m.firstJoinAt != null ? Math.max(0, now - m.firstJoinAt) : 0;
   const hoursIntoWindow = (elapsedMs % windowMs) / 3600_000;
 
-  const decayPct = status === 'filling' ? hoursIntoWindow / windowHours : (status === 'open' ? 0 : 1);
-  const liveSec = (windowHours - hoursIntoWindow) * 3600;
+  const decayPct = isFin
+    // How far through the entry window we are needs the window's LENGTH, which is
+    // only knowable from when the table was created — there is no fixed window.
+    ? (m.finaleClosesAt != null && m.finaleClosesAt > m.createdAt
+        ? Math.min(1, Math.max(0, (now - m.createdAt) / (m.finaleClosesAt - m.createdAt)))
+        : 0)
+    : status === 'filling' ? hoursIntoWindow / windowHours : (status === 'open' ? 0 : 1);
+  const liveSec = isFin ? msToClose / 1000 : (windowHours - hoursIntoWindow) * 3600;
+  const countdownLabel = isFin ? 'ENTRY CLOSES IN' : 'SLOT DECAYS IN';
 
   const roman = toRoman(m.series);
   const seriesLabel = `COHORT ${roman}`;
@@ -541,7 +689,35 @@ export function computeMissionCard(
   let insufficientGold = false;
 
   if (m.state === 'inprogress') {
-    disabledReason = 'This cohort has already deployed. A fresh cohort is forming below.';
+    disabledReason = isFin
+      ? 'Entry has closed and the finale room is being built.'
+      : 'This cohort has already deployed. A fresh cohort is forming below.';
+  } else if (isFin) {
+    // ⚠️ HOISTED ABOVE THE CLAIM GATE, and that is the whole point of this branch.
+    // The gate below would tell a player who already holds a table that they
+    // cannot enter — which is precisely the restriction the finale exists without.
+    // It costs no claim, has no seat cap and no entry fee, so none of the gates
+    // after this one apply and the only thing that can bar a player is having
+    // already played it.
+    //
+    // A RESTRICTED player reaches `takeable` here, deliberately: their claim is
+    // held to world completion so they are usually at capacity, and the finale is
+    // the celebration nobody is excluded from.
+    if (youIn) {
+      doneLabel = 'YOU ARE IN';
+    } else if (uid != null && m.finalePlays?.[uid]?.played) {
+      doneLabel = 'ALREADY PLAYED';
+      disabledReason = 'You have already played the finale — it runs once, and once each.';
+    } else if (finaleEntryClosed(m, now)) {
+      // The table is still `forming` at this point and will be until its last
+      // seat locks in — but it is closed to NEW players, so this is the one gate
+      // that survives the hoist above. The server agrees without a guard of its
+      // own: `currentMaxSlots` is now the seated count, so enlist's `filled >=
+      // max` check refuses them too.
+      disabledReason = 'Entry to the finale has closed.';
+    } else {
+      takeable = true;
+    }
   } else if (def.special && basicTrainingDone && !youIn) {
     doneLabel = 'ALREADY COMPLETED';
     disabledReason = 'You have already completed Basic Training — it can be undertaken only once per guildmaster.';
@@ -580,6 +756,7 @@ export function computeMissionCard(
     decaySteps,
     decayPct,
     liveSec,
+    countdownLabel,
     youIn,
     seriesLabel,
     takeable,
@@ -626,6 +803,15 @@ export function freshMission(
 
 // The house-cut note shown on a table card, derived from the game's cost model.
 export function casinoEntryCosts(game: CasinoGame): { label: string; gold: number }[] {
+  // The finale's costs do not fit the ante/reroll/play-on shape: all three are 0,
+  // and its only charge is a re-entry after folding. Listing "Ante 0g · Reroll 0g"
+  // would be technically true and completely useless.
+  if (game === FINALE_GAME) {
+    return [
+      { label: 'Entry',            gold: 0 },
+      { label: 'Rebuy after fold', gold: FINALE_REBUY_GOLD },
+    ];
+  }
   const g = CASINO_GAMES[game];
   const costs: { label: string; gold: number }[] = [{ label: 'Ante', gold: g.ante }];
   if (g.reroll) costs.push({ label: 'Reroll',  gold: g.rerollCost });
@@ -641,14 +827,17 @@ export function pickNextCasinoGame(
   missions: Record<string, GMMission> | undefined,
   rng: () => number = Math.random,
 ): CasinoGame {
-  const counts: Record<CasinoGame, number> = {
-    five_card_draw: 0, seven_card_stud: 0, holdem: 0, blackjack: 0,
-  };
+  // Keyed off the ROTATION, not off `CasinoGame`, so a game that is not in the
+  // rotation — the finale — can neither be counted here nor be returned as the
+  // next table to open. Built from CASINO_GAME_ORDER so the two can never drift.
+  const counts = new Map<CasinoGame, number>(CASINO_GAME_ORDER.map(g => [g, 0]));
   for (const m of Object.values(missions ?? {})) {
-    if (m.type === 'casino' && m.state === 'forming' && m.casinoGame) counts[m.casinoGame]++;
+    if (m.type !== 'casino' || m.state !== 'forming' || !m.casinoGame) continue;
+    const seen = counts.get(m.casinoGame);
+    if (seen !== undefined) counts.set(m.casinoGame, seen + 1);
   }
-  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts[g]));
-  const candidates = CASINO_GAME_ORDER.filter(g => counts[g] === min);
+  const min = Math.min(...CASINO_GAME_ORDER.map(g => counts.get(g) ?? 0));
+  const candidates = CASINO_GAME_ORDER.filter(g => (counts.get(g) ?? 0) === min);
   return candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
 }
 
@@ -687,6 +876,127 @@ export function freshCasinoTable(
     // (the drift display and the pot audit both diff against these).
     casinoOpenStats: { ...setup.stats },
     casinoOpenPot:   setup.pot,
+  };
+}
+
+// ── The finale's table ────────────────────────────────────────────────────────
+
+/**
+ * `baseMax` for a finale. The field is required on `GMMission` and is never read
+ * through `currentMaxSlots` (which returns Infinity), but several seat-pip loops
+ * read `m.baseMax` DIRECTLY — `SeatPips`, the map card's `Pips`, and the table's
+ * empty-seat filler.
+ *
+ * ⚠️ Zero rather than a large number, and that is the whole point: `for (i = 0;
+ * i < baseMax; i++)` then draws nothing and every one of those loops degenerates
+ * to "show exactly the seats that exist", which IS the finale's display rule. A
+ * big sentinel would have each of them render a wall of fake empty seats. The two
+ * "N decayed" readouts are guarded by `> 0`, so they stay hidden too.
+ */
+export const FINALE_BASE_MAX = 0;
+
+/**
+ * The mission corpus the season's CARD STATISTICS are measured over — committed
+ * cards from tables that have actually run.
+ *
+ * ⚠️ **Shared on purpose.** The admin Stats tab renders the card-popularity table
+ * (and the finale's star column) from this set, and the Finale panel freezes its
+ * star snapshot from the same call. If the two derived their corpus separately,
+ * the host could review one table and open the finale on another — so the
+ * guarantee that *what you read is what gets frozen* is structural, not a
+ * coincidence of two matching expressions.
+ *
+ * Forming tables are excluded even when their seats have locked cards: a table that
+ * has not run is still hypothetical, and a card committed at one may yet be
+ * re-picked (`resubmitCasinoYaml`). Complete missions are deduped across
+ * `missionsHistory` and any live node an admin parked at `complete`.
+ */
+export function cardStatsCorpus(
+  missions:  Record<string, GMMission> | undefined,
+  history:   Record<string, GMMission> | undefined,
+): GMMission[] {
+  const live = Object.values(missions ?? {});
+  const done = new Map<string, GMMission>();
+  for (const m of Object.values(history ?? {})) done.set(m.id, m);
+  for (const m of live) if (m.state === 'complete') done.set(m.id, m);
+  return [...live.filter(m => m.state === 'inprogress'), ...done.values()];
+}
+
+/**
+ * The season's finale, if the host has opened it. There is only ever one — it runs
+ * once, as the closer — so this looks across live missions AND history: a settled
+ * finale must still be found, or the host would be offered a second one.
+ */
+export function findFinale(
+  ...sources: (Record<string, GMMission> | undefined)[]
+): GMMission | null {
+  for (const src of sources) {
+    for (const m of Object.values(src ?? {})) if (isFinale(m)) return m;
+  }
+  return null;
+}
+
+/** The host's choices when opening the finale. */
+export interface FinaleSetup {
+  /** When entry closes and the table deploys (ms epoch). */
+  closesAt: number;
+  /** Hand-picked, not rolled — see D1. */
+  release:  boolean;
+  collect:  boolean;
+  /** Hint cost, as a percentage. */
+  hint:     number;
+  /** The frozen star snapshot (`finaleStarTiers`), as reviewed on the Stats tab. */
+  stars:    Record<string, FinaleStars>;
+}
+
+/**
+ * The finale table itself. Unlike `freshCasinoTable` nothing here is rolled — the
+ * host picks the odds, and the stars come from a snapshot they have already read.
+ */
+export function freshFinaleTable(setup: FinaleSetup, now: number): Omit<GMMission, 'id'> {
+  // Release and Collect are stored as CHANCES in `casinoStats` and rolled to on/off
+  // at deploy. The host has already decided, so the chances are pinned to 100/0,
+  // which makes `rollCasinoOdds` deterministic — `Math.random() * 100 < 100` is
+  // always true and `< 0` never is. So the host's pick survives even if that roll
+  // runs, and the deploy-time skip is a tidiness measure rather than the guarantee.
+  const stats = {
+    release: setup.release ? 100 : 0,
+    collect: setup.collect ? 100 : 0,
+    hint:    setup.hint,
+    xp:      CASINO_XP_FLOOR,
+  };
+  return {
+    type:           'casino',
+    casinoGame:     FINALE_GAME,
+    series:         1,                       // it runs once; there is no cohort II
+    label:          CASINO_GAMES[FINALE_GAME].label,
+    state:          'forming',
+    baseMax:        FINALE_BASE_MAX,
+    xp:             stats.xp,
+    gp:             0,
+    // Final values, not 'special' — the player deciding whether to enter can see
+    // exactly what the room will be, which is the point of letting the host choose.
+    release:        setup.release ? 'on' : 'off',
+    collect:        setup.collect ? 'on' : 'off',
+    hint:           setup.hint,
+    firstJoinAt:    null,
+    createdAt:      now,
+    participants:   {},
+    variableReward: true,
+    tableUrl:       '/casino/table',
+    entryCosts:     casinoEntryCosts(FINALE_GAME),
+    // ⚠️ NO POT, and it must never grow. A zero pot keeps the entire weighted-pot
+    // pipeline dormant at settle (`casinoPotShares` returns 0 for everyone when
+    // `pot <= 0`), which is what lets the finale reuse `completeMission` unforked.
+    // Adding to it — by routing the rebuy through `potContribution`, say — switches
+    // that machinery back on and it really would be split.
+    pot:             0,
+    casinoStats:     stats,
+    casinoOpenStats: { ...stats },
+    casinoOpenPot:   0,
+    finaleStars:     setup.stars,
+    finaleClosesAt:  setup.closesAt,
+    finalePlays:     {},
   };
 }
 
@@ -876,6 +1186,25 @@ export function fmtDayClock(totalSec: number): string {
   const m   = Math.floor((s % 3600) / 60);
   const pad = (n: number) => String(n).padStart(2, '0');
   return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`;
+}
+
+/**
+ * Compact FORWARD duration — "1d 4h", "5h 20m", "40m" — for a countdown to
+ * something that has not happened yet (the next decay step, the finale's entry
+ * deadline). Distinct from `fmtDayClock`, which renders a clock that has been
+ * RUNNING: this one rounds to the coarsest useful unit, because nobody reads
+ * seconds off a deadline two days out.
+ *
+ * Lives here rather than in a shell so the casino landing and its phase panel can
+ * both read one copy — the panel is imported BY the landing, so a helper exported
+ * from the landing would be a cycle.
+ */
+export function fmtDur(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 60000));
+  const d = Math.floor(total / 1440), h = Math.floor((total % 1440) / 60), min = total % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${min}m`;
+  return `${min}m`;
 }
 
 // ── Game titles the host has already had to source ────────────────────────────

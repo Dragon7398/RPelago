@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useGameState } from '../../contexts/GameStateContext';
-import { CASINO_GAMES, CASINO_GAME_ORDER } from '../../lib/casinoData';
+import { CASINO_GAMES, CASINO_GAME_ORDER, CARD_TYPES, DECK_VARIANTS, DECK_VARIANT_ORDER } from '../../lib/casinoData';
+import { cardPopularity, type CardPopularityRow } from '../../lib/cardStats';
+import { finaleStarTiers, type FinaleStars } from '../../lib/finaleStars';
 import { normalizeSlots } from '../../lib/slotHelpers';
+import { cardStatsCorpus } from '../../lib/missionLogic';
 import { playerStatus } from '../../lib/gameLogic';
 import type { AdvSlot, GMMission, TriState } from '../../types';
 
@@ -37,12 +40,21 @@ function tallyBy(live: GMMission[], done: GMMission[], key: (m: GMMission) => st
 function buildRows(
   counts: Record<string, Tally>,
   order: readonly string[],
-  label: (k: string) => string,
+  label: (k: string) => string | undefined,
 ): Rows {
-  const rows: Rows = order.map(k => ({ key: k, label: label(k), tally: counts[k] ?? { live: 0, done: 0 } }));
+  const rows: Rows = order.map(k => ({ key: k, label: label(k) ?? k, tally: counts[k] ?? { live: 0, done: 0 } }));
   const extra = Object.keys(counts).filter(k => !order.includes(k));
   for (const k of extra) {
-    rows.push({ key: k, label: k === UNSET ? 'Unset' : k, tally: counts[k] });
+    // An extra row is a key the order does not name — a retired value, or the
+    // FINALE, which is deliberately absent from CASINO_GAME_ORDER. Ask the
+    // caller's labeller first so the finale reads "The Finale" rather than the raw
+    // key, and fall back to the key when it has no name for it.
+    //
+    // This is why the order stays the ROTATION here rather than becoming
+    // COAT_TABLE_TYPES: an order containing the finale would draw an empty Slots
+    // row for the whole season, where the extras pass grows one only once a finale
+    // table actually exists.
+    rows.push({ key: k, label: k === UNSET ? 'Unset' : (label(k) ?? k), tally: counts[k] });
   }
   return rows;
 }
@@ -277,6 +289,112 @@ function StatTable({ headLabel, rows, foot, rankFrom }: {
   );
 }
 
+// How many rows each end of the popularity table shows. The middle is where the
+// index is closest to 1 and says least, so it collapses by default.
+const CARD_ENDS = 8;
+
+function CardRow({ r, rank, stars }: { r: CardPopularityRow; rank: number; stars?: FinaleStars }) {
+  // Tone by whether the card beat its availability, with the index printed beside
+  // it — hue is never the only carrier.
+  const tone = r.index == null ? '' : r.index > 1.15 ? ' over' : r.index < 0.85 ? ' under' : '';
+  return (
+    <tr className={`dash-card-row${tone}`}>
+      <td><span className="dash-stat-rank">{rank}</span> {r.name}</td>
+      <td>{CARD_TYPES[r.type]?.label ?? r.type}</td>
+      <td className="num">{r.observed}</td>
+      <td className="num">{r.availability}</td>
+      <td className="num">{r.index == null ? '—' : `${r.index.toFixed(2)}×`}</td>
+      <td className="num">{stars == null ? '—' : `${stars}★`}</td>
+    </tr>
+  );
+}
+
+function CardPopularityPanel({ missions }: { missions: GMMission[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const rep = useMemo(() => cardPopularity(missions), [missions]);
+  // The finale's star tiers, derived from this same report but ranked the other
+  // way up. Shown here because this table is where the host reviews the numbers
+  // the finale will be priced from, and the two must be read together — a card's
+  // rate is the evidence for its star value. `finaleStarTiers` excludes the finale
+  // from its own baseline, so this column does not drift once the table opens.
+  const stars = useMemo(() => finaleStarTiers(missions), [missions]);
+
+  if (rep.seats === 0) {
+    return <div className="dash-stat-empty">No seat has locked a hand yet, so there is nothing to weigh.</div>;
+  }
+
+  const rows = rep.rows;
+  const head = rows.slice(0, CARD_ENDS);
+  const tail = rows.slice(-CARD_ENDS);
+  const hidden = Math.max(0, rows.length - CARD_ENDS * 2);
+
+  return (
+    <>
+      <p className="dash-stat-note">
+        Picks measured against a theoretical deck pooling one <strong>Purist</strong>,
+        one <strong>Unconsoled</strong> and one <strong>Indie</strong> deck, so a card
+        with more copies is not credited for simply being dealt more often.
+        <strong>1.00×</strong> means a card was committed exactly as often as that deck
+        offers it; above is over-picked, below under-picked.
+      </p>
+      <div className="dash-stat-figures">
+        <Figure value={rep.seats} label="Seats counted" />
+        <Figure value={rep.cards} label="Cards committed" />
+        <Figure value={rep.claimedSkipped} label="Claimed (excluded)" />
+      </div>
+      <p className="dash-stat-note">
+        Deck choices behind those seats:{' '}
+        {DECK_VARIANT_ORDER.map(v => `${DECK_VARIANTS[v].label} ${rep.deckMix[v] ?? 0}`).join(' · ')}
+        {rep.deckUnknown > 0 && ` · unrecorded ${rep.deckUnknown}`}.
+        {' '}<strong>Read the two ends with this in mind:</strong> a seat on Indie never saw a
+        Franchise card and a seat on Unconsoled never saw a Platform one, so the more
+        those decks were chosen, the more those categories are under-counted here
+        rather than genuinely unpopular.
+      </p>
+      <p className="dash-stat-note">
+        <strong>Finale</strong> is what each card will be worth when the season's closing
+        Slots table is created — <strong>inverse</strong> to the rate beside it, so the
+        cards the season passed over pay most. The 37 cards are cut
+        <strong> 8 / 7 / 7 / 7 / 8</strong> from 1★ up, and <strong>Wild is pinned to 1★</strong>:
+        it hands the player a free choice of game, which countermands the whole point of
+        rewarding the overlooked. The tiers are <strong>frozen onto the table when you open
+        it</strong> and never recomputed, so this column is the last look you get at them —
+        read it before creating the finale.
+      </p>
+      <table className="dash-stat-table">
+        <thead>
+          <tr>
+            <th scope="col">Card</th>
+            <th scope="col">Category</th>
+            <th scope="col" className="num">Picked</th>
+            <th scope="col" className="num">In pool</th>
+            <th scope="col" className="num">Rate</th>
+            <th scope="col" className="num" title="What this card is worth at the Finale">Finale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(showAll ? rows : head).map((r, i) =>
+            <CardRow key={r.name} r={r} rank={i + 1} stars={stars[r.name]} />)}
+          {!showAll && hidden > 0 && (
+            <tr className="dash-card-gap">
+              <td colSpan={6}>
+                <button className="dash-btn" onClick={() => setShowAll(true)}>
+                  Show {hidden} more in the middle
+                </button>
+              </td>
+            </tr>
+          )}
+          {!showAll && hidden > 0 && tail.map((r, i) =>
+            <CardRow key={r.name} r={r} rank={rows.length - CARD_ENDS + i + 1} stars={stars[r.name]} />)}
+        </tbody>
+      </table>
+      {showAll && (
+        <button className="dash-btn" onClick={() => setShowAll(false)}>Collapse the middle</button>
+      )}
+    </>
+  );
+}
+
 export default function StatsPage() {
   const { gameState } = useGameState();
   // Release/Collect and the chosen game titles all exist on every mission type, so
@@ -299,6 +417,16 @@ export default function StatsPage() {
       done: [...byId.values()],
     };
   }, [gameState?.missions, gameState?.missionsHistory]);
+
+  // ⚠️ The card-popularity panel below (and its Finale ★ column) must read the
+  // SAME corpus the Finale panel freezes its snapshot from, or the host could
+  // review one table and open the finale on another. `cardStatsCorpus` is that
+  // single derivation — `[...live, ...done]` above happens to agree with it today,
+  // and this is what keeps them agreeing.
+  const cardCorpus = useMemo(
+    () => cardStatsCorpus(gameState?.missions, gameState?.missionsHistory),
+    [gameState?.missions, gameState?.missionsHistory],
+  );
 
   const gameRows = useMemo(() => {
     const casino = (ms: GMMission[]) => ms.filter(m => m.type === 'casino');
@@ -347,6 +475,11 @@ export default function StatsPage() {
       <section className="dash-section">
         <h3 className="dash-section-title">Casino Tables by Game Type</h3>
         <StatTable headLabel="Game Type" rows={gameRows} />
+      </section>
+
+      <section className="dash-section">
+        <h3 className="dash-section-title">Card Popularity · Most and Least Picked</h3>
+        <CardPopularityPanel missions={cardCorpus} />
       </section>
 
       <div className="dash-stat-scope">

@@ -97,6 +97,11 @@ export function ownHolePath(missionId: string, uid: string): string {
   return secretPath(`missions/${missionId}/participants/${uid}/hole`);
 }
 
+/** Path to a Finale seat's own 3×5 board, row-major. Owner-readable, server-written. */
+export function ownBoardPath(missionId: string, uid: string): string {
+  return secretPath(`missions/${missionId}/participants/${uid}/board`);
+}
+
 // ── Config resolution ────────────────────────────────────────────────────────
 
 /**

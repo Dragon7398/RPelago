@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   missionPendingAction, missionReadyToComplete, tileReadyToComplete, missionSettleBlockers,
   seatsMissingConfig, seatsAwaitingConfig,
-  seatOwesConfig, outstandingConfigsBlockRoom, missionClockOrigin, compareMissionsForAdmin,
+  seatOwesConfig, outstandingConfigsBlockRoom, configsBlockedSince, missionClockOrigin, compareMissionsForAdmin,
   holdPinned, hasUnfinishedSlots, roomGoalProgress,
 } from '../../src/lib/missionLogic';
 import type { AdvSlot, GMMission, GMMissionState, GMMissionType, GMParticipant, Tile } from '../../src/types';
@@ -137,6 +137,39 @@ describe('outstandingConfigsBlockRoom — warning vs error', () => {
   });
 });
 
+describe('configsBlockedSince — the table-wide chase clock', () => {
+  it('is null while the configs are not yet blocking', () => {
+    const m = mission({ baseMax: 3, participants: seats(seated('a'), seated('b', { played: false })) });
+    expect(configsBlockedSince(m, 10 * HOUR)).toBeNull();
+  });
+
+  it('counts from the last seat taken when a join filled the table', () => {
+    const m = mission({ baseMax: 2, firstJoinAt: 0, participants: seats(
+      seated('a', { played: false, joinedAt: 1 * HOUR }),
+      seated('b', { joinedAt: 5 * HOUR }),
+    ) });
+    // Seat a has owed its config since hour 1, but the room was only held up from hour 5.
+    expect(configsBlockedSince(m, 50 * HOUR)).toBe(5 * HOUR);
+  });
+
+  it('counts from the decay step when decay closed the cap onto the seated count', () => {
+    // Two of three seats taken by hour 2; one 36h casino step closes the third.
+    const m = mission({ baseMax: 3, firstJoinAt: 0, participants: seats(
+      seated('a', { joinedAt: 0 }), seated('b', { played: false, joinedAt: 2 * HOUR }),
+    ) });
+    expect(configsBlockedSince(m, 40 * HOUR)).toBe(36 * HOUR);
+  });
+
+  it('on a live table, never runs later than deploy — a later claimant does not reset it', () => {
+    const m = mission({ state: 'inprogress', baseMax: 3, firstJoinAt: 0, deployedAt: 10 * HOUR, link: 'r',
+      participants: seats(
+        seated('a', { yamlDenied: true, joinedAt: 0 }),
+        ['c', { playerId: 'c', playerName: 'C', joinedAt: 30 * HOUR, slots: [{ ...slot('In-Progress'), claimed: true }] }],
+      ) });
+    expect(configsBlockedSince(m, 40 * HOUR)).toBe(10 * HOUR);
+  });
+});
+
 describe('missionReadyToComplete', () => {
   it('needs every seat to have slots and every slot terminal', () => {
     expect(missionReadyToComplete(mission({ participants: seats(
@@ -261,6 +294,37 @@ describe('missionPendingAction — in progress', () => {
   it('reports a denial ahead of the missing room — regenerating first would be wasted', () => {
     const p = missionPendingAction(live({ participants: seats(seated('a', { yamlDenied: true })) }), 0);
     expect(p?.code).toBe('denied');
+  });
+
+  // Added for the finale (WS-F), the first table that can deploy holding a seat
+  // that never locked in — gmShouldDeploy demands allSeatsPlayed, so an ordinary
+  // cohort reaches this state only via a force-deploy. Same reasoning as the
+  // denial above: a seat with no config cannot be in the room.
+  it('reports an outstanding config ahead of the missing room too', () => {
+    const m = live({ participants: seats(seated('a'), seated('b', { played: false })) });
+    const p = missionPendingAction(m, 0);
+    expect(p?.code).toBe('configs');
+    expect(p?.label).toBe('1 config');
+  });
+
+  it('still puts a DENIAL first — that seat has to act before the host can', () => {
+    // A denied seat is counted by seatsMissingConfig as well, so the order of the
+    // two arms is what decides which one the card reports.
+    const m = live({ participants: seats(seated('a', { yamlDenied: true }), seated('b', { played: false })) });
+    expect(missionPendingAction(m, 0)?.code).toBe('denied');
+  });
+
+  it('is casino-only — a non-casino seat is judged on yamlAt, which legacy seats lack', () => {
+    // ⚠️ The scoping guard. `seatOwesConfig` reads `yamlAt`, and participants that
+    // predate that marker carry none — so an unscoped arm would relabel every
+    // older in-progress Patrol as 'configs' and bury the room it actually needs.
+    const m = live({ type: 'patrol', participants: seats(seated('a', { played: false })) });
+    expect(seatsMissingConfig(m)).toBe(1);
+    expect(missionPendingAction(m, 0)?.code).toBe('generate');
+  });
+
+  it('does not fire once every config is in', () => {
+    expect(missionPendingAction(live({ participants: seats(seated('a')) }), 0)?.code).toBe('generate');
   });
 });
 

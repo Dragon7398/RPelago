@@ -9,8 +9,15 @@ npm run dev       # Vite dev server (localhost:5173)
 npm run build     # tsc -b then vite build → dist/
 npm run lint      # ESLint check
 npm run preview   # Preview production build
-npx tsc --noEmit  # Type-check only (no emit)
+npx tsc -b        # Type-check only (no emit) — see the warning below
 ```
+
+> ⚠️ **`npx tsc --noEmit` type-checks NOTHING here.** The root `tsconfig.json` is
+> `{ "files": [], "references": [...] }`, so that command resolves to an empty
+> program and exits 0 however broken the code is. Use **`npx tsc -b`** (add
+> `--force` to bypass the build cache), which is what `npm run build` runs. The
+> functions package is a normal tsconfig, so `cd functions && npx tsc --noEmit` is
+> correct there — **the two halves take different commands.**
 
 The build is a **multi-page Vite app** with two HTML entry points (configured in `vite.config.ts`):
 - `index.html` → main game app (`src/main.tsx`)
@@ -335,6 +342,22 @@ Eight shop items are defined in `SHOP_ITEMS` (`constants.ts`):
 
 > **Dual-copy item costs**: `SHOP_ITEMS` in `src/lib/constants.ts` defines costs for the UI. `ITEM_COSTS` in `functions/src/index.ts` is a separate hardcoded copy used by the `purchaseShopItem` Cloud Function to enforce the price server-side. **Both must be updated together** whenever a price changes.
 
+> **Starting gold is PER SHELL, and the two figures are separate constants.**
+> `createSeasonPlayer` branches: a `casino` shell player starts at
+> `CASINO_START_GOLD`, a `map` shell player at **`MAP_START_GOLD`**. Both are 500
+> today but answer different questions — a casino bankroll vs. enough for one S2
+> companion-capture mission before earning anything — so they are deliberately not
+> one shared constant. All three gold figures (`CASINO_START_GOLD`,
+> `CASINO_GOLD_FLOOR`, `MAP_START_GOLD`) are **dual-copied** between
+> `src/lib/constants.ts` and `functions/src/index.ts`.
+>
+> A map season created players at `gold: 0` through S1, which is why S1's records
+> show that; S2 charges for companion captures, hence the change. **It does not
+> migrate anyone** — existing S2 draft players keep whatever they were created
+> with (🪙 Adjust Gold on the admin Players card fixes one by hand). **S2 has no
+> weekly top-up**: its challenges are free to join, so there is no ante to fall
+> behind on.
+
 ### Feats system
 
 Players unlock one feat at each of levels 3, 5, and 7, stored in `player.feats` (`PlayerFeats` type). Feats are permanent and modify YAML submission limits and/or provide passive bonuses.
@@ -405,7 +428,7 @@ The DB rule for `claimableSlots/$slotKey` allows any authenticated player to **d
 
 **`kickedPlayers/{uid}: KickRecord`** (`{ at, name? }`) on the mission or tile records a player kicked off a world **while it was in progress** — the abandonment that reopens their slots. It is never cleared, and is written by every live kick path: `adminKickMissionParticipant` (in-progress only), `adminRemoveCasinoSlot` `mode:'kick'` (the player keeps the rest of their seat but is still recorded — the kicked card is abandoned work), `adminKickAdventurer` with `convertToClaimableSlot`, and `playerReset` for in-progress tiles and missions. A forming removal writes none.
 
-- **Claims** (`claimRefusal` in `slotHelpers.ts` — `kicked` | `restricted`): a player kicked off a world may not claim its open slots, and a **restricted** player may not claim any (a claim is extra capacity, which restriction exists to curb). Missions: `claimMissionSlot` refuses both. Tiles are a client write, so the **database rules** enforce it — the `$advId` `.validate` for joining an in-progress tile and both `claimableSlots/$slotKey` delete rules (tile and mission — the latter so a client delete can't grief) require the claimant not be in `kickedPlayers` and not `restricted`. Every claim surface (casino `OpenSlots`, map-mission `ClaimableSlots`, tile `ClaimableSlots`) shows `CLAIM_REFUSAL_TEXT` instead of a button that can only fail.
+- **Claims** (`claimRefusal` in `slotHelpers.ts` — `kicked` | `restricted`): a player kicked off a world may not claim its open slots, and a **restricted** player may not claim any (a claim is extra capacity, which restriction exists to curb). **The casino finale is the one exception — a restricted player may claim there; see the finale block below, and note the rule is duplicated in `claimMissionSlot`.** Missions: `claimMissionSlot` refuses both. Tiles are a client write, so the **database rules** enforce it — the `$advId` `.validate` for joining an in-progress tile and both `claimableSlots/$slotKey` delete rules (tile and mission — the latter so a client delete can't grief) require the claimant not be in `kickedPlayers` and not `restricted`. Every claim surface (casino `OpenSlots`, map-mission `ClaimableSlots`, tile `ClaimableSlots`) shows `CLAIM_REFUSAL_TEXT` instead of a button that can only fail.
 - **Mercs**: see `mercCandidateBlockers` under Mercenaries.
 - Open slots created before `kickedPlayers` existed have no record, so a kick that predates it isn't caught.
 
@@ -772,6 +795,24 @@ weight = ownRemainingCards / lockedCount  +  Σ claimed slots' claimedFraction
 
 **Claimed slots.** A claim is only ever offered from an **in-progress** table, so the Archipelago room already exists and the claimant adopts a *live* slot — no ante, no deal, no config to submit, and `claimMissionSlot` charges nothing and does **not** consume a mission claim. Limits: one claimed slot per player per table (a player already seated there may take one extra). The claimed slot is appended to both `slots` and `lockedCards` so every existing consumer keeps working, and is marked on the slot itself with `claimed` / `claimedFraction` / `claimedFrom`. **The fraction lives on the slot, not on the participant** — it was carved off a *different* seat with a different `lockedCount`, so a seat-level total could not say which slot contributed what.
 
+> **The Coat of Many Colors takes ANY 4 of 5 table types, not all four games.**
+> `COAT_TABLE_TYPES` (`casinoData.ts`) is the rotation **plus** the finale and
+> `COAT_TYPES_REQUIRED` is 4, so there are two routes: all four games, or three of
+> them plus the finale. ⚠️ It is a **separate array from `CASINO_GAME_ORDER` and
+> must stay one** — merging them puts the closer in the respawn rotation and zeroes
+> `minCasinoAnte`; `tests/lib/finaleTable.test.ts` pins both halves. The change is
+> strictly more generous, so no existing holder can lose the Coat (anyone with all
+> four games still clears four of five) — which is what made it safe to ship
+> mid-season. The grant stays gated on `participant.played`, or four claims would
+> buy the Coat without playing a hand.
+>
+> **Only Coat surfaces read that array.** The Games modal and the help games list
+> answer *what can I play tonight*, so they keep iterating the rotation — the
+> finale renders there conditionally on the table existing, never permanently.
+> `StatsPage` needs neither: `buildRows`' `extra` pass already grows a finale row
+> once one exists, and now labels it through the caller's labeller rather than
+> printing the raw key.
+
 > **A claimed card pays FLAT — no deck boost.** `seatGoldSwing` boosts only the seat's own hand; the claimant never chose the deck. Anything that rebuilds `slots`/`lockedCards` must preserve claimed slots and re-derive `goldSwing` through it — `resubmitCasinoYaml` does both (its card re-pick re-appends them, and its config-only path skips them, since a claimed card came from another player's deck and is absent from this player's manifest). `completeMission` also gates the **Coat of Many Colors** credit on `played`, or four claims would buy the Coat without ever playing a hand.
 
 The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat corresponds to one `GMParticipant` in the mission. A participant's deadline (`startBy`) triggers a 15-minute countdown warning in the UI.
@@ -783,6 +824,449 @@ The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat
 > **Odds drift baselines against the table's OWN roll.** Each table rolls its own release/collect at creation (`rollTableSetup`), so `mission.casinoStats` is meaningless to diff against a fixed 60/30. `freshCasinoTable` / `gmFreshCasinoTable` bank a frozen `casinoOpenStats` copy of that roll; `ChallengePanel` diffs against it (via the `open` prop) and hides the XP/Reward row in a casino season (`showXp={shell !== 'casino'}`, since gambit XP is paid out as gold there). Both builders — client and functions — must set `casinoOpenStats`.
 
 The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
+
+> **`npm run econ` structurally cannot see the finale** — it iterates
+> `CASINO_GAME_ORDER` (which must never contain the finale), and its model is
+> ante-in / pot-out, while the finale antes nothing, has no pot and pays a closed
+> form off stars. **`npm run econ:finale`** (`scripts/econFinale.ts`) is the other
+> half: 40k sittings a cell off the live engine, reporting expected payout per seat
+> by **cards kept** — because keeping a card *is* agreeing to play it, so the
+> season's exposure is bounded by the floor's appetite for Archipelago rather than
+> by anything in the code. Everything it pays is **money-in with nothing against
+> it**; the rebuy is the only money-out and is deliberately unmodelled, a fold
+> being a judgement call rather than a rate. Re-run it after touching the star
+> tiers, `FINALE_BASE_GOLD` / `FINALE_GOLD_PER_STAR`, or the board shape.
+
+> **`CasinoGame` includes `'finale'`, and `CASINO_GAME_ORDER` deliberately does NOT.**
+> The finale is the season closer (a one-off Slots table; see
+> [docs/casino-finale-slots-impl.md](docs/casino-finale-slots-impl.md)), so it is a
+> member of the type but not of the **rotation** — that array drives
+> `pickNextCasinoGame`, the per-game `casinoSeries` counters, `seedInitialMissions`
+> and `minCasinoAnte`, and adding the finale to it would put the closer in the
+> respawn rotation and **zero the minimum ante** (its ante is 0). So: anything
+> keyed `Record<CasinoGame, …>` now needs a `finale` entry, while anything that
+> means "the games we rotate through" must iterate `CASINO_GAME_ORDER`. Both halves
+> are pinned in `tests/lib/finaleTable.test.ts`. The predicate for every fork is
+> **`isFinale(m)`** (`casinoData.ts`, mirrored in `functions/src/casinoEngine.ts`) —
+> never the label, never the presence of `finaleClosesAt`. A finale's
+> `currentMaxSlots` is `Infinity` **while entry is open** (no cap, no decay) and the
+> seated count once it closes — see the three-phase block below, which is the one
+> thing to read before changing any of this — and its `baseMax` is
+> **0 on purpose**: several seat-pip loops read `baseMax` directly as
+> `for (i = 0; i < baseMax; i++)`, and zero makes each of them draw only the seats
+> that exist instead of a wall of fake empty ones.
+
+> **The finale has THREE phases, and the deadline does NOT deploy it.** This is the
+> correction worth reading before touching any of it, because the obvious reading
+> (deadline → deploy) strands players: `lockFinaleResult` requires a `forming`
+> table, so deploying at the deadline tells everyone still mid-manifest *"the
+> finale has closed"* and leaves the host voiding seats that had done everything
+> but the last click.
+>
+> | Phase | State | Seat cap | What happens |
+> |---|---|---|---|
+> | **open** | `forming` | `Infinity` | Anyone may enter and spin. Nothing deploys. |
+> | **closed** | `forming` | **seated count** | No new entries; the seats that spun finish their row and config. A straggler holds it here. |
+> | **deployed** | `inprogress` | — | Every seat locked in, or the stragglers voided. Room generable. |
+>
+> **The entire middle phase is one line**: `currentMaxSlots` returns
+> `finaleEntryClosed(m, now) ? filledCount(m) : Infinity`. Closing the cap makes the
+> table read as FULL, and four existing mechanisms then behave correctly with **no
+> finale branch of their own** — which is the reason to do it this way rather than
+> forking each one:
+>
+> - **`enlistInMission`** refuses a late entrant on its own `filled >= max` gate, so
+>   the entry deadline is enforced server-side with no second copy of it. Only the
+>   error wording forks ("full" is a lie about a table with no cap). ⚠️ Do not add a
+>   `finaleClosesAt` test there — that is the duplicate this design exists to avoid.
+> - **`shouldDeploy` / `gmShouldDeploy`** need no finale arm: full **and**
+>   `allSeatsPlayed` already *is* the finale's rule. Their old unconditional
+>   `isFinale → false` is gone, and so is the tick's second deploy arm.
+> - **`outstandingConfigsBlockRoom`** flips the host's config roster amber → red at
+>   the close, exactly when chasing those players starts to matter.
+> - **`missionPendingAction`** reaches its forming `configs` / `deploy` arms.
+>
+> **A straggler holds the table open indefinitely — that is the decision, not a
+> gap.** Nobody loses a completed spin to a timer. It clears when the player locks
+> in, when the host ⊘ voids the seat, or via `adminForceDeploy`. The host sees them
+> on the card's existing config roster (`seatsAwaitingConfig`, one row per seat by
+> Discord handle) — no finale-specific surface was needed.
+>
+> **`finaleEntryClosed` deliberately does not test `state`** (nor does
+> `gmFinaleEntryClosed`): the closed phase *is* `forming`, so a state term would be
+> invisible where it matters and would break the admin panel's wording once the
+> table goes live. It was called `finaleDeadlinePassed` while it was a deploy
+> trigger; the rename is the point.
+>
+> **`lockFinaleResult` re-reads the mission and calls `gmShouldDeploy`**, like
+> `lockCasinoResult`. It matters more here — a closed finale is waiting on exactly
+> these writes, so leaving it to the tick would sit the whole table on its last
+> player for up to 15 minutes.
+>
+> **Folding during the closed phase is self-healing, which is why it has no guard.**
+> `dealFinaleBoard` refuses a rebuy past the deadline, so the seat would otherwise
+> sit boardless and `played`-less forever, holding the table. `foldFinaleBoard`
+> re-arms `startBy`, handing it to the idle sweep — which runs *before* the deploy
+> pass in the same tick and mutates its own copy of the roster, so one tick can both
+> remove the seat and deploy the table. Folding after close forfeits the entry and
+> cleans itself up inside the hour.
+>
+> The tick's internal order stays load-bearing for the same reason it always was:
+> the `startBy` sweep runs and writes first, so a player who enlisted and never
+> pulled the arm is gone inside the hour and never reaches the close. That is why
+> the only seats that can hold a closed finale open are players who **actually
+> spun** — and why the host's straggler list is short.
+>
+> `deployMission` still takes two finale guards. **No replacement cohort** — the
+> season's closer must not spawn a fresh Five Card Draw table as it deploys, and it
+> deploys on a timer, which is exactly when nobody is watching to delete one.
+> (Flipping the season to `closing` beforehand is the operational belt;
+> `gmSpawnAllowed` already refuses there. The guard is the braces.) And **no
+> `rollCasinoOdds`** — the host hand-picked Release / Collect, so there is nothing
+> to roll; the stats hold chances of 100/0 precisely so the roll would reproduce
+> the pick if it ever ran, which makes the skip tidiness rather than the guarantee.
+> `hint`, `xp` and `casinoShareUnits` are still written: the first two re-write the
+> values creation already set, and the third is the banked denominator §0.4 of the
+> impl doc depends on being present-but-inert.
+>
+> ⚠️ **`tickableSeasons` includes `closing`.** That is what makes the operational
+> advice above safe — the tick keeps running in a closing season, so the finale
+> still deploys on its deadline. An `active`-only list would have had the wind-down
+> step silently disable the deadline it was meant to protect.
+
+> **The finale is the first table that can reach `inprogress` with a seat that
+> never locked in**, and that broke the admin board's advice. `gmShouldDeploy`
+> demands `allSeatsPlayed`, so an ordinary cohort gets there only by force-deploy —
+> which is why `missionPendingAction`'s `configs` arm lived only in the **forming**
+> branch, behind `filled >= currentMaxSlots`. For a finale that is `>= Infinity`
+> and never fires, so a straggler-bearing finale fell through to **`generate`**:
+> the card told the host to build the room, the one thing they cannot do until that
+> seat is chased or ⊘ voided. There is now an in-progress `configs` arm, sitting
+> where `denied` sits and ranked the same way (a seat with no config cannot be in
+> the room, so generating first is wasted work). **It is scoped to
+> `m.type === 'casino'`, mirroring `denied`** — `seatOwesConfig` judges a
+> non-casino seat on `yamlAt`, which participants predating that marker do not
+> carry, so an unscoped arm would relabel every older in-progress Patrol and bury
+> the `generate` those cards really need.
+>
+> `outstandingConfigsBlockRoom` needed no change and is worth reading once: a
+> forming finale can never be "full", so the roster correctly stays an amber
+> heads-up while entry is open and turns red the instant the deadline deploys it.
+
+> **Entering the finale consumes NO mission claim, and that has one non-obvious
+> consequence: `enlistInMission` must not write `players/{uid}/activeMissions/{id}`
+> for it.** Skipping that write is what makes every *reader* of the node no-op for
+> free — the two early-release syncs, `tickSlotStatuses`, and `completeMission`'s
+> idempotent null — so writing one "harmlessly" would silently cost the player a
+> claim they were promised they would keep. It also means a **`restricted` player
+> can enter**: restriction is enforced purely through claim release, so a table
+> that never borrows the claim never engages it. The claim-capacity gate is the
+> only one skipped — the seat cap and the gold gate are already inert
+> (`Infinity` and 0), and are deliberately left unguarded rather than given a
+> redundant `!isFinale`. One play each is enforced by **`mission.finalePlays`**,
+> which lives on the mission rather than the seat because stand-down, the `startBy`
+> sweep and an admin removal all delete a finale seat — a `played` flag that left
+> with the seat would buy a second free spin via fold → stand down → re-enlist.
+>
+> **Both directions matter, and the rule is `holdsMissionClaim(m)`** (`casinoData.ts`,
+> mirrored in `functions/src/casinoEngine.ts`). The finale opens at the same moment
+> new table creation stops, so ordinary tables are still gathering their last
+> players: existing tables must not bar the finale *and* a finale seat must not bar
+> those tables. Skipping the `activeMissions` write is what delivers the second
+> half. ⚠️ **`weeklyGoldTopUp` therefore excludes the finale from its live-seat
+> scan**: that scan reads a live seat as "not falling behind", which is true of a
+> table you anted into and false of a free, universal one that runs to the end of
+> the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
+> everyone who entered.
+
+> **The finale is a `casino` mission, so it INHERITS every path written for an
+> ordinary table — and inheritance is silent.** This is the recurring trap, and it
+> cost five separate walk-arounds found in one audit. The guard is
+> **`mustCasinoSeat`, which now REFUSES the finale** (`allowFinale` opts one caller
+> back in). Without it a finale seat satisfies every check the ten shared casino
+> callables rely on, and each then does something the finale has no answer for:
+> `dealCasinoHand` deals a **free fifteen-card hand** (its ante is 0),
+> `casinoFold` folds without recording a fold against the rebuy, the gambit pair
+> shifts odds the host HAND-PICKED and adds to a pot that must stay at zero (which
+> switches the weighted split back on), and `lockCasinoResult` commits the best
+> five of the fifteen **priced off card gold rather than stars**, never stamping
+> `finalePlays.played`. Only `setCasinoDeckChoice` is genuinely shared — and it
+> needs its own finale arm, because the finale holds no `hand` (its pool is the
+> `board`), so the ordinary freeze sees an empty seat and would let a player spin
+> a Safety board and lock it in as Purist. **When adding a casino callable, decide
+> explicitly which side of this line it is on.**
+
+> **The server refusing is only half of it — `CasinoTable` must not OFFER the
+> button.** `mustCasinoSeat` turning the finale away is a backstop, not the
+> experience: a finale seat routed to an ordinary phase gets a live control wired
+> to a callable that can only error. The phase a seat opens on is therefore
+> **`openingPhase(game)`** (`src/casino/CasinoTable.tsx`) — the finale ARMS, every
+> other table ANTES — read by both the derive effect and `chooseDeck`. It is one
+> function because it was briefly two: `chooseDeck` hardcoded `'ante'`, so picking
+> a deck at the finale landed the player on the ordinary buy-in screen pressing
+> *"Ante 0g · Deal me in"* at `dealCasinoHand`. Whether it self-corrected was a
+> race with the mission subscription. The finale's reachable phases are
+> `deckselect → armed → spinning → reroll → rowpick → keep → manifest → locked`;
+> **anything that routes a seat out of that set is a bug**, and `play`, `ante`,
+> `holdplay`, `folded` and `gambit` each carry a control the finale has no answer
+> for. (`backToCards` reads `play` too, but renders only inside `gambit`, so the
+> finale never reaches it.)
+
+> **`enlistInMission` refuses a player who is ALREADY SEATED (`already-seated`).**
+> It writes the participant record wholesale and runs `clearSeatSecrets`, so an
+> enlist over a seat you hold is a silent reset. On the finale that is an unlimited
+> free respin that undoes D5 outright — `finalePlays.folds` lives on the MISSION
+> and only `foldFinaleBoard` increments it, so re-entering wipes the board without
+> paying or counting a fold. On an ordinary table it destroys a LOCKED seat
+> (`played`, `slots`, `lockedCards`, the `goldSwing` settlement pays) for an ante
+> already spent. Leaving a table is `standDownFromMission`.
+>
+> ⚠️ **…which is why `standDownFromMission` counts a FOLD when a finale seat holds
+> a board.** The `already-seated` guard above cannot see this one: stand-down
+> deletes the seat and `clearSeatSecrets` wipes the board, so the player is *not*
+> seated when they re-enlist, and `dealFinaleBoard` charges off
+> `finalePlays.folds`, which never moved — pull the arm, dislike the board, stand
+> down, re-enter, spin again free, forever. Leaving with a board in front of you is
+> a fold, logged as one, and `finalePlays` living on the MISSION is what makes it
+> outlive the seat. A player who **never spun** pays nothing (no board, no fold),
+> which is also why the `startBy` idle sweep counts none — it only removes seats
+> that never pulled the arm.
+
+> **The finale's deadline closes ENTRY, not PLAY — so `dealFinaleBoard` bars the
+> REBUY and never the first board.** The rule is **`finaleBoardRefusal`**
+> (`src/lib/finaleStars.ts` ↔ `functions/src/casinoEngine.ts`), read by the callable
+> AND by the arm screen's `armBlocked`, so the button and the server can never
+> disagree about whether a fold is recoverable — the fold dialog's copy turns on
+> exactly that. Enlisting is
+> entry, and `enlistInMission` is already the gate for it through
+> `gmCurrentMaxSlots`; by the time anyone reaches the deal they were let in. A flat
+> deadline test there silently took the entry away from whoever enlisted in the
+> last few minutes: a live *Pull the arm* the server rejected, until the idle sweep
+> removed them having never spun. `lockFinaleResult` draws the same line by
+> carrying **no** deadline check at all. Folding past the close stays self-healing
+> — there is no way back, so `foldFinaleBoard` re-arms `startBy` for the sweep —
+> and `FinaleBoard` takes **`entryClosed`** so the fold warning, its danger-button
+> label and the arm screen all say what will actually happen. ⚠️ The fold dialog
+> must never promise *"the last board you will pay for"*: folding is unlimited, at
+> the rebuy each time.
+
+> **`GMParticipant.removedCardUids` keeps a struck card out of the re-pick pool.**
+> `adminRemoveCasinoSlot` rewrites `slots` / `lockedCards` / `goldSwing` but cannot
+> touch the seat's dealt POOL (the secret hand, the hole+community, the finale
+> row), which is what `resubmitCasinoYaml` re-selects from — so a denied player
+> could re-pick the card the host had just taken off them. After a **kick** that
+> card is live as someone else's claimable slot, so the room holds two slots for
+> one card and the pot pays weight for both; after a **void** its weight is already
+> released, so re-picking over-pays against a denominator that has shrunk. The
+> filter is **`repickPool`** (`src/lib/casinoSlots.ts` ↔
+> `functions/src/casinoEngine.ts`), applied on **both** sides — the callable and
+> `CasinoTable`'s `resubmitPool` — or the client offers a card the server refuses.
+> ⚠️ **Own cards only**: a claimed card's
+> uid is a per-deck index from ANOTHER player's deck, so recording one could
+> exclude an unrelated own card that shares the number. That same collision is why
+> `startResubmit` pairs `lockedCards` against `slots` by index and seeds only the
+> unclaimed — seeding across both uid spaces pre-selects the wrong card and stamps
+> a claimed card's game onto an own one.
+
+> **The struck card's SHARE has to be held out too, and that is the other half of
+> the same bug.** `repickPool` keeps the card out of the pool; **`repickLockedCount`**
+> (`src/lib/casinoSlots.ts` ↔ `functions/src/casinoEngine.ts`) keeps its pot weight
+> out of the denominator. A re-pick restamps `lockedCount`, and restamping it to the
+> new, smaller hand returns the seat to a **full unit** while the fraction a void
+> released (`casinoVoidedShare`) or a kick reserved on the claim entry is still
+> carved out elsewhere — so the table pays out more than its pot. That is the same
+> over-pay arriving by the other door, and the pool filter cannot see it, because
+> weight is computed from the new COUNT and not from which cards were picked. So on
+> a **live** table the struck cards stay in the denominator: the seat sits at
+> `committed/(committed + struck)`.
+>
+> ⚠️ **Only while live.** Pre-deploy there is nothing to conserve —
+> `casinoShareUnits` is banked AT deploy and a forming void skips the
+> `casinoVoidedShare` increment entirely — so a forming seat is one whole unit
+> however often its hand is rebuilt, and carrying strikes there would underpay it
+> for nothing. The one residual is a card struck while forming and re-picked after
+> deploy, which counts without ever having released anything: an underpay of one
+> card's share, which is the direction this pot errs in by design (an unclaimed kick
+> reserve is never paid either).
+
+> **`deckChoiceOf` prices off `finaleDeck` — the deck the board was actually DEALT
+> from — not the player's standing `deckChoice`.** `setCasinoDeckChoice` refuses to
+> move once a finale board exists (the board IS the hand there, and it has no
+> `hand` for the ordinary guard to see), but that refusal reads the board and writes
+> the choice in **two steps**: a client firing it and `dealFinaleBoard` together can
+> land the change behind the deal and then lock the very same cards in at the other
+> variant's boost — Safety deals the small deck at −10%, Purist pays +10%. So the
+> deal **stamps** the variant it used and every pricing site reads the stamp. One
+> accessor, both copies (`casinoData.ts` ↔ `casinoEngine.ts`), so all four
+> `goldSwing` writers and the client's own quote move together; ordinary tables never
+> write `finaleDeck`, so it is exactly `deckChoice` for them. **A fold nulls the
+> stamp** — the board it described is gone and the picker is reachable again, so
+> leaving it would price the next board off the last one's deck. `seatDeckChoice` in
+> `CasinoTable` stays the raw PICK, since that is what the picker highlights.
+
+> **`dealFinaleBoard` clears NOTHING, and a loser of its board race writes nothing
+> at all.** The per-board flags are nulled by `foldFinaleBoard`, atomically with the
+> board they belong to, and a fresh seat is written wholesale by `enlistInMission` —
+> so they are already clean by the time anyone reaches the deal. It briefly
+> pre-cleared them anyway, "harmlessly", ahead of the claim transaction: two tabs
+> both pass the fast path, the winner's board lands, the player spends their reroll,
+> and then the **loser's** pre-clear nulls `finaleRerolled` on its way to losing —
+> handing back a second free reroll on a board that already had one. A write a loser
+> must not make is a write that does not belong before the claim.
+
+> **`gmMissionLabel` (server) mirrors `missionDisplayLabel` (client) — change
+> both.** The finale runs once, so it has no cohort to number; *"The Finale ·
+> Cohort I"* reads as a promise of a second one. The **server** copy is the one
+> players see most: the deploy notification, the activity log, the slot-removal
+> warning and the status-incident warning are all written there.
+
+> **Voiding a locked finale seat ENDS that player's finale**, unlike every other
+> void, which is no-fault and leaves no mark. `finalePlays.played` lives on the
+> mission precisely so it outlives the seat, so there is no re-entry. The ⊘ confirm
+> on `MissionsPage` therefore names which case the host is in — locked in (cannot
+> re-enter) or never locked in (may re-enter; the fold count, and so the rebuy,
+> carries over). The host's undo, if they want one, is nulling
+> `finalePlays/{uid}` by hand.
+
+> **A finale card must not borrow an ordinary table's instrument — three of them
+> state something FALSE about it, not merely redundant.** The landing's
+> `TableCard` / `SeatedView` therefore fork on `isFinale`, and these are the forks
+> that are about correctness rather than wording:
+>
+> - **`OddsTrio` → `RollFlags`.** `freshFinaleTable` pins `casinoStats` to 100/0
+>   so `rollCasinoOdds` would reproduce the host's pick if it ever ran — so the
+>   drift display advertised a *100% chance* of something already decided. The
+>   finale stores FINAL values (`release: 'on' | 'off'`), which is exactly what
+>   `RollFlags` reads.
+> - **`DeployBar` → `FinaleWait`, scoped to the OPEN phase.** The bar's
+>   `filled >= max` is trivially true for a table whose cap *is* its fill count,
+>   so it turned green and read **Ready to deploy** as soon as the seated players
+>   had all played — while the table was waiting on a deadline days off and on
+>   players who had not entered. Once entry closes the bar is truthful again and
+>   takes back over, so the fork is on the phase, never on the finale.
+> - **`TableCard.spent`.** `enlistInMission` refuses `finale-already-played`, and
+>   nothing else on the card can tell: the seat is gone, the table is free and no
+>   claim is held. Read off `mission.finalePlays`, it replaces a button that could
+>   only fail with *"You've played the finale"*.
+>
+> The rest is wording that would mislead — `0g pot`, `Cohort I`, `Table full`,
+> `Ante 0g`, *"the pot keeps it"* on the leave warning. **`full` itself needs no
+> fork**: `currentMaxSlots` already makes it false while entry is open and true
+> after, which is the whole point of closing the cap. And a good deal needed
+> nothing at all — `seatTally`, `msToNextDecay`, `SeatPips` (off `baseMax: 0`) and
+> `casinoEntryCosts` were already finale-aware, which is why the rebuy reaches the
+> player before they ever open the table.
+>
+> ⚠️ **`ProgressCard` is the THIRD card and needs the same forks** — it is the
+> read-only twin of `TableCard`, shown for a live table the viewer holds no seat
+> at. It shipped without them and rendered `0g pot` and `Cohort I` on the season
+> closer, the two things every other finale surface is careful never to say. A card
+> that only appears once the table is running is easy to miss while building the
+> one that is all about sitting down, so **when a finale fork goes into `TableCard`,
+> check `ProgressCard` in the same pass.** Its awaiting-room line forks too: the
+> finale closed its entry rather than filling up, so *"seats are locked in"*
+> describes an event that never happened there.
+
+> **The inverse star scale is said out loud on every surface that offers the
+> table** (the card, the Games modal, the help section) — it is the one mechanic
+> nobody guesses. All three read `FINALE_BASE_GOLD` / `FINALE_GOLD_PER_STAR` /
+> `FINALE_MIN_GOLD` / `FINALE_MAX_GOLD` rather than printing 60–300, so what a
+> player is promised and what `finaleOwnGold` pays cannot drift; the last two are
+> **derived and display-only, and need no server mirror** despite living in
+> `finaleStars.ts`. **Every one of those surfaces renders conditionally on
+> `findFinale`** — the finale is a one-off, so advertising it permanently would
+> advertise it in seasons where it does not exist. That is also why they take a
+> flag instead of iterating a longer array: `CASINO_GAME_ORDER` must not gain the
+> finale (see the Coat block).
+
+> **`mission.finaleStars` is keyed by `cardKey`, NOT by card name.** A card name is
+> not a legal RTDB key — twelve of the 36 carry a `/` (`Exploration / open world`,
+> `NES / Famicom`, …) — so the raw snapshot failed the whole multi-path `update()`
+> and the finale could not be created at all. `cardKey` / `cardNameFromKey` /
+> `starsFor` / `finaleStarsToWire` live in `src/lib/finaleStars.ts`, mirrored in
+> `functions/src/casinoEngine.ts` (minus the decoder, which only the admin panel
+> needs). This is the `profiles/` dot-trap again, handled the same way: **one named
+> encoder per key space, never a bare `encodeURIComponent`**, which escapes every
+> illegal character except `.`.
+>
+> ⚠️ **Two maps, two keyings — do not mix them.** `finaleStarTiers` returns a
+> RAW-NAME ranking (what `StatsPage`'s ★ column and `npm run econ:finale` index
+> directly, correctly); `mission.finaleStars` is the stored, encoded snapshot.
+> `finaleStarsToWire` is the one-way door, applied in `createFinaleTable` at the
+> write. **Read the stored map only through `starsFor`** — `stars[card.name]`
+> compiles, returns undefined for a third of the deck, and scores those cards 0,
+> which is a silent underpayment rather than an error. That is also why the admin
+> panel's drift check converts the live map through `finaleStarsToWire` before
+> diffing, and decodes for display.
+
+> **The admin's frozen star snapshot is the audit trail, and the Stats tab is
+> NOT.** The Finale panel lists `mission.finaleStars` by tier and reports how many
+> cards the live recompute has already drifted on, because `StatsPage`'s ★ column
+> is recomputed from the CURRENT corpus and keeps moving as tables settle — a host
+> answering *"why was Sonic worth five"* from that column will eventually answer
+> it wrong. `cardStatsCorpus` being shared is what guarantees the host froze what
+> they reviewed; this panel is what lets them read it back afterwards.
+
+> **The finale lifts the `restricted` claim bar — in TWO files, and doing one is
+> the bug.** A restricted player may claim an abandoned finale card: restriction
+> exists to stop a player overextending, and the finale is free, consumes no claim
+> and runs to the end of the season, so there is no extension to curb. The
+> carve-out lives in **`claimRefusal`** (`src/lib/slotHelpers.ts`, via `isFinale` —
+> never the label) **and** in the copy `claimMissionSlot` inlines, the way it
+> inlines `deriveStatus`. Client only ⇒ a restricted player is offered a button the
+> server refuses; server only ⇒ they are refused a claim the server would allow.
+> Tiles are enforced by the database rules instead, but the finale is a mission, so
+> rules never see it.
+>
+> ⚠️ **The carve-out sits BELOW the kicked check in both copies.** Whether you
+> abandoned this very card is a different question from whether you are
+> overextended — lifting both arms would let a player reclaim the card they walked
+> away from. The one-per-player cap still applies to them like everyone else
+> (`claimedWeight(seat) > 0`), and needed no change.
+
+> **A finale slot cannot be merced** (`mercHireBlockers`' `finale` blocker, client
+> `src/lib/mercLogic.ts` + the server mirror — change both). The reward is priced
+> in the stars of the cards you personally spun for, so handing 60% of it to
+> someone who never pulled the arm reads as selling your spin. It is a blocker
+> rather than an absolute bar, so it inherits the house behaviour: **hard for
+> players, soft for the admin** (`details.mercWarnings` + *Hire anyway*). The
+> parameter is **optional and defaults to false**, so no existing caller changed;
+> `MercControl` derives it from `gameState` rather than taking a prop, and treats
+> it like `claimed` — a permanent blocker, so the owner sees no button instead of
+> one that can only fail.
+
+> **Every writer of a finale seat's `goldSwing` goes through `seatGoldSwingFor`**
+> (`functions/src/index.ts`), which delegates to the mirrored pure `finaleSeatGold`
+> (`src/lib/finaleStars.ts` ↔ `functions/src/casinoEngine.ts`). There are **four**
+> writers — `lockFinaleResult`, `claimMissionSlot`, `resubmitCasinoYaml`,
+> `adminRemoveCasinoSlot` — and `goldSwing` is a **stored** number that settlement
+> pays verbatim, never re-derived from the slots. So a site that computes it the
+> ordinary way for a finale seat does not display something wrong, it *pays*
+> something wrong. The finale prices stars: own cards `(50 + 10 × Σ stars) × deck
+> boost`, a claimed card `10 × stars` flat. ⚠️ The `own.length > 0` guard inside is
+> load-bearing — the +50 is the fee for sitting down and spinning, so it survives
+> while the seat holds one own card and is **absent for a pure claimant**; drop it
+> and a claimant collects 50g for a table they never played.
+>
+> **Settlement needs no finale branch**, and the reason is worth keeping: a finale's
+> `pot` is 0, and `casinoPotShares` short-circuits on `pot <= 0`, so the entire
+> weighted-split pipeline runs and pays nothing even though `casinoShareUnits` *is*
+> banked at deploy. That makes `pot: 0` load-bearing rather than cosmetic — routing
+> the 50g rebuy through `potContribution` would switch the split back on for real.
+> Pinned both ways in `tests/lib/finaleTable.test.ts`.
+>
+> **A finale slot's `details` reads `"Sonic · 5★"`, not a gold figure** (its worth
+> is stars), via `cardsToSlots`' optional formatter. That does **not** match
+> `handStakeFromSlots`' `· Ng` regex — safe only because that function is always a
+> fallback behind `p.goldSwing ?? …`.
+
+> **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
+> Finale panel**, and that sharing is the point: the host reviews the card-popularity
+> table (with its Finale ★ column) and then opens the finale, which **freezes** those
+> star values onto the mission forever. Two separate derivations of "which missions
+> count" would let them review one table and freeze another. It excludes `forming`
+> tables — a table that has not run is still hypothetical, and its cards may yet be
+> re-picked via `resubmitCasinoYaml`.
 
 > **Casino engine duplication**: `functions/src/casinoEngine.ts` is a single-file server-side consolidation of the four client casino modules (`casinoData.ts`, `casinoEngine.ts`, `casinoGambits.ts`, `casinoSlots.ts`), plus the server-only `CASINO_POT_CUT_PCT` constant. **Any change to casino card/gambit/slot logic or constants must be reflected in both the client files and `functions/src/casinoEngine.ts`.**
 
@@ -820,7 +1304,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `functions/src/yamlPaths.ts` / `traits.ts` | Server mirrors of the Storage path and the Horde floor. **Change with their client copies** |
 | `src/lib/tileGen.ts` | Seeded RNG, grid layout, `generateTileStats`, `buildDefaultTileData`, `getBossLiveStats` |
 | `src/lib/gameLogic.ts` | XP/level math, feat bonuses, adventurer reward calculation, `computeRecalcUpdates`, `awardTileRewards`, `adventurerCountForLevel`, `missionClaimCapacity`, `playerStatus`/`releasesClaimsEarly` (the active/restricted/disabled tri-state and the early-claim-release gate), `yamlLimitsForFeats`/`yamlLimitsForPlayer` |
-| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), `roomGoalProgress` (the casino landing's "X / Y goaled" meter — seats **plus open claimable slots**, on the same `goaled` predicate as the ready-to-settle ✓), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
+| `src/lib/missionLogic.ts` | Mission card computation, decay/deploy logic, `currentMaxSlots`, `seatTally` (display seat count), `fmtDur` (forward countdowns — shared by the landing and its phase panel, which the landing imports), `computeMissionCard`, `freshMission`, the sourced-game helpers (`sourcedGameLists`, `gameNoveltyInYaml`, `sourcedAt`, `gameTitleKey`), `roomGoalProgress` (the casino landing's "X / Y goaled" meter — seats **plus open claimable slots**, on the same `goaled` predicate as the ready-to-settle ✓), the admin triage helpers (`missionPendingAction`, `missionReadyToComplete`, `tileReadyToComplete`, `missionSettleBlockers`, `seatOwesConfig`, `seatsAwaitingConfig`, `seatsMissingConfig`, `outstandingConfigsBlockRoom`, `missionClockOrigin`, `compareMissionsForAdmin`, `holdPinned`), and the weighted casino pot split (`casinoPotShares`, `casinoTableShares`, `seatPotWeight`, `casinoShareDenominator`) |
 | `src/lib/mercLogic.ts` | Mercenary split math (`flatMercCuts`, `casinoMercCuts`, `mercTotals`) + handle matching (`normalizeHandle`, `playersByHandle`) |
 | `src/components/MercControl.tsx` | The `⚔` merc tag + hire/change/remove control, shared by every slot surface |
 | `src/lib/slotHelpers.ts` | Slot normalization (`normalizeSlots`, `slotsFromEntry`, `normalizeClaimEntry`, `claimEntries`, `claimableCount`) + shared slot-completion core (`slotsAllFree`, `countUnfinishedSets`) used by both Challenge adventurer-release and Mission claim-reclaim |
@@ -863,6 +1347,7 @@ State and callbacks live in `KmkProvider` / `KmkContext` (subscribed to `kmkEven
 | `src/lib/casinoEngine.ts` | Pure hand evaluation: `evaluatePoker`, `evaluateBlackjack`, `DrawableDeck` |
 | `src/lib/casinoGambits.ts` | Gambit deck definitions, `makeGambitDeck`, `applyGambit` |
 | `src/lib/casinoSlots.ts` | `cardsToSlots`, `handStake`, `handStakeFromSlots` — card→AdvSlot bridge |
+| `src/lib/finaleStars.ts` | The casino finale's star tiers — `finaleStarTiers` (the snapshot frozen onto the mission), `finaleStarRanking`, `starTierSizes`, `compareForStars`, and the star→gold formula (`finaleOwnGold` / `finaleClaimedGold`). **Not yet mirrored server-side** — see the ⚠️ in the file and [docs/casino-finale-slots-impl.md](docs/casino-finale-slots-impl.md) |
 | `src/lib/apYaml.ts` | Player-config parsing + screening: `parseApYaml`, `checkWorldCount`, `checkProgressionBalancing` (can block), `checkBlanketTargets` (always blocks — `Everything` / `Everywhere` under any capped setting), `checkYamlLimits` / `summarizeLimitFindings` (advisory settings caps) |
 | `src/components/casino/CasinoShell.tsx` | Casino-season landing shell (rendered when the season's shell is `casino`). Renders **one `PhasePanel` per table the player is seated at** (`myTables`) — pooled claims let a player hold several at once; **held (active) claims sort above freed (settling) ones**, and every table shows until it completes. Falls back to a single Ledger/empty panel when they hold none. |
 | `src/components/casino/PhasePanel.tsx` | Per-table panel; phase is backend-owned (forming→Seated, inprogress→Board, complete→Ledger). One instance per seat; `mission=null` renders the Ledger (last settled) or empty prompt. |

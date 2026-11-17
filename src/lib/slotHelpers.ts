@@ -1,5 +1,6 @@
-import type { AdvSlot, ClaimableEntry, GMMission, SlotStatus, TileAdventurer } from '../types';
+import type { AdvSlot, CasinoGame, ClaimableEntry, GMMission, SlotStatus, TileAdventurer } from '../types';
 import { FREE_COMPLETED_STATUSES } from './constants';
+import { isFinale } from './casinoData';
 
 export function normalizeSlots(raw: AdvSlot[] | Record<string, AdvSlot> | undefined): AdvSlot[] {
   if (!raw) return [];
@@ -102,6 +103,17 @@ export function countUnfinishedSets(
 //                stop that player getting overextended again.
 // Enforced server-side for missions (`claimMissionSlot`) and by the database rules
 // for tiles (a tile claim is a client write). This is what the UI reads to say why.
+//
+// THE FINALE LIFTS THE RESTRICTED BAR, and only that one. It is the celebration
+// nobody is excluded from, and a player willing to finish an abandoned 5★ card is
+// doing the room a favour — restriction exists to stop a player overextending, and
+// the finale is free, consumes no claim and runs to the end of the season, so there
+// is no extension to curb. The one-per-player cap still applies to them like
+// everyone else (`claimMissionSlot`'s `claimedWeight(seat) > 0`).
+//
+// ⚠️ The KICKED bar still stands on a finale. A player who abandoned a card may not
+// claim that card back, which is a different question from capacity, so the
+// carve-out sits BELOW the kicked check and not above it.
 
 export type ClaimRefusal = 'kicked' | 'restricted';
 
@@ -111,11 +123,14 @@ export const CLAIM_REFUSAL_TEXT: Readonly<Record<ClaimRefusal, string>> = {
 };
 
 export function claimRefusal(
-  world: { kickedPlayers?: Record<string, unknown> } | null | undefined,
+  world: { kickedPlayers?: Record<string, unknown>; casinoGame?: CasinoGame } | null | undefined,
   player: { id?: string; restricted?: boolean | null } | null | undefined,
 ): ClaimRefusal | null {
   if (!player?.id) return null;
   if (world?.kickedPlayers?.[player.id]) return 'kicked';
+  // Order matters: see the ⚠️ above. A tile has no `casinoGame`, so `isFinale`
+  // is false for every tile without needing a world-type test here.
+  if (isFinale(world))                   return null;
   if (player.restricted === true)        return 'restricted';
   return null;
 }

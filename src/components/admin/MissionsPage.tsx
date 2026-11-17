@@ -4,11 +4,14 @@ import { useToast } from '../../contexts/ToastContext';
 import RoomPeek from './statusReportPage/RoomPeek';
 import type { GMMission, GMMissionState, GMParticipant, AdvSlot, SlotStatus, TriState, CasinoStats, CasinoLogEntry } from '../../types';
 import { SLOT_STATUSES, toRoman } from '../../lib/constants';
+import { isFinale } from '../../lib/casinoData';
 import { useSeason } from '../../contexts/SeasonContext';
-import { fmtDayClock, missionDisplayLabel, seatTally, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
+import { SLOT_CAUTION_HOURS } from '../../lib/statusReport';
+import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleEntryClosed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, configsBlockedSince, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
-import { seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
+import { finaleStarTiers, finaleStarsToWire, cardNameFromKey, FINALE_GOLD_PER_STAR, FINALE_BASE_GOLD, FINALE_REBUY_GOLD, type FinaleStars } from '../../lib/finaleStars';
+import { createFinaleTable, seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
 import { checkProgressionBalancing, checkBlanketTargets, checkYamlLimits, summarizeLimitFindings } from '../../lib/apYaml';
@@ -27,7 +30,7 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, locked, isCasino, isLive, mismatchedNames, onKick,
+  missionId, playerId, participant, locked, isCasino, isLive, isFinaleTable, finaleFolds, mismatchedNames, onKick,
 }: {
   missionId: string;
   playerId: string;
@@ -36,6 +39,20 @@ function MissionParticipantSlots({
   isCasino?: boolean;
   /** Mission is in progress — a room exists, so a kicked slot can actually be taken over. */
   isLive?: boolean;
+  /**
+   * The finale. Removing a seat there is NOT the no-fault act it is everywhere
+   * else: `finalePlays/{uid}.played` lives on the mission precisely so it outlives
+   * the seat, so a player who has locked in cannot be let back. The host has to be
+   * told which of the two cases they are looking at before they confirm.
+   */
+  isFinaleTable?: boolean;
+  /**
+   * This player's fold count on the finale, from `mission.finalePlays`. It decides
+   * the removal copy: a seat that has never folded gets its next board FREE, so
+   * telling the host the rebuy still applies would have them hand out a free respin
+   * believing they had done the opposite.
+   */
+  finaleFolds?: number;
   mismatchedNames?: Set<string>;
   onKick: () => void;
 }) {
@@ -125,6 +142,16 @@ function MissionParticipantSlots({
                 : confirmSeat === 'kick'
                   ? `Kick ${who}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
                   : `Void ${who}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
+              {isFinaleTable && (participant.played
+                ? <><br />⚠ <b>They have already locked in, and the finale is one play each.</b>{' '}
+                  Their play is recorded on the table rather than the seat, so removing it
+                  <b> ends their finale</b> — they cannot re-enter, even while entry is open.</>
+                : <><br />They never locked in, so they may re-enter while entry is open.{' '}
+                  {(finaleFolds ?? 0) > 0
+                    ? <>Their fold count ({finaleFolds}) lives on the table rather than the seat, so it
+                      carries over and a fresh board still costs them the rebuy.</>
+                    : <><b>They have never folded, so their next board would be free</b> — clearing this
+                      seat hands them a fresh spin at no cost.</>}</>)}
             </span>
             <button
               className="dash-action-btn danger"
@@ -516,6 +543,12 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
   // today either way. Once nothing else stands in the way, the same rows become
   // the thing making the room late.
   const blocking = outstandingConfigsBlockRoom(mission, now);
+  // How long the full table has stood waiting on them — the figure the host
+  // chases on, rather than any one seat's own clock. Emphasised past
+  // SLOT_CAUTION_HOURS (the landing's 48h caution badge).
+  const blockedSince = configsBlockedSince(mission, now);
+  const blockedMs = blockedSince != null ? now - blockedSince : null;
+  const blockedLong = blockedMs != null && blockedMs >= SLOT_CAUTION_HOURS * 3_600_000;
 
   // With the download hidden and no seat owing a config there is nothing left to
   // draw — and an empty block would still spend its margin on the card.
@@ -531,10 +564,22 @@ function CasinoYamlDownload({ mission, label, now, locked }: {
               ? <>⛔ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} outstanding
                   <span className="casino-yaml-list-note">
                     {' '}· all that is holding the room up
-                  </span></>
+                  </span>
+                  {blockedMs != null && (
+                    <span className={`casino-yaml-missing-when${blockedLong ? ' long' : ''}`}
+                          title={isFinale(mission)
+                            ? 'Time since finale entry closed (or the last seat was taken)'
+                            : 'Time since the table filled — the last seat taken, or decay closing the cap to the seats already taken'}>
+                      {' '}· waiting {fmtDayClock(blockedMs / 1000)}
+                    </span>
+                  )}</>
               : <>⚠ {awaiting.length} config{awaiting.length === 1 ? '' : 's'} not in yet
                   <span className="casino-yaml-list-note">
-                    {' '}· nothing to chase until the table fills
+                    {/* A finale never fills — it has no cap. It CLOSES, and that
+                        is the moment these rows start to matter, so the amber
+                        note has to name the right event or it reads as a wait
+                        for something that will never happen. */}
+                    {' '}· nothing to chase until {isFinale(mission) ? 'entry closes' : 'the table fills'}
                   </span></>}
           </div>
           {awaiting.map(({ playerId, participant, reason }) => (
@@ -1127,6 +1172,8 @@ function MissionCard({ mission, pinned, onInteract }: {
           locked={slotsLocked}
           isCasino={mission.type === 'casino'}
           isLive={mission.state === 'inprogress'}
+          isFinaleTable={isFinale(mission)}
+          finaleFolds={mission.finalePlays?.[pid]?.folds ?? 0}
           mismatchedNames={mismatchedNames}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />
@@ -1293,6 +1340,210 @@ type MissionFilter = 'casino' | 'noncasino' | 'all';
 /** The card the host is working on, held at the board index they last saw it at. */
 type BoardPin = { id: string; column: 'forming' | 'inprog'; index: number };
 
+// ── The Finale ────────────────────────────────────────────────────────────────
+/**
+ * Open the season's closing Slots table, or report the one already open.
+ *
+ * The finale is created ONCE and its star tiers are frozen at that moment, so this
+ * panel's job is as much to slow the host down as to take the input: there is no
+ * recompute, and the Stats tab is where the numbers are reviewed.
+ */
+function FinalePanel({ now }: { now: number }) {
+  const { gameState } = useGameState();
+  const { season }    = useSeason();
+  const { addToast }  = useToast();
+
+  const [open, setOpen]       = useState(false);
+  const [busy, setBusy]       = useState(false);
+  const [closes, setCloses]   = useState('');
+  const [showStars, setShowStars] = useState(false);
+  const [release, setRelease] = useState(true);
+  const [collect, setCollect] = useState(true);
+  const [hint, setHint]       = useState(7);
+
+  const existing = useMemo(
+    () => findFinale(gameState?.missions, gameState?.missionsHistory),
+    [gameState?.missions, gameState?.missionsHistory],
+  );
+  // The same corpus the Stats tab's Finale ★ column renders from — see cardStatsCorpus.
+  const stars = useMemo(
+    () => finaleStarTiers(cardStatsCorpus(gameState?.missions, gameState?.missionsHistory)),
+    [gameState?.missions, gameState?.missionsHistory],
+  );
+  const tierCounts = useMemo(() => {
+    const per = [0, 0, 0, 0, 0];
+    for (const s of Object.values(stars)) per[s - 1]++;
+    return per;
+  }, [stars]);
+
+  // Deliberately NOT gated on `seedAllowed`. New cohorts stop spawning once the
+  // season is `closing` — that is how a season winds down — but the finale is the
+  // thing the host opens DURING that wind-down, so it must outlive the respawn gate.
+  const canOpen = season?.status === 'draft' || season?.status === 'active' || season?.status === 'closing';
+
+  if (existing) {
+    const seated   = Object.keys(existing.participants ?? {}).length;
+    const closesAt = existing.finaleClosesAt;
+    const closed   = finaleEntryClosed(existing, now);
+    const frozen   = existing.finaleStars ?? {};
+    const banked   = Object.keys(frozen).length;
+    // How far the live recompute has already drifted from what this table pays.
+    // This is the whole reason the snapshot is readable here rather than on the
+    // Stats tab: that tab's ★ column is recomputed from the CURRENT corpus and so
+    // keeps moving as tables settle, while the finale pays the values below and
+    // nothing else. A host who answers "why was Sonic worth five" from the Stats
+    // column will eventually answer it wrong.
+    // Both sides keyed the same way before comparing: `frozen` came off the wire
+    // (cardKey-encoded) and `stars` is the live raw-name recompute, so diffing them
+    // directly reported every `/`-bearing card as missing rather than drifted.
+    const liveWire = finaleStarsToWire(stars);
+    const drifted = Object.keys(frozen).filter(k => liveWire[k] != null && liveWire[k] !== frozen[k]).length;
+    return (
+      <div className="dash-section">
+        <h3 className="dash-section-title">✦ The Finale</h3>
+        <div className="dash-stat-note">
+          <strong>{missionDisplayLabel(existing)}</strong> is {existing.state === 'forming'
+            ? (closed ? 'closed — waiting on the last seats to lock in' : 'open for entry')
+            : existing.state === 'inprogress' ? 'in progress' : 'settled'}
+          {' · '}<strong>{seated}</strong> seated (no limit)
+          {closesAt != null && <> · entry {closed ? 'closed' : 'closes'} {fmtDayClock(closesAt)}</>}
+          {' · '}{banked} card star values frozen
+          {' · '}Release {existing.release} · Collect {existing.collect} · Hint {existing.hint}%
+        </div>
+        <p className="dash-stat-note">
+          It runs once, so there is no second one to open. The frozen star values are
+          what every payout is computed from — they are deliberately not recomputed,
+          even if more tables settle after this point. A card pays{' '}
+          <strong>{FINALE_GOLD_PER_STAR}g a ★</strong> over a <strong>{FINALE_BASE_GOLD}g</strong> base
+          for the seat's own row, or {FINALE_GOLD_PER_STAR}g a ★ flat for a claimed card; a board
+          after a fold costs <strong>{FINALE_REBUY_GOLD}g</strong>.
+        </p>
+        <button className="dash-btn" onClick={() => setShowStars(v => !v)} aria-expanded={showStars}>
+          {showStars ? '▾' : '▸'} Frozen star values ({banked})
+        </button>
+        {showStars && (
+          <div className="dash-finale-stars">
+            {drifted > 0 && (
+              <p className="dash-stat-note warn">
+                ⚠ <strong>{drifted}</strong> of these {banked} cards would be valued differently if
+                recomputed today — more tables have settled since the snapshot. That is expected and
+                changes nothing: <strong>the values below are what this table pays</strong>, and the
+                Stats tab's ★ column is now a different number. Answer any question about a payout
+                from here.
+              </p>
+            )}
+            {([5, 4, 3, 2, 1] as FinaleStars[]).map(tier => {
+              // Decoded back for the host — the stored keys are percent-encoded.
+              const names = Object.keys(frozen).filter(k => frozen[k] === tier)
+                .map(cardNameFromKey).sort();
+              if (names.length === 0) return null;
+              return (
+                <div className="dash-finale-tier" key={tier}>
+                  <span className="dash-finale-tier-lbl">
+                    {'★'.repeat(tier)}
+                    <small>{FINALE_GOLD_PER_STAR * tier}g · {names.length}</small>
+                  </span>
+                  <span className="dash-finale-tier-names">{names.join(' · ')}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const handleCreate = async () => {
+    const at = closes ? new Date(closes).getTime() : NaN;
+    if (!Number.isFinite(at)) { addToast('Pick a closing date and time first.', 'error'); return; }
+    setBusy(true);
+    try {
+      await createFinaleTable({ closesAt: at, release, collect, hint, stars });
+      addToast('The Finale is open.', 'success');
+      setOpen(false);
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Could not open the Finale.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="dash-section">
+      <h3 className="dash-section-title">✦ The Finale</h3>
+      {!canOpen ? (
+        <div className="dash-empty">This season is archived — the Finale can no longer be opened.</div>
+      ) : !open ? (
+        <>
+          <p className="dash-stat-note">
+            The season's closing table: a 3×5 slot machine, free to enter once, no seat
+            limit, and <strong>time-limited instead of seat-limited</strong>. Card values
+            run <strong>inverse</strong> to how often the season picked them.
+          </p>
+          <p className="dash-stat-note">
+            <strong>Read the Finale ★ column on the Stats tab before you open this.</strong>{' '}
+            The {Object.keys(stars).length} star values are frozen at the moment you create
+            the table and are never recomputed — any table that settles afterwards will not
+            change them. Current cut, 1★→5★:{' '}
+            <strong>{tierCounts.join(' / ')}</strong>.
+          </p>
+          <button className="dash-action-btn" onClick={() => setOpen(true)}>✦ Open the Finale…</button>
+        </>
+      ) : (
+        <>
+          <p className="dash-stat-note">
+            Release, Collect and the hint cost are <strong>yours to choose</strong> — the
+            finale has no gambit phase, so nothing will shift them afterwards and nothing
+            is rolled. Pick the room you want this season to end on.
+          </p>
+          <div className="dash-finale-form">
+            <label className="dash-finale-field">
+              <span>Entry closes</span>
+              <input
+                className="dash-number-input when" type="datetime-local"
+                value={closes} onChange={e => setCloses(e.target.value)}
+              />
+            </label>
+            <label className="dash-finale-field">
+              <span>Release</span>
+              <select
+                className="dash-select" value={release ? 'on' : 'off'}
+                onChange={e => setRelease(e.target.value === 'on')}
+              >
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label className="dash-finale-field">
+              <span>Collect</span>
+              <select
+                className="dash-select" value={collect ? 'on' : 'off'}
+                onChange={e => setCollect(e.target.value === 'on')}
+              >
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label className="dash-finale-field">
+              <span>Hint cost %</span>
+              <input
+                className="dash-number-input" type="number" min={0} max={100} step={0.5} value={hint}
+                onChange={e => setHint(Math.max(0, Number(e.target.value) || 0))}
+              />
+            </label>
+          </div>
+          <div className="dash-finale-actions">
+            <button className="dash-action-btn" disabled={busy} onClick={handleCreate}>
+              {busy ? '…' : '✦ Open it'}
+            </button>
+            <button className="dash-btn" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilter }) {
   const { gameState } = useGameState();
   const { addToast }  = useToast();
@@ -1397,6 +1648,7 @@ export default function MissionsPage({ filter = 'all' }: { filter?: MissionFilte
       <h2 className="dash-page-title">{isCasinoTab ? '🂡 Casino Tables' : '⚜ Guildmaster Missions'}</h2>
 
       {isCasinoTab && <GoldTopUpAudit />}
+      {isCasinoTab && <FinalePanel now={sortNow} />}
 
       <div className="dash-challenges-cols">
         <div className="dash-col">

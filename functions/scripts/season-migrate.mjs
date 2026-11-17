@@ -13,6 +13,13 @@
  *                       draftSeasons, alphaUsers, minClientVersion). Holds the
  *                       active season at S1 (archived, read-only) until launch.
  *   create-casino-draft Create the empty S1.5 season skeleton (draft).
+ *   create-draft        Create a NEW throwaway draft season (any id) + alpha grants,
+ *                       for end-to-end testing off the live tree. Takes
+ *                       --id <seasonId> [--label "..."] [--shell casino|map]
+ *                       [--board s1|s2] [--tables N] [--alpha uid,uid].
+ *   drop-draft          Delete a draft season: its config entry, seasons/{id},
+ *                       seasonSecrets/{id} and roomTelemetry/{id}. Refuses any
+ *                       season in the public seasonList. Needs --force.
  *   kmk-migrate         Convert game/meta/kmkActiveListId → per-list `active`.
  *   reseed-casino       Wipe the casino DRAFT's playtest tables/secrets/log and
  *                       reset player gold, so the app can re-open tables at
@@ -70,6 +77,15 @@ const SEASON_LABELS = {
 const [, , command, ...rest] = process.argv;
 const DRY_RUN = rest.includes('--dry-run');
 const FORCE   = rest.includes('--force');
+
+/** Read a `--name value` flag. Returns null when absent; throws on a missing value. */
+function arg(name) {
+  const i = rest.indexOf(`--${name}`);
+  if (i === -1) return null;
+  const v = rest[i + 1];
+  if (v == null || v.startsWith('--')) throw new Error(`--${name} needs a value.`);
+  return v;
+}
 
 function connect() {
   const emulator = process.env.FIREBASE_DATABASE_EMULATOR_HOST;
@@ -402,11 +418,143 @@ async function deleteGame(db) {
   await commit('delete game/ (profiles/ untouched)', () => db.ref('game').remove());
 }
 
+// ── Throwaway draft seasons (WS-J's rehearsal season) ────────────────────────
+//
+// A draft season is absent from the public `seasonList`, readable only by admin +
+// alpha, and lives on its own `seasons/{id}` / `seasonSecrets/{id}` subtrees — so
+// nothing it does touches live data. There is no creation UI (`SeasonSwitcher` only
+// switches), which is why these two commands exist.
+//
+// ⚠️ A draft isolates the DATA, not the FUNCTIONS. Testing against one still needs
+// the current `functions/` deployed, and that deploy is global.
+
+async function createDraft(db) {
+  const id = arg('id');
+  if (!id) throw new Error('create-draft needs --id <seasonId>.');
+  if (!/^[A-Za-z0-9_-]+$/.test(id))
+    throw new Error('--id must be a plain RTDB key (letters, digits, _ or -).');
+
+  const label  = arg('label') ?? id;
+  const shell  = arg('shell') ?? 'casino';
+  if (shell !== 'casino' && shell !== 'map')
+    throw new Error("--shell must be 'casino' or 'map'.");
+  const board  = arg('board');                       // map shells only; absent ⇒ s1
+  const tables = Number(arg('tables') ?? '2');
+  if (!Number.isInteger(tables) || tables < 0)
+    throw new Error('--tables must be a non-negative integer.');
+  const alphas = (arg('alpha') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
+  // Never touch a season the public can see, whatever the flags say.
+  const listed = await db.ref(`config/seasonList/${id}`).get();
+  if (listed.exists())
+    throw new Error(`${id} is in the PUBLIC seasonList (status: ${listed.val()?.status}) — not a draft. Refusing.`);
+
+  const [draftSnap, metaSnap, adminSnap, alphaSnap] = await Promise.all([
+    db.ref(`config/draftSeasons/${id}`).get(),
+    db.ref(`seasons/${id}/meta`).get(),
+    db.ref('config/adminId').get(),
+    db.ref('config/alphaUsers').get(),
+  ]);
+  if (!adminSnap.exists())
+    throw new Error('config/adminId is missing — run seed-config first.');
+  if ((draftSnap.exists() || metaSnap.exists()) && !FORCE)
+    throw new Error(`${id} already exists as a draft. Re-run with --force to reset its entry + meta.`);
+
+  const entry = {
+    label,
+    shell,
+    ...(shell === 'casino' ? { casinoOpenTables: tables } : {}),
+    ...(board ? { board } : {}),
+  };
+  const seed = Math.floor(Math.random() * 0x7fffffff);
+
+  // Alpha grants are per-uid LEAF writes, never a set() of the node: this must add
+  // testers without dropping whoever is already allowed to preview other drafts.
+  const updates = {
+    [`config/draftSeasons/${id}`]: entry,
+    [`seasons/${id}/meta`]:        { initialized: true, seed },
+  };
+  for (const uid of alphas) updates[`config/alphaUsers/${uid}`] = true;
+
+  console.log(`create-draft: ${id} — "${label}", shell=${shell}` +
+              (shell === 'casino' ? `, casinoOpenTables=${tables}` : `, board=${board ?? 's1 (default)'}`));
+  console.log(`  seasons/${id}/meta seed ${seed}`);
+  if (alphas.length) console.log(`  + ${alphas.length} alpha grant(s): ${alphas.join(', ')}`);
+
+  const alphaTotal = Object.keys(alphaSnap.val() ?? {}).length + alphas.length;
+  if (alphaTotal === 0) {
+    console.log('  ⚠ NOBODY can see this season. `resolveWriteSeason` refuses a draft to anyone');
+    console.log('    who is not admin or alpha, and the same pair gates the draftSeasons READ —');
+    console.log('    so an unlisted account cannot even pick it in the switcher. Pass');
+    console.log('    --alpha uid,uid for every test account.');
+  }
+
+  await commit(`write config/draftSeasons/${id} + seasons/${id}/meta`,
+    () => db.ref().update(updates));
+
+  console.log('');
+  console.log('  Next, in the app:');
+  console.log('   1. Each account: admin dashboard → SeasonSwitcher → this season.');
+  console.log('      (The choice is localStorage, so it is per browser profile.)');
+  console.log('   2. Player records appear by themselves — `ensureSeasonPlayer` runs on every');
+  console.log('      load and exists for exactly this case.');
+  if (shell === 'casino') {
+    console.log('   3. ⚠️ Seed the ordinary tables BEFORE opening the finale: Admin → Missions →');
+    console.log('      "Open Casino Tables". `seedInitialMissions` counts every forming casino');
+    console.log('      mission toward casinoOpenTables — the finale included — so opening it');
+    console.log('      first leaves you a table short.');
+    console.log('   4. Admin → Casino → ✦ The Finale. Set the close 20–30 minutes out.');
+  }
+  console.log('');
+  console.log(`  Tear-down when finished: drop-draft --id ${id} --force`);
+}
+
+async function dropDraft(db) {
+  const id = arg('id');
+  if (!id) throw new Error('drop-draft needs --id <seasonId>.');
+
+  const listed = await db.ref(`config/seasonList/${id}`).get();
+  if (listed.exists())
+    throw new Error(`${id} is in the PUBLIC seasonList (status: ${listed.val()?.status}) — refusing to delete a launched season.`);
+
+  const draftSnap = await db.ref(`config/draftSeasons/${id}`).get();
+  if (!draftSnap.exists() && !FORCE)
+    throw new Error(`${id} is not a listed draft. Re-run with --force to clear its subtrees anyway.`);
+
+  const [playersSnap, missionsSnap] = await Promise.all([
+    db.ref(`seasons/${id}/players`).get(),
+    db.ref(`seasons/${id}/missions`).get(),
+  ]);
+  console.log(`drop-draft: ${id} — ${Object.keys(playersSnap.val() ?? {}).length} player record(s), ` +
+              `${Object.keys(missionsSnap.val() ?? {}).length} live mission(s)`);
+
+  if (!FORCE && !DRY_RUN)
+    throw new Error('drop-draft permanently deletes the season. Re-run with --dry-run to preview, or --force to commit.');
+
+  await commit(`delete ${id} (config entry, season tree, secrets, telemetry)`,
+    () => db.ref().update({
+      [`config/draftSeasons/${id}`]: null,
+      [`seasons/${id}`]:             null,
+      [`seasonSecrets/${id}`]:       null,
+      [`roomTelemetry/${id}`]:       null,
+    }));
+
+  // Deliberately NOT touched: config/alphaUsers (those grants are per-person and
+  // almost certainly wanted for the next draft) and profiles/ (cross-season, and
+  // `syncPlayerProfile` is the repair path if a test run dirtied it).
+  console.log('  config/alphaUsers left alone — the grants are per-person, not per-season.');
+  console.log('  Storage is a separate service and is NOT cleared by this script. Delete by hand:');
+  console.log(`    yaml/${id}/      (tile + mission configs)`);
+  console.log(`    casino/${id}/    (casino seat configs)`);
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 const COMMANDS = {
   'archive-s1':          archiveS1,
   'seed-config':         seedConfig,
   'create-casino-draft': createCasinoDraft,
+  'create-draft':        createDraft,
+  'drop-draft':          dropDraft,
   'kmk-migrate':         kmkMigrate,
   'reseed-casino':       reseedCasino,
   'migrate-claims':      migrateClaims,
@@ -421,6 +569,7 @@ async function main() {
     console.error(`Unknown command: ${command ?? '(none)'}`);
     console.error(`Commands: ${Object.keys(COMMANDS).join(', ')}`);
     console.error('Flags: --dry-run --force');
+    console.error('create-draft/drop-draft also take: --id --label --shell --board --tables --alpha');
     process.exit(1);
   }
   if (DRY_RUN) console.log('=== DRY RUN — no writes will be committed ===');

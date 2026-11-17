@@ -13,10 +13,11 @@ import { seatGames, type SeatGame } from './seatGames';
 import { useLastSettled } from './useLastSettled';
 import OddsTrio from './OddsTrio';
 import { DeckPreview } from '../../casino/DeckPreview';
-import { CASINO_GAMES, CASINO_GAME_ORDER, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, seatSpend, type CasinoGame } from '../../lib/casinoData';
+import { CASINO_GAMES, CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED, DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, isFinale, seatSpend, FINALE_GAME, type CasinoGame } from '../../lib/casinoData';
+import { FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_MIN_GOLD, FINALE_MAX_GOLD, FINALE_REBUY_GOLD } from '../../lib/finaleStars';
 import { CASINO_START_GOLD, NAME_COLORS, nameColorValue } from '../../lib/constants';
 import type { CasinoDeckChoice } from '../../types';
-import { awaitingRoom, roomGoalProgress, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, seatTally } from '../../lib/missionLogic';
+import { awaitingRoom, roomGoalProgress, currentMaxSlots, msToNextDecay, missionDisplayLabel, missionClockOrigin, casinoSeatPaid, fmtDayClock, fmtDur, seatTally, finaleEntryClosed, findFinale } from '../../lib/missionLogic';
 import { missionClaimCapacity } from '../../lib/gameLogic';
 import { claimableCount } from '../../lib/slotHelpers';
 import { toRoman } from '../../lib/constants';
@@ -44,15 +45,6 @@ function loadView(): View {
 
 const seatHue = (i: number): number => [75, 200, 295, 30, 150, 260, 340, 110][i % 8];
 
-// Compact "1d 4h" / "5h" / "40m" for a forward duration.
-function fmtDur(ms: number): string {
-  const m = Math.max(0, Math.round(ms / 60000));
-  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), min = m % 60;
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${min}m`;
-  return `${min}m`;
-}
-
 // Seat pips: ALL baseMax seats are drawn, so decay is visible — seats past the
 // (decayed) max show as closed, and the last still-open seat pulses when a decay
 // step is pending. Mirrors the map's mission pips.
@@ -77,6 +69,36 @@ function SeatPips({ m, now }: { m: GMMission; now: number }) {
     pips.push(<span key={i} className={cls} style={{ '--ph': seatHue(i) } as React.CSSProperties} />);
   }
   return <div className="rl-pips">{pips}</div>;
+}
+
+/**
+ * The finale's entry clock — what SeatPips and DecayNote together are to an
+ * ordinary table. A finale is time-limited rather than seat-limited: it has no
+ * cap to draw pips against (`baseMax` is 0) and nothing decays, so the deadline
+ * is the only thing on its card that moves on its own.
+ *
+ * Three readings, one per phase. ⚠️ The middle one is the easy mistake: entry
+ * closing does NOT deploy the table, so this must not say the finale has started
+ * or ended — the seats already in are still choosing a row and attaching configs,
+ * and a player reading 'closed' needs to understand it as 'too late to enter',
+ * not 'over'. The third covers a half-written finale with no deadline at all,
+ * which `finaleEntryClosed` deliberately treats as never closing rather than as
+ * closing at once — so the card says so instead of silently reading as open.
+ */
+function FinaleEntryNote({ m, now }: { m: GMMission; now: number }) {
+  const at = m.finaleClosesAt;
+  if (at == null) return <span className="rl-decay closed">No closing time set yet</span>;
+  // The shared predicate, not a second `now >= at` — it is what the server gate,
+  // the cap and the admin panel all read, so the card can never disagree with them.
+  if (finaleEntryClosed(m, now)) {
+    return <span className="rl-fin-clock closed">Entry closed — the seats already in are locking theirs in</span>;
+  }
+  const left = at - now;
+  return (
+    <span className={`rl-fin-clock${left <= 86_400_000 ? ' soon' : ''}`}>
+      Entry closes in {fmtDur(left)}
+    </span>
+  );
 }
 
 // One-line decay status: how long until the next seat closes, or how many have.
@@ -111,22 +133,38 @@ interface TableCardProps {
   /** Gold a seat must have on hand to see the game through — see `seatBuyIn`. */
   buyIn: number;
   canAfford: boolean;
+  /**
+   * Finale only: this player has already locked a row, so they may never enter
+   * again (`mission.finalePlays`, one play each). The server refuses it with
+   * `finale-already-played`, and nothing else on the card can tell — the seat is
+   * gone, the table is free, and no claim is held — so without this the card
+   * offers a button that can only fail.
+   */
+  spent?: boolean;
   onSit: (m: GMMission) => void;
 }
 
-function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, onSit }: TableCardProps) {
+function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, spent, onSit }: TableCardProps) {
   const game    = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg     = CASINO_GAMES[game];
+  const finale  = isFinale(m);
   // `full` gates the seat button and must use the real cap; everything shown to
   // the player reads off the tally, which can't fall below the seats already taken.
   const tally   = seatTally(m, now);
   const seats   = Object.values(m.participants ?? {});
   const filled  = seats.length;
   const played  = seats.filter(p => p.played).length;
+  // Needs NO finale arm, which is the point of closing the cap rather than
+  // deploying: `currentMaxSlots` is Infinity while entry is open (never full) and
+  // the seated count once it closes (always full). Only the WORDING forks below,
+  // exactly as `enlistInMission`'s refusal does.
   const full    = filled >= currentMaxSlots(m, now);
   const ante    = cfg.ante;
 
-  const takeable = !locked && !full && canAfford;
+  // The finale is free and borrows no claim, so neither the gold gate nor the
+  // all-claims-in-use lock can shut it (the caller already forces `locked` false).
+  // The deadline and one-play-each are the only two things that can.
+  const takeable = finale ? !full && !spent : !locked && !full && canAfford;
 
   return (
     <div className={`rl-tcard${seatedHere ? ' seated-here' : ''}${locked && !seatedHere ? ' locked' : ''}`}>
@@ -134,41 +172,91 @@ function TableCard({ m, now, seatedHere, locked, lockLabel, buyIn, canAfford, on
       <div className="rl-tcard-felt">
         <div className="rl-tcard-name">
           {cfg.label}
-          <span className="rl-pot">
-            <span className="n">{m.pot ?? 0}</span><span className="u">g pot</span>
-            {/* What one seat can expect: the pot split across the seats still in. */}
-            <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, tally.max))}g ea</span>
-          </span>
+          {finale
+            // The finale has NO POT and must never grow one (a nonzero pot switches
+            // the whole weighted split back on — see `freshFinaleTable`), so the
+            // figure every other card leads with would read a flat 0g. What a player
+            // is actually choosing between is a board's worth, so print that instead.
+            ? <span className="rl-pot">
+                <span className="n">{FINALE_BASE_GOLD}</span>
+                <span className="u">g + {FINALE_GOLD_PER_STAR}g a ★</span>
+                <span className="s">{FINALE_MIN_GOLD}–{FINALE_MAX_GOLD}g a board</span>
+              </span>
+            : <span className="rl-pot">
+                <span className="n">{m.pot ?? 0}</span><span className="u">g pot</span>
+                {/* What one seat can expect: the pot split across the seats still in. */}
+                <span className="s">≈{Math.floor((m.pot ?? 0) / Math.max(1, tally.max))}g ea</span>
+              </span>}
         </div>
         {/* Status pill sits on the cohort line, matching the live cards. */}
         <div className="rl-tcard-room rl-room-status">
-          <span>Cohort {toRoman(m.series)}</span>
+          {/* It runs once, so it has no cohort number to show — "Cohort I" implies
+              a second one is coming. Same reasoning as `sit`'s flash label. */}
+          <span>{finale ? 'The season closer · free · once · no claim' : `Cohort ${toRoman(m.series)}`}</span>
           {seatedHere
             ? <span className="rl-badge seated">Your seat</span>
             : full
-              ? <span className="rl-badge open">Table full</span>
-              : <span className="rl-badge ready">Taking seats</span>}
+              // "Table full" is a lie about a table with no seat cap, and the one
+              // that would mislead most: it reads as "someone beat you to it".
+              ? <span className="rl-badge open">{finale ? 'Entry closed' : 'Table full'}</span>
+              : <span className="rl-badge ready">{finale ? 'Open to everyone' : 'Taking seats'}</span>}
         </div>
       </div>
       <div className="rl-tcard-body">
-        <SeatPips m={m} now={now} />
-        <DecayNote m={m} now={now} />
-        {m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
+        {/* No cap ⇒ no pips (`baseMax` is 0, so SeatPips would draw an empty rail)
+            and nothing to decay. The deadline takes both their places. */}
+        {finale
+          ? <FinaleEntryNote m={m} now={now} />
+          : <><SeatPips m={m} now={now} /><DecayNote m={m} now={now} /></>}
+        {/* The finale's Release and Collect are the host's FINAL PICK, not odds to
+            roll (D1), so it shows the decided flags the in-progress cards show.
+            `casinoStats` holds them as 100/0 purely so the roll would reproduce the
+            pick if it ever ran — rendering that through OddsTrio would advertise a
+            100% chance of something already certain. */}
+        {finale
+          ? <RollFlags m={m} />
+          : m.casinoStats && <OddsTrio stats={m.casinoStats} open={m.casinoOpenStats} />}
         <div className="rl-tcard-stats">
-          <div className="rl-mini" title={tally.title}><span className="rl-mini-lbl">Seats</span><span className="rl-mini-val">{tally.label}</span></div>
+          {/* `tally.label` is already "N seated" for a finale, which would read as
+              "Entered: 7 seated" — so the number alone under its own heading. */}
+          <div className="rl-mini" title={tally.title}><span className="rl-mini-lbl">{finale ? 'Entered' : 'Seats'}</span><span className="rl-mini-val">{finale ? filled : tally.label}</span></div>
           <div className="rl-mini"><span className="rl-mini-lbl">Played</span><span className="rl-mini-val">{played}</span></div>
-          <div className="rl-mini"><span className="rl-mini-lbl">Ante</span><span className="rl-mini-val gold">{ante}g</span></div>
+          <div className="rl-mini"><span className="rl-mini-lbl">{finale ? 'Entry' : 'Ante'}</span><span className="rl-mini-val gold">{finale ? 'Free' : `${ante}g`}</span></div>
         </div>
+        {/* `casinoEntryCosts` already states the finale's rebuy here, which is how
+            it reaches the player BEFORE they open the table. A zero reads as Free
+            rather than "0g" — nothing else in the rotation has a free cost line. */}
         <div className="rl-entry">
-          {(m.entryCosts ?? []).map((c, i) => <span key={i}>{c.label} <b>{c.gold}g</b></span>)}
+          {(m.entryCosts ?? []).map((c, i) => <span key={i}>{c.label} <b>{c.gold === 0 ? 'Free' : `${c.gold}g`}</b></span>)}
         </div>
+        {finale && (
+          // The inverse star scale is the one mechanic nobody guesses, so it is said
+          // out loud on every surface that offers the table (plan §2) — here, in the
+          // Games modal, and in the help section.
+          <p className="rl-fin-note">
+            It costs you <b>no claim</b>, so enter however many tables you are already holding.
+            Pull the arm for a 3×5 board, take <b>one row</b>, and keep as many of its five cards
+            as you are willing to play. Each card is worth 1–5 ★ set <b>inverse</b> to how often
+            the season picked it, so the games fewer people chose pay the most. Fold the board and a
+            fresh one costs {FINALE_REBUY_GOLD}g.
+          </p>
+        )}
         <div className="rl-tcard-foot rl-foot-end">
           {seatedHere
             ? <span className="rl-time">You're seated here</span>
-            : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
-                title={locked ? lockLabel : !canAfford ? `Need ${buyIn}g to play this table through` : full ? 'Table full' : undefined}>
-                {locked ? lockLabel : !canAfford ? 'Not enough gold' : 'Take a seat'}
-              </button>}
+            : finale
+              ? (spent
+                  // One play each, and it is spent. A disabled button would invite
+                  // a retry; say what happened instead.
+                  ? <span className="rl-time">You've played the finale</span>
+                  : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
+                      title={full ? 'Entry to the finale has closed' : undefined}>
+                      {full ? 'Entry closed' : 'Enter the finale'}
+                    </button>)
+              : <button className="rl-btn primary" disabled={!takeable} onClick={() => onSit(m)}
+                  title={locked ? lockLabel : !canAfford ? `Need ${buyIn}g to play this table through` : full ? 'Table full' : undefined}>
+                  {locked ? lockLabel : !canAfford ? 'Not enough gold' : 'Take a seat'}
+                </button>}
         </div>
       </div>
     </div>
@@ -217,6 +305,12 @@ const liveClockFrom = (m: GMMission): number | undefined => m.linkedAt ?? (m.lin
 function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (m: GMMission) => void }) {
   const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg   = CASINO_GAMES[game];
+  // ⚠️ The read-only twin of `TableCard`, and it needs the SAME finale forks — it
+  // went in without them and rendered `0g pot` and `Cohort I` on the season closer,
+  // both of which every other finale surface is careful never to say. A card that
+  // only appears once the table is live is easy to miss while building one that is
+  // all about sitting down.
+  const finale = isFinale(m);
   const seats = Object.values(m.participants ?? {}).length;
   const { goaled, total } = roomGoalProgress(m);
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
@@ -240,10 +334,22 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
       <div className="rl-tcard-felt">
         <div className="rl-tcard-name">
           {cfg.label}
-          <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>
+          {/* No pot, and it must stay that way — a nonzero one switches the whole
+              weighted split back on (see `freshFinaleTable`), so `0g pot` is not just
+              uninformative, it advertises the thing that must not happen. Print what
+              a board is worth instead, exactly as the entry card does. */}
+          {finale
+            ? <span className="rl-pot">
+                <span className="n">{FINALE_BASE_GOLD}</span>
+                <span className="u">g + {FINALE_GOLD_PER_STAR}g a ★</span>
+                <span className="s">{FINALE_MIN_GOLD}–{FINALE_MAX_GOLD}g a board</span>
+              </span>
+            : <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>}
         </div>
         <div className="rl-tcard-room rl-room-status">
-          <span>Cohort {toRoman(m.series)}</span>
+          {/* "Cohort I" promises a second one. Same reasoning as `missionDisplayLabel`
+              and its server mirror. */}
+          <span>{finale ? 'The season closer' : `Cohort ${toRoman(m.series)}`}</span>
           {pending
             ? <span className="rl-badge pending">Awaiting room</span>
             : <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>}
@@ -253,7 +359,11 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
         {pending ? (
           <div className="rl-pending-mini">
             <span className="rl-pending-icon">⏳</span>
-            <span>Seats are locked in. Waiting on the host to generate this table.</span>
+            {/* The finale closed its entry rather than filling up, so "seats are
+                locked in" describes the wrong event — nobody was racing for a seat. */}
+            <span>{finale
+              ? 'Entry has closed and every seat locked in. Waiting on the host to build the room.'
+              : 'Seats are locked in. Waiting on the host to generate this table.'}</span>
           </div>
         ) : (
           <div className="mp-complete-wrap">
@@ -296,7 +406,17 @@ function Modal({ title, tag, onClose, children, wide }: { title: string; tag: st
   );
 }
 
-function GamesModal({ onClose }: { onClose: () => void }) {
+/**
+ * Tonight's tables. Iterates CASINO_GAME_ORDER — the ROTATION — plus the finale,
+ * and only when the host has actually opened it.
+ *
+ * ⚠️ The finale is deliberately NOT in the rotation, and must not be added to it
+ * to get it listed here (that array drives respawn, the series counters and
+ * `minCasinoAnte`). This modal answers *what can I sit down at tonight*, so a
+ * permanent entry would advertise a one-off table in every season, including
+ * seasons where it does not exist — hence the flag rather than a longer array.
+ */
+function GamesModal({ finale, onClose }: { finale: boolean; onClose: () => void }) {
   // Same deck preview the table offers, brought to the landing so a player can see
   // exactly what's in each deck before ever sitting down. Rendered as a sibling of
   // the Modal so its lightbox (z-index 120) stacks above this modal's overlay.
@@ -304,17 +424,26 @@ function GamesModal({ onClose }: { onClose: () => void }) {
   return (
     <>
       <Modal title="The Games" tag="Tonight's Tables" onClose={onClose}>
-        {CASINO_GAME_ORDER.map(g => {
-          const c = CASINO_GAMES[g];
-          const cost = [`${c.ante}g ante`, c.reroll ? `${c.rerollCost}g reroll` : '', c.playOn ? `${c.playOn}g play-on` : '']
-            .filter(Boolean).join(' · ');
+        {[...CASINO_GAME_ORDER, ...(finale ? [FINALE_GAME] : [])].map(g => {
+          const c   = CASINO_GAMES[g];
+          const fin = g === FINALE_GAME;
+          // The finale's ante/reroll/play-on are all 0, so the generic line would
+          // read "0g ante" — true and useless. Its one charge is the fold rebuy.
+          const cost = fin
+            ? `Free · ${FINALE_REBUY_GOLD}g rebuy after a fold`
+            : [`${c.ante}g ante`, c.reroll ? `${c.rerollCost}g reroll` : '', c.playOn ? `${c.playOn}g play-on` : '']
+              .filter(Boolean).join(' · ');
           return (
             <div key={g} style={{ borderTop: '1px solid var(--border)', padding: '0.7rem 0' }}>
               <div className="rl-spread" style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span className="rl-mini-val gold">{c.label}</span>
                 <span className="rl-mini-val">{cost}</span>
               </div>
-              <div className="rl-muted">Commit up to {c.pickMax} cards{c.sittings === 2 ? ' · two sittings (hole cards, then community reveal)' : ''}.</div>
+              <div className="rl-muted">
+                {fin
+                  ? <>Take <b>one row</b> of five from a 3×5 board and keep the cards you will play. Each pays {FINALE_GOLD_PER_STAR}g a ★ over a {FINALE_BASE_GOLD}g base, and a card's ★ run <b>inverse</b> to how often the season picked it.</>
+                  : <>Commit up to {c.pickMax} cards{c.sittings === 2 ? ' · two sittings (hole cards, then community reveal)' : ''}.</>}
+              </div>
             </div>
           );
         })}
@@ -428,7 +557,9 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
   const { gold, net, tablesPlayed, biggestWin, history } = stats;
   const hasCoat  = (player?.inventory?.['coat_of_many_colors'] ?? 0) > 0;
   const done     = player?.casinoGamesCompleted ?? {};
-  const doneCount = CASINO_GAME_ORDER.filter(g => done[g]).length;
+  // Counted over COAT_TABLE_TYPES (the rotation plus the finale), not the
+  // rotation — the finale is a route to the Coat like any other table type.
+  const doneCount = COAT_TABLE_TYPES.filter(g => done[g]).length;
 
   return (
     <Modal title={name || 'Your Profile'} tag="At the Casino" onClose={onClose}>
@@ -461,15 +592,21 @@ function ProfileModal({ name, uid, player, stats, onSetColor, onSignOut, onClose
         ) : (
           <div className="rl-prof-coat">
             <p className="rl-muted" style={{ margin: 0 }}>
-              Complete a table of all four games to earn the <b>Coat of Many Colors</b> and unlock name colors.
+              Complete a table of <b>any {COAT_TYPES_REQUIRED} of the {COAT_TABLE_TYPES.length} table types</b> to earn
+              the <b>Coat of Many Colors</b> and unlock name colors.
             </p>
             <div className="rl-prof-coatprog">
-              {CASINO_GAME_ORDER.map(g => (
+              {/* One pip per TYPE — five of them — against a requirement of four, so
+                  a player can see they have a spare route. The count is clamped
+                  because a player who plays all five would otherwise read 5/4. */}
+              {COAT_TABLE_TYPES.map(g => (
                 <span key={g} className={`rl-prof-coatpip${done[g] ? ' on' : ''}`} title={CASINO_GAMES[g].label}>
                   {done[g] ? '✓' : '·'}
                 </span>
               ))}
-              <span className="rl-mini-lbl" style={{ marginLeft: '0.4rem' }}>{doneCount}/4</span>
+              <span className="rl-mini-lbl" style={{ marginLeft: '0.4rem' }}>
+                {Math.min(doneCount, COAT_TYPES_REQUIRED)}/{COAT_TYPES_REQUIRED}
+              </span>
             </div>
           </div>
         )}
@@ -664,7 +801,13 @@ export default function CasinoShell({ onBack }: Props = {}) {
     const all = Object.values(gameState?.missions ?? {});
     return all
       .filter(m => m.type === 'casino' && m.state === 'forming')
-      .sort((a, b) => (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '') || a.series - b.series);
+      // The finale leads. It is the season's closer, it runs once, and entry is
+      // time-limited — so burying it alphabetically mid-list (between Blackjack
+      // and Five Card Draw, as it happens) is the one ordering that loses it.
+      .sort((a, b) =>
+        (Number(isFinale(b)) - Number(isFinale(a)))
+        || (a.casinoGame ?? '').localeCompare(b.casinoGame ?? '')
+        || a.series - b.series);
   }, [gameState?.missions]);
 
   // Every table the player holds a seat at right now — pooled claims mean this can
@@ -733,12 +876,29 @@ export default function CasinoShell({ onBack }: Props = {}) {
   // A RESTRICTED player never gets a claim back early — it is held until the table
   // itself settles, not the moment their own games are done. Without this the lock
   // just looks broken: they finished their slots and the seat button stayed shut.
-  const lockNote  = me?.restricted === true && locked
-    ? 'Your account is restricted — a claim comes back when the whole table settles, not when your own games are done.'
+  //
+  // The finale is the exception, so the note has to say so: it costs no claim, so
+  // a player at capacity can still enter it — and a flat "all claims in use" above
+  // a finale card that IS enterable reads as a bug.
+  const finaleOpen = tables.some(isFinale);
+  const lockNote   = locked && (me?.restricted === true || finaleOpen)
+    ? [
+        me?.restricted === true
+          ? 'Your account is restricted — a claim comes back when the whole table settles, not when your own games are done.'
+          : 'All your claims are in use, so the tables below are closed to you for now.',
+        finaleOpen
+          ? 'The Finale is open to you regardless: it costs no claim, so you can enter it however many tables you are holding.'
+          : '',
+      ].filter(Boolean).join(' ')
     : null;
 
   const sit = (m: GMMission) => {
-    const label = `${CASINO_GAMES[(m.casinoGame ?? 'five_card_draw') as CasinoGame].label} · Cohort ${toRoman(m.series)}`;
+    const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
+    // The finale runs once, so it has no cohort number to show — "The Finale ·
+    // Cohort I" implies a second one is coming.
+    const label = isFinale(m)
+      ? CASINO_GAMES[game].label
+      : `${CASINO_GAMES[game].label} · Cohort ${toRoman(m.series)}`;
     setSitFlash(label);
     window.setTimeout(() => setSitFlash(null), 2200);
     void enlistInMission(m.id, label);
@@ -852,11 +1012,17 @@ export default function CasinoShell({ onBack }: Props = {}) {
           : <div className={`rl-grid${isFloor ? ' rl-grid-tight' : ''}`}>
               {tables.map(m => {
                 const buyIn = seatBuyIn((m.casinoGame ?? 'five_card_draw') as CasinoGame);
+                // ⚠️ The finale consumes NO claim, so the all-claims-in-use lock
+                // must not close it. Without this a player holding a table would
+                // see the one table they are guaranteed entry to shut against
+                // them — and the server would have let them in.
+                const barred = locked && !isFinale(m);
                 return (
                   <TableCard key={m.id} m={m} now={now}
                     seatedHere={myTableIds.has(m.id)}
-                    locked={locked} lockLabel={lockLabel}
+                    locked={barred} lockLabel={lockLabel}
                     buyIn={buyIn} canAfford={gold >= buyIn}
+                    spent={!!user?.id && m.finalePlays?.[user.id]?.played === true}
                     onSit={sit} />
                 );
               })}
@@ -920,7 +1086,7 @@ export default function CasinoShell({ onBack }: Props = {}) {
         </Modal>
       )}
 
-      {modal === 'games' && <GamesModal onClose={() => setModal(null)} />}
+      {modal === 'games' && <GamesModal finale={!!findFinale(gameState?.missions, gameState?.missionsHistory)} onClose={() => setModal(null)} />}
       {modal === 'feed'  && <FeedModal entries={activityLog} now={now} onClose={() => setModal(null)} />}
       {modal === 'profile' && user && (
         <ProfileModal

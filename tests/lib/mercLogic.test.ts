@@ -177,6 +177,37 @@ describe('mercHireBlockers', () => {
     const t = slot();
     expect(mercHireBlockers(t, [null, t, undefined, slot()], false)).toEqual([]);
   });
+
+  // ── The finale ──
+  //
+  // Its reward is priced in the STARS of the cards you personally spun for, so
+  // handing 60% of it to someone who never pulled the arm reads as selling your
+  // spin. It is a blocker like any other rather than an absolute bar, which is
+  // what makes it soft for the admin (D3 — the host keeps the right to hire one).
+
+  it('blocks every slot of a finale seat, however many they hold', () => {
+    const [a, b, c] = [slot(), slot(), slot()];
+    expect(mercHireBlockers(b, [a, b, c], true, true)).toEqual(['finale']);
+    // Not an arithmetic limit — it does not care how many are already merced,
+    // and it stacks with the ones that are.
+    a.merc = merc('m');
+    expect(mercHireBlockers(b, [a, b, c], true, true)).toEqual(['finale', 'casinoLimit']);
+  });
+
+  it('defaults to off, so every existing caller is unchanged', () => {
+    // The parameter is optional precisely so the live tables keep their exact
+    // behaviour with no call site touched.
+    const [a, b, c] = [slot(), slot(), slot()];
+    expect(mercHireBlockers(b, [a, b, c], true)).toEqual([]);
+    expect(mercHireBlockers(b, [a, b, c], true, false)).toEqual([]);
+  });
+
+  it('still reports `claimed` on a finale card taken over from someone else', () => {
+    // Both are permanent for the slot and MercControl hides the affordance on
+    // either — but the host is shown both reasons.
+    const t = slot({ claimed: true });
+    expect(mercHireBlockers(t, [t, slot(), slot()], true, true)).toEqual(['claimed', 'finale']);
+  });
 });
 
 describe('mercCandidateBlockers', () => {
@@ -217,5 +248,40 @@ describe('claimRefusal', () => {
 
   it('a cleared restriction (null) is not a restriction', () => {
     expect(claimRefusal({}, { id: 'x', restricted: null })).toBeNull();
+  });
+
+  // ── The finale lifts the restricted bar, and ONLY that one ──
+  //
+  // ⚠️ `claimMissionSlot` inlines its own copy of this function's rule. These tests
+  // cover the client half; the server half is the same carve-out in that callable,
+  // and doing one without the other offers a restricted player a button the server
+  // refuses (or refuses them a claim the server would allow).
+
+  it('lets a restricted player claim a finale card', () => {
+    // The celebration nobody is excluded from, and a player willing to finish an
+    // abandoned 5★ card is doing the room a favour. Restriction exists to stop a
+    // player overextending; the finale is free, consumes no claim and runs to the
+    // end of the season, so there is no extension to curb.
+    expect(claimRefusal({ casinoGame: 'finale' }, { id: 'x', restricted: true })).toBeNull();
+  });
+
+  it('still refuses the player the finale card was KICKED from', () => {
+    // ⚠️ The order of the two checks is the point. Whether you abandoned this very
+    // card is a different question from whether you are overextended, so the
+    // carve-out sits BELOW the kicked test — above it, a player could reclaim the
+    // card they walked away from.
+    const world = { casinoGame: 'finale' as const, kickedPlayers: { k: { at: 1 } } };
+    expect(claimRefusal(world, { id: 'k' })).toBe('kicked');
+    // …and one who was kicked AND is restricted is still refused, as kicked.
+    expect(claimRefusal(world, { id: 'k', restricted: true })).toBe('kicked');
+  });
+
+  it('does not lift the bar on an ordinary casino table', () => {
+    expect(claimRefusal({ casinoGame: 'blackjack' }, { id: 'x', restricted: true }))
+      .toBe('restricted');
+  });
+
+  it('does not lift the bar on a tile, which carries no casinoGame at all', () => {
+    expect(claimRefusal({}, { id: 'x', restricted: true })).toBe('restricted');
   });
 });
