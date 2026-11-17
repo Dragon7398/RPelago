@@ -1263,6 +1263,32 @@ inline, for the reason the last round established.
     > which is what the report pointed at, would have left the same wrong number on
     > the landing and in the deck picker.
 
+11. **← Back from the manifest walked a finale seat into two dead ends**
+    (`CasinoTable`). The button was a flat `setPhase('gambit')`. The finale has no
+    gambit step — the host hand-picks the odds — so it landed on a screen whose
+    only forward action calls `dealGambitOffer`, which refuses the seat; and THAT
+    screen's own "← Back to cards" then dropped them on `play`: the ordinary commit
+    screen, cards priced in card gold rather than stars, with a Fold wired to
+    `casinoFold`. Two unrecoverable screens, reached by pressing Back twice.
+
+    > **This is the audit from #8 having been wrong.** That pass checked
+    > `backToCards` — correctly concluding it renders only inside `gambit` — and
+    > never asked how the MANIFEST goes back. Worse, the fork already existed
+    > twelve lines away: the resubmit branch reads
+    > `game === 'finale' ? 'keep' : 'play'` while the first-submit branch did not.
+    > Checking a few suspicious call sites is not an audit; **enumerating every
+    > `setPhase` and asking which are reachable from the finale's phases is**, and
+    > that is what was done this time (the deck badge, ← Change deck and ← Back to
+    > config all turned out to be gated on `ante` / `play`, so the set is closed).
+
+    The rule is now **`backFromManifest(game)`**, beside `openingPhase`. It exposed
+    a second defect underneath: `FinaleBoard` is mounted only for
+    `armed | spinning | reroll | rowpick | keep`, so the manifest UNMOUNTS it and
+    takes `row` / `dropped` with it — a step back to `keep` would have rendered an
+    inert board with no row taken. The parent already holds both facts
+    (`finaleRow`, and the `keep` set it built from the chosen row), so it seeds
+    them back through `initialRow` / `initialDropped`, read once at mount.
+
 > **The pattern this time.** Three of the six (#1, #3, #4) are **two-step
 > read-then-write** sequences that a single client can interleave, and one (#4) was
 > introduced by the previous fix. The finale is the only table where the money and

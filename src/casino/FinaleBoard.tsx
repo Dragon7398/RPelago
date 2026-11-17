@@ -49,6 +49,20 @@ interface Props {
   onBackToRows:() => void;
   onFold:      () => void;
   onCommit:    (row: 1 | 2 | 3, keepUids: number[]) => void;
+  /**
+   * Seeds for the keep screen, read ONCE at mount.
+   *
+   * ⚠️ This component is mounted only for `armed | spinning | reroll | rowpick |
+   * keep`, so moving to the manifest UNMOUNTS it and `row` / `dropped` — which
+   * live here — are gone. A step back from the manifest therefore returned the
+   * player to a board with no row taken and nothing dropped: the tally and the
+   * commit button are both gated on `row`, so the screen rendered inert. The
+   * parent keeps both facts anyway (`finaleRow`, and the `keep` set it built from
+   * the chosen row), so it hands them back rather than this component having to
+   * outlive its own screen.
+   */
+  initialRow?:     1 | 2 | 3 | null;
+  initialDropped?: number[];
 }
 
 const CARD_W = 104;
@@ -73,13 +87,17 @@ function Stars({ n, name }: { n: number; name: string }) {
 export default function FinaleBoard({
   phase, board, stars, deckChoice, rebuyCost, entryClosed, armBlocked, busy,
   onArm, onSpinDone, onReroll, onSkipReroll, onPickRow, onBackToRows, onFold, onCommit,
+  initialRow, initialDropped,
 }: Props) {
   // How many reels have stopped. Only meaningful while `spinning`; every other
   // phase shows the whole board.
   const [settled, setSettled] = useState(0);
   const [picked,  setPicked]  = useState<number[]>([]);
-  const [row,     setRow]     = useState<1 | 2 | 3 | null>(null);
-  const [dropped, setDropped] = useState<Set<number>>(new Set());
+  // Mount-time seeds only — see `initialRow`. They must not fight later updates,
+  // which is exactly what useState's initial value gives us: a fresh spin mounts
+  // with them absent, and a step back from the manifest mounts with them set.
+  const [row,     setRow]     = useState<1 | 2 | 3 | null>(initialRow ?? null);
+  const [dropped, setDropped] = useState<Set<number>>(() => new Set(initialDropped ?? []));
   const [confirmFold, setConfirmFold] = useState(false);
 
   // ── Resetting on a phase or board change ────────────────────────────────────

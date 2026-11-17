@@ -82,6 +82,23 @@ function openingPhase(game: CasinoGame | null | undefined): Phase {
   return game === 'finale' ? 'armed' : 'ante';
 }
 
+/**
+ * Where a step BACK from the manifest lands.
+ *
+ * ⚠️ The finale has NO gambit step — the host hand-picks the room's odds, so there
+ * is nothing to draw and `dealGambitOffer` refuses the seat outright. Sending it
+ * to `gambit` stranded the player on a screen whose only forward action errors,
+ * and THAT screen's own "← Back to cards" then dropped them on `play`: the
+ * ordinary commit screen, cards priced in card gold rather than stars, with a Fold
+ * wired to `casinoFold` (which also refuses). Two dead ends in a row, reached by
+ * pressing Back twice.
+ *
+ * The finale's flow is rowpick → keep → manifest, so back is the kept row.
+ */
+function backFromManifest(game: CasinoGame | null | undefined): Phase {
+  return game === 'finale' ? 'keep' : 'gambit';
+}
+
 const GAME_BLURB: Record<CasinoGame, string> = {
   five_card_draw:
     'Five cards, one hand. Mark any you would rather not play — reroll them once for a ' +
@@ -792,6 +809,18 @@ export function CasinoTable() {
 
   /** The seat's star snapshot and fold history, both frozen on the mission. */
   const finaleStarMap = useMemo(() => mission?.finaleStars ?? {}, [mission?.finaleStars]);
+  // The drops the player made on their kept row, re-derived from the parent's own
+  // `keep` set so a step back from the manifest can restore the keep screen —
+  // FinaleBoard unmounts there and loses its copy. See `Props.initialRow`.
+  const finaleDroppedUids = useMemo(() => {
+    if (game !== 'finale' || finaleRow == null) return [];
+    const board = secretBoard ?? [];
+    return finaleRowIndices(finaleRow)
+      .map(i => board[i])
+      .filter((c): c is DeckCard => !!c)
+      .filter(c => !keep.has(c.uid))
+      .map(c => c.uid);
+  }, [game, finaleRow, secretBoard, keep]);
   const finaleFolds   = uid ? mission?.finalePlays?.[uid]?.folds ?? 0 : 0;
   const finaleRebuy   = finaleBoardCost({ folds: finaleFolds });
   const finaleRerolled = uid ? mission?.participants?.[uid]?.finaleRerolled ?? null : null;
@@ -1091,7 +1120,7 @@ export function CasinoTable() {
   const showBackToCards = game !== 'holdem' || !mySeat?.playedOn || canRePick;
   const backToCards = () => {
     if (game === 'holdem' && mySeat?.playedOn) { if (canRePick) startRePick(); return; }
-    setPhase(game === 'holdem' ? 'holdplay' : 'play');
+    setPhase(game === 'finale' ? 'keep' : game === 'holdem' ? 'holdplay' : 'play');
   };
 
   const manifestReady = committedCards.filter(c => (manifest[c.uid]?.game ?? '').trim().length > 0).length;
@@ -1443,6 +1472,8 @@ export function CasinoTable() {
                 phase={phase}
                 board={secretBoard ?? []}
                 stars={finaleStarMap}
+                initialRow={finaleRow}
+                initialDropped={finaleDroppedUids}
                 deckChoice={effectiveDeckChoice}
                 rebuyCost={finaleRebuy}
                 entryClosed={finaleClosed}
@@ -1892,7 +1923,7 @@ export function CasinoTable() {
                       <button className="cz-btn" disabled={busy} onClick={cancelResubmit}>Cancel</button>
                     </>
                   ) : (
-                    <button className="cz-btn" disabled={busy} onClick={() => setPhase('gambit')}>← Back</button>
+                    <button className="cz-btn" disabled={busy} onClick={() => setPhase(backFromManifest(game))}>← Back</button>
                   )}
                   <button className="cz-btn primary" disabled={busy || !canSubmit} onClick={doSubmit}>
                     {busy ? 'Submitting…' : resubmitting ? 'Resubmit to guildmaster →' : 'Submit to guildmaster →'}
