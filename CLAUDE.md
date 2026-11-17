@@ -825,6 +825,18 @@ The table is opened with URL params `?missionId=<id>&mission=<label>`. Each seat
 
 The economy is tuned as a whole — antes, card values, and the pot formula are balanced against each other so two average cards turn a modest profit. **Re-run `npm run econ` after touching any of them**; it models real tables from the live engine values.
 
+> **`npm run econ` structurally cannot see the finale** — it iterates
+> `CASINO_GAME_ORDER` (which must never contain the finale), and its model is
+> ante-in / pot-out, while the finale antes nothing, has no pot and pays a closed
+> form off stars. **`npm run econ:finale`** (`scripts/econFinale.ts`) is the other
+> half: 40k sittings a cell off the live engine, reporting expected payout per seat
+> by **cards kept** — because keeping a card *is* agreeing to play it, so the
+> season's exposure is bounded by the floor's appetite for Archipelago rather than
+> by anything in the code. Everything it pays is **money-in with nothing against
+> it**; the rebuy is the only money-out and is deliberately unmodelled, a fold
+> being a judgement call rather than a rate. Re-run it after touching the star
+> tiers, `FINALE_BASE_GOLD` / `FINALE_GOLD_PER_STAR`, or the board shape.
+
 > **`CasinoGame` includes `'finale'`, and `CASINO_GAME_ORDER` deliberately does NOT.**
 > The finale is the season closer (a one-off Slots table; see
 > [docs/casino-finale-slots-impl.md](docs/casino-finale-slots-impl.md)), so it is a
@@ -966,6 +978,139 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > table you anted into and false of a free, universal one that runs to the end of
 > the season — counting it would strike the `CASINO_GOLD_FLOOR` guarantee from
 > everyone who entered.
+
+> **The finale is a `casino` mission, so it INHERITS every path written for an
+> ordinary table — and inheritance is silent.** This is the recurring trap, and it
+> cost five separate walk-arounds found in one audit. The guard is
+> **`mustCasinoSeat`, which now REFUSES the finale** (`allowFinale` opts one caller
+> back in). Without it a finale seat satisfies every check the ten shared casino
+> callables rely on, and each then does something the finale has no answer for:
+> `dealCasinoHand` deals a **free fifteen-card hand** (its ante is 0),
+> `casinoFold` folds without recording a fold against the rebuy, the gambit pair
+> shifts odds the host HAND-PICKED and adds to a pot that must stay at zero (which
+> switches the weighted split back on), and `lockCasinoResult` commits the best
+> five of the fifteen **priced off card gold rather than stars**, never stamping
+> `finalePlays.played`. Only `setCasinoDeckChoice` is genuinely shared — and it
+> needs its own finale arm, because the finale holds no `hand` (its pool is the
+> `board`), so the ordinary freeze sees an empty seat and would let a player spin
+> a Safety board and lock it in as Purist. **When adding a casino callable, decide
+> explicitly which side of this line it is on.**
+
+> **`enlistInMission` refuses a player who is ALREADY SEATED (`already-seated`).**
+> It writes the participant record wholesale and runs `clearSeatSecrets`, so an
+> enlist over a seat you hold is a silent reset. On the finale that is an unlimited
+> free respin that undoes D5 outright — `finalePlays.folds` lives on the MISSION
+> and only `foldFinaleBoard` increments it, so re-entering wipes the board without
+> paying or counting a fold. On an ordinary table it destroys a LOCKED seat
+> (`played`, `slots`, `lockedCards`, the `goldSwing` settlement pays) for an ante
+> already spent. Leaving a table is `standDownFromMission`.
+>
+> ⚠️ **…which is why `standDownFromMission` counts a FOLD when a finale seat holds
+> a board.** The `already-seated` guard above cannot see this one: stand-down
+> deletes the seat and `clearSeatSecrets` wipes the board, so the player is *not*
+> seated when they re-enlist, and `dealFinaleBoard` charges off
+> `finalePlays.folds`, which never moved — pull the arm, dislike the board, stand
+> down, re-enter, spin again free, forever. Leaving with a board in front of you is
+> a fold, logged as one, and `finalePlays` living on the MISSION is what makes it
+> outlive the seat. A player who **never spun** pays nothing (no board, no fold),
+> which is also why the `startBy` idle sweep counts none — it only removes seats
+> that never pulled the arm.
+
+> **The finale's deadline closes ENTRY, not PLAY — so `dealFinaleBoard` bars the
+> REBUY and never the first board.** The rule is **`finaleBoardRefusal`**
+> (`src/lib/finaleStars.ts` ↔ `functions/src/casinoEngine.ts`), read by the callable
+> AND by the arm screen's `armBlocked`, so the button and the server can never
+> disagree about whether a fold is recoverable — the fold dialog's copy turns on
+> exactly that. Enlisting is
+> entry, and `enlistInMission` is already the gate for it through
+> `gmCurrentMaxSlots`; by the time anyone reaches the deal they were let in. A flat
+> deadline test there silently took the entry away from whoever enlisted in the
+> last few minutes: a live *Pull the arm* the server rejected, until the idle sweep
+> removed them having never spun. `lockFinaleResult` draws the same line by
+> carrying **no** deadline check at all. Folding past the close stays self-healing
+> — there is no way back, so `foldFinaleBoard` re-arms `startBy` for the sweep —
+> and `FinaleBoard` takes **`entryClosed`** so the fold warning, its danger-button
+> label and the arm screen all say what will actually happen. ⚠️ The fold dialog
+> must never promise *"the last board you will pay for"*: folding is unlimited, at
+> the rebuy each time.
+
+> **`GMParticipant.removedCardUids` keeps a struck card out of the re-pick pool.**
+> `adminRemoveCasinoSlot` rewrites `slots` / `lockedCards` / `goldSwing` but cannot
+> touch the seat's dealt POOL (the secret hand, the hole+community, the finale
+> row), which is what `resubmitCasinoYaml` re-selects from — so a denied player
+> could re-pick the card the host had just taken off them. After a **kick** that
+> card is live as someone else's claimable slot, so the room holds two slots for
+> one card and the pot pays weight for both; after a **void** its weight is already
+> released, so re-picking over-pays against a denominator that has shrunk. The
+> filter is **`repickPool`** (`src/lib/casinoSlots.ts` ↔
+> `functions/src/casinoEngine.ts`), applied on **both** sides — the callable and
+> `CasinoTable`'s `resubmitPool` — or the client offers a card the server refuses.
+> ⚠️ **Own cards only**: a claimed card's
+> uid is a per-deck index from ANOTHER player's deck, so recording one could
+> exclude an unrelated own card that shares the number. That same collision is why
+> `startResubmit` pairs `lockedCards` against `slots` by index and seeds only the
+> unclaimed — seeding across both uid spaces pre-selects the wrong card and stamps
+> a claimed card's game onto an own one.
+
+> **The struck card's SHARE has to be held out too, and that is the other half of
+> the same bug.** `repickPool` keeps the card out of the pool; **`repickLockedCount`**
+> (`src/lib/casinoSlots.ts` ↔ `functions/src/casinoEngine.ts`) keeps its pot weight
+> out of the denominator. A re-pick restamps `lockedCount`, and restamping it to the
+> new, smaller hand returns the seat to a **full unit** while the fraction a void
+> released (`casinoVoidedShare`) or a kick reserved on the claim entry is still
+> carved out elsewhere — so the table pays out more than its pot. That is the same
+> over-pay arriving by the other door, and the pool filter cannot see it, because
+> weight is computed from the new COUNT and not from which cards were picked. So on
+> a **live** table the struck cards stay in the denominator: the seat sits at
+> `committed/(committed + struck)`.
+>
+> ⚠️ **Only while live.** Pre-deploy there is nothing to conserve —
+> `casinoShareUnits` is banked AT deploy and a forming void skips the
+> `casinoVoidedShare` increment entirely — so a forming seat is one whole unit
+> however often its hand is rebuilt, and carrying strikes there would underpay it
+> for nothing. The one residual is a card struck while forming and re-picked after
+> deploy, which counts without ever having released anything: an underpay of one
+> card's share, which is the direction this pot errs in by design (an unclaimed kick
+> reserve is never paid either).
+
+> **`deckChoiceOf` prices off `finaleDeck` — the deck the board was actually DEALT
+> from — not the player's standing `deckChoice`.** `setCasinoDeckChoice` refuses to
+> move once a finale board exists (the board IS the hand there, and it has no
+> `hand` for the ordinary guard to see), but that refusal reads the board and writes
+> the choice in **two steps**: a client firing it and `dealFinaleBoard` together can
+> land the change behind the deal and then lock the very same cards in at the other
+> variant's boost — Safety deals the small deck at −10%, Purist pays +10%. So the
+> deal **stamps** the variant it used and every pricing site reads the stamp. One
+> accessor, both copies (`casinoData.ts` ↔ `casinoEngine.ts`), so all four
+> `goldSwing` writers and the client's own quote move together; ordinary tables never
+> write `finaleDeck`, so it is exactly `deckChoice` for them. **A fold nulls the
+> stamp** — the board it described is gone and the picker is reachable again, so
+> leaving it would price the next board off the last one's deck. `seatDeckChoice` in
+> `CasinoTable` stays the raw PICK, since that is what the picker highlights.
+
+> **`dealFinaleBoard` clears NOTHING, and a loser of its board race writes nothing
+> at all.** The per-board flags are nulled by `foldFinaleBoard`, atomically with the
+> board they belong to, and a fresh seat is written wholesale by `enlistInMission` —
+> so they are already clean by the time anyone reaches the deal. It briefly
+> pre-cleared them anyway, "harmlessly", ahead of the claim transaction: two tabs
+> both pass the fast path, the winner's board lands, the player spends their reroll,
+> and then the **loser's** pre-clear nulls `finaleRerolled` on its way to losing —
+> handing back a second free reroll on a board that already had one. A write a loser
+> must not make is a write that does not belong before the claim.
+
+> **`gmMissionLabel` (server) mirrors `missionDisplayLabel` (client) — change
+> both.** The finale runs once, so it has no cohort to number; *"The Finale ·
+> Cohort I"* reads as a promise of a second one. The **server** copy is the one
+> players see most: the deploy notification, the activity log, the slot-removal
+> warning and the status-incident warning are all written there.
+
+> **Voiding a locked finale seat ENDS that player's finale**, unlike every other
+> void, which is no-fault and leaves no mark. `finalePlays.played` lives on the
+> mission precisely so it outlives the seat, so there is no re-entry. The ⊘ confirm
+> on `MissionsPage` therefore names which case the host is in — locked in (cannot
+> re-enter) or never locked in (may re-enter; the fold count, and so the rebuy,
+> carries over). The host's undo, if they want one, is nulling
+> `finalePlays/{uid}` by hand.
 
 > **A finale card must not borrow an ordinary table's instrument — three of them
 > state something FALSE about it, not merely redundant.** The landing's

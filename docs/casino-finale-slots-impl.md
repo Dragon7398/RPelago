@@ -1027,20 +1027,363 @@ and a player with all four games still is.
 
 ---
 
+### WS-I½ — The pre-rehearsal audit — ✅ DONE
+
+An adversarial read of the finished code, before the rehearsal rather than after.
+It found **five ways to walk around the design** and two pieces of copy that
+promise the opposite of what the server does. All are fixed. The entries worth
+keeping are the ones where the finale inherits an ordinary table's machinery and
+the inheritance is wrong.
+
+**1. `mustCasinoSeat` accepted a finale seat, and that was the big one.** The
+finale is a `casino` mission in `forming` state, so it satisfies every check in
+the guard the other ten casino callables share — and `isFinale` appeared nowhere
+in it. A player could therefore call `dealCasinoHand` (ante 0, deal size 15: a
+**free fifteen-card hand**), `casinoFold` as often as they liked with no fold
+recorded against the rebuy, `dealGambitOffer` / `playCasinoGambit` (shifting the
+odds the host HAND-PICKED and adding to a pot that must stay at zero, which would
+switch the weighted split back on), and finally `lockCasinoResult` — committing
+the best five of those fifteen, **priced off card gold rather than stars**, with
+no row limit and no `finalePlays.played` stamp. That chain walks around rows,
+stars, the rebuy, D1 and D5 together. The guard now refuses the finale, with one
+opt-in: `setCasinoDeckChoice`, which the finale genuinely shares.
+
+**2. The deck could be swapped after seeing the board.** `setCasinoDeckChoice`
+froze the choice on `seat.hand`, and a finale seat has no hand — its pool is the
+`board`. Since `lockFinaleResult` reads `deckChoiceOf(seat)` at LOCK, a player
+could spin a Safety board (−10%) and lock the same cards in as Purist (+10%). The
+board is the hand here, and now freezes the deck exactly as a hand does.
+
+**3. Re-enlisting was an unlimited free respin.** `enlistInMission` never checked
+whether the caller was already seated: it writes the participant record wholesale
+and runs `clearSeatSecrets`, so re-entering wiped the board without paying — or
+counting — a fold. `finalePlays.folds` lives on the mission and only
+`foldFinaleBoard` increments it, so the next board was free again. **This is also
+a bug on every other table**, where a re-enlist destroys a LOCKED seat (`played`,
+`slots`, `lockedCards`, `goldSwing`) for an ante already spent. Now refused with
+`already-seated`; leaving a table is `standDownFromMission`.
+
+**4. The deadline refused the FIRST board, not just the rebuy — the correction
+that matters most.** §11's reading was that a seat past the close must not buy a
+fresh board, and the check was written as a flat deadline test. But **the deadline
+closes ENTRY, and enlisting is entry**: `enlistInMission` is the gate (through
+`gmCurrentMaxSlots`, which is why there is no second copy of the deadline there),
+so anyone reaching `dealFinaleBoard` was already let in. A player who enlisted
+minutes before the close was shown a live *Pull the arm* that the server rejected,
+until the idle sweep removed them having never spun — the entry taken away from
+them silently. It now gates on `cost > 0`: **first board always, rebuy never.**
+That is the same distinction `lockFinaleResult` already drew by carrying no
+deadline check at all, and folding past the close stays self-healing, because
+`foldFinaleBoard` re-arms `startBy` and hands the seat to the sweep.
+
+**5. The fold dialog promised a rebuy that no longer existed.** It read *"a fresh
+one costs 50g"* and *"this is the last board you will pay for"* — the first false
+once entry has closed (folding then forfeits the finale outright), the second
+false always (folding is unlimited, at 50g each). `FinaleBoard` now takes
+`entryClosed` and forks all three places that depend on it: the fold warning, its
+danger-button label, and the arm screen, which blocks only when entry has closed
+**and** this would be a rebuy — and otherwise tells a straggler the table is
+waiting on them.
+
+**Also fixed, same pass:**
+
+- **A double-charged rebuy.** `dealFinaleBoard`'s "you already have a board" check
+  sat outside the gold transaction, so two tabs could both pay 50g and the second
+  board overwrite the first. The board write is now a transaction of its own and
+  is what decides the race; the loser is refunded by `increment`.
+- **The server still said "Cohort I".** `missionDisplayLabel` had the finale
+  branch; `gmMissionLabel` did not — and the server copy is the one players see
+  most (the deploy notification, the activity log, the slot-removal warning, the
+  status-incident warning). Mirrored.
+- **A struck card could be re-picked.** `adminRemoveCasinoSlot` rewrites
+  `slots` / `lockedCards` / `goldSwing` but cannot touch the seat's dealt POOL,
+  which is what `resubmitCasinoYaml` re-selects from — so a denied player could
+  re-pick the card the host had just taken off them. After a KICK that card is
+  live as someone else's claimable slot, so the room would hold two slots for one
+  card and the pot would pay weight for both; after a VOID its weight is already
+  released, so re-picking over-pays against a shrunken denominator. Struck OWN
+  cards are now recorded in `GMParticipant.removedCardUids` and filtered out of
+  the pool on both sides. Claimed cards are deliberately not recorded — their uid
+  belongs to another player's deck. **Not finale-specific**, but the deny path is
+  exercised by the rehearsal.
+- **`startResubmit` pre-selected by uid across both uid spaces.** It seeded the
+  selection and the manifest from the whole of `lockedCards`, claimed cards
+  included — and a claimed card's uid is a per-deck index from another player's
+  deck, so it can coincide with an own card's. The result pre-selects the wrong
+  card and stamps the claimed card's game onto an own one. Now paired by index and
+  filtered to own cards, matching `splitSeatCards` server-side. **Also not
+  finale-specific.**
+- **Voiding a locked finale seat ends that player's finale**, because
+  `finalePlays.played` lives on the mission precisely so it outlives the seat.
+  Everywhere else a void is no-fault and leaves no mark. The ⊘ confirm now says
+  which of the two cases the host is looking at — locked in (cannot re-enter) or
+  never locked in (may re-enter, rebuy still applies).
+- **Two stale comments**: `doFinaleCommit` still said the manifest submits through
+  `lockCasinoResult` (it routes to `lockFinaleResult`), and `clearSeatSecrets`
+  said an orphaned board trips `mustCasinoSeat` (it never read `board`, and now
+  refuses the finale outright anyway).
+
+> **The pattern worth carrying into the rehearsal.** Four of these five are the
+> same mistake: the finale is a `casino` mission, so it *inherits* every path
+> written for an ordinary table, and inheritance is silent. The rehearsal drives
+> the UI, and the UI never offers any of them — so **none of 1–3 can be found by
+> playing**. They need a client calling the callables directly, which is why WS-J
+> step 0 below exists.
+
+---
+
+### WS-I¾ — The second audit (the money paths) — ✅ DONE
+
+A review of the WS-I½ diff itself, which found six more. Where the first audit was
+about the finale **inheriting** ordinary-table callables, this one is about the
+opposite: paths the finale's own fixes had moved, raced, or described wrongly. Four
+are server bugs and two are copy that states something false.
+
+1. **A card re-pick restored the seat's full pot weight** (`resubmitCasinoYaml`).
+   `lockedCount` was restamped to the new hand size, so a seat that had a card
+   **voided** (its `1/lockedCount` released to the table via `casinoVoidedShare`)
+   or **kicked** (reserved on the claim entry) went back to a *whole unit* while
+   that fraction was still carved out elsewhere — the table paying out more than
+   its pot. This is the same over-pay `repickPool` was added to stop, arriving by
+   the other door, and the pool filter structurally cannot catch it: weight is
+   computed from the new COUNT, not from which cards were picked. Now
+   **`repickLockedCount`** (`casinoSlots.ts` ↔ `casinoEngine.ts`), which holds
+   struck cards in the denominator on a LIVE table and leaves a forming seat at one
+   whole unit (nothing is banked pre-deploy). Residual, deliberately: a card struck
+   while forming and re-picked after deploy underpays by one card's share, which is
+   the direction this pot errs in by design.
+2. **Stand-down was a free respin** (`standDownFromMission`). The new
+   `already-seated` guard closes re-enlisting *over* a seat, but stand-down deletes
+   the seat first — so pull the arm, dislike the board, stand down, re-enter, and
+   `dealFinaleBoard` charges 0 because `finalePlays.folds` never moved. D5 bypassed
+   entirely, repeatable. **Leaving with a board in front of you is now a fold**,
+   logged as one. A player who never spun still pays nothing, which is also why the
+   `startBy` sweep counts none.
+3. **The deck could still be swapped behind the deal** (`setCasinoDeckChoice`). Its
+   board check is a read and a write in two steps, so a client firing it alongside
+   `dealFinaleBoard` lands the change after the deal read the old value — spin on
+   Safety (−10%, small deck), lock the same cards in at Purist (+10%). The guard
+   made it unlikely, not impossible. The deal now **stamps** `finaleDeck` with the
+   variant it used and `deckChoiceOf` prefers the stamp, so all four `goldSwing`
+   writers and the client's own quote price off the board that was actually dealt.
+   A fold nulls the stamp. Ordinary tables never write it, so nothing else moves.
+4. **The deal's pre-clear could wipe the winner's reroll flag** (`dealFinaleBoard`)
+   — a bug WS-I½ introduced while fixing the board race. Two tabs pass the fast
+   path; the winner's board lands; the player spends their reroll; the **loser's**
+   pre-clear then nulls `finaleRerolled` on its way to losing, handing back a second
+   free reroll. The comment claiming those nulls cost the winner nothing was simply
+   wrong. The deal now clears **nothing** — `foldFinaleBoard` already nulls both
+   per-board flags atomically with the board, and a fresh seat is written wholesale
+   — so a loser writes nothing at all.
+5. **The seat-removal confirm promised a rebuy that would not be charged**
+   (`MissionsPage`). It told the host the fold count carries over "so a fresh board
+   still costs them the rebuy" for *every* unlocked seat, including one that had
+   never folded — whose next board is free. The host voids the seat believing they
+   have cost the player something and hands them a free respin. It now reads
+   `mission.finalePlays[uid].folds` and says which case it is.
+6. **The blocked-arm copy narrated a fold it cannot see** (`FinaleBoard`). It said
+   entry closed *while that board was in front of you* and that folding it *ended
+   your finale* — true in one path, false when the fold happened days before the
+   deadline, or on a seat that was swept and re-entered. It now says only what
+   `finaleBoardRefusal` established: entry is closed, and a board after a fold is a
+   rebuy.
+
+**Tests**: 11 new, all mutation-verified — reverting #1 fails 3 and reverting #3 on
+the client alone fails 2, including the `engine.test.ts` parity guard catching the
+mirror drift by itself. Both new rules are named, pure and mirrored rather than
+inline, for the reason the last round established.
+
+> **The pattern this time.** Three of the six (#1, #3, #4) are **two-step
+> read-then-write** sequences that a single client can interleave, and one (#4) was
+> introduced by the previous fix. The finale is the only table where the money and
+> the pool both live behind one button a player can press twice, so *"who wins the
+> race, and what does the loser still write?"* is the question to ask of every
+> write on these paths. The other two are copy asserting a cause the code never
+> checked — the same failure as a stale comment, but pointed at a player.
+
+---
+
 ### WS-J — Tests and the dress rehearsal
 
 **Spans everything.** This is the finale; a rehearsal is cheaper than a repair.
 
-1. **Unit** (`npm run test:unit`): the star partition and tiebreak (WS-A); the
-   payout formula at both ends (60 and 300 before boost, 330 Purist / 270 Safety);
-   `seatGoldSwingFor` for an own hand, a mixed seat, and a pure claimant; the
-   board→column index mapping for the reroll (`reel`, `+5`, `+10`).
-2. **Regression on the forks** (P2): each of the six shared functions gets a
-   non-finale case alongside its finale one.
-3. **`npm run econ`** — the finale injects gold with no ante against it. Its
-   closed-form payout is outside the pot model the script covers, so it will not
-   model it; the figure to compute by hand is **seats × expected payout**, which is
-   the season's final money-in. Worth knowing before it happens.
+#### The rehearsal season — standing one up
+
+Everything below wants a **throwaway draft season**: absent from the public
+`seasonList`, readable only by admin + alpha, and on its own `seasons/{id}` /
+`seasonSecrets/{id}` subtrees, so nothing it does touches the live season's data.
+There is **no creation UI** — `SeasonSwitcher` only switches — so step 1 is a hand
+write, which the rules permit from the admin's own client (`config/draftSeasons`
+is `.write`-able by `config/adminId`). No functions deploy is involved in making
+it.
+
+1. **The draft entry.** One node, from the Firebase console or a `set()` as admin:
+
+   ```
+   config/draftSeasons/finale_test = {
+     "label": "Finale Rehearsal",
+     "shell": "casino",
+     "casinoOpenTables": 2
+   }
+   ```
+
+   No `board` key — a `casino` shell never reads one.
+
+2. ⚠️ **Alpha-list every test account** — `config/alphaUsers/{uid}: true`. **This
+   is the step that will bite.** Every casino callable runs `resolveWriteSeason`
+   first, and it refuses a `draft` season with `permission-denied` /
+   *"Season not available"* for anyone who is neither admin nor alpha. The admin
+   account is in for free; the others are not — and the same pair gates the
+   `draftSeasons` **read**, so an un-listed account cannot even see the season in
+   the switcher to pick it.
+
+3. **Each account switches via the `SeasonSwitcher`** on the admin dashboard. The
+   choice is `localStorage`, hence per browser profile — which is also how four
+   accounts sit at one table at once.
+
+4. **Player records need no setup.** `ensureSeasonPlayer` is idempotent, runs on
+   every load, and exists for exactly this case (its comment names draft
+   preview). A `casino` shell starts each account at `CASINO_START_GOLD` — ample,
+   since the finale antes nothing and a rebuy is `FINALE_REBUY_GOLD`.
+
+5. ⚠️ **Seed the ordinary tables BEFORE opening the finale.**
+   `seedInitialMissions` counts every `type: 'casino' && state: 'forming'`
+   mission toward `casinoOpenTables` — **the finale among them** — so with the
+   finale already open it will seed one table short. This can never bite live,
+   because the finale opens during `closing` where seeding is a no-op; a draft is
+   `status: 'draft'`, where `gmSpawnAllowed` is true and tables spawn freely, so
+   it bites there. The dress rehearsal needs two ordinary tables anyway, for the
+   account holding two.
+
+6. **The star snapshot will be synthetic, and that is fine for everything but the
+   numbers.** A fresh draft has no settled tables, so `cardStatsCorpus` is empty
+   and every card is ranked on baseline presence alone. The tier *sizes* are
+   fixed (8/7/7/7/8) regardless, so the partition, the payouts and every path
+   checked here exercise correctly — but the values will not resemble what the live
+   season freezes. To rehearse the star table a player will actually read, copy
+   the live season's `missionsHistory` into the draft before opening the finale.
+   Optional; nothing in the mechanics depends on it.
+
+   Then: admin **Casino** tab → **✦ The Finale** (`canOpen` already admits
+   `draft`). Set the close 20–30 minutes out, so one sitting covers
+   open → closed → deployed.
+
+7. **What needs no setup — and one of them is load-bearing.**
+   `tickableSeasons` defaults to `includeDraft = true`, so the 15-minute job runs
+   in the draft: it is what closes the cap, sweeps the account that never spun,
+   and deploys the table. **None of the three phases works without it**, and it
+   costs nothing to have. Likewise the mini-app reads
+   `config/draftSeasons/{sid}/shell` directly and all three link builders pass
+   `?seasonId=`, and the YAML Storage trees are keyed by season id, so
+   owner-scoped uploads just work.
+
+8. **One minimal valid `.yaml` per account.** Screening at `manifest` is real:
+   `checkWorldCount` must match the declared slots, and `checkBlanketTargets`
+   blocks unconditionally.
+
+> ⚠️ **The draft isolates the DATA, not the FUNCTIONS.** All of this needs
+> `firebase deploy --only functions`, which is global. Two items in this diff
+> change **live** behaviour rather than only adding finale paths:
+> `enlistInMission` now refuses `already-seated` (a re-enlist used to silently
+> reset a locked seat — the fix is right, but it is a live change), and
+> `adminRemoveCasinoSlot` now stamps `removedCardUids` (additive). Everything
+> else — `mustCasinoSeat`'s finale refusal, the `gmMissionLabel` branch,
+> `repickPool` — no-ops for an ordinary table. Low risk, not zero; know it before
+> deploying rather than after.
+
+**Tear-down**: `config/draftSeasons/finale_test`, `config/alphaUsers` entries if
+they were added only for this, `seasons/finale_test`,
+`seasonSecrets/finale_test`, `roomTelemetry/finale_test`, and the
+`yaml/finale_test` + `casino/finale_test` Storage trees.
+
+#### The checks
+
+0. **The callables, called directly** — the step the rehearsal cannot cover. Sit a
+   test account at the draft finale and call `dealCasinoHand`, `casinoDraw`,
+   `casinoFold`, `dealGambitOffer`, `playCasinoGambit` and `lockCasinoResult`
+   against it from the console; each must come back *"The finale is played at its
+   own machine."* Then: `setCasinoDeckChoice` **after** pulling the arm (refused —
+   the board freezes the deck), and `enlistInMission` while already seated
+   (`already-seated`). These are the WS-I½ fixes, and **every one of them is
+   invisible through the UI**, which offers none of these paths. A regression here
+   would not surface until someone went looking.
+0a. **The WS-I¾ money paths, also console-only.** Same sitting, same reason:
+   - **Stand-down is not a free respin.** Pull the arm, then
+     `standDownFromMission`, then `enlistInMission` again. The next
+     `dealFinaleBoard` must charge **50g** (`finalePlays/{uid}/folds` is 1 and a
+     `fold` entry is in the `casinoLog`). Standing down *without* a board must
+     charge nothing — that distinction is the whole fix.
+   - **The deck stamp exists and is what prices the board.** After the arm,
+     `participants/{uid}/finaleDeck` must hold the variant the board was dealt
+     from, `setCasinoDeckChoice` must refuse, and the `lock` log entry's
+     `deckChoice` must equal the stamp — not a `deckChoice` changed since. (Firing
+     the two calls concurrently to lose the race on purpose is optional; the stamp
+     is what makes the outcome correct either way.)
+   - **A fold releases the stamp**: `finaleDeck` is null after `foldFinaleBoard`,
+     so the next board prices off the next pick rather than the last one's deck.
+   - **A re-pick does not restore pot weight.** Void one card off a locked
+     five-card seat on a LIVE table, deny the config, re-pick the remaining four:
+     `lockedCount` must still read **5**, not 4. This one is reachable through the
+     UI and belongs in item 4's run as well — it is listed here because the number
+     to check is on the participant record, not on any screen.
+1. **Unit** (`npm run test:unit`) — ✅ **DONE**. The star partition and tiebreak,
+   the payout formula at both ends (60/300 before boost, 330 Purist / 270 Safety),
+   `finaleSeatGold` for an own hand / a mixed seat / a pure claimant (the pure
+   delegate every `seatGoldSwingFor` writer goes through), and the board→column
+   reroll mapping were all already covered by A–I. What was **not** covered was
+   WS-I½'s own fixes, which is where this pass went — see item 1a.
+1a. **The two rules WS-I½ introduced are now named, mirrored and pinned.** Both
+   arrived as inline logic duplicated across the callable and the screen it
+   drives, which is the drift this codebase keeps paying for, so each became one
+   function with a server mirror:
+   - **`finaleBoardRefusal(play, closesAt, now)`** (`finaleStars.ts` ↔
+     `casinoEngine.ts`) — the rebuy-vs-first-board rule, read by `dealFinaleBoard`
+     and by the arm screen's `armBlocked`. Pinned across the close, a missing
+     deadline, and the deadline instant itself.
+   - **`repickPool(pool, seat)`** (`casinoSlots.ts` ↔ `casinoEngine.ts`) — the
+     struck-card filter, read by `resubmitCasinoYaml` and `CasinoTable`'s
+     `resubmitPool`. Pinned including the holes RTDB puts in a sparse array.
+   > **Verified by mutation, not just by green.** Re-introducing the original flat
+   > deadline test failed three tests: the named regression, the
+   > cost/refusal-agreement check, and — usefully — the client/server parity guard
+   > in `engine.test.ts`, which caught the mirror drifting on its own.
+2. **Regression on the forks** (P2) — ✅ **DONE**, and mostly already was. All six
+   are server callables, so each is covered through its pure delegate:
+   `enlistInMission` → `holdsMissionClaim` / `currentMaxSlots` (`finaleEntry`'s
+   *"ordinary tables are unchanged"*, 5 cases); `claimMissionSlot` → `claimRefusal`
+   (`mercLogic`, finale carve-out **and** the kicked/restricted cases it must not
+   lift); `adminRemoveCasinoSlot` / `resubmitCasinoYaml` → `finaleSeatGold` and
+   `cardsToSlots` (*"leaves the ordinary gold line untouched by default"*) plus the
+   new `repickPool` (*"leaves an ordinary seat's pool untouched"*);
+   `tickGuildmasterMissions` → `shouldDeploy` / `finaleEntryClosed` (*"never claims
+   an ordinary table has closed"*); `deployMission` → `pickNextCasinoGame`.
+3. **The economy** — ✅ **DONE**. `npm run econ` is clean and, as predicted, does
+   not model the finale: it iterates `CASINO_GAME_ORDER`, and its whole model is
+   ante-in / pot-out, while the finale antes nothing, has no pot and pays a closed
+   form off stars. Rather than compute the figure by hand once, it is now
+   **`npm run econ:finale`** (`scripts/econFinale.ts`), 40k sittings a cell off the
+   live engine — best of three rows, three weakest reels respun:
+
+   | cards kept | Purist | Unconsoled | Indie | Safety |
+   |---|---|---|---|---|
+   | 1 | 110g | 100g | 100g | 90g |
+   | 2 | 165g | 150g | 150g | 135g |
+   | 3 | 217g | 199g | 199g | 180g |
+   | 4 | 261g | 242g | 242g | 223g |
+   | 5 | 291g | 266g | 276g | 254g |
+
+   **Season money-in = seats × expected payout**, and at 20 seats that is roughly
+   **2,000g** if everyone keeps one card, **~4,000g** at three, **~5,800g** if
+   every seat keeps all five on the best deck. The rebuy is the only money-out and
+   is deliberately not modelled — a fold is a judgement call, not a rate, and
+   assuming one would understate the exposure.
+
+   > **The ceiling is set by the floor's appetite for Archipelago, not by the
+   > code.** Keeping a card *is* agreeing to play it, so the keep-count column is
+   > the real variable and nothing in the system caps it. Note also that keep-1
+   > pays a flat 110g on Purist: across 15 cards, best-of-three-rows, a 5★ is
+   > essentially always available, so the floor of the advertised 60–300g range is
+   > reachable in theory and almost never in practice.
 4. **The dress rehearsal, in a draft season, end to end**: open a finale, seat
    four accounts including one restricted and one holding two other tables, have
    one fold and rebuy, one lock in with five cards, one spin and walk away, one
@@ -1061,8 +1404,9 @@ Functions before frontend, always (CLAUDE.md). Beyond that:
 | **Now, season live** | WS-A, WS-B, WS-H. Invisible to players; H is strictly generous. |
 | **Next** | WS-C, then D and E in parallel. |
 | **Before the finale opens** | ~~WS-F~~ ✅, ~~G~~ ✅, ~~I~~ ✅. (~~H~~ ✅ — shippable any time.) **All code is in; WS-J's rehearsal is what is left.** |
-| **Before the host touches it** | WS-J's rehearsal, in a draft season. |
+| **Before the host touches it** | WS-J's rehearsal, in a draft season — WS-J's *rehearsal season* block is how one is stood up, including the two ordering traps (alpha-list the accounts; seed the ordinary tables first). |
 | **Before the deadline fires** | season → `closing`, so no replacement cohort spawns (§0.7). |
+| **After the deadline, until the finale SETTLES** | season stays `closing` — **do not archive it**. Per D9 the finale runs past the season's end, and an archived season is frozen (`season.writable`), so archiving first would lock the host out of generating the room, running Sync, and settling the table. It also means the finale's **Coat of Many Colors credit only lands at that settle**, since `completeMission` is what grants it. `tickableSeasons` includes `closing`, so everything keeps running meanwhile. |
 
 ---
 

@@ -185,8 +185,26 @@ export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
 export const DECK_VARIANT_ORDER: CasinoDeckChoice[] = ['purist', 'unconsoled', 'indie', 'safety'];
 
 // Participant records predate this feature — treat a missing value as Purist.
-export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
-  return seat.deckChoice ?? 'purist';
+/**
+ * Which deck this seat is PRICED off.
+ *
+ * ⚠️ `finaleDeck` wins when present, and that is the whole point: it is stamped by
+ * `dealFinaleBoard` with the variant the board in front of the player was actually
+ * built from. `setCasinoDeckChoice` refuses to move once a board exists, but that
+ * refusal is a read and a write in two steps — a client firing both calls together
+ * can have the deck change land after the deal has already read it, and then lock
+ * the very same cards in at the other variant's boost (Safety deals the small deck
+ * at −10%, Purist pays +10%). Reading the stamp makes that race unwinnable instead
+ * of merely unlikely.
+ *
+ * Ordinary tables never write `finaleDeck`, so this is exactly `deckChoice` for
+ * them — their deck is frozen by the `hand` guard instead. A fold nulls the stamp,
+ * because the board it described is gone and the player may pick again.
+ */
+export function deckChoiceOf(
+  seat: { deckChoice?: CasinoDeckChoice; finaleDeck?: CasinoDeckChoice },
+): CasinoDeckChoice {
+  return seat.finaleDeck ?? seat.deckChoice ?? 'purist';
 }
 
 // How many cards a given deck variant plays with — for the picker's "N of M" line

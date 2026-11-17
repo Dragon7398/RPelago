@@ -11,7 +11,8 @@
     "test:rules": "firebase emulators:exec --only database --project demo-rpelago \"vitest run\"",
     "test:rules:watch": "firebase emulators:exec --only database --project demo-rpelago \"vitest\"",
     "test:unit": "vitest run tests/casino tests/lib",
-    "econ": "vite-node scripts/econ.ts"
+    "econ": "vite-node scripts/econ.ts",
+    "econ:finale": "vite-node scripts/econFinale.ts"
   },
   "dependencies": {
     "fflate": "^0.8.3",

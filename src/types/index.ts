@@ -618,6 +618,25 @@ export interface GMParticipant {
   // slice of a shrinking hand. Claimed cards never change it (they carry their own
   // fraction from the seat they came from).
   lockedCount?: number;
+  /**
+   * Cards the HOST has struck off this seat (`adminRemoveCasinoSlot`), by uid.
+   *
+   * The admin's removal rewrites `slots` / `lockedCards` / `goldSwing`, but it
+   * cannot touch the seat's dealt POOL — the secret hand, the hole+community, or
+   * the finale row — which is what `resubmitCasinoYaml` re-selects from. Without
+   * this list a denied player simply re-picks the card the host just took off
+   * them: after a KICK that card is live as someone else's claimable slot, so the
+   * room ends up with two slots for one card and the pot pays weight for both;
+   * after a VOID the card was declared unplayable and its weight already released
+   * to the table, so re-picking it over-pays against a denominator that has
+   * already shrunk.
+   *
+   * ⚠️ OWN cards only. A claimed card's uid belongs to ANOTHER player's deck —
+   * `DeckCard.uid` is a per-deck index from 0 — so recording one could exclude an
+   * unrelated own card that happens to share the number. A claimed card is absent
+   * from this seat's pool in any case.
+   */
+  removedCardUids?: number[];
   gambitPlayed?: boolean;            // true once the player has played (or skipped) their gambit
   gambitOffer?:  string[];           // the gambit defIds the server dealt this seat (authoritative — the
                                      // only ones playCasinoGambit will accept); drawn from the shared deck
@@ -654,6 +673,14 @@ export interface GMParticipant {
   finaleRow?:      1 | 2 | 3;
   /** Which reels (0–4) the one free reroll respun, kept for the audit. */
   finaleRerolled?: number[];
+  /**
+   * The deck variant the seat's current BOARD was dealt from, stamped by
+   * `dealFinaleBoard`. Read it through `deckChoiceOf`, which prefers it over
+   * `deckChoice` — the player's standing pick can still move behind a concurrent
+   * deal, and pricing a board off a deck it was not built from is a real gold
+   * difference (±10%). Nulled by a fold, with the board it describes.
+   */
+  finaleDeck?:     CasinoDeckChoice;
 }
 
 export interface GMMission {

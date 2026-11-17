@@ -30,7 +30,7 @@ const MISSION_STATE_BUTTONS: { state: GMMissionState; label: string; cls: string
 // ── Per-participant slot editor — mirrors AdvSlotEditor UX exactly ─────────────
 
 function MissionParticipantSlots({
-  missionId, playerId, participant, locked, isCasino, isLive, mismatchedNames, onKick,
+  missionId, playerId, participant, locked, isCasino, isLive, isFinaleTable, finaleFolds, mismatchedNames, onKick,
 }: {
   missionId: string;
   playerId: string;
@@ -39,6 +39,20 @@ function MissionParticipantSlots({
   isCasino?: boolean;
   /** Mission is in progress — a room exists, so a kicked slot can actually be taken over. */
   isLive?: boolean;
+  /**
+   * The finale. Removing a seat there is NOT the no-fault act it is everywhere
+   * else: `finalePlays/{uid}.played` lives on the mission precisely so it outlives
+   * the seat, so a player who has locked in cannot be let back. The host has to be
+   * told which of the two cases they are looking at before they confirm.
+   */
+  isFinaleTable?: boolean;
+  /**
+   * This player's fold count on the finale, from `mission.finalePlays`. It decides
+   * the removal copy: a seat that has never folded gets its next board FREE, so
+   * telling the host the rebuy still applies would have them hand out a free respin
+   * believing they had done the opposite.
+   */
+  finaleFolds?: number;
   mismatchedNames?: Set<string>;
   onKick: () => void;
 }) {
@@ -128,6 +142,16 @@ function MissionParticipantSlots({
                 : confirmSeat === 'kick'
                   ? `Kick ${who}? Each of their ${slots.length} card${slots.length === 1 ? '' : 's'} reopens as its own open slot, carrying its share of the pot. They are warned and keep nothing.`
                   : `Void ${who}'s seat? Every card is killed — nobody can take them over — and the seat's whole share of the pot returns to the table. No warning is recorded.`}
+              {isFinaleTable && (participant.played
+                ? <><br />⚠ <b>They have already locked in, and the finale is one play each.</b>{' '}
+                  Their play is recorded on the table rather than the seat, so removing it
+                  <b> ends their finale</b> — they cannot re-enter, even while entry is open.</>
+                : <><br />They never locked in, so they may re-enter while entry is open.{' '}
+                  {(finaleFolds ?? 0) > 0
+                    ? <>Their fold count ({finaleFolds}) lives on the table rather than the seat, so it
+                      carries over and a fresh board still costs them the rebuy.</>
+                    : <><b>They have never folded, so their next board would be free</b> — clearing this
+                      seat hands them a fresh spin at no cost.</>}</>)}
             </span>
             <button
               className="dash-action-btn danger"
@@ -1148,6 +1172,8 @@ function MissionCard({ mission, pinned, onInteract }: {
           locked={slotsLocked}
           isCasino={mission.type === 'casino'}
           isLive={mission.state === 'inprogress'}
+          isFinaleTable={isFinale(mission)}
+          finaleFolds={mission.finalePlays?.[pid]?.folds ?? 0}
           mismatchedNames={mismatchedNames}
           onKick={() => adminKickMissionParticipant(mission.id, pid)}
         />

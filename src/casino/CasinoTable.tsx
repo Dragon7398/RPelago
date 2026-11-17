@@ -4,16 +4,16 @@ import { ref, onValue, get } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase/config';
 import { setCurrentSeason, sRef, ownHandPath, ownHolePath, ownBoardPath } from '../firebase/season';
-import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats } from '../types';
+import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats, AdvSlot } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
-  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, CASINO_GAMES, CARD_TYPES, seatSpend,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, deckChoiceOf, CASINO_GAMES, CARD_TYPES, seatSpend,
   FINALE_BOARD_CARDS, finaleRowIndices,
 } from '../lib/casinoData';
 import { holdemPool } from '../lib/casinoEngine';
 import { type GambitCard, GAMBIT_DEFS_BY_ID } from '../lib/casinoGambits';
-import { handStake, handStakeFromSlots, applyDeckBoost } from '../lib/casinoSlots';
-import { finaleBoardCost } from '../lib/finaleStars';
+import { handStake, handStakeFromSlots, applyDeckBoost, repickPool } from '../lib/casinoSlots';
+import { finaleBoardCost, finaleBoardRefusal } from '../lib/finaleStars';
 import FinaleBoard from './FinaleBoard';
 import {
   parseApYaml, checkWorldCount, checkProgressionBalancing, checkBlanketTargets,
@@ -22,7 +22,7 @@ import {
 import { getPlayerFeatIds, yamlLimitsForFeats } from '../lib/gameLogic';
 import { uploadCasinoYaml, MAX_YAML_BYTES } from '../firebase/casinoYaml';
 import { CASINO_START_STATS, DRAGOS_LIST_URL, nameColorValue } from '../lib/constants';
-import { seatTally, estimatedSeatShare } from '../lib/missionLogic';
+import { seatTally, estimatedSeatShare, finaleEntryClosed } from '../lib/missionLogic';
 import { CardFace } from './CardFace';
 import { GambitCardFace } from './GambitCardFace';
 import { PotDisplay, Seat, ChallengePanel, PokerReadout, BlackjackGauge, ResultRow } from './TableComponents';
@@ -609,8 +609,14 @@ export function CasinoTable() {
   const stats    = (mission?.casinoStats ?? CASINO_START_STATS) as CasinoStats;
   const allSeats = Object.values(mission?.participants ?? {});
 
+  // The raw PICK — what the deck picker highlights as current, and what decides
+  // whether the player has chosen at all. Deliberately not the stamp below.
   const seatDeckChoice   = uid ? (mission?.participants?.[uid]?.deckChoice ?? null) : null;
-  const effectiveDeckChoice: CasinoDeckChoice = seatDeckChoice ?? 'purist';
+  // What the cards in front of this seat are PRICED off, which is a different
+  // question once a finale board has been dealt: `deckChoiceOf` prefers the
+  // `finaleDeck` the deal stamped. Everything that previews a payout reads this, so
+  // what the player is quoted is what settlement will pay.
+  const effectiveDeckChoice: CasinoDeckChoice = deckChoiceOf(mission?.participants?.[uid ?? ''] ?? {});
   // The gambit is one-shot and never reopens, so it's what decides where a step
   // BACKWARD rejoins the flow: before it, the gambit screen; after it, Slot Fill.
   const gambitPlayed = uid ? mission?.participants?.[uid]?.gambitPlayed === true : false;
@@ -771,6 +777,18 @@ export function CasinoTable() {
   const finaleFolds   = uid ? mission?.finalePlays?.[uid]?.folds ?? 0 : 0;
   const finaleRebuy   = finaleBoardCost({ folds: finaleFolds });
   const finaleRerolled = uid ? mission?.participants?.[uid]?.finaleRerolled ?? null : null;
+  // The shared predicate, off the ticking `now` — never a second `Date.now() >=`.
+  // It changes nothing a seated player may DO (the deadline closes entry, not
+  // play), but it decides whether a fold is recoverable, which three pieces of the
+  // board's copy promise. See `dealFinaleBoard`.
+  const finaleClosed = !!mission && finaleEntryClosed(mission, now);
+  // Whether the arm itself is dead, decided by the rule the CALLABLE uses rather
+  // than re-derived here: a first board is still dealt after the close, so only a
+  // rebuy is blocked. Re-deriving it as `closed && rebuy > 0` would be a second
+  // copy of a rule that has already been got wrong once.
+  const finaleArmBlocked = !!mission && finaleBoardRefusal(
+    { folds: finaleFolds }, mission.finaleClosesAt, now,
+  ) !== null;
 
   const doFinaleArm = () => run(async () => {
     await call<object, { board: DeckCard[] }>('dealFinaleBoard')({ missionId });
@@ -800,10 +818,9 @@ export function CasinoTable() {
    * uses: `committedCards` is `hand` filtered by `keep`, so seeding both is what
    * makes the finale's chosen row look like any other committed hand.
    *
-   * ⚠️ The LOCK itself is WS-E (`lockFinaleResult`) — the manifest's submit still
-   * calls `lockCasinoResult`, which would reject a finale seat (no gambit) and
-   * would price it off card gold rather than stars. The flow is not end to end
-   * until that lands.
+   * The manifest's submit routes to `lockFinaleResult` for a finale seat (see
+   * `doSubmitManifest`) — NOT `lockCasinoResult`, which refuses a finale outright
+   * and would price the row off card gold rather than stars.
    */
   const doFinaleCommit = (row: 1 | 2 | 3, keepUids: number[]) => {
     const board = secretBoard ?? [];
@@ -1019,11 +1036,16 @@ export function CasinoTable() {
     return finaleRowIndices(row).map(i => board[i]).filter(Boolean);
   }, [secretBoard, mySeat?.finaleRow]);
 
-  const resubmitPool: DeckCard[] = game === 'finale'
+  const rawResubmitPool: DeckCard[] = game === 'finale'
     ? finaleRowPool
     : game === 'holdem'
       ? holdemPool(secretHole ?? [], mission?.community ?? [])
       : (secretHand ?? []);
+  // Cards the host has struck off this seat are out of the pool — the SAME rule
+  // `resubmitCasinoYaml` applies, so we never offer a card the server will refuse
+  // (and, after a kick, one that is already live as somebody else's claimable
+  // slot). See `GMParticipant.removedCardUids`.
+  const resubmitPool: DeckCard[] = repickPool(rawResubmitPool, mySeat);
   const canChangeCards = !!mySeat?.played
     && (mission?.state === 'forming' || (mission?.state === 'inprogress' && yamlDenied))
     && (game === 'finale' ? finaleRowPool.length > 0
@@ -1138,8 +1160,24 @@ export function CasinoTable() {
   // otherwise only the committed cards are loaded. Seeds the manifest from the
   // current slots so a YAML-only tweak loses nothing.
   const startResubmit = () => {
-    const cards = mySeat?.lockedCards ?? [];
-    const slots = mySeat?.slots ?? [];
+    // ⚠️ OWN CARDS ONLY, paired by index exactly as the server's `splitSeatCards`
+    // does. A CLAIMED card came off ANOTHER player's deck, and `DeckCard.uid` is a
+    // per-deck index from 0 — the same collision `COMMUNITY_UID_BASE` exists to
+    // prevent within one pool — so a claimed card's uid can coincide with one of
+    // this seat's own. Seeding the selection and the manifest off the whole of
+    // `lockedCards` therefore pre-selects the wrong card and stamps the claimed
+    // card's game onto an own one, which is what the server then writes.
+    //
+    // Claimed slots are not this player's to re-name in any case: they arrived
+    // complete from a live room, and `resubmitCasinoYaml` carries them through
+    // untouched on BOTH paths (the card re-pick re-appends them after the picked
+    // hand; the config-only path skips every `claimed` slot by index).
+    const seatSlots = (mySeat?.slots ?? []).filter((x): x is AdvSlot => !!x);
+    const ownPairs = (mySeat?.lockedCards ?? [])
+      .filter((c): c is DeckCard => !!c)
+      .map((card, i) => ({ card, slot: seatSlots[i] }))
+      .filter(pair => !pair.slot?.claimed);
+    const cards = ownPairs.map(p => p.card);
     const fullHand = canChangeCards ? resubmitPool : cards;
     setHand(fullHand);
     const committed = new Set(cards.map(c => c.uid));
@@ -1158,7 +1196,9 @@ export function CasinoTable() {
     // and both `lockFinaleResult` and the re-pick pool are scoped by it.
     setFinaleRow(mySeat?.finaleRow ?? null);
     const seeded: Record<number, ManifestVal> = {};
-    cards.forEach((c, i) => { seeded[c.uid] = { name: slots[i]?.name ?? '', game: slots[i]?.game ?? '' }; });
+    ownPairs.forEach(({ card, slot }) => {
+      seeded[card.uid] = { name: slot?.name ?? '', game: slot?.game ?? '' };
+    });
     setManifest(seeded);
     setYamlText(null); setYamlInfo(null); setYamlWarn([]); setPbFindings([]);
     setResubmitting(true);
@@ -1387,6 +1427,8 @@ export function CasinoTable() {
                 stars={finaleStarMap}
                 deckChoice={effectiveDeckChoice}
                 rebuyCost={finaleRebuy}
+                entryClosed={finaleClosed}
+                armBlocked={finaleArmBlocked}
                 busy={busy}
                 onArm={doFinaleArm}
                 onSpinDone={doFinaleSpinDone}

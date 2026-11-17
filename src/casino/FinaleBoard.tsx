@@ -24,6 +24,22 @@ interface Props {
   deckChoice:  CasinoDeckChoice;
   /** What a fresh board would cost right now — 0 the first time, the rebuy after a fold. */
   rebuyCost:   number;
+  /**
+   * Has the entry deadline passed? The deadline closes ENTRY, not play, so this
+   * changes nothing about what a seated player may do with a board they already
+   * hold — but it decides whether there is a board to go BACK to after a fold.
+   * `dealFinaleBoard` allows the first board past the close and refuses only the
+   * rebuy, so folding here forfeits the finale outright. Three pieces of copy
+   * would otherwise state the opposite of what the server will do.
+   */
+  entryClosed: boolean;
+  /**
+   * Is the arm itself dead? Decided by `finaleBoardRefusal` in the container, not
+   * re-derived here, because it is the rule `dealFinaleBoard` enforces — a first
+   * board IS still dealt after the close, and only a rebuy is refused. A second
+   * copy of that rule is exactly what got it wrong the first time.
+   */
+  armBlocked:  boolean;
   busy:        boolean;
   onArm:       () => void;
   onSpinDone:  () => void;
@@ -55,7 +71,7 @@ function Stars({ n, name }: { n: number; name: string }) {
 }
 
 export default function FinaleBoard({
-  phase, board, stars, deckChoice, rebuyCost, busy,
+  phase, board, stars, deckChoice, rebuyCost, entryClosed, armBlocked, busy,
   onArm, onSpinDone, onReroll, onSkipReroll, onPickRow, onBackToRows, onFold, onCommit,
 }: Props) {
   // How many reels have stopped. Only meaningful while `spinning`; every other
@@ -155,27 +171,53 @@ export default function FinaleBoard({
   });
 
   // ── The arm ─────────────────────────────────────────────────────────────────
+  //
+  // `armBlocked` is the ONE state in which the arm cannot be pulled: entry has
+  // closed and this would be a rebuy. A first board is still dealt after the close
+  // (the deadline closes entry, and enlisting is entry — see `finaleBoardRefusal`),
+  // so the live button is correct for a player who enlisted in time and has not
+  // spun yet.
   if (phase === 'armed') {
     return (
       <div className="fin-wrap">
         <div className="fin-head">
-          <h2 className="fin-title">One last Archipelago</h2>
+          <h2 className="fin-title">{armBlocked ? 'The finale has closed' : 'One last Archipelago'}</h2>
           <p className="fin-sub">
-            Three rows, five reels. You will take <strong>one row</strong> and keep only the
-            cards you are willing to play — so the arm is the easy part.
-            {rebuyCost > 0 && <> This board costs <strong>{rebuyCost}g</strong>.</>}
+            {armBlocked ? (
+              // Says only what `finaleBoardRefusal` actually established: entry is
+              // closed and this board would be a rebuy. WHEN the fold happened is
+              // not knowable from here — it may have been days before the deadline,
+              // or on a seat that was swept and re-entered — so the copy must not
+              // claim the close caught them mid-board, nor that this particular
+              // fold is what ended things.
+              <>Entry to the finale has closed, and a board after a fold is a rebuy —
+              so there is no fresh one to buy. Your seat clears itself shortly.</>
+            ) : (
+              <>Three rows, five reels. You will take <strong>one row</strong> and keep only the
+              cards you are willing to play — so the arm is the easy part.
+              {rebuyCost > 0 && <> This board costs <strong>{rebuyCost}g</strong>.</>}</>
+            )}
           </p>
         </div>
+        {entryClosed && !armBlocked && (
+          <div className="fin-note">
+            <strong>Entry has closed and the table is waiting on you.</strong>{' '}
+            You were let in before the deadline, so the spin is still yours — but the
+            finale cannot deploy until you take a row and lock in.
+          </div>
+        )}
         <div className="fin-machine fin-idle" aria-hidden>
           {Array.from({ length: FINALE_ROWS * FINALE_ROW_REELS }, (_, i) => (
             <CardBack key={i} width={CARD_W} variant="medallion" />
           ))}
         </div>
-        <div className="fin-actions">
-          <button className="fin-arm" disabled={busy} onClick={onArm}>
-            {busy ? 'Spinning…' : rebuyCost > 0 ? `⟳ Pull the arm · ${rebuyCost}g` : '⟳ Pull the arm'}
-          </button>
-        </div>
+        {!armBlocked && (
+          <div className="fin-actions">
+            <button className="fin-arm" disabled={busy} onClick={onArm}>
+              {busy ? 'Spinning…' : rebuyCost > 0 ? `⟳ Pull the arm · ${rebuyCost}g` : '⟳ Pull the arm'}
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -317,18 +359,28 @@ export default function FinaleBoard({
 
       {confirmFold ? (
         <div className="fin-fold-warn" role="alertdialog" aria-label="Fold this board">
-          <p>
-            Folding throws this whole board away. A fresh one costs{' '}
-            <strong>{rebuyCost > 0 ? rebuyCost : FINALE_REBUY_GOLD}g</strong> — and the finale can only be
-            <strong> played once</strong>, so this is the last board you will pay for rather than
-            a way to shop around.
-          </p>
+          {entryClosed ? (
+            <p>
+              <strong>Entry to the finale has closed</strong>, so this board cannot be replaced —
+              there is no rebuy left to buy. Folding it now <strong>ends your finale</strong>, and
+              it can only be played once, so there is no second entry either.
+            </p>
+          ) : (
+            <p>
+              Folding throws this whole board away. A fresh one costs{' '}
+              <strong>{rebuyCost > 0 ? rebuyCost : FINALE_REBUY_GOLD}g</strong> — and so does every
+              board after that. The rebuy is charged each time you fold, not once, and it stops
+              being available the moment entry closes.
+            </p>
+          )}
           <p className="fin-fold-why">
-            Worth it only if nothing here is worth playing at the price it pays.
+            {entryClosed
+              ? 'Worth it only if you would rather play nothing at all than anything on this board.'
+              : 'Worth it only if nothing here is worth playing at the price it pays.'}
           </p>
           <div className="fin-actions">
             <button className="fin-danger" disabled={busy} onClick={onFold}>
-              {busy ? '…' : 'Fold the board'}
+              {busy ? '…' : entryClosed ? 'Fold — give up my finale' : 'Fold the board'}
             </button>
             <button className="fin-ghost" disabled={busy} onClick={() => setConfirmFold(false)}>
               Keep looking
@@ -348,7 +400,7 @@ export default function FinaleBoard({
           </>}
           {phase === 'rowpick' && (
             <button className="fin-ghost" disabled={busy} onClick={() => setConfirmFold(true)}>
-              Fold — nothing here is playable
+              {entryClosed ? 'Fold — and give up the finale' : 'Fold — nothing here is playable'}
             </button>
           )}
           {phase === 'keep' && row && <>

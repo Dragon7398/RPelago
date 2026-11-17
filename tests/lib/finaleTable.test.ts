@@ -3,7 +3,7 @@ import {
   CASINO_GAMES, CASINO_GAME_ORDER, FINALE_GAME, isFinale, minCasinoAnte,
   FINALE_ROWS, FINALE_ROW_REELS, FINALE_BOARD_CARDS, FINALE_MAX_REROLL_REELS,
   finaleReelIndices, finaleRowIndices, applyReelRespin, seatSpend,
-  COAT_TABLE_TYPES, COAT_TYPES_REQUIRED,
+  COAT_TABLE_TYPES, COAT_TYPES_REQUIRED, deckChoiceOf,
 } from '../../src/lib/casinoData';
 import {
   currentMaxSlots, msToNextDecay, seatTally, shouldDeploy, finaleEntryClosed, allSeatsPlayed, fmtDur,
@@ -13,10 +13,10 @@ import {
   seatsAwaitingConfig,
 } from '../../src/lib/missionLogic';
 import {
-  FINALE_REBUY_GOLD, finaleBoardCost, finaleOwnGold, finaleClaimedGold,
+  FINALE_REBUY_GOLD, finaleBoardCost, finaleBoardRefusal, finaleOwnGold, finaleClaimedGold,
   FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_MIN_GOLD, FINALE_MAX_GOLD,
 } from '../../src/lib/finaleStars';
-import { cardsToSlots, finaleSlotDetails, handStakeFromSlots } from '../../src/lib/casinoSlots';
+import { cardsToSlots, finaleSlotDetails, handStakeFromSlots, repickPool, repickLockedCount } from '../../src/lib/casinoSlots';
 import type { GMMission } from '../../src/types';
 
 const HOUR = 3_600_000;
@@ -655,6 +655,206 @@ describe('the Coat counts the finale as a table type', () => {
   });
 });
 
+
+// ── Who may still be dealt a board ───────────────────────────────────────────
+//
+// The rule `dealFinaleBoard` enforces and the arm screen renders, said once. The
+// distinction it draws is the one the first implementation got WRONG: the
+// deadline closes ENTRY, and enlisting is entry, so a player who was let in may
+// still take their first board afterwards. A flat deadline test there left them
+// pressing a live button the server rejected until the idle sweep removed them.
+
+describe('finaleBoardRefusal', () => {
+  const DAY = 86_400_000;
+  const first  = { folds: 0 };
+  const rebuy  = { folds: 1 };
+
+  it('allows a FIRST board after entry has closed — the regression', () => {
+    expect(finaleBoardRefusal(first, 1_000, 9_999)).toBeNull();
+    // …including for a seat with no play record at all, which is the shape a
+    // player who enlisted and never spun actually has.
+    expect(finaleBoardRefusal(undefined, 1_000, 9_999)).toBeNull();
+    expect(finaleBoardRefusal({}, 1_000, 9_999)).toBeNull();
+  });
+
+  it('allows a rebuy while entry is still open', () => {
+    expect(finaleBoardRefusal(rebuy, 10_000, 9_999)).toBeNull();
+    expect(finaleBoardCost(rebuy)).toBe(FINALE_REBUY_GOLD);
+  });
+
+  it('refuses a rebuy once entry has closed', () => {
+    expect(finaleBoardRefusal(rebuy, 1_000, 9_999)).toBe('rebuy-closed');
+    // However many times they have folded.
+    expect(finaleBoardRefusal({ folds: 7 }, 1_000, 9_999)).toBe('rebuy-closed');
+  });
+
+  it('treats the deadline instant itself as closed, like finaleEntryClosed', () => {
+    expect(finaleBoardRefusal(rebuy, 5_000, 4_999)).toBeNull();
+    expect(finaleBoardRefusal(rebuy, 5_000, 5_000)).toBe('rebuy-closed');
+  });
+
+  it('allows everything when no deadline has been set', () => {
+    // A table mid-creation, or one the host has not dated. Never guess a close.
+    expect(finaleBoardRefusal(rebuy, null, Date.now() + DAY)).toBeNull();
+    expect(finaleBoardRefusal(rebuy, undefined, Date.now() + DAY)).toBeNull();
+  });
+
+  it('agrees with finaleBoardCost about which boards are free', () => {
+    // The join between the two: a board that costs nothing is never refused, so
+    // the free-board case can only ever be gated by the seat itself.
+    for (const folds of [0, 1, 2, 5]) {
+      const free = finaleBoardCost({ folds }) === 0;
+      expect(finaleBoardRefusal({ folds }, 1_000, 9_999) === null).toBe(free);
+    }
+  });
+});
+
+// ── The re-pick pool after a host edit ───────────────────────────────────────
+//
+// `adminRemoveCasinoSlot` cannot reach the seat's dealt pool, which is what a
+// resubmit re-selects from — so a struck card is kept out by uid instead. Applied
+// on both sides, or the client offers a card the server refuses to commit.
+
+describe('repickPool', () => {
+  const pool = [card('Sonic', 0), card('Zelda', 1), card('Metroid', 2)];
+
+  it('leaves an ordinary seat\u2019s pool untouched — the regression half', () => {
+    // Every table, every seat, every day: nothing has been struck, so nothing is
+    // filtered. This is the case that must not change.
+    expect(repickPool(pool, {})).toEqual(pool);
+    expect(repickPool(pool, undefined)).toEqual(pool);
+    expect(repickPool(pool, { removedCardUids: [] })).toEqual(pool);
+  });
+
+  it('drops a struck card', () => {
+    expect(repickPool(pool, { removedCardUids: [1] }).map(c => c.name))
+      .toEqual(['Sonic', 'Metroid']);
+  });
+
+  it('drops several, and leaves the survivors in order', () => {
+    expect(repickPool(pool, { removedCardUids: [2, 0] }).map(c => c.name))
+      .toEqual(['Zelda']);
+  });
+
+  it('can empty the pool, which the callers must then refuse on', () => {
+    // `resubmitCasinoYaml` answers "your dealt hand is no longer available" —
+    // better than silently offering a re-pick with nothing in it.
+    expect(repickPool(pool, { removedCardUids: [0, 1, 2] })).toEqual([]);
+  });
+
+  it('ignores a uid that is not in this pool', () => {
+    // A finale seat re-picks from its ROW, not the whole board, so a card struck
+    // from elsewhere legitimately will not be found here.
+    expect(repickPool(pool, { removedCardUids: [99] })).toEqual(pool);
+  });
+
+  it('survives the holes RTDB puts in an array', () => {
+    // A sparse array comes back with undefined in the gaps, which is what the
+    // typeof guard is for — not defensive noise.
+    const holey = [undefined, 1, null] as unknown as number[];
+    expect(repickPool(pool, { removedCardUids: holey }).map(c => c.name))
+      .toEqual(['Sonic', 'Metroid']);
+  });
+
+  it('never aliases the pool it was given', () => {
+    const out = repickPool(pool, {});
+    expect(out).not.toBe(pool);
+    out.pop();
+    expect(pool).toHaveLength(3);
+  });
+});
+
+// ── The pot denominator after a host edit ────────────────────────────────────
+//
+// `repickPool` keeps a struck CARD out of the re-pick; this keeps its SHARE out.
+// Both halves are needed: without the second, a denied player re-picks their
+// remaining cards and the seat silently recovers the pot weight a void already
+// released to the table (or a kick reserved for a claimant), so the table pays out
+// more than it holds.
+
+describe('repickLockedCount', () => {
+  it('is the committed count on a FORMING table, struck cards or not', () => {
+    // Nothing is banked pre-deploy: casinoShareUnits is counted at deploy and a
+    // forming void skips the voidedShare increment, so the seat is one whole unit
+    // however often its hand is rebuilt. Carrying strikes here would underpay it.
+    expect(repickLockedCount('forming', 3, {})).toBe(3);
+    expect(repickLockedCount('forming', 3, { removedCardUids: [7] })).toBe(3);
+    expect(repickLockedCount('forming', 5, { removedCardUids: [1, 2] })).toBe(5);
+  });
+
+  it('leaves an ordinary live seat at its committed count — the regression half', () => {
+    // The common case by far: a host deny on a table nobody has had cards struck
+    // from. One seat, one unit. This is what must not change.
+    expect(repickLockedCount('inprogress', 4, {})).toBe(4);
+    expect(repickLockedCount('inprogress', 4, undefined)).toBe(4);
+    expect(repickLockedCount('inprogress', 4, { removedCardUids: [] })).toBe(4);
+  });
+
+  it('holds a struck card in the denominator on a LIVE table', () => {
+    // Dealt 5, host voids one (0.2 released), player re-picks the other 4.
+    // Restamping to 4 would return the seat to weight 1.0 against a denominator
+    // that has already shrunk by 0.2 — the over-pay.
+    expect(repickLockedCount('inprogress', 4, { removedCardUids: [2] })).toBe(5);
+    expect(repickLockedCount('inprogress', 3, { removedCardUids: [2, 4] })).toBe(5);
+  });
+
+  it('never lets a re-picked live seat exceed the share its strikes left it', () => {
+    // The invariant the whole rule exists for, stated as arithmetic: seat weight
+    // plus every carved fraction can never exceed the one unit it started as.
+    const dealt = 5;
+    for (const struckCount of [0, 1, 2, 3]) {
+      const struck = Array.from({ length: struckCount }, (_, i) => i);
+      const carved = struckCount / dealt;              // released or reserved elsewhere
+      for (let committed = 1; committed <= dealt - struckCount; committed++) {
+        const denom  = repickLockedCount('inprogress', committed, { removedCardUids: struck });
+        const weight = committed / denom;
+        expect(weight + carved).toBeLessThanOrEqual(1 + 1e-9);
+      }
+    }
+  });
+
+  it('survives the holes RTDB puts in an array', () => {
+    const holey = [undefined, 3, null] as unknown as number[];
+    expect(repickLockedCount('inprogress', 4, { removedCardUids: holey })).toBe(5);
+  });
+});
+
+// ── Which deck a seat is priced off ─────────────────────────────────────────
+//
+// `setCasinoDeckChoice` refuses to move once a finale board exists, but it reads
+// the board and writes the choice in two steps — so a client firing both calls at
+// once can still slip a change in behind the deal, and lock the same cards in at
+// the other variant's boost. The deal therefore STAMPS the deck it used, and this
+// accessor prefers the stamp, which makes the race unwinnable rather than unlikely.
+
+describe('deckChoiceOf', () => {
+  it('prefers the deck the board was dealt from', () => {
+    expect(deckChoiceOf({ deckChoice: 'purist', finaleDeck: 'safety' })).toBe('safety');
+    expect(deckChoiceOf({ deckChoice: 'safety', finaleDeck: 'purist' })).toBe('purist');
+  });
+
+  it('falls back to the standing pick when nothing is stamped', () => {
+    // Every ordinary table, always: `finaleDeck` is never written there, so this
+    // is exactly the old behaviour and no other game changes.
+    expect(deckChoiceOf({ deckChoice: 'safety' })).toBe('safety');
+    expect(deckChoiceOf({ deckChoice: 'indie' })).toBe('indie');
+  });
+
+  it('defaults to purist with neither', () => {
+    expect(deckChoiceOf({})).toBe('purist');
+  });
+
+  it('prices a stamped board off the stamp, which is the gold difference', () => {
+    // The exploit in one assertion: spin on Safety, switch to Purist behind the
+    // deal, lock the same stars in. The stamp is what stops the +10%.
+    const stars = 12;
+    const seat  = { deckChoice: 'purist' as const, finaleDeck: 'safety' as const };
+    expect(finaleOwnGold(stars, deckChoiceOf(seat)))
+      .toBe(finaleOwnGold(stars, 'safety'));
+    expect(finaleOwnGold(stars, deckChoiceOf(seat)))
+      .toBeLessThan(finaleOwnGold(stars, 'purist'));
+  });
+});
 // ── What the player is told a board is worth ─────────────────────────────────
 //
 // Three surfaces advertise this range — the landing card, the Games modal and the

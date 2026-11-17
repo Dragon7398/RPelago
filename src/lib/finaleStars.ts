@@ -69,6 +69,37 @@ export function finaleBoardCost(play: { folds?: number } | undefined): number {
 }
 
 /**
+ * Why this seat may not be dealt a board right now — or null if it may.
+ *
+ * ⚠️ **The deadline closes ENTRY, not PLAY, so it bars the REBUY and never the
+ * first board.** Enlisting is entry, and `enlistInMission` is already the gate for
+ * it (through `currentMaxSlots`, which is why there is no second copy of the
+ * deadline there) — so anyone holding a seat was let in before the close. A flat
+ * deadline test here silently took the entry away from whoever enlisted in the
+ * last few minutes: they were shown a live "Pull the arm" that the server
+ * rejected, until the idle sweep removed them having never spun.
+ * `lockFinaleResult` draws the same line by carrying NO deadline check at all.
+ *
+ * What must not survive the close is buying a FRESH board, and that is what makes
+ * folding past the deadline self-healing: there is no way back, so
+ * `foldFinaleBoard` re-arms `startBy` and hands the seat to the idle sweep rather
+ * than letting it hold the table open boardless forever.
+ *
+ * ONE rule, read by `dealFinaleBoard` and by the arm screen alike, so the button
+ * and the callable can never disagree about whether a fold is recoverable — the
+ * fold dialog's copy turns on exactly this.
+ */
+export function finaleBoardRefusal(
+  play:     { folds?: number } | undefined,
+  closesAt: number | null | undefined,
+  now:      number,
+): 'rebuy-closed' | null {
+  if (finaleBoardCost(play) <= 0) return null;          // a first board, always
+  if (closesAt == null || now < closesAt) return null;  // entry still open
+  return 'rebuy-closed';
+}
+
+/**
  * What a seat's OWN hand pays: the sitting-down base plus its stars, then the
  * deck boost. The base is the fee for spinning, rerolling and choosing a row.
  */

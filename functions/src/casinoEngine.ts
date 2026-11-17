@@ -231,6 +231,37 @@ export function finaleBoardCost(play: { folds?: number } | undefined): number {
   return (play?.folds ?? 0) > 0 ? FINALE_REBUY_GOLD : 0;
 }
 
+/**
+ * Why this seat may not be dealt a board right now — or null if it may.
+ *
+ * ⚠️ **The deadline closes ENTRY, not PLAY, so it bars the REBUY and never the
+ * first board.** Enlisting is entry, and `enlistInMission` is already the gate for
+ * it (through `currentMaxSlots`, which is why there is no second copy of the
+ * deadline there) — so anyone holding a seat was let in before the close. A flat
+ * deadline test here silently took the entry away from whoever enlisted in the
+ * last few minutes: they were shown a live "Pull the arm" that the server
+ * rejected, until the idle sweep removed them having never spun.
+ * `lockFinaleResult` draws the same line by carrying NO deadline check at all.
+ *
+ * What must not survive the close is buying a FRESH board, and that is what makes
+ * folding past the deadline self-healing: there is no way back, so
+ * `foldFinaleBoard` re-arms `startBy` and hands the seat to the idle sweep rather
+ * than letting it hold the table open boardless forever.
+ *
+ * ONE rule, read by `dealFinaleBoard` and by the arm screen alike, so the button
+ * and the callable can never disagree about whether a fold is recoverable — the
+ * fold dialog's copy turns on exactly this.
+ */
+export function finaleBoardRefusal(
+  play:     { folds?: number } | undefined,
+  closesAt: number | null | undefined,
+  now:      number,
+): 'rebuy-closed' | null {
+  if (finaleBoardCost(play) <= 0) return null;          // a first board, always
+  if (closesAt == null || now < closesAt) return null;  // entry still open
+  return 'rebuy-closed';
+}
+
 export function finaleOwnGold(stars: number, choice: CasinoDeckChoice): number {
   return applyDeckBoost(FINALE_BASE_GOLD + FINALE_GOLD_PER_STAR * stars, choice);
 }
@@ -417,8 +448,26 @@ export const DECK_VARIANTS: Readonly<Record<CasinoDeckChoice, DeckVariant>> = {
   },
 };
 
-export function deckChoiceOf(seat: { deckChoice?: CasinoDeckChoice }): CasinoDeckChoice {
-  return seat.deckChoice ?? 'purist';
+/**
+ * Which deck this seat is PRICED off.
+ *
+ * ⚠️ `finaleDeck` wins when present, and that is the whole point: it is stamped by
+ * `dealFinaleBoard` with the variant the board in front of the player was actually
+ * built from. `setCasinoDeckChoice` refuses to move once a board exists, but that
+ * refusal is a read and a write in two steps — a client firing both calls together
+ * can have the deck change land after the deal has already read it, and then lock
+ * the very same cards in at the other variant's boost (Safety deals the small deck
+ * at −10%, Purist pays +10%). Reading the stamp makes that race unwinnable instead
+ * of merely unlikely.
+ *
+ * Ordinary tables never write `finaleDeck`, so this is exactly `deckChoice` for
+ * them — their deck is frozen by the `hand` guard instead. A fold nulls the stamp,
+ * because the board it described is gone and the player may pick again.
+ */
+export function deckChoiceOf(
+  seat: { deckChoice?: CasinoDeckChoice; finaleDeck?: CasinoDeckChoice },
+): CasinoDeckChoice {
+  return seat.finaleDeck ?? seat.deckChoice ?? 'purist';
 }
 
 export function shuffle<T>(arr: readonly T[]): T[] {
@@ -778,6 +827,69 @@ export function holdemPool(
 }
 
 // ── Slot conversion ──────────────────────────────────────────────────────────
+
+/**
+ * The cards a seat may still re-pick from, with everything the host has struck off
+ * it removed.
+ *
+ * `adminRemoveCasinoSlot` rewrites `slots` / `lockedCards` / `goldSwing`, but it
+ * cannot touch the seat's dealt POOL — the secret hand, the hole+community, or the
+ * finale row — which is what `resubmitCasinoYaml` re-selects from. Without this a
+ * denied player simply re-picks the card the host just took off them: after a
+ * KICK that card is live as somebody else's claimable slot, so the room would hold
+ * two slots for one card and the pot would pay weight for both; after a VOID the
+ * card was declared unplayable and its weight already released to the table, so
+ * re-picking it over-pays against a denominator that has already shrunk.
+ *
+ * Applied on BOTH sides — the callable and `CasinoTable`'s `resubmitPool` — or the
+ * client offers a card the server will refuse to commit.
+ *
+ * ⚠️ `removedCardUids` holds OWN cards only. A claimed card's uid belongs to
+ * another player's deck (`DeckCard.uid` is a per-deck index from 0), so recording
+ * one could exclude an unrelated own card that happens to share the number. The
+ * `typeof` guard is not defensive noise either: RTDB hands an array with holes
+ * back with `undefined` in them.
+ */
+export function repickPool<T extends { uid: number }>(
+  pool: readonly T[] | undefined,
+  seat: { removedCardUids?: number[] } | undefined,
+): T[] {
+  const struck = new Set((seat?.removedCardUids ?? []).filter(u => typeof u === 'number'));
+  return (pool ?? []).filter(c => !!c && !struck.has(c.uid));
+}
+
+/**
+ * The `lockedCount` a card re-pick should stamp — the DENOMINATOR the seat's pot
+ * weight is measured against (`seatPotWeight` = own remaining / lockedCount).
+ *
+ * ⚠️ **A struck card stays in the denominator while the table is LIVE.** A void
+ * released `1/lockedCount` of the pot to the table (`casinoVoidedShare`) and a kick
+ * reserved it on the claim entry — both carved against the count stamped at lock.
+ * Restamping to the new, smaller hand puts the seat back to a FULL unit while that
+ * fraction is still released or reserved elsewhere, and the table then pays out more
+ * than its pot. It is the same over-pay `repickPool` exists to stop, arriving by the
+ * other door: the pool filter keeps the struck CARD out, and this keeps its SHARE
+ * out.
+ *
+ * Pre-deploy there is nothing to conserve — `casinoShareUnits` is banked at deploy
+ * and a forming void skips the `casinoVoidedShare` increment entirely — so a forming
+ * seat is one whole unit however often its hand is rebuilt, and carrying struck cards
+ * there would underpay it for nothing.
+ *
+ * The residual: a card struck while FORMING and re-picked after deploy counts here
+ * without ever having released anything, costing that seat one card's share.
+ * Underpaying is the direction this pot errs in by design — an unclaimed kick reserve
+ * is never paid out either — so that is the safe side to land on.
+ */
+export function repickLockedCount(
+  missionState: string | undefined,
+  committedCount: number,
+  seat: { removedCardUids?: number[] } | undefined,
+): number {
+  if (missionState === 'forming') return committedCount;
+  const struck = (seat?.removedCardUids ?? []).filter(u => typeof u === 'number').length;
+  return committedCount + struck;
+}
 
 /**
  * The Finale's details line: "Sonic · 5★". A finale card's worth is its STARS, so
