@@ -7,7 +7,7 @@ import { setCurrentSeason, sRef, ownHandPath, ownHolePath, ownBoardPath } from '
 import type { GMMission, GMParticipant, CasinoStats, CasinoDeckChoice, CasinoSeatPeek, PlayerFeats, AdvSlot } from '../types';
 import type { DeckCard, CasinoGame, CardTypeKey } from '../lib/casinoData';
 import {
-  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, deckChoiceOf, CASINO_GAMES, CARD_TYPES, seatSpend,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckSizeFor, deckChoiceOf, isFinale, CASINO_GAMES, CARD_TYPES, seatSpend,
   FINALE_BOARD_CARDS, finaleRowIndices,
 } from '../lib/casinoData';
 import { holdemPool } from '../lib/casinoEngine';
@@ -1324,7 +1324,11 @@ export function CasinoTable() {
       <div className="cz-top">
         <div className="cz-brand">
           <span className="cz-kick">RPelago Casino</span>
-          <h1>{cfg.label} <span className="cz-kick">· Table {mission.series}</span></h1>
+          {/* The finale runs once — a table number implies a second one. Same
+              reasoning as `missionDisplayLabel` and its server mirror. */}
+          <h1>{cfg.label}{!isFinale(mission) && (
+            <span className="cz-kick"> · Table {mission.series}</span>
+          )}</h1>
         </div>
         <div className="cz-top-right">
           {seatDeckChoice && (phase === 'ante' || phase === 'folded') && (
@@ -1332,16 +1336,32 @@ export function CasinoTable() {
               Deck: {DECK_VARIANTS[seatDeckChoice].label}
             </button>
           )}
-          <PotDisplay amount={pot} bump={potBump} seats={potSeats} />
+          {/* ⚠️ The finale has NO pot and must never grow one — a nonzero pot
+              switches the whole weighted split back on (see `freshFinaleTable`),
+              so a standing "0g · ≈0g/player" advertises the one thing that must
+              not happen. What a board pays is said on the board itself and on the
+              landing card, so this corner simply stays empty. */}
+          {!isFinale(mission) && <PotDisplay amount={pot} bump={potBump} seats={potSeats} />}
         </div>
       </div>
 
+      {/* ⚠️ Every clause of the ordinary line is false at the finale: entry is
+          free, nothing feeds a pot, and there is no pot to split. The seat count
+          survives the fork because it still means something — `seatTally` floors
+          the max at the fill count, so for an uncapped finale it reads as "of the
+          players who entered". */}
       <div className="cz-room-tag" title={tally?.title}>
         {mission.state === 'forming'
-          ? `${allSeats.filter(p => p?.played).length}/${openMax}${tally?.over ? '*' : ''} seats played · 40% of every entry feeds the pot · non-folded players split it`
+          ? (isFinale(mission)
+              ? `${allSeats.filter(p => p?.played).length}/${openMax} who entered have locked in · free to enter, no pot · the stars you keep set your gold`
+              : `${allSeats.filter(p => p?.played).length}/${openMax}${tally?.over ? '*' : ''} seats played · 40% of every entry feeds the pot · non-folded players split it`)
           : mission.state === 'inprogress'
-            ? 'Cards are locked in · your worlds are live — play them out in Archipelago · the pot pays out when the table settles'
-            : 'This table has settled · the pot has been paid out'}
+            ? (isFinale(mission)
+                ? 'Cards are locked in · your worlds are live — play them out in Archipelago · your gold settles from the stars you kept'
+                : 'Cards are locked in · your worlds are live — play them out in Archipelago · the pot pays out when the table settles')
+            : (isFinale(mission)
+                ? 'This table has settled · your gold has been paid out'
+                : 'This table has settled · the pot has been paid out')}
       </div>
 
       {/* ── Host view: reveal every seat's cards (admin only) ── */}
@@ -1938,9 +1958,16 @@ export function CasinoTable() {
           {phase === 'locked' && (
             <>
               <div className="cz-stage-title">You're locked in</div>
+              {/* The finale has no cohort waiting to fill, and "the mission
+                  deploys" is the state machine's word rather than anything a
+                  player can act on — it is the host building the room that they
+                  are actually waiting for. */}
               <div className="cz-stage-note">
-                Your hand is committed. Waiting for the other seats to lock in.
-                Once everyone has played, the mission deploys.
+                {isFinale(mission)
+                  ? <>Your row is committed. Everyone who entered still has to lock in;
+                     your host builds the Archipelago room once the last of them has.</>
+                  : <>Your hand is committed. Waiting for the other seats to lock in.
+                     Once everyone has played, the mission deploys.</>}
               </div>
               <div className="cz-ap-banner"><div className="cz-ap-icon">✦</div></div>
               {resubmitBlock}
@@ -1978,7 +2005,10 @@ export function CasinoTable() {
                 ))}
               </div>
               <div className="cz-stage-note" style={{ marginTop: '0.5rem' }}>
-                Gold payouts (hand reward + pot share) are credited when the admin marks this mission complete.
+                {/* No pot share at the finale — its pot is 0 and must stay that way. */}
+                {isFinale(mission)
+                  ? 'Your gold is credited when the admin marks this mission complete.'
+                  : 'Gold payouts (hand reward + pot share) are credited when the admin marks this mission complete.'}
               </div>
               <div className="cz-actions">
                 <button className="cz-btn ghost" onClick={closeTable}>Close table</button>
