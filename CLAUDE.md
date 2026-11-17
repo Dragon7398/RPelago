@@ -1259,6 +1259,18 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > is stars), via `cardsToSlots`' optional formatter. That does **not** match
 > `handStakeFromSlots`' `· Ng` regex — safe only because that function is always a
 > fallback behind `p.goldSwing ?? …`.
+>
+> ⚠️ **The CARD FACE has the same rule, and it is easier to miss.** `CardFace`
+> prints `card.value` — the gold that card is worth at an ordinary table — and the
+> finale prices the same deck by inverse popularity instead, so a gold figure there
+> is not a stale label but a **different number for the same card**. It takes an
+> optional **`stars`**, which replaces the value AND drops the coin glyph with it.
+> Four render sites are finale-reachable and all four pass it: `FinaleBoard` (the
+> board), `PhasePanel`'s `LockedHand` (the landing's committed hand), and
+> `DeckPreview` twice (the deck picker, where comparing which genres the season
+> overlooked is the whole reason to open it). `CasinoTable`'s three are in `play` /
+> `holdwait` / `holdplay`, which no finale seat reaches — see `openingPhase`. Only
+> the `plate` look reads `stars`; it is the only look anything renders.
 
 > **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
 > Finale panel**, and that sharing is the point: the host reviews the card-popularity

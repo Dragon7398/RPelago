@@ -1958,7 +1958,8 @@ export function CasinoTable() {
         </div>
       </div>
 
-      {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)} />}
+      {previewDeck && <DeckPreview choice={previewDeck} onClose={() => setPreviewDeck(null)}
+                                  stars={game === 'finale' ? finaleStarMap : undefined} />}
       {showYamlRules && <YamlRulesLightbox onClose={() => setShowYamlRules(false)} limits={yamlLimits} />}
     </div>
   );

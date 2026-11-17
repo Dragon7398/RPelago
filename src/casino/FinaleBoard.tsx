@@ -298,7 +298,7 @@ export default function FinaleBoard({
 
             const inner = stopped && card ? (
               <>
-                <CardFace card={card} look="plate" width={CARD_W} />
+                <CardFace card={card} look="plate" width={CARD_W} stars={starOf(card)} />
                 <Stars n={starOf(card)} name={card.name} />
                 {inChosenRow && (
                   <span className={`fin-tag${isDropped ? '' : ' on'}`}>

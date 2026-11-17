@@ -1248,6 +1248,21 @@ inline, for the reason the last round established.
    > pass nor the rehearsal's early steps would surface it. **A finale fork in
    > `TableCard` should be followed by a look at `ProgressCard` in the same pass.**
 
+10. **The cards themselves still showed gold** (`CardFace`). `card.value` is the
+    gold an ordinary table pays for that card; the finale prices the same deck in
+    stars. So every card in front of a finale player carried a number that is real,
+    looks authoritative, and is not what the seat will be paid. `CardFace` now takes
+    an optional `stars` that replaces the figure and drops the coin glyph with it
+    (a gold disc beside a star count is the same mixed message in less space).
+    Threaded at all four finale-reachable sites: the board, the landing's locked
+    hand, and the deck preview's two grids.
+
+    > The audit mattered more than the fix here. Of seven `CardFace` renders, three
+    > are in `play` / `holdwait` / `holdplay` — unreachable for a finale seat, per
+    > #8's phase set — so they were correctly left alone. Fixing only the board,
+    > which is what the report pointed at, would have left the same wrong number on
+    > the landing and in the deck picker.
+
 > **The pattern this time.** Three of the six (#1, #3, #4) are **two-step
 > read-then-write** sequences that a single client can interleave, and one (#4) was
 > introduced by the previous fix. The finale is the only table where the money and

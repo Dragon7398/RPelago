@@ -3,6 +3,7 @@
 // into (or out of) before picking a deck.
 
 import type { CasinoDeckChoice } from '../types';
+import { starsFor, type FinaleStars } from '../lib/finaleStars';
 import { CARD_DEFS, CARD_TYPES, DECK_VARIANTS } from '../lib/casinoData';
 import { CardFace } from './CardFace';
 import './cards.css';
@@ -11,9 +12,16 @@ import './deckPreview.css';
 interface DeckPreviewProps {
   choice: CasinoDeckChoice;
   onClose: () => void;
+  /**
+   * The finale's frozen star snapshot. Passed only at a finale table, where the
+   * deck's cards are worth stars rather than gold — and where this list is the
+   * one place a player can compare WHICH genres the season overlooked before
+   * committing to a deck. Absent everywhere else, so the gold figure stays.
+   */
+  stars?: Record<string, FinaleStars>;
 }
 
-export function DeckPreview({ choice, onClose }: DeckPreviewProps) {
+export function DeckPreview({ choice, onClose, stars }: DeckPreviewProps) {
   const variant = DECK_VARIANTS[choice];
   const excl    = new Set(variant.excludeTypes);
 
@@ -41,7 +49,8 @@ export function DeckPreview({ choice, onClose }: DeckPreviewProps) {
               <div className="cz-preview-grid">
                 {g.cards.map(card => (
                   <div key={card.name} className="cz-preview-card">
-                    <CardFace card={{ ...card, uid: 0, copyIndex: 0 }} look="plate" width={92} />
+                    <CardFace card={{ ...card, uid: 0, copyIndex: 0 }} look="plate" width={92}
+                              stars={stars ? starsFor(stars, card.name) : undefined} />
                     <span className="cz-preview-count">×{card.copies}</span>
                   </div>
                 ))}
@@ -60,7 +69,8 @@ export function DeckPreview({ choice, onClose }: DeckPreviewProps) {
                   <div className="cz-preview-grid">
                     {g.cards.map(card => (
                       <div key={card.name} className="cz-preview-card">
-                        <CardFace card={{ ...card, uid: 0, copyIndex: 0 }} look="plate" width={92} />
+                        <CardFace card={{ ...card, uid: 0, copyIndex: 0 }} look="plate" width={92}
+                                  stars={stars ? starsFor(stars, card.name) : undefined} />
                       </div>
                     ))}
                   </div>
