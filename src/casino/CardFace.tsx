@@ -93,7 +93,7 @@ function LookFoil({ card }: { card: DeckCard }) {
   );
 }
 
-function LookPlate({ card }: { card: DeckCard }) {
+function LookPlate({ card, stars }: LookProps) {
   const t = TYPE_META[card.type];
   return (
     <>
@@ -108,9 +108,16 @@ function LookPlate({ card }: { card: DeckCard }) {
           <div className="pl-name">{card.name}</div>
           {card.blurb && <div className="pl-note">{card.blurb}</div>}
           <div className="pl-rule" />
+          {/* ⚠️ A FINALE CARD IS WORTH STARS, NOT GOLD. `card.value` is the gold a
+              card is worth at an ordinary table; the finale prices the same deck by
+              inverse popularity and pays `50 + 10 × Σ stars` (see finaleStars.ts), so
+              printing a gold figure there is not a stale label, it is a different
+              number for the same card. The coin goes with it — a gold disc beside a
+              star count is the same mixed message in a smaller space. */}
           <div className="pl-value">
-            <span className="pl-coin" />
-            <span className="pl-num">{card.value}</span>
+            {stars == null
+              ? <><span className="pl-coin" /><span className="pl-num">{card.value}</span></>
+              : <span className="pl-num">{stars}★</span>}
           </div>
         </div>
       </div>
@@ -120,7 +127,15 @@ function LookPlate({ card }: { card: DeckCard }) {
 
 type Look = 'sigil' | 'court' | 'arcana' | 'foil' | 'plate';
 
-const LOOK_COMPONENTS: Record<Look, (props: { card: DeckCard }) => React.ReactElement> = {
+/**
+ * `stars` replaces the gold figure for a finale card. Only `plate` reads it —
+ * every CardFace in the app renders that look, and the other four are kept for
+ * their own sake rather than used. If one is ever put in front of a finale seat it
+ * needs the same treatment; they would otherwise quietly print card gold.
+ */
+type LookProps = { card: DeckCard; stars?: number };
+
+const LOOK_COMPONENTS: Record<Look, (props: LookProps) => React.ReactElement> = {
   sigil:  LookSigil,
   court:  LookCourt,
   arcana: LookArcana,
@@ -141,19 +156,21 @@ const LOOK_CSS: Record<Look, string> = {
 interface CardFaceProps {
   card: DeckCard;
   look?: Look;
+  /** Finale only: the card's star worth, shown in place of its gold value. */
+  stars?: number;
   width: number;
   className?: string;
   style?: React.CSSProperties;
 }
 
-export function CardFace({ card, look = 'plate', width, className, style }: CardFaceProps) {
+export function CardFace({ card, look = 'plate', stars, width, className, style }: CardFaceProps) {
   const Comp = LOOK_COMPONENTS[look] ?? LookSigil;
   return (
     <div
       className={`ck ck-noise ${LOOK_CSS[look] ?? 'look-sigil'}${className ? ` ${className}` : ''}`}
       style={{ ...cardVars(card, width), ...style }}
     >
-      <Comp card={card} />
+      <Comp card={card} stars={stars} />
     </div>
   );
 }

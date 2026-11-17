@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { AdvSlot, AdvStatusNote, GMMission, GMParticipant, SlotStatus, TriState } from '../../types';
 import type { CasinoGame, DeckCard, CardTypeKey } from '../../lib/casinoData';
 import { CASINO_GAMES, CARD_TYPES, isFinale } from '../../lib/casinoData';
+import { starsFor, type FinaleStars } from '../../lib/finaleStars';
 import { nameColorValue } from '../../lib/constants';
 import { discordAvatarUrl } from '../../lib/discordAvatar';
 import { seatGames, type SeatGame } from './seatGames';
@@ -239,9 +240,21 @@ function DeployBar({ m, max, over, title }: { m: GMMission; max: number; over: b
 }
 
 // The player's OWN committed cards, persisted publicly at lock (see lockCasinoResult).
-function LockedHand({ cards, width }: { cards: DeckCard[] | undefined; width: number }) {
+// `stars` is the mission's FROZEN snapshot, passed only for a finale seat — its
+// cards are worth stars rather than the gold every other table pays. Read through
+// `starsFor`, never indexed by name: the stored keys are `cardKey`-encoded.
+function LockedHand({ cards, width, stars }: {
+  cards: DeckCard[] | undefined; width: number; stars?: Record<string, FinaleStars>;
+}) {
   if (!cards?.length) return null;
-  return <div className="rl-hand">{cards.map((c, i) => <CardFace key={i} card={c} look="plate" width={width} />)}</div>;
+  return (
+    <div className="rl-hand">
+      {cards.map((c, i) => (
+        <CardFace key={i} card={c} look="plate" width={width}
+                  stars={stars ? starsFor(stars, c.name) : undefined} />
+      ))}
+    </div>
+  );
 }
 
 function Stake({ amount, label }: { amount: number; label: string }) {
@@ -355,7 +368,8 @@ function SeatedView({ m, uid, now, seasonId, view, onLeave }: {
   );
 
   const hand = seat.played && seat.lockedCards?.length
-    ? <LockedHand cards={seat.lockedCards} width={view === 'lounge' ? 84 : 68} />
+    ? <LockedHand cards={seat.lockedCards} width={view === 'lounge' ? 84 : 68}
+                  stars={isFinale(m) ? m.finaleStars : undefined} />
     : <div className="rl-hand-empty">{standing.note}</div>;
 
   const actions = (
