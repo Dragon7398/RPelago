@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Client (canonical) casino modules.
 import {
   CASINO_GAMES, CASINO_GAME_ORDER, minCasinoAnte, seatSpend, buildDeck,
-  DECK_VARIANTS, DECK_VARIANT_ORDER, deckChoiceOf as clientDeckChoiceOf,
+  DECK_VARIANTS, DECK_VARIANT_ORDER, deckChoiceOf as clientDeckChoiceOf, CARD_DEFS,
   type CasinoGame,
 } from '../../src/lib/casinoData';
 import {
@@ -15,7 +15,7 @@ import {
   type DeckCard,
 } from '../../src/lib/casinoEngine';
 import { handStake as clientHandStake, repickPool, repickLockedCount } from '../../src/lib/casinoSlots';
-import { finaleBoardRefusal } from '../../src/lib/finaleStars';
+import { finaleBoardRefusal, cardKey, starsFor, finaleStarsToWire, finaleStarTiers } from '../../src/lib/finaleStars';
 import { applyDeckBoost as clientApplyDeckBoost } from '../../src/lib/casinoSlots';
 import {
   GAMBIT_DEFS, makeGambitDeck, gambitOfferable, gambitCasinoGold, CASINO_GAMBIT_XP_TO_GP,
@@ -823,6 +823,21 @@ describe('client and server casino engines stay in sync', () => {
     }
     expect(server.finaleBoardRefusal(undefined, 1_000, 9_999))
       .toBe(finaleBoardRefusal(undefined, 1_000, 9_999));
+  });
+
+  it('cardKey and starsFor agree — the snapshot both sides price from', () => {
+    // The server writes goldSwing off this map and the client quotes the player
+    // from it, so a drift in the KEYING is not a display nit: one side reads a
+    // card's stars and the other reads nothing and scores it 0.
+    for (const d of CARD_DEFS) {
+      expect(server.cardKey(d.name)).toBe(cardKey(d.name));
+    }
+    const wire = finaleStarsToWire(finaleStarTiers([]));
+    for (const d of CARD_DEFS) {
+      expect(server.starsFor(wire, d.name)).toBe(starsFor(wire, d.name));
+    }
+    expect(server.starsFor(undefined, 'x')).toBe(starsFor(undefined, 'x'));
+    expect(server.starsFor(wire, undefined)).toBe(starsFor(wire, undefined));
   });
 
   it('repickLockedCount agrees across state and strike count', () => {

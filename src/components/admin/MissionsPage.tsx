@@ -10,7 +10,7 @@ import { SLOT_CAUTION_HOURS } from '../../lib/statusReport';
 import { fmtDayClock, missionDisplayLabel, seatTally, cardStatsCorpus, findFinale, finaleEntryClosed, sourcedGameLists, gameNoveltyInYaml, missionPendingAction, missionClockOrigin, compareMissionsForAdmin, seatsAwaitingConfig, outstandingConfigsBlockRoom, configsBlockedSince, holdPinned, type GameToFetch, type SettleBlockers } from '../../lib/missionLogic';
 import { currentApList } from '../../lib/apLists';
 import { playerHandle } from '../../lib/playerHandle';
-import { finaleStarTiers, FINALE_GOLD_PER_STAR, FINALE_BASE_GOLD, FINALE_REBUY_GOLD, type FinaleStars } from '../../lib/finaleStars';
+import { finaleStarTiers, finaleStarsToWire, cardNameFromKey, FINALE_GOLD_PER_STAR, FINALE_BASE_GOLD, FINALE_REBUY_GOLD, type FinaleStars } from '../../lib/finaleStars';
 import { createFinaleTable, seedInitialMissions, setMissionSlotLock, setMissionTracker, setMissionCheese, fetchCheesetrackerId, fetchCheeseDetails, adminUpdateParticipantSlotStatus, adminUpdateParticipantSlotActivity, adminUpdateParticipantSlotName, adminGetCasinoYamls, adminDenyCasinoYaml, adminRemoveCasinoSlot, adminVoidCasinoSeat, adminReleaseClaimableSlot, freeMissionClaim, type CasinoYaml } from '../../firebase/db';
 import { fetchRoomStatus, extractApSlotName, parseCheeseTs, deriveSlotStatus, resolveNumberedSlotName } from '../../lib/archipelagoApi';
 import { slotsAllFree, claimEntries } from '../../lib/slotHelpers';
@@ -1393,7 +1393,11 @@ function FinalePanel({ now }: { now: number }) {
     // keeps moving as tables settle, while the finale pays the values below and
     // nothing else. A host who answers "why was Sonic worth five" from the Stats
     // column will eventually answer it wrong.
-    const drifted = Object.keys(frozen).filter(k => stars[k] != null && stars[k] !== frozen[k]).length;
+    // Both sides keyed the same way before comparing: `frozen` came off the wire
+    // (cardKey-encoded) and `stars` is the live raw-name recompute, so diffing them
+    // directly reported every `/`-bearing card as missing rather than drifted.
+    const liveWire = finaleStarsToWire(stars);
+    const drifted = Object.keys(frozen).filter(k => liveWire[k] != null && liveWire[k] !== frozen[k]).length;
     return (
       <div className="dash-section">
         <h3 className="dash-section-title">✦ The Finale</h3>
@@ -1429,7 +1433,9 @@ function FinalePanel({ now }: { now: number }) {
               </p>
             )}
             {([5, 4, 3, 2, 1] as FinaleStars[]).map(tier => {
-              const names = Object.keys(frozen).filter(k => frozen[k] === tier).sort();
+              // Decoded back for the host — the stored keys are percent-encoded.
+              const names = Object.keys(frozen).filter(k => frozen[k] === tier)
+                .map(cardNameFromKey).sort();
               if (names.length === 0) return null;
               return (
                 <div className="dash-finale-tier" key={tier}>

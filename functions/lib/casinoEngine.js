@@ -3,7 +3,20 @@
 // Keep in sync with: casinoData.ts, casinoEngine.ts, casinoGambits.ts, casinoSlots.ts
 // This file is compiled by functions/tsconfig.json (CommonJS, no Vite).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.COMMUNITY_UID_BASE = exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.CASINO_GAMES = exports.CASINO_GAME_ORDER = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = void 0;
+exports.COMMUNITY_UID_BASE = exports.CASINO_XP_FLOOR = exports.CASINO_GAMBIT_XP_TO_GP = exports.GAMBIT_DEFS_BY_ID = exports.GAMBIT_DEFS = exports.DECK_VARIANTS = exports.FINALE_REBUY_GOLD = exports.FINALE_GOLD_PER_STAR = exports.FINALE_BASE_GOLD = exports.CASINO_GAMES = exports.FINALE_MAX_REROLL_REELS = exports.FINALE_BOARD_CARDS = exports.FINALE_ROW_REELS = exports.FINALE_ROWS = exports.FINALE_GAME = exports.CASINO_GAME_ORDER = exports.CASINO_START_STATS = exports.CASINO_POT_CUT_PCT = void 0;
+exports.isFinale = isFinale;
+exports.holdsMissionClaim = holdsMissionClaim;
+exports.finaleReelIndices = finaleReelIndices;
+exports.finaleRowIndices = finaleRowIndices;
+exports.applyReelRespin = applyReelRespin;
+exports.finaleBoardCost = finaleBoardCost;
+exports.finaleBoardRefusal = finaleBoardRefusal;
+exports.finaleOwnGold = finaleOwnGold;
+exports.finaleClaimedGold = finaleClaimedGold;
+exports.finaleSeatGold = finaleSeatGold;
+exports.cardKey = cardKey;
+exports.starsFor = starsFor;
+exports.sumStars = sumStars;
 exports.minCasinoAnte = minCasinoAnte;
 exports.seatSpend = seatSpend;
 exports.buildDeck = buildDeck;
@@ -30,15 +43,80 @@ exports.potContribution = potContribution;
 exports.rollTableSetup = rollTableSetup;
 exports.drawCommunity = drawCommunity;
 exports.holdemPool = holdemPool;
+exports.repickPool = repickPool;
+exports.repickLockedCount = repickLockedCount;
+exports.finaleSlotDetails = finaleSlotDetails;
 exports.cardsToSlots = cardsToSlots;
 // ── Casino mission constants ─────────────────────────────────────────────────
 // Mirror of CASINO_START_STATS in src/lib/constants.ts. (Enlist gold is the
 // per-table finish cost — seatSpend(game, { playedOn: true }) — not a constant.)
 exports.CASINO_POT_CUT_PCT = 0.40;
 exports.CASINO_START_STATS = { release: 60, collect: 30, hint: 10, xp: 50 };
+// ⚠️ The ROTATION, not the list of games — drives gmPickNextCasinoGame, the
+// casinoSeries counters and minCasinoAnte. The finale is a one-off closer and is
+// deliberately absent: including it would put it in the respawn rotation and zero
+// the minimum ante. The Coat uses COAT_TABLE_TYPES instead.
 exports.CASINO_GAME_ORDER = [
     'five_card_draw', 'seven_card_stud', 'holdem', 'blackjack',
 ];
+/** The finale's `casinoGame` value — the one place this literal lives server-side. */
+exports.FINALE_GAME = 'finale';
+/**
+ * THE predicate for "is this the finale". Mirror of `isFinale` in
+ * src/lib/casinoData.ts. Every fork keys off it so a grep finds all of them.
+ *
+ * Deliberately not the label and not the presence of `finaleClosesAt`: a label is
+ * host-editable, and a missing timestamp would silently demote the finale back to
+ * an ordinary table.
+ */
+function isFinale(m) {
+    return m?.casinoGame === exports.FINALE_GAME;
+}
+/**
+ * Does holding a seat at this mission consume one of the player's mission claims?
+ * Mirror of `holdsMissionClaim` in src/lib/casinoData.ts.
+ *
+ * **False for the finale**, which is what keeps the two directions independent: a
+ * player's existing tables must not bar them from the finale, and a finale seat
+ * must not bar them from the tables still gathering final players. `enlistInMission`
+ * therefore writes no `activeMissions` entry for it, so a finale seat is invisible
+ * to every claim count.
+ */
+function holdsMissionClaim(m) {
+    return !isFinale(m);
+}
+// ── The finale's board ────────────────────────────────────────────────────────
+// 3 rows × 5 reels, stored ROW-MAJOR. A reel is a COLUMN, so rerolling reel `r`
+// respins indices r, r + 5, r + 10. Mirror of src/lib/casinoData.ts.
+exports.FINALE_ROWS = 3;
+exports.FINALE_ROW_REELS = 5;
+exports.FINALE_BOARD_CARDS = exports.FINALE_ROWS * exports.FINALE_ROW_REELS;
+exports.FINALE_MAX_REROLL_REELS = 3;
+/** Board indices of one reel (column), row-major. */
+function finaleReelIndices(reel) {
+    return Array.from({ length: exports.FINALE_ROWS }, (_, row) => row * exports.FINALE_ROW_REELS + reel);
+}
+/** Board indices of one row, row-major. `row` is 1-based, as `finaleRow` is. */
+function finaleRowIndices(row) {
+    return Array.from({ length: exports.FINALE_ROW_REELS }, (_, i) => (row - 1) * exports.FINALE_ROW_REELS + i);
+}
+/**
+ * The board with the chosen reels respun — every card of those COLUMNS replaced,
+ * in reel order, from `fresh`. Mirror of `applyReelRespin` in src/lib/casinoData.ts.
+ *
+ * Extracted because a row-major board makes "replace a reel" a strided write, and
+ * the wrong stride respins a ROW instead — silently destroying the one mechanic
+ * the reroll exists for.
+ */
+function applyReelRespin(board, reels, fresh) {
+    const next = board.slice();
+    const indices = [...reels].sort((a, b) => a - b).flatMap(finaleReelIndices);
+    indices.forEach((boardIndex, i) => {
+        if (fresh[i])
+            next[boardIndex] = fresh[i];
+    });
+    return next;
+}
 // Entry costs are the S1 values ×3 (cards/pot/stake are ×2) — see the client copy.
 exports.CASINO_GAMES = {
     five_card_draw: {
@@ -65,7 +143,128 @@ exports.CASINO_GAMES = {
         reroll: false, ante: 150, rerollCost: 0, playOn: 0,
         subsetSelect: true,
     },
+    // The season closer. Every cost is 0 and that is correct — entry and the reroll
+    // are both free. The one charge is the rebuy after a fold (FINALE_REBUY_GOLD),
+    // which is a re-entry, not a reroll, and so does not fit this shape.
+    finale: {
+        key: 'finale', label: 'The Finale',
+        sittings: 1, hole: exports.FINALE_BOARD_CARDS, community: 0,
+        maxDraw: exports.FINALE_BOARD_CARDS, pickMax: exports.FINALE_ROW_REELS,
+        reroll: true, ante: 0, rerollCost: 0, playOn: 0,
+        subsetSelect: true,
+    },
 };
+// ── The finale's money (mirror of src/lib/finaleStars.ts) ─────────────────────
+// gold = (50 + 10 × Σ stars) × deck boost → 60–300 before the boost, so 330 on
+// Purist and 270 on Safety. A CLAIMED card pays its stars alone: no base (the
+// claimant never sat down and spun) and no deck boost (they never chose the deck).
+//
+// ⚠️ These are what `goldSwing` is computed from at four separate sites, and that
+// STORED number is what settlement pays — it is never re-derived from the slots.
+// So a drift from the client copy is not a display bug, it is the wrong payout.
+exports.FINALE_BASE_GOLD = 50;
+exports.FINALE_GOLD_PER_STAR = 10;
+/**
+ * What a fresh board costs after a fold; the first board is free.
+ *
+ * ⚠️ Anti-abuse, not revenue: a hand tops out at 330g, so a free respin would let
+ * a player fold in a loop until a 250g+ board appeared. The money goes to the
+ * HOUSE and is never routed through `potContribution` — the finale's pot stays 0,
+ * which is what keeps the whole weighted-pot pipeline dormant at settle.
+ */
+exports.FINALE_REBUY_GOLD = 50;
+function finaleBoardCost(play) {
+    return (play?.folds ?? 0) > 0 ? exports.FINALE_REBUY_GOLD : 0;
+}
+/**
+ * Why this seat may not be dealt a board right now — or null if it may.
+ *
+ * ⚠️ **The deadline closes ENTRY, not PLAY, so it bars the REBUY and never the
+ * first board.** Enlisting is entry, and `enlistInMission` is already the gate for
+ * it (through `currentMaxSlots`, which is why there is no second copy of the
+ * deadline there) — so anyone holding a seat was let in before the close. A flat
+ * deadline test here silently took the entry away from whoever enlisted in the
+ * last few minutes: they were shown a live "Pull the arm" that the server
+ * rejected, until the idle sweep removed them having never spun.
+ * `lockFinaleResult` draws the same line by carrying NO deadline check at all.
+ *
+ * What must not survive the close is buying a FRESH board, and that is what makes
+ * folding past the deadline self-healing: there is no way back, so
+ * `foldFinaleBoard` re-arms `startBy` and hands the seat to the idle sweep rather
+ * than letting it hold the table open boardless forever.
+ *
+ * ONE rule, read by `dealFinaleBoard` and by the arm screen alike, so the button
+ * and the callable can never disagree about whether a fold is recoverable — the
+ * fold dialog's copy turns on exactly this.
+ */
+function finaleBoardRefusal(play, closesAt, now) {
+    if (finaleBoardCost(play) <= 0)
+        return null; // a first board, always
+    if (closesAt == null || now < closesAt)
+        return null; // entry still open
+    return 'rebuy-closed';
+}
+function finaleOwnGold(stars, choice) {
+    return applyDeckBoost(exports.FINALE_BASE_GOLD + exports.FINALE_GOLD_PER_STAR * stars, choice);
+}
+function finaleClaimedGold(stars) {
+    return exports.FINALE_GOLD_PER_STAR * stars;
+}
+/**
+ * What a whole finale seat is paid — its own hand plus anything it claimed.
+ * Mirror of `finaleSeatGold` in src/lib/finaleStars.ts, where it is unit-tested.
+ *
+ * ⚠️ The `own.length > 0` test is load-bearing: the +50 is the fee for sitting
+ * down and spinning, so it survives while the seat keeps one own card and is
+ * ABSENT for a pure claimant, who never sat down. Drop the guard and a claimant
+ * collects 50g for a table they never played.
+ */
+function finaleSeatGold(stars, own, claimed, choice) {
+    const base = own.length > 0 ? finaleOwnGold(sumStars(own, stars), choice) : 0;
+    return base + claimed.reduce((g, c) => g + finaleClaimedGold(sumStars([c], stars)), 0);
+}
+/** Σ stars over a set of cards, read from the mission's frozen snapshot. */
+// ── The snapshot's KEY SPACE ─────────────────────────────────────────────────
+//
+// ⚠️ A card name is NOT a legal RTDB key. Twelve of the 36 carry a `/`
+// (`Exploration / open world`, `NES / Famicom`, …), and RTDB rejects `.`, `#`,
+// `$`, `/`, `[` and `]` outright — so writing `finaleStars` keyed by raw name
+// fails the WHOLE multi-path update, which is how this was found: the finale
+// simply could not be created.
+//
+// This is the same trap that cost `profiles/` a season of writes, and it is
+// handled the same way — one named encoder per key space (`gameKey`,
+// `handleKey`, `apSlotKey`, and now this), never a bare `encodeURIComponent`,
+// which escapes every illegal character EXCEPT `.`.
+//
+// Unlike `apSlotKey` this one IS decoded: the admin's frozen-star panel lists the
+// names back to the host. `%2E` round-trips through `decodeURIComponent`, so one
+// pair covers both directions.
+function cardKey(name) {
+    return encodeURIComponent(name).replace(/\./g, '%2E');
+}
+/**
+ * Read one card's stars out of a STORED snapshot (`mission.finaleStars`).
+ *
+ * ⚠️ Always go through this rather than indexing the record: its keys are
+ * `cardKey`-encoded, so `stars[card.name]` silently returns undefined for a third
+ * of the deck — every card with a `/` in its name, which is to say most of the
+ * genre cards. Scoring them 0 is not a crash; it is a quiet underpayment.
+ *
+ * The in-memory ranking from `finaleStarTiers` is keyed by RAW NAME and is a
+ * different thing — `StatsPage` and `econFinale` index that one directly, and
+ * should. `finaleStarsToWire` is the one-way door between them.
+ */
+function starsFor(stars, name) {
+    if (!stars || !name)
+        return 0;
+    return stars[cardKey(name)] ?? 0;
+}
+function sumStars(cards, stars) {
+    if (!cards || !stars)
+        return 0;
+    return cards.reduce((s, c) => s + starsFor(stars, c?.name), 0);
+}
 function minCasinoAnte() {
     return Math.min(...exports.CASINO_GAME_ORDER.map(g => exports.CASINO_GAMES[g].ante));
 }
@@ -198,8 +397,24 @@ exports.DECK_VARIANTS = {
             + 'The narrowest deck, and you pay for the comfort: −10% GP on everything you win.',
     },
 };
+/**
+ * Which deck this seat is PRICED off.
+ *
+ * ⚠️ `finaleDeck` wins when present, and that is the whole point: it is stamped by
+ * `dealFinaleBoard` with the variant the board in front of the player was actually
+ * built from. `setCasinoDeckChoice` refuses to move once a board exists, but that
+ * refusal is a read and a write in two steps — a client firing both calls together
+ * can have the deck change land after the deal has already read it, and then lock
+ * the very same cards in at the other variant's boost (Safety deals the small deck
+ * at −10%, Purist pays +10%). Reading the stamp makes that race unwinnable instead
+ * of merely unlikely.
+ *
+ * Ordinary tables never write `finaleDeck`, so this is exactly `deckChoice` for
+ * them — their deck is frozen by the `hand` guard instead. A fold nulls the stamp,
+ * because the board it described is gone and the player may pick again.
+ */
 function deckChoiceOf(seat) {
-    return seat.deckChoice ?? 'purist';
+    return seat.finaleDeck ?? seat.deckChoice ?? 'purist';
 }
 function shuffle(arr) {
     const a = arr.slice();
@@ -497,11 +712,79 @@ function holdemPool(hole = [], community = []) {
     return pool;
 }
 // ── Slot conversion ──────────────────────────────────────────────────────────
-function cardsToSlots(hand) {
-    return hand.map(card => ({
+/**
+ * The cards a seat may still re-pick from, with everything the host has struck off
+ * it removed.
+ *
+ * `adminRemoveCasinoSlot` rewrites `slots` / `lockedCards` / `goldSwing`, but it
+ * cannot touch the seat's dealt POOL — the secret hand, the hole+community, or the
+ * finale row — which is what `resubmitCasinoYaml` re-selects from. Without this a
+ * denied player simply re-picks the card the host just took off them: after a
+ * KICK that card is live as somebody else's claimable slot, so the room would hold
+ * two slots for one card and the pot would pay weight for both; after a VOID the
+ * card was declared unplayable and its weight already released to the table, so
+ * re-picking it over-pays against a denominator that has already shrunk.
+ *
+ * Applied on BOTH sides — the callable and `CasinoTable`'s `resubmitPool` — or the
+ * client offers a card the server will refuse to commit.
+ *
+ * ⚠️ `removedCardUids` holds OWN cards only. A claimed card's uid belongs to
+ * another player's deck (`DeckCard.uid` is a per-deck index from 0), so recording
+ * one could exclude an unrelated own card that happens to share the number. The
+ * `typeof` guard is not defensive noise either: RTDB hands an array with holes
+ * back with `undefined` in them.
+ */
+function repickPool(pool, seat) {
+    const struck = new Set((seat?.removedCardUids ?? []).filter(u => typeof u === 'number'));
+    return (pool ?? []).filter(c => !!c && !struck.has(c.uid));
+}
+/**
+ * The `lockedCount` a card re-pick should stamp — the DENOMINATOR the seat's pot
+ * weight is measured against (`seatPotWeight` = own remaining / lockedCount).
+ *
+ * ⚠️ **A struck card stays in the denominator while the table is LIVE.** A void
+ * released `1/lockedCount` of the pot to the table (`casinoVoidedShare`) and a kick
+ * reserved it on the claim entry — both carved against the count stamped at lock.
+ * Restamping to the new, smaller hand puts the seat back to a FULL unit while that
+ * fraction is still released or reserved elsewhere, and the table then pays out more
+ * than its pot. It is the same over-pay `repickPool` exists to stop, arriving by the
+ * other door: the pool filter keeps the struck CARD out, and this keeps its SHARE
+ * out.
+ *
+ * Pre-deploy there is nothing to conserve — `casinoShareUnits` is banked at deploy
+ * and a forming void skips the `casinoVoidedShare` increment entirely — so a forming
+ * seat is one whole unit however often its hand is rebuilt, and carrying struck cards
+ * there would underpay it for nothing.
+ *
+ * The residual: a card struck while FORMING and re-picked after deploy counts here
+ * without ever having released anything, costing that seat one card's share.
+ * Underpaying is the direction this pot errs in by design — an unclaimed kick reserve
+ * is never paid out either — so that is the safe side to land on.
+ */
+function repickLockedCount(missionState, committedCount, seat) {
+    if (missionState === 'forming')
+        return committedCount;
+    const struck = (seat?.removedCardUids ?? []).filter(u => typeof u === 'number').length;
+    return committedCount + struck;
+}
+/**
+ * The Finale's details line: "Sonic · 5★". A finale card's worth is its STARS, so
+ * printing `value` would show a figure unrelated to what the slot pays.
+ *
+ * ⚠️ It deliberately does not match `handStakeFromSlots`' regex. That is safe —
+ * the function is only ever a fallback behind `p.goldSwing ?? …`, and a finale seat
+ * always carries a goldSwing. Mirror of src/lib/casinoSlots.ts.
+ */
+function finaleSlotDetails(card, stars) {
+    return `${card.name} · ${stars}★`;
+}
+// `details` overrides the line stamped on each slot — the Finale passes a
+// star-based formatter. Mirror of src/lib/casinoSlots.ts.
+function cardsToSlots(hand, details = c => `${c.name} · ${c.value}g`) {
+    return hand.map((card, i) => ({
         name: '',
         game: '',
-        details: `${card.name} · ${card.value}g`,
+        details: details(card, i),
         status: 'Unstarted',
     }));
 }

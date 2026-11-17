@@ -295,11 +295,70 @@ export function finaleSeatGold(
   return base + claimed.reduce((g, c) => g + finaleClaimedGold(sumStars([c], stars)), 0);
 }
 
-/** Σ stars over a set of cards, reading the frozen snapshot. Unknown names score 0. */
+
+// ── The snapshot's KEY SPACE ─────────────────────────────────────────────────
+//
+// ⚠️ A card name is NOT a legal RTDB key. Twelve of the 36 carry a `/`
+// (`Exploration / open world`, `NES / Famicom`, …), and RTDB rejects `.`, `#`,
+// `$`, `/`, `[` and `]` outright — so writing `finaleStars` keyed by raw name
+// fails the WHOLE multi-path update, which is how this was found: the finale
+// simply could not be created.
+//
+// This is the same trap that cost `profiles/` a season of writes, and it is
+// handled the same way — one named encoder per key space (`gameKey`,
+// `handleKey`, `apSlotKey`, and now this), never a bare `encodeURIComponent`,
+// which escapes every illegal character EXCEPT `.`.
+//
+// Unlike `apSlotKey` this one IS decoded: the admin's frozen-star panel lists the
+// names back to the host. `%2E` round-trips through `decodeURIComponent`, so one
+// pair covers both directions.
+
+export function cardKey(name: string): string {
+  return encodeURIComponent(name).replace(/\./g, '%2E');
+}
+
+/** The inverse of `cardKey`, for display only. */
+export function cardNameFromKey(key: string): string {
+  try { return decodeURIComponent(key); } catch { return key; }
+}
+
+/**
+ * Read one card's stars out of a STORED snapshot (`mission.finaleStars`).
+ *
+ * ⚠️ Always go through this rather than indexing the record: its keys are
+ * `cardKey`-encoded, so `stars[card.name]` silently returns undefined for a third
+ * of the deck — every card with a `/` in its name, which is to say most of the
+ * genre cards. Scoring them 0 is not a crash; it is a quiet underpayment.
+ *
+ * The in-memory ranking from `finaleStarTiers` is keyed by RAW NAME and is a
+ * different thing — `StatsPage` and `econFinale` index that one directly, and
+ * should. `finaleStarsToWire` is the one-way door between them.
+ */
+export function starsFor(
+  stars: Record<string, FinaleStars> | undefined,
+  name:  string | undefined,
+): number {
+  if (!stars || !name) return 0;
+  return stars[cardKey(name)] ?? 0;
+}
+
+/**
+ * Key a star ranking for storage. The ONLY door between the raw-name map
+ * `finaleStarTiers` returns and what `mission.finaleStars` holds.
+ */
+export function finaleStarsToWire(
+  raw: Record<string, FinaleStars>,
+): Record<string, FinaleStars> {
+  const out: Record<string, FinaleStars> = {};
+  for (const [name, s] of Object.entries(raw)) out[cardKey(name)] = s;
+  return out;
+}
+
+/** Σ stars over a set of cards, reading the STORED snapshot. Unknown names score 0. */
 export function sumStars(
   cards: readonly { name?: string }[] | undefined,
   stars: Record<string, FinaleStars> | undefined,
 ): number {
   if (!cards || !stars) return 0;
-  return cards.reduce((s, c) => s + (c?.name ? stars[c.name] ?? 0 : 0), 0);
+  return cards.reduce((s, c) => s + starsFor(stars, c?.name), 0);
 }

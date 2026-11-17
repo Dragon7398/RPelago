@@ -9,6 +9,7 @@ import { activeBoard } from '../lib/board';
 import { emptyTraitRoll, type TraitTargetRoll } from '../lib/traits';
 import { CASINO_GAME_ORDER, COAT_TABLE_TYPES, COAT_TYPES_REQUIRED } from '../lib/casinoData';
 import { normalizeSlots } from '../lib/slotHelpers';
+import { finaleStarsToWire } from '../lib/finaleStars';
 import { freshMission, freshCasinoTable, freshFinaleTable, findFinale, pickNextCasinoGame, casinoTableSettlement, claimedWeight, casinoSeatPaid, missionDisplayLabel, missionSettleBlockers, type FinaleSetup, type SettleBlockers } from '../lib/missionLogic';
 import { calcLevel, checkAndGrantAdventurers, adventurerCountForLevel } from '../lib/gameLogic';
 import { hasUnexcusedProblem, type SlotProgressSamples } from '../lib/statusReport';
@@ -1359,7 +1360,16 @@ export async function createFinaleTable(setup: FinaleSetup): Promise<string> {
   const r  = push(sRef(db!, 'missions'));
   const id = r.key!;
   await update(ref(db!), {
-    [sPath(`missions/${id}`)]: { ...freshFinaleTable(setup, Date.now()), id },
+    // ⚠️ `finaleStars` is keyed by CARD NAME, and a third of the deck carries a `/`
+    // — which RTDB rejects as a key, failing this whole update. The snapshot the
+    // host reviewed stays raw (that is what `FinaleSetup.stars` is); it is keyed
+    // for storage HERE, at the only place it is written. Read it back through
+    // `starsFor`, never by indexing with a card name.
+    [sPath(`missions/${id}`)]: {
+      ...freshFinaleTable(setup, Date.now()),
+      finaleStars: finaleStarsToWire(setup.stars),
+      id,
+    },
   });
   return id;
 }

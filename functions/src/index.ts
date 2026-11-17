@@ -18,7 +18,7 @@ import {
   deckChoiceOf, applyDeckBoost, isFinale, holdsMissionClaim,
   FINALE_BOARD_CARDS, FINALE_ROW_REELS, FINALE_MAX_REROLL_REELS, FINALE_REBUY_GOLD,
   FINALE_ROWS, applyReelRespin, finaleBoardCost, finaleRowIndices, finaleSlotDetails,
-  finaleOwnGold, finaleSeatGold, sumStars, finaleBoardRefusal, repickPool, repickLockedCount,
+  finaleOwnGold, finaleSeatGold, sumStars, starsFor, finaleBoardRefusal, repickPool, repickLockedCount,
 } from './casinoEngine';
 import {
   sp, secret, getConfig, seasonInfo, isDraftSeason, resolveWriteSeason, tickableSeasons,
@@ -2691,7 +2691,7 @@ export const lockFinaleResult = onCall(async (request) => {
 
   const choice = deckChoiceOf(seat);
   const stars  = mission.finaleStars ?? {};
-  const starsOf = (c: { name?: string }) => (c.name ? stars[c.name] ?? 0 : 0);
+  const starsOf = (c: { name?: string }) => starsFor(stars, c.name);
   const goldSwing = finaleOwnGold(sumStars(hand, stars), choice);
   // Stars, not gold — see finaleSlotDetails.
   const slots = cardsToSlots(hand, c => finaleSlotDetails(c, starsOf(c)));

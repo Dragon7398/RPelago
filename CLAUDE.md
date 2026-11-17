@@ -996,6 +996,22 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > a Safety board and lock it in as Purist. **When adding a casino callable, decide
 > explicitly which side of this line it is on.**
 
+> **The server refusing is only half of it — `CasinoTable` must not OFFER the
+> button.** `mustCasinoSeat` turning the finale away is a backstop, not the
+> experience: a finale seat routed to an ordinary phase gets a live control wired
+> to a callable that can only error. The phase a seat opens on is therefore
+> **`openingPhase(game)`** (`src/casino/CasinoTable.tsx`) — the finale ARMS, every
+> other table ANTES — read by both the derive effect and `chooseDeck`. It is one
+> function because it was briefly two: `chooseDeck` hardcoded `'ante'`, so picking
+> a deck at the finale landed the player on the ordinary buy-in screen pressing
+> *"Ante 0g · Deal me in"* at `dealCasinoHand`. Whether it self-corrected was a
+> race with the mission subscription. The finale's reachable phases are
+> `deckselect → armed → spinning → reroll → rowpick → keep → manifest → locked`;
+> **anything that routes a seat out of that set is a bug**, and `play`, `ante`,
+> `holdplay`, `folded` and `gambit` each carry a control the finale has no answer
+> for. (`backToCards` reads `play` too, but renders only inside `gambit`, so the
+> finale never reaches it.)
+
 > **`enlistInMission` refuses a player who is ALREADY SEATED (`already-seated`).**
 > It writes the participant record wholesale and runs `clearSeatSecrets`, so an
 > enlist over a seat you hold is a silent reset. On the finale that is an unlimited
@@ -1140,6 +1156,16 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > nothing at all — `seatTally`, `msToNextDecay`, `SeatPips` (off `baseMax: 0`) and
 > `casinoEntryCosts` were already finale-aware, which is why the rebuy reaches the
 > player before they ever open the table.
+>
+> ⚠️ **`ProgressCard` is the THIRD card and needs the same forks** — it is the
+> read-only twin of `TableCard`, shown for a live table the viewer holds no seat
+> at. It shipped without them and rendered `0g pot` and `Cohort I` on the season
+> closer, the two things every other finale surface is careful never to say. A card
+> that only appears once the table is running is easy to miss while building the
+> one that is all about sitting down, so **when a finale fork goes into `TableCard`,
+> check `ProgressCard` in the same pass.** Its awaiting-room line forks too: the
+> finale closed its entry rather than filling up, so *"seats are locked in"*
+> describes an event that never happened there.
 
 > **The inverse star scale is said out loud on every surface that offers the
 > table** (the card, the Games modal, the help section) — it is the one mechanic
@@ -1152,6 +1178,26 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > advertise it in seasons where it does not exist. That is also why they take a
 > flag instead of iterating a longer array: `CASINO_GAME_ORDER` must not gain the
 > finale (see the Coat block).
+
+> **`mission.finaleStars` is keyed by `cardKey`, NOT by card name.** A card name is
+> not a legal RTDB key — twelve of the 36 carry a `/` (`Exploration / open world`,
+> `NES / Famicom`, …) — so the raw snapshot failed the whole multi-path `update()`
+> and the finale could not be created at all. `cardKey` / `cardNameFromKey` /
+> `starsFor` / `finaleStarsToWire` live in `src/lib/finaleStars.ts`, mirrored in
+> `functions/src/casinoEngine.ts` (minus the decoder, which only the admin panel
+> needs). This is the `profiles/` dot-trap again, handled the same way: **one named
+> encoder per key space, never a bare `encodeURIComponent`**, which escapes every
+> illegal character except `.`.
+>
+> ⚠️ **Two maps, two keyings — do not mix them.** `finaleStarTiers` returns a
+> RAW-NAME ranking (what `StatsPage`'s ★ column and `npm run econ:finale` index
+> directly, correctly); `mission.finaleStars` is the stored, encoded snapshot.
+> `finaleStarsToWire` is the one-way door, applied in `createFinaleTable` at the
+> write. **Read the stored map only through `starsFor`** — `stars[card.name]`
+> compiles, returns undefined for a third of the deck, and scores those cards 0,
+> which is a silent underpayment rather than an error. That is also why the admin
+> panel's drift check converts the live map through `finaleStarsToWire` before
+> diffing, and decodes for display.
 
 > **The admin's frozen star snapshot is the audit trail, and the Stats tab is
 > NOT.** The Finale panel lists `mission.finaleStars` by tier and reports how many

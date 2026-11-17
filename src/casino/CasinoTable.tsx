@@ -67,6 +67,21 @@ const LOCAL_PHASES: Phase[] = [
   'spinning', 'reroll', 'rowpick', 'keep',
 ];
 
+/**
+ * Where a seat with a deck but no cards yet belongs.
+ *
+ * ⚠️ The finale ARMS; every other table ANTES. This is one function because it was
+ * briefly two: the derive effect forked on the finale and `chooseDeck` hardcoded
+ * `'ante'`, so picking a deck at the finale dropped the player on the ordinary
+ * buy-in screen with a "Deal me in" button wired to `dealCasinoHand` — which
+ * `mustCasinoSeat` refuses outright ("The finale is played at its own machine").
+ * Whether it self-corrected was a race: the local setPhase only loses to the
+ * mission subscription if that tick happens to land after it.
+ */
+function openingPhase(game: CasinoGame | null | undefined): Phase {
+  return game === 'finale' ? 'armed' : 'ante';
+}
+
 const GAME_BLURB: Record<CasinoGame, string> = {
   five_card_draw:
     'Five cards, one hand. Mark any you would rather not play — reroll them once for a ' +
@@ -444,7 +459,7 @@ export function CasinoTable() {
       if (secretBoard?.length) {
         setPhase(seat?.finaleRerolled?.length ? 'rowpick' : 'reroll');
       } else {
-        setPhase(seat?.deckChoice == null ? 'deckselect' : 'armed');
+        setPhase(seat?.deckChoice == null ? 'deckselect' : openingPhase(game));
       }
       return;
     }
@@ -501,8 +516,9 @@ export function CasinoTable() {
       return;
     }
 
-    // Nothing dealt yet — pick a deck the first time, otherwise sit and ante in.
-    setPhase(seat?.deckChoice == null ? 'deckselect' : 'ante');
+    // Nothing dealt yet — pick a deck the first time, otherwise take the table's
+    // opening step (the finale arms instead of anteing — see `openingPhase`).
+    setPhase(seat?.deckChoice == null ? 'deckselect' : openingPhase(game));
     // `secretHand` MUST be a dep: it arrives from its own seasonSecrets
     // subscription, which can resolve after the mission does. Without it, a
     // player reloading mid-hand would never have their hand restored.
@@ -675,7 +691,9 @@ export function CasinoTable() {
 
   const chooseDeck = (choice: CasinoDeckChoice) => run(async () => {
     await call<object, unknown>('setCasinoDeckChoice')({ missionId, deckChoice: choice });
-    setPhase('ante');
+    // Never a bare 'ante' — see `openingPhase`. The finale has no buy-in step, and
+    // its deal is a different callable entirely.
+    setPhase(openingPhase(game));
   }, 'Failed to set deck. Try again.');
 
   // Sit in. The table dictates the game, so this takes no game argument — Hold 'Em

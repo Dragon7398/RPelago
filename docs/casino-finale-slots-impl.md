@@ -1132,7 +1132,7 @@ waiting on them.
 
 ---
 
-### WS-I¾ — The second audit (the money paths) — ✅ DONE
+### WS-I¾ — The second audit (the money paths) + the key-space fix — ✅ DONE
 
 A review of the WS-I½ diff itself, which found six more. Where the first audit was
 about the finale **inheriting** ordinary-table callables, this one is about the
@@ -1193,6 +1193,61 @@ the client alone fails 2, including the `engine.test.ts` parity guard catching t
 mirror drift by itself. Both new rules are named, pure and mirrored rather than
 inline, for the reason the last round established.
 
+7. **The snapshot could not be written at all** — found the moment the first real
+   finale was opened on the rehearsal season, so it never reached a player.
+   `mission.finaleStars` is keyed by CARD NAME, and **twelve of the 36 names carry
+   a `/`** (`Exploration / open world`, `NES / Famicom`, …). RTDB rejects `.`, `#`,
+   `$`, `/`, `[` and `]` in a key, and one bad key fails the ENTIRE multi-path
+   `update()` — so `createFinaleTable` simply errored and no finale existed. Fixed
+   with **`cardKey` / `cardNameFromKey` / `starsFor` / `finaleStarsToWire`**
+   (`finaleStars.ts` ↔ `casinoEngine.ts`), encoding at the write in
+   `createFinaleTable` and reading only through `starsFor`. The in-memory
+   `finaleStarTiers` ranking stays raw-named, which is what `StatsPage` and
+   `econFinale` want.
+
+   > **The quiet half is worse than the loud half.** The write failing is
+   > self-announcing. But every reader indexed the stored map as
+   > `stars[card.name]`, which compiles, returns undefined for a third of the deck,
+   > and scores those cards **0** — so a seat holding genre cards would have been
+   > paid the 50g base and nothing else, with no error anywhere. The regression
+   > test asserts over the REAL `CARD_DEFS` rather than a fixture, plus a second
+   > test that the deck still contains names needing encoding, so it cannot go
+   > vacuously green if the cards are ever renamed.
+
+8. **Picking a deck dropped the player on the ordinary ante screen** — found at the
+   rehearsal table, one click after #7. `chooseDeck` hardcoded `setPhase('ante')`
+   while the derive effect forked on the finale, so the seat landed on the buy-in
+   step with a live *"Ante 0g · Deal me in"* wired to `dealCasinoHand`.
+   `mustCasinoSeat` refused it — the WS-I½ guard doing exactly its job — but the
+   player's experience was a dead button and a red error. Whether it self-corrected
+   was a RACE: the local `setPhase` is only overwritten if the mission tick carrying
+   the new `deckChoice` happens to land after it. Now **`openingPhase(game)`**, read
+   by both sites.
+
+   > **The server guard is a backstop, not the experience.** WS-I½ made ten shared
+   > callables refuse a finale seat, and that is what turned this into an error
+   > message instead of a free fifteen-card hand. But refusing is not routing: the
+   > client has its own copy of "what does this table do next", and that copy had
+   > the same inheritance bug the callables did. The finale's reachable phases are
+   > `deckselect → armed → spinning → reroll → rowpick → keep → manifest → locked`,
+   > and an audit of the other four exits (`play`, `holdplay`, `folded`, `gambit` —
+   > each holding a control with no finale meaning) found them all unreachable:
+   > `backToCards` routes to `play` but renders only within `gambit`.
+
+9. **The live-table card had none of the finale forks** (`ProgressCard`,
+   `CasinoShell`). `TableCard` — the one a player sits down from — forks on
+   `isFinale` for the pot, the cohort line, the seat count and the leave warning.
+   Its read-only twin, shown for a table in progress that the viewer holds no seat
+   at, had no fork at all: `0g pot` and `Cohort I`, both explicitly ruled out
+   everywhere else. Also reworded its awaiting-room line, which says *"seats are
+   locked in"* — an event that never happens at a finale, where entry closes on a
+   deadline rather than filling up.
+
+   > Found while chasing a different copy report, which is the useful part: the
+   > card is invisible until the table is already running, so neither the design
+   > pass nor the rehearsal's early steps would surface it. **A finale fork in
+   > `TableCard` should be followed by a look at `ProgressCard` in the same pass.**
+
 > **The pattern this time.** Three of the six (#1, #3, #4) are **two-step
 > read-then-write** sequences that a single client can interleave, and one (#4) was
 > introduced by the previous fix. The finale is the only table where the money and
@@ -1212,30 +1267,31 @@ inline, for the reason the last round established.
 Everything below wants a **throwaway draft season**: absent from the public
 `seasonList`, readable only by admin + alpha, and on its own `seasons/{id}` /
 `seasonSecrets/{id}` subtrees, so nothing it does touches the live season's data.
-There is **no creation UI** — `SeasonSwitcher` only switches — so step 1 is a hand
-write, which the rules permit from the admin's own client (`config/draftSeasons`
-is `.write`-able by `config/adminId`). No functions deploy is involved in making
-it.
+There is **no creation UI** — `SeasonSwitcher` only switches — so it is made from
+the ops script.
 
-1. **The draft entry.** One node, from the Firebase console or a `set()` as admin:
+1. **Create it**, from `functions/` (see that script's header for the
+   `DATABASE_URL` / credential setup; `--dry-run` first):
 
    ```
-   config/draftSeasons/finale_test = {
-     "label": "Finale Rehearsal",
-     "shell": "casino",
-     "casinoOpenTables": 2
-   }
+   node scripts/season-migrate.mjs create-draft \
+     --id finale_test --label "Finale Rehearsal" --tables 2 \
+     --alpha <uid>,<uid>,<uid>
    ```
 
-   No `board` key — a `casino` shell never reads one.
+   It writes `config/draftSeasons/finale_test` and `seasons/finale_test/meta`, adds
+   the alpha grants as **per-uid leaf writes** (so whoever can already preview other
+   drafts keeps that), and refuses outright to touch any season in the public
+   `seasonList`. `--shell map --board s2` for a map season instead; re-running needs
+   `--force`.
 
-2. ⚠️ **Alpha-list every test account** — `config/alphaUsers/{uid}: true`. **This
-   is the step that will bite.** Every casino callable runs `resolveWriteSeason`
-   first, and it refuses a `draft` season with `permission-denied` /
-   *"Season not available"* for anyone who is neither admin nor alpha. The admin
-   account is in for free; the others are not — and the same pair gates the
-   `draftSeasons` **read**, so an un-listed account cannot even see the season in
-   the switcher to pick it.
+2. ⚠️ **The `--alpha` list is the step that will bite if you skip it.** Every casino
+   callable runs `resolveWriteSeason` first, and it refuses a `draft` season with
+   `permission-denied` / *"Season not available"* for anyone who is neither admin
+   nor alpha. The admin account is in for free; the others are not — and the same
+   pair gates the `draftSeasons` **read**, so an un-listed account cannot even see
+   the season in the switcher to pick it. The script warns when the total would be
+   zero, but it cannot know which accounts you mean to test with.
 
 3. **Each account switches via the `SeasonSwitcher`** on the admin dashboard. The
    choice is `localStorage`, hence per browser profile — which is also how four
@@ -1291,10 +1347,13 @@ it.
 > `repickPool` — no-ops for an ordinary table. Low risk, not zero; know it before
 > deploying rather than after.
 
-**Tear-down**: `config/draftSeasons/finale_test`, `config/alphaUsers` entries if
-they were added only for this, `seasons/finale_test`,
-`seasonSecrets/finale_test`, `roomTelemetry/finale_test`, and the
-`yaml/finale_test` + `casino/finale_test` Storage trees.
+**Tear-down**: `node scripts/season-migrate.mjs drop-draft --id finale_test --force`
+clears the config entry, `seasons/{id}`, `seasonSecrets/{id}` and
+`roomTelemetry/{id}`. It deliberately leaves `config/alphaUsers` alone (the grants
+are per-person, and the next draft will want them) and it cannot touch **Storage**,
+which is a separate service — delete `yaml/finale_test/` and `casino/finale_test/`
+by hand. It refuses any season in the public `seasonList`, so it cannot be pointed
+at a live one by mistake.
 
 #### The checks
 

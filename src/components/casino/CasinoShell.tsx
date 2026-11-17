@@ -305,6 +305,12 @@ const liveClockFrom = (m: GMMission): number | undefined => m.linkedAt ?? (m.lin
 function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (m: GMMission) => void }) {
   const game  = (m.casinoGame ?? 'five_card_draw') as CasinoGame;
   const cfg   = CASINO_GAMES[game];
+  // ⚠️ The read-only twin of `TableCard`, and it needs the SAME finale forks — it
+  // went in without them and rendered `0g pot` and `Cohort I` on the season closer,
+  // both of which every other finale surface is careful never to say. A card that
+  // only appears once the table is live is easy to miss while building one that is
+  // all about sitting down.
+  const finale = isFinale(m);
   const seats = Object.values(m.participants ?? {}).length;
   const { goaled, total } = roomGoalProgress(m);
   const pct  = total ? Math.round((goaled / total) * 100) : 0;
@@ -328,10 +334,22 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
       <div className="rl-tcard-felt">
         <div className="rl-tcard-name">
           {cfg.label}
-          <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>
+          {/* No pot, and it must stay that way — a nonzero one switches the whole
+              weighted split back on (see `freshFinaleTable`), so `0g pot` is not just
+              uninformative, it advertises the thing that must not happen. Print what
+              a board is worth instead, exactly as the entry card does. */}
+          {finale
+            ? <span className="rl-pot">
+                <span className="n">{FINALE_BASE_GOLD}</span>
+                <span className="u">g + {FINALE_GOLD_PER_STAR}g a ★</span>
+                <span className="s">{FINALE_MIN_GOLD}–{FINALE_MAX_GOLD}g a board</span>
+              </span>
+            : <span className="rl-pot"><span className="n">{m.pot ?? 0}</span><span className="u">g pot</span></span>}
         </div>
         <div className="rl-tcard-room rl-room-status">
-          <span>Cohort {toRoman(m.series)}</span>
+          {/* "Cohort I" promises a second one. Same reasoning as `missionDisplayLabel`
+              and its server mirror. */}
+          <span>{finale ? 'The season closer' : `Cohort ${toRoman(m.series)}`}</span>
           {pending
             ? <span className="rl-badge pending">Awaiting room</span>
             : <span className="rl-badge live"><span className="rl-live-dot" />In progress</span>}
@@ -341,7 +359,11 @@ function ProgressCard({ m, now, onOpen }: { m: GMMission; now: number; onOpen: (
         {pending ? (
           <div className="rl-pending-mini">
             <span className="rl-pending-icon">⏳</span>
-            <span>Seats are locked in. Waiting on the host to generate this table.</span>
+            {/* The finale closed its entry rather than filling up, so "seats are
+                locked in" describes the wrong event — nobody was racing for a seat. */}
+            <span>{finale
+              ? 'Entry has closed and every seat locked in. Waiting on the host to build the room.'
+              : 'Seats are locked in. Waiting on the host to generate this table.'}</span>
           </div>
         ) : (
           <div className="mp-complete-wrap">

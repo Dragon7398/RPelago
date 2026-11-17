@@ -3,6 +3,7 @@ import {
   FINALE_GAME, WILD_STARS, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR,
   starTierSizes, compareForStars, baselineMissions,
   finaleStarRanking, finaleStarTiers, finaleOwnGold, finaleClaimedGold, finaleSeatGold, sumStars,
+  cardKey, cardNameFromKey, starsFor, finaleStarsToWire,
   type FinaleStars,
 } from '../../src/lib/finaleStars';
 import { baselineDeckWeights } from '../../src/lib/cardStats';
@@ -398,3 +399,97 @@ describe('sumStars', () => {
     expect(sumStars([{ name: 'Sonic' }], undefined)).toBe(0);
   });
 });
+
+// ── The snapshot's key space ────────────────────────────────────────────────
+//
+// `finaleStars` is keyed by CARD NAME, and a card name is not a legal RTDB key:
+// twelve of the 36 carry a `/`. Writing the snapshot raw failed the whole
+// multi-path update, so the finale could not be created at all. These are the
+// tests that would have caught it before it reached a season.
+
+describe('the finale star snapshot is RTDB-safe', () => {
+  // RTDB rejects these outright in a key. `.` is the dangerous one: it is the
+  // character `encodeURIComponent` leaves alone, which is what cost `profiles/`
+  // a season of writes.
+  const ILLEGAL = ['.', '#', '$', '/', '[', ']'];
+
+  it('EVERY real card name produces a legal key — the regression', () => {
+    const names = CARD_DEFS.map(d => d.name);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const key = cardKey(name);
+      for (const ch of ILLEGAL)
+        expect(key.includes(ch), `${name} → ${key} still contains ${ch}`).toBe(false);
+      expect(key.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('the deck really does contain names that need encoding', () => {
+    // Guards the test above from going vacuously green if the deck is ever
+    // renamed into safety: the encoder must keep being exercised for real.
+    const needy = CARD_DEFS.filter(d => ILLEGAL.some(ch => d.name.includes(ch)));
+    expect(needy.length).toBeGreaterThan(0);
+    expect(needy.some(d => d.name.includes('/'))).toBe(true);
+  });
+
+  it('round-trips every card name back for display', () => {
+    // The admin's frozen-star panel lists these to the host, so the encoding has
+    // to be reversible — unlike `apSlotKey`, which nothing decodes.
+    for (const d of CARD_DEFS) expect(cardNameFromKey(cardKey(d.name))).toBe(d.name);
+  });
+
+  it('encodes a dot, which encodeURIComponent does not', () => {
+    expect(encodeURIComponent('Dr. Mario')).toContain('.');     // the trap itself
+    expect(cardKey('Dr. Mario')).not.toContain('.');
+    expect(cardNameFromKey(cardKey('Dr. Mario'))).toBe('Dr. Mario');
+  });
+
+  it('keeps distinct names distinct', () => {
+    const keys = new Set(CARD_DEFS.map(d => cardKey(d.name)));
+    expect(keys.size).toBe(new Set(CARD_DEFS.map(d => d.name)).size);
+  });
+
+  it('cardNameFromKey survives a key it cannot decode', () => {
+    // Never throw while rendering the host's audit panel.
+    expect(cardNameFromKey('%E0%A4%A')).toBe('%E0%A4%A');
+  });
+});
+
+describe('finaleStarsToWire / starsFor', () => {
+  const slashCard = CARD_DEFS.find(d => d.name.includes('/'))!;
+
+  it('reads back a star value through the encoded key', () => {
+    const wire = finaleStarsToWire({ [slashCard.name]: 4 });
+    expect(starsFor(wire, slashCard.name)).toBe(4);
+    // …and the raw name is NOT a key of the stored map, which is the whole point.
+    expect(wire[slashCard.name]).toBeUndefined();
+  });
+
+  it('scores an unknown card 0 rather than throwing', () => {
+    expect(starsFor({}, 'Not A Card')).toBe(0);
+    expect(starsFor(undefined, slashCard.name)).toBe(0);
+    expect(starsFor({ x: 3 }, undefined)).toBe(0);
+  });
+
+  it('sums a hand of slash-named cards off the stored snapshot', () => {
+    // The failure this prevents is silent: indexing by raw name scores every one
+    // of these 0, and the seat is quietly underpaid rather than erroring.
+    const slashCards = CARD_DEFS.filter(d => d.name.includes('/')).slice(0, 3);
+    const raw: Record<string, FinaleStars> = {};
+    for (const d of slashCards) raw[d.name] = 3;
+    const wire = finaleStarsToWire(raw);
+    expect(sumStars(slashCards, wire)).toBe(3 * slashCards.length);
+  });
+
+  it('carries a whole real snapshot through to legal keys', () => {
+    const raw  = finaleStarTiers([]);
+    const wire = finaleStarsToWire(raw);
+    expect(Object.keys(wire).length).toBe(Object.keys(raw).length);
+    for (const k of Object.keys(wire))
+      for (const ch of ['.', '#', '$', '/', '[', ']'])
+        expect(k.includes(ch), `stored key ${k} is not RTDB-legal`).toBe(false);
+    // Every ranked card still priced, read back the way the game reads it.
+    for (const name of Object.keys(raw)) expect(starsFor(wire, name)).toBe(raw[name]);
+  });
+});
+

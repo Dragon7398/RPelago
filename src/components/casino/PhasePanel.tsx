@@ -196,11 +196,20 @@ function FinaleWait({ m, now }: { m: GMMission; now: number }) {
         <span>Entry open</span>
         <span><b>{entered}</b> entered · no seat limit</span>
       </div>
+      {/* ⚠️ PLAYER-FACING. This said "nothing deploys then" and "the room is
+          generated once the last of them has locked in" — the first is internal
+          state-machine wording, and the second quietly promises the room appears by
+          itself. Two separate things happen: the table flips to in-progress on its
+          own once every seat has locked in, and then the HOST builds the
+          Archipelago room from the configs. Only the second is what a player is
+          actually waiting on, so that is the one to name. */}
       <p className="rl-fin-wait-txt">
         {at != null
-          ? <>Entry closes in <b>{fmtDur(at - now)}</b> — and nothing deploys then. The seats
-              already in finish taking a row and attaching a config, and the room is generated
-              once the last of them has locked in.</>
+          ? <>Entry closes in <b>{fmtDur(at - now)}</b> — that only stops new players
+              joining. Nothing starts then, and a spin you have already taken is safe.
+              Everyone who entered still has to take a row, name their games and attach
+              their config; once the last of them has, your host builds the Archipelago
+              room.</>
           : <>No closing time has been set yet, so entry stays open.</>}
       </p>
     </div>

@@ -4,7 +4,7 @@ import type { DeckCard } from '../lib/casinoData';
 import {
   FINALE_ROWS, FINALE_ROW_REELS, FINALE_MAX_REROLL_REELS, finaleRowIndices,
 } from '../lib/casinoData';
-import { finaleOwnGold, sumStars, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_REBUY_GOLD } from '../lib/finaleStars';
+import { finaleOwnGold, sumStars, starsFor, FINALE_BASE_GOLD, FINALE_GOLD_PER_STAR, FINALE_REBUY_GOLD } from '../lib/finaleStars';
 import { CardFace, CardBack } from './CardFace';
 import './finale.css';
 
@@ -142,7 +142,7 @@ export default function FinaleBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  const starOf = (c: DeckCard | undefined) => (c?.name ? stars[c.name] ?? 0 : 0);
+  const starOf = (c: DeckCard | undefined) => starsFor(stars, c?.name);
 
   const rowCards = useMemo(
     () => (row ? finaleRowIndices(row).map(i => board[i]).filter(Boolean) : []),
