@@ -11,6 +11,21 @@
 .fin-wrap {
   display: flex; flex-direction: column; gap: 0.9rem;
   --fin-sel: var(--gold);
+  /* ⚠️ THE BOARD CANNOT SCROLL UNTIL THIS IS CLAMPED. `.cz-stage` is a column flex
+     container with `align-items: center`, which sizes every child to its CONTENT on
+     the cross axis rather than stretching it — so this wrap took the board's
+     max-content width (~560px, five cards and their gaps), the stage and the felt
+     grew with it, and the overflow ended up on the DOCUMENT: the whole page
+     scrolled sideways while `.fin-machine` sat there with an `overflow-x: auto`
+     that had nothing to scroll, because its parent was never narrower than its
+     content. `min-width: 0` on the scroller is no help against an ancestor sized
+     to content; the clamp has to be here.
+
+     `max-width: 100%` keeps the centring `align-items` gives us while bounding the
+     wrap to the stage, which finally hands `.fin-machine` a definite width to
+     scroll inside. */
+  max-width: 100%;
+  min-width: 0;
 }
 
 .fin-head { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -37,7 +52,30 @@
 
 /* ── The machine ── */
 .fin-machine {
-  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: grid;
+  /* ⚠️ NEVER `minmax(0, 1fr)` here. The cards do not shrink — CardFace sets `--cw`
+     INLINE, so no stylesheet can size them down, and 79 of the card's internal
+     measurements derive from it. Zero-floor tracks therefore crush below the card
+     while the card stays 104px: each one overflows its column, is painted over by
+     the next, and the overflow propagates to the DOCUMENT, so the whole page
+     scrolls sideways instead of the board.
+
+     `minmax(max-content, 1fr)` floors each track at the card and still lets the
+     five share any spare width, and `overflow-x: auto` scrolls the board itself
+     when they do not fit. One rule at every width — the board needs ~560px of
+     content whatever the viewport is, so a breakpoint is the wrong instrument:
+     it leaves a dead zone between the query and the width that actually fits.
+
+     ⚠️ It is ONE grid holding all fifteen cells, and that is load-bearing:
+     scrolling the container moves all three rows together, so a REEL stays
+     readable as a column. Three per-row scrollers would drift out of step, and a
+     reel is the unit the reroll operates on. */
+  grid-template-columns: repeat(5, minmax(max-content, 1fr));
+  overflow-x: auto;
+  /* Without this a flex/grid ancestor sizes the machine to its CONTENT and the
+     page scrolls instead of the board — the usual way an overflow container ends
+     up blowing out its parent rather than scrolling inside it. */
+  min-width: 0;
   gap: 0.6rem; padding: 0.8rem;
   background: var(--felt); border: 1px solid var(--border); border-radius: 10px;
 }
@@ -168,7 +206,12 @@ button.fin-cell:focus-visible { outline: 2px solid var(--border-glow); outline-o
 
 /* ── Narrow screens ── */
 @media (max-width: 720px) {
-  .fin-machine { gap: 0.35rem; padding: 0.5rem; }
+  /* Density only — the scrolling lives on the base rule, at every width. */
+  .fin-machine {
+    gap: 0.35rem; padding: 0.5rem;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   .fin-cell { padding: 0.15rem; }
   .fin-title { font-size: 1.1rem; }
 }

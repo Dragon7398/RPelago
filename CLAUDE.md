@@ -1272,6 +1272,19 @@ The economy is tuned as a whole — antes, card values, and the pot formula are 
 > `holdwait` / `holdplay`, which no finale seat reaches — see `openingPhase`. Only
 > the `plate` look reads `stars`; it is the only look anything renders.
 
+> **The finale board SCROLLS on a phone, and it is one grid rather than three
+> rows for a reason.** `.fin-machine` holds all fifteen cells in a single
+> `display: grid`, so scrolling the container moves all three rows together and a
+> **reel stays readable as a column** — which is the unit the reroll operates on.
+> Three per-row scrollers would let the rows drift out of step and leave a player
+> picking a reel they cannot see. The cards cannot simply shrink to fit: `CardFace`
+> sets `--cw` INLINE, so no stylesheet can override it, and 79 of the card's
+> internal sizes derive from it — left as `1fr` tracks the columns crushed to
+> ~65px while the cards stayed 104px, so each was painted over by the next and
+> only the last of each row was legible. The narrow-screen rule uses `max-content`
+> tracks plus `overflow-x: auto`, which is inert on any screen wide enough to fit
+> the board.
+
 > **`cardStatsCorpus` (`missionLogic.ts`) is shared by the admin Stats tab and the
 > Finale panel**, and that sharing is the point: the host reviews the card-popularity
 > table (with its Finale ★ column) and then opens the finale, which **freezes** those
