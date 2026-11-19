@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useKmk } from '../../contexts/KmkContext';
 import { useAuth } from '../../contexts/AuthContext';
+import LoginModal from '../LoginModal';
+import PrivacyModal from '../PrivacyModal';
 import type { KmkArea, KmkStatus } from '../../types';
 
 const STATUS_LABELS: Record<KmkStatus, string> = {
@@ -198,7 +200,11 @@ interface Props { listId: string; }
 
 export default function KmkBoard({ listId }: Props) {
   const { lists, loading } = useKmk();
-  const { user } = useAuth();
+  const { user, loading: authLoading, authError } = useAuth();
+  // Sign-in happens HERE rather than bouncing to the front page: the OAuth
+  // round trip carries the #keep/ hash back (see contexts/oauthReturn.ts).
+  const [loginOpen,   setLoginOpen]   = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   if (loading) {
     return (
@@ -233,10 +239,14 @@ export default function KmkBoard({ listId }: Props) {
         <a className="kmk-board-home-link" href="/">↩ Map</a>
       </header>
 
-      {!user && (
+      {/* Hidden while auth resolves, so the prompt doesn't flash up during the
+          code exchange on the way back from Discord. */}
+      {!user && !authLoading && (
         <div className="kmk-board-login-prompt">
           <span className="kmk-board-login-msg">Sign in to claim trials and track your progress.</span>
-          <a className="kmk-board-login-link" href="/">Sign in</a>
+          <button type="button" className="kmk-board-login-link" onClick={() => setLoginOpen(true)}>
+            Sign in
+          </button>
         </div>
       )}
 
@@ -251,6 +261,16 @@ export default function KmkBoard({ listId }: Props) {
           />
         ))}
       </div>
+
+      {/* A failed or refused sign-in (e.g. a banned Discord ID) lands back
+          here with the modal closed, so an error opens it by itself —
+          otherwise the failure would be silent. Closing clears the error. */}
+      <LoginModal
+        open={loginOpen || !!authError}
+        onClose={() => setLoginOpen(false)}
+        onPrivacyClick={() => { setLoginOpen(false); setPrivacyOpen(true); }}
+      />
+      <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </div>
   );
 }

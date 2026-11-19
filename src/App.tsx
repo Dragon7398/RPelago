@@ -225,6 +225,8 @@ export default function App() {
           <KmkProvider>
             <FirebaseBanner />
             <KmkBoard listId={listId} />
+            {/* Theme picker only — see the `keep` variant in SettingsPanel. */}
+            <SettingsPanel variant="keep" />
           </KmkProvider>
         </ToastProvider>
       </AuthProvider>

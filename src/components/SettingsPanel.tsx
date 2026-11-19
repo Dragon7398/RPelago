@@ -8,6 +8,12 @@ import SeasonSwitcher from './SeasonSwitcher';
  * (`--font-scale` drives `html { font-size }`, so the whole casino scales with
  * it too). The tile-specific controls are only meaningful on the map, so a
  * casino season hides them rather than shipping a second settings UI.
+ *
+ * The `keep` variant (Keymaster's Keep) shows the theme picker ONLY. It must
+ * not render `SeasonSwitcher`: the #keep/ route mounts no SeasonProvider, and
+ * `useSeason` throws outside one. The hidden settings still APPLY their saved
+ * values (the effects run regardless), so a player's font size and
+ * reduce-motion choices carry over to the Keep.
  */
 
 function useBoolSetting(key: string, def: boolean): [boolean, (v: boolean) => void] {
@@ -48,8 +54,9 @@ function useStringSetting<T extends string>(key: string, def: T): [T, (v: T) => 
   return [val, set];
 }
 
-export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | 'casino' }) {
+export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | 'casino' | 'keep' }) {
   const showMapOptions = variant === 'map';
+  const themeOnly      = variant === 'keep';
 
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState(() => {
@@ -115,7 +122,7 @@ export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | '
         {/* Admin/alpha only (self-hides otherwise) — lets a playtester preview a
             draft season from either shell, since the dashboard switcher isn't
             reachable by non-admins. */}
-        <SeasonSwitcher />
+        {!themeOnly && <SeasonSwitcher />}
         <div className="settings-theme-block">
           <span className="settings-label settings-section-label">THEME</span>
           <div className="settings-theme-options">
@@ -131,7 +138,7 @@ export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | '
             ))}
           </div>
         </div>
-        <div className="settings-row settings-row--tile-size">
+        {!themeOnly && <div className="settings-row settings-row--tile-size">
           <span className="settings-label">FONT SIZE</span>
           <input
             type="range" min={1.0} max={1.4} step={0.1}
@@ -140,7 +147,7 @@ export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | '
             className="settings-slider"
           />
           <span className="settings-value">{Math.round(fontScale * 100)}%</span>
-        </div>
+        </div>}
         {showMapOptions && (
           <div className="settings-row settings-row--tile-size">
             <span className="settings-label">TILE SIZE</span>
@@ -165,10 +172,12 @@ export default function SettingsPanel({ variant = 'map' }: { variant?: 'map' | '
             <span className="settings-label">HIGHLIGHT MY ADVENTURERS</span>
           </label>
         )}
-        <label className="settings-row settings-check-row">
-          <input type="checkbox" className="settings-check" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />
-          <span className="settings-label">REDUCE ANIMATIONS</span>
-        </label>
+        {!themeOnly && (
+          <label className="settings-row settings-check-row">
+            <input type="checkbox" className="settings-check" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />
+            <span className="settings-label">REDUCE ANIMATIONS</span>
+          </label>
+        )}
         {showMapOptions && (
           <label className="settings-row settings-check-row">
             <input type="checkbox" className="settings-check" checked={statePatterns} onChange={e => setStatePatterns(e.target.checked)} />

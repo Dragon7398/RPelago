@@ -10,6 +10,7 @@ import { auth as firebaseAuth, firebaseReady } from '../firebase/config';
 import { playerExists, isPlayerDisabled } from '../firebase/db';
 import { whenSeasonReady } from '../firebase/season';
 import { AuthContext } from './AuthContext';
+import { saveOAuthReturnHash } from './oauthReturn';
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID as string;
 const REDIRECT_PATH     = '/auth/callback';
@@ -103,8 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (code && returnedState && returnedState === storedState) {
       sessionStorage.removeItem(OAUTH_STATE_KEY);
-      // Clear the code from the URL immediately so a refresh doesn't re-attempt
-      window.history.replaceState({}, '', window.location.pathname);
+      // Clear the code from the URL immediately so a refresh doesn't re-attempt.
+      // Keep the hash: it's what routes a Keep sign-in back to the Keep.
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
       exchangingRef.current = true;
 
       exchangeCodeForToken(code)
@@ -173,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthError('VITE_DISCORD_CLIENT_ID is not configured.');
       return;
     }
+    saveOAuthReturnHash();
     window.location.href = buildDiscordAuthUrl();
   }, []);
 
