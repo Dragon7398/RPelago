@@ -2283,8 +2283,28 @@ exports.dealGambitOffer = (0, https_1.onCall)(async (request) => {
         offer = handle.drawOffer(3, card => (0, casinoEngine_1.gambitOfferable)(stats, card));
         return handle.toArray();
     });
-    await db.ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gambitOffer`))
-        .set(offer.map(c => c.defId));
+    // CLAIM the seat's offer atomically — first writer wins. The fast-path check
+    // above is a plain read, so two clients on one seat (the table open on a desktop
+    // while the hand is played on a phone: the phone's play-on pushes BOTH into the
+    // gambit step, and both fire this) each saw no offer, each drew, and the second
+    // `.set` silently replaced the first. The loser then displayed three gambits the
+    // server no longer held — and `playCasinoGambit` would refuse any it picked.
+    // A transaction on the leaf (never on the seat: a null first pass there would
+    // abort locally — see the Admin SDK pitfall in CLAUDE.md) re-runs against the
+    // real value, so a loser sees the winner's offer and aborts.
+    const ids = offer.map(c => c.defId);
+    const { committed, snapshot } = await db
+        .ref((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/participants/${uid}/gambitOffer`))
+        .transaction((cur) => Array.isArray(cur) && cur.length > 0 ? undefined : ids);
+    if (!committed) {
+        // Lost the race: put our draw back so the shared deck isn't short three cards
+        // nobody was ever offered, and hand back the offer that actually stands.
+        if (offer.length > 0) {
+            await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${missionId}/gambitDeck`)).transaction((current) => [...(current ?? []), ...offer]);
+        }
+        const standing = snapshot.val() ?? [];
+        return { offer: asCards(standing) };
+    }
     return { offer };
 });
 // Play a gambit. Validates the defId against the seat's dealt offer, applies it

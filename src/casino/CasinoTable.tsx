@@ -913,6 +913,26 @@ export function CasinoTable() {
   const toGambit = () => run(async () => { await dealGambit(); setPhase('gambit'); },
     'Could not draw your gambits. Try again.');
 
+  // The offer ON SCREEN is the one stored on the seat, not the callable's reply.
+  // The seat's `gambitOffer` is the only set `playCasinoGambit` accepts, and it is
+  // public, so the subscription is the authority. The reply is a fallback for the
+  // instant before the mission tick lands. This is what keeps two devices on one
+  // seat agreeing: a second client that raced the first used to show its own draw
+  // until a refresh (the server now refuses the race too — see dealGambitOffer).
+  const seatOfferIds = uid ? mission?.participants?.[uid]?.gambitOffer : undefined;
+  const offer = useMemo<GambitCard[]>(() => {
+    if (!seatOfferIds?.length) return gOffer;
+    // Same uid shape the server mints, so React keys match the reply's.
+    return seatOfferIds
+      .map((id, i) => {
+        const d = GAMBIT_DEFS_BY_ID[id];
+        return d ? { ...d, uid: `gam_${uid}_${i}` } : null;
+      })
+      .filter((c): c is GambitCard => c !== null);
+  }, [seatOfferIds, gOffer, uid]);
+  // A pick only counts while it is still in the standing offer.
+  const pickValid = gPick == null || offer.some(c => c.defId === gPick);
+
   // Recovery: landed on the gambit step without the offer (a reload, or straight
   // off a play-on) — fetch it. Idempotent server-side, so this never re-draws or
   // double-depletes the shared deck. This is now the ONLY path that draws the
@@ -925,7 +945,7 @@ export function CasinoTable() {
   // scoped off for this effect the same way the derive effect above scopes it.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (phase !== 'gambit' || gOffer.length > 0) return;
+    if (phase !== 'gambit' || offer.length > 0) return;
     if (uid && mission?.participants?.[uid]?.gambitPlayed) return;  // resolved — lock directly
     void dealGambit().catch(e => doFlash((e as { message?: string })?.message ?? 'Could not draw your gambits. Try again.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1193,6 +1213,13 @@ export function CasinoTable() {
     }
 
     if (!gambitPlayed) {
+      // Never quietly skip a gambit the player chose: if the standing offer moved
+      // under them, send them back to choose again rather than lock in without it.
+      if (!pickValid) {
+        setGPick(null);
+        setPhase('gambit');
+        throw new Error('Your gambit offer changed — please choose again.');
+      }
       await call<object, unknown>('playCasinoGambit')({ missionId, gambitDefId: gPick ?? null });
     }
     await call<object, { goldSwing: number }>('lockCasinoResult')({
@@ -1729,7 +1756,7 @@ export function CasinoTable() {
           {phase === 'gambit' && (() => {
             // Offer empty but gambit not yet resolved → it's still being drawn
             // from the shared server deck (or a reload is re-fetching it).
-            const loadingOffer = gOffer.length === 0 && !gambitPlayed;
+            const loadingOffer = offer.length === 0 && !gambitPlayed;
             return (
               <>
                 <div className="cz-stage-title">Play a Gambit?</div>
@@ -1740,7 +1767,7 @@ export function CasinoTable() {
                 <div className="cz-gambit-offer">
                   {loadingOffer
                     ? <div className="cz-card-cap">Drawing your gambits from the deck…</div>
-                    : gOffer.map(card => {
+                    : offer.map(card => {
                         const selected = gPick === card.defId;
                         return (
                           <div
@@ -1761,7 +1788,7 @@ export function CasinoTable() {
                     </button>
                   )}
                   <button className="cz-btn primary" onClick={() => setPhase('manifest')} disabled={busy || loadingOffer}>
-                    {loadingOffer ? 'Drawing…' : gOffer.length === 0 ? 'Continue →' : gPick ? 'Play this gambit & continue →' : 'Skip & continue →'}
+                    {loadingOffer ? 'Drawing…' : offer.length === 0 ? 'Continue →' : gPick && pickValid ? 'Play this gambit & continue →' : 'Skip & continue →'}
                   </button>
                 </div>
                 <div className="cz-flash">{flash}</div>
