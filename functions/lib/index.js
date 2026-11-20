@@ -381,6 +381,9 @@ exports.onTileComplete = (0, database_1.onValueWritten)('seasons/{seasonId}/tile
     const seasonId = event.params.seasonId;
     const coord = event.params.coord;
     const db = (0, database_2.getDatabase)();
+    // Drop the room(s)' per-slot telemetry — see onMissionComplete. Ahead of the
+    // draft guard: a playtest season's samples need clearing just the same.
+    await db.ref(`roomTelemetry/${seasonId}/tiles/${coord}`).remove();
     // Never write real player history from a draft season being playtested.
     if (await (0, seasonPaths_1.isDraftSeason)(seasonId, db))
         return;
@@ -3629,6 +3632,10 @@ exports.onMissionComplete = (0, database_1.onValueCreated)('seasons/{seasonId}/m
     // ahead of the draft guard: a playtest season's hands need clearing too, and
     // `completeMission` (client-side) can't do it — the leaves are `.write: false`.
     await db.ref((0, seasonPaths_1.secret)(seasonId, `missions/${event.params.missionId}`)).remove();
+    // The room's per-slot telemetry dies with it too. tickSlotStatuses only ever
+    // prunes a LIVE room's samples, so a settled table's last 14 days would
+    // otherwise sit in `roomTelemetry/` forever. The peek only reads live worlds.
+    await db.ref(`roomTelemetry/${seasonId}/missions/${event.params.missionId}`).remove();
     // Never write real player history from a draft season being playtested.
     if (await (0, seasonPaths_1.isDraftSeason)(seasonId, db))
         return;
@@ -3700,7 +3707,9 @@ exports.tickGuildmasterMissions = (0, scheduler_1.onSchedule)('every 15 minutes'
     // season plus drafts (so alphas can playtest mission deploy).
     const seasons = await (0, seasonPaths_1.tickableSeasons)(db, true);
     for (const { seasonId } of seasons) {
-        const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+        // Every pass below acts on FORMING tables only (gmShouldDeploy refuses any
+        // other state), so fetch just those — `.indexOn: ["state"]` in the rules.
+        const snap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).orderByChild('state').equalTo('forming').get();
         if (!snap.exists())
             continue;
         const missions = snap.val();
@@ -3932,7 +3941,18 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
     // Keys are the TRACKER's slot names (`extractApSlotName`), which is what a
     // resolved `{NUMBER}` name equals — an unresolved one matches nothing and
     // correctly shows no history rather than someone else's.
-    function sampleSlotProgress(basePath, existing, games) {
+    //
+    // ⚠️ READ ONLY THIS ROOM, AND ONLY BY KEY QUERY. This used to `.get()` the whole
+    // `roomTelemetry/{seasonId}` tree once per run to learn the timestamp keys —
+    // every sample of every room, 96 times a day, and finished rooms were never
+    // pruned (only a live room reaches this function), so it grew with every table
+    // settled. At 1.33 MB a tick it was the single largest download in the project.
+    // Now a run reads one sample per live room (`limitToLast(1)`, for spacing) and,
+    // only when it actually writes, the expired samples it is about to delete.
+    // Sample keys are 13-digit ms stamps — too big for RTDB's 32-bit integer key
+    // ordering, so they sort as strings, which at equal length is numeric order.
+    // Finished rooms are cleared by onMissionComplete / onTileComplete.
+    async function sampleSlotProgress(basePath, games) {
         const slots = {};
         for (const g of games) {
             const t = g.checks_total || 0;
@@ -3942,15 +3962,19 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         }
         if (Object.keys(slots).length === 0)
             return;
-        const stamps = Object.keys(existing ?? {}).map(Number).filter(n => Number.isFinite(n));
-        const newest = stamps.length ? Math.max(...stamps) : null;
+        const ref = db.ref(basePath);
+        const latest = [];
+        (await ref.orderByKey().limitToLast(1).get()).forEach(c => { latest.push(Number(c.key)); });
+        const newest = latest.find(n => Number.isFinite(n)) ?? null;
         if (newest != null && runNow - newest < ROOM_SAMPLE_MIN_HOURS * 3_600_000)
             return;
         updates[`${basePath}/${runNow}`] = slots;
+        // Strictly older than the cutoff, as before: endAt is inclusive, hence the -1.
         const cutoff = runNow - ROOM_SAMPLE_RETENTION_HOURS * 3_600_000;
-        for (const ts of stamps)
-            if (ts < cutoff)
-                updates[`${basePath}/${ts}`] = null;
+        (await ref.orderByKey().endAt(String(cutoff - 1)).get()).forEach(c => {
+            if (c.key)
+                updates[`${basePath}/${c.key}`] = null;
+        });
     }
     // Stamp a slot's activity timestamps into `updates`, but only the fields that
     // actually changed — avoids rewriting unchanged leaves every 15-minute tick.
@@ -3984,12 +4008,6 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
         // terminal. Inlined here the same way `deriveStatus` is — the client mirror is
         // `releasesClaimsEarly` in src/lib/gameLogic.ts.
         const releasesEarly = (pid) => rawPlayers[pid]?.restricted !== true;
-        // Existing per-slot samples for this whole season, read ONCE — the tree is
-        // top-level, so unlike `roomProgress` it does not arrive with the tile and
-        // mission snapshots below. Only the timestamp keys are used (for spacing and
-        // pruning), so the shallow shape is all `sampleSlotProgress` needs.
-        const telemetrySnap = await db.ref(`roomTelemetry/${seasonId}`).get();
-        const telemetry = (telemetrySnap.exists() ? telemetrySnap.val() : {});
         // ── Tiles ──────────────────────────────────────────────────────────────
         const tilesSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'tiles')).get();
         if (tilesSnap.exists()) {
@@ -4018,7 +4036,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                         continue;
                     const progKey = roomNum === 1 ? 'roomProgress' : 'roomProgress2';
                     sampleRoomProgress((0, seasonPaths_1.sp)(seasonId, `tiles/${coord}/${progKey}`), tile[progKey], games);
-                    sampleSlotProgress(`roomTelemetry/${seasonId}/tiles/${coord}/${roomNum}`, telemetry.tiles?.[coord]?.[roomNum], games);
+                    await sampleSlotProgress(`roomTelemetry/${seasonId}/tiles/${coord}/${roomNum}`, games);
                     const apNames = games.map(g => extractApSlotName(g.name));
                     const statusMap = new Map(games.flatMap(g => {
                         const s = deriveStatus(g);
@@ -4063,7 +4081,8 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
             }
         }
         // ── Missions ─────────────────────────────────────────────────────────────
-        const missionsSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).get();
+        // Only live rooms are synced, so fetch only those (`.indexOn: ["state"]`).
+        const missionsSnap = await db.ref((0, seasonPaths_1.sp)(seasonId, 'missions')).orderByChild('state').equalTo('inprogress').get();
         if (missionsSnap.exists()) {
             const missions = missionsSnap.val();
             for (const [missionId, mission] of Object.entries(missions)) {
@@ -4076,7 +4095,7 @@ exports.tickSlotStatuses = (0, scheduler_1.onSchedule)('every 15 minutes', async
                 if (!games)
                     continue;
                 sampleRoomProgress((0, seasonPaths_1.sp)(seasonId, `missions/${missionId}/roomProgress`), mission.roomProgress, games);
-                sampleSlotProgress(`roomTelemetry/${seasonId}/missions/${missionId}`, telemetry.missions?.[missionId], games);
+                await sampleSlotProgress(`roomTelemetry/${seasonId}/missions/${missionId}`, games);
                 const apNames = games.map(g => extractApSlotName(g.name));
                 const statusMap = new Map(games.flatMap(g => {
                     const s = deriveStatus(g);

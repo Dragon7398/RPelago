@@ -642,6 +642,13 @@ requiring a round trip to Cheesetracker.
   `roomTelemetry/{seasonId}/missions/{missionId}/{ts}/{apSlotKey}: {d, t}` and
   `…/tiles/{coord}/{roomNum}/{ts}/{apSlotKey}`. Rules: **admin read, nobody
   writes** (the tick is Admin SDK), pinned in `tests/rules/seasons.rules.test.ts`.
+  > ⚠️ **The tick must never `.get()` the whole `roomTelemetry/{seasonId}` tree.**
+  > It did, once per run, to learn the timestamp keys — and since only a LIVE room
+  > is ever pruned, settled rooms piled up in it: 1.33 MB a tick, ~4 GB a month,
+  > the largest download in the project and what pushed RTDB past the free tier.
+  > `sampleSlotProgress` now reads one room by key query (`limitToLast(1)` for
+  > spacing, `endAt(cutoff)` for pruning, only when it writes), and
+  > `onMissionComplete` / `onTileComplete` delete a finished room's subtree.
 - **Keys go through `apSlotKey`, never a bare `encodeURIComponent`** — the same
   dot trap that cost `profiles/` a season of writes, and slot names are as
   arbitrary as game names ("Dr. Mario"). It is **mirrored** in

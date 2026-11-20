@@ -233,6 +233,11 @@
         },
 
         "missions": {
+          // The two 15-minute ticks each act on ONE state — tickGuildmasterMissions on
+          // `forming`, tickSlotStatuses on `inprogress` — and query by it rather than
+          // downloading every table 96 times a day. Without this index the query still
+          // returns the right rows, but the server ships the whole node to filter.
+          ".indexOn": ["state"],
           "$missionId": {
             "claimableSlots": {
               "$slotKey": {
